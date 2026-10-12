@@ -19,10 +19,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--debug", action="store_true", help="open WebView2 devtools")
     ap.add_argument("--list-projects", action="store_true")
     ap.add_argument("--check", action="store_true")
+    ap.add_argument("--project", help="FieldWorks project name (with --dump)")
+    ap.add_argument("--dump", metavar="TEXT", help="print the first segments of a text (title, part of a title, or GUID) as JSON and exit — for diagnosing what flexicon returns")
     args = ap.parse_args(argv)
 
     if args.check:
         return check()
+    if args.dump:
+        return dump(args.project, args.dump)
     if args.list_projects:
         from .flex.lcm import FlexError, FlexiconBackend
         be = FlexiconBackend()
@@ -38,6 +42,41 @@ def main(argv: list[str] | None = None) -> int:
 
     from .app import run
     return run(notebook_dir=args.notebook, demo=args.demo, debug=args.debug)
+
+
+def dump(project: str | None, which: str) -> int:
+    """Open the project read-only and print one text's first three segments plus the writing
+    systems, so a rendering problem can be diagnosed from the raw data."""
+    import json
+    from .flex.lcm import FlexError, FlexiconBackend
+    from .flex.model import is_guid
+    be = FlexiconBackend(progress=lambda m: print(m, file=sys.stderr))
+    try:
+        if not project:
+            names = be.list_projects()
+            if len(names) != 1:
+                print("Several projects; pass --project NAME. Found: " + ", ".join(names), file=sys.stderr)
+                return 2
+            project = names[0]
+        st = be.open(project)
+        print(json.dumps({"status": st}, ensure_ascii=False, indent=1))
+        guid = which if is_guid(which) else None
+        if not guid:
+            hits = [t for t in be.list_texts() if which.casefold() in t["title"].casefold()]
+            if not hits:
+                print("No text title contains " + repr(which) + ". Texts: " + ", ".join(t["title"] for t in be.list_texts()[:30]), file=sys.stderr)
+                return 2
+            guid = hits[0]["guid"]
+        page = be.get_text(guid, 1, 3)
+        print(json.dumps(page, ensure_ascii=False, indent=1))
+        return 0
+    except FlexError as e:
+        print(e.message, file=sys.stderr)
+        if e.detail:
+            print(e.detail, file=sys.stderr)
+        return 2
+    finally:
+        be.close()
 
 
 def check() -> int:

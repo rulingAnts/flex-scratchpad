@@ -105,7 +105,7 @@
       this.activeTable = null;      // the table widget whose cell is being edited
       root.classList.add('editor-root');
       root.addEventListener('click', (e) => { if (e.target === root) this.focusBlock(this.blocks.length - 1, 'end', true); });
-      root.addEventListener('focusin', (e) => { const w = e.target.closest('.widget'); this.activeTable = w && w._table ? w._table : null; });
+      root.addEventListener('focusin', (e) => { const w = e.target.closest('.widget'); this.activeTable = w && w._table ? w._table : null; if (w && w._table) this.active = this.blocks.find((b) => b.el === w) || this.active; });
     }
 
     /* -- model ------------------------------------------------------------------ */
@@ -348,11 +348,8 @@
       const body = b.el.querySelector('.blk-body');
       if (!body || document.activeElement !== body) return;
       const a = getCaret(body), z = getCaretEnd(body);
-      const s = body.textContent;
-      const sel = s.slice(a, z);
-      if (s.slice(a - m.length, a) === m && s.slice(z, z + m.length) === m) { this.setText(body, b, s.slice(0, a - m.length) + sel + s.slice(z + m.length), a - m.length, z - m.length); return; }
-      if (sel.startsWith(m) && sel.endsWith(m) && sel.length >= 2 * m.length) { this.setText(body, b, s.slice(0, a) + sel.slice(m.length, -m.length) + s.slice(z), a, z - 2 * m.length); return; }
-      this.setText(body, b, s.slice(0, a) + m + sel + m + s.slice(z), a + m.length, z + m.length);
+      const r = wrapLines(body.textContent, a, z, m);
+      this.setText(body, b, r.text, r.a, r.z);
     }
     /* Prefix commands: heading level, bullet/number/task list, quote. Toggle on the current line(s). */
     linePrefix(kind, level) {
@@ -739,6 +736,48 @@
     }
   }
 
+  /* Toggle an inline marker (**, *, ==, `) around the selection [a, z) of `text`.
+   *
+   * Emphasis never spans a line break in markdown, so a selection across lines is wrapped
+   * LINE BY LINE (Seth, 2026-10-12: a selection of two paragraphs got one `*` at the start and one
+   * at the end, "but that's not valid markdown"). Block prefixes (`- `, `1. `, `- [ ] `, `# `, `> `)
+   * and leading/trailing spaces stay outside the markers; empty lines are skipped. When every
+   * selected line is already wrapped, the markers come off instead. A collapsed selection inserts
+   * an empty pair with the caret in the middle. Returns {text, a, z} with the new selection. */
+  const PREFIX_RE = /^(\s*(?:#{1,6}\s+|(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?|>\s?))/;
+  function wrapLines(text, a, z, m) {
+    if (a === z) return { text: text.slice(0, a) + m + m + text.slice(a), a: a + m.length, z: a + m.length };
+    const segs = [];
+    let lineStart = text.lastIndexOf('\n', a - 1) + 1;
+    while (lineStart < z) {
+      let lineEnd = text.indexOf('\n', lineStart);
+      if (lineEnd < 0) lineEnd = text.length;
+      let la = Math.max(a, lineStart), lz = Math.min(z, lineEnd);
+      if (la === lineStart) { const pm = PREFIX_RE.exec(text.slice(lineStart, lineEnd)); if (pm) la = Math.max(la, lineStart + pm[1].length); }
+      while (la < lz && /\s/.test(text[la])) la++;
+      while (lz > la && /\s/.test(text[lz - 1])) lz--;
+      if (lz > la) segs.push({ la, lz });
+      lineStart = lineEnd + 1;
+    }
+    if (!segs.length) return { text, a, z };
+    const wrappedOutside = (g) => text.slice(g.la - m.length, g.la) === m && text.slice(g.lz, g.lz + m.length) === m;
+    const wrappedInside = (g) => { const inner = text.slice(g.la, g.lz); return inner.length >= 2 * m.length && inner.startsWith(m) && inner.endsWith(m); };
+    const allWrapped = segs.every((g) => wrappedOutside(g) || wrappedInside(g));
+    let out = text, na = a, nz = z;
+    for (const g of segs.slice().reverse()) {          // right to left so earlier offsets stay valid
+      if (allWrapped) {
+        if (wrappedInside(g)) { out = out.slice(0, g.la) + out.slice(g.la + m.length, g.lz - m.length) + out.slice(g.lz); nz -= 2 * m.length; }
+        else { out = out.slice(0, g.la - m.length) + out.slice(g.la, g.lz) + out.slice(g.lz + m.length); nz -= 2 * m.length; if (g.la - m.length < na) na -= m.length; }
+      } else if (!(wrappedOutside(g) || wrappedInside(g))) {
+        out = out.slice(0, g.la) + m + out.slice(g.la, g.lz) + m + out.slice(g.lz);
+        nz += 2 * m.length;
+      }
+    }
+    if (allWrapped) { na = Math.max(0, na); nz = Math.max(na, nz); }
+    else if (segs[0].la === a) { /* markers were inserted at the selection start: keep them inside it */ nz = Math.min(out.length, nz); }
+    return { text: out, a: na, z: Math.min(out.length, nz) };
+  }
+
   function wrapRange(textNode, a, b) {
     if (a < 0 || b > textNode.nodeValue.length || a >= b) return null;
     const mid = textNode.splitText(a);
@@ -751,5 +790,5 @@
   }
 
   FS.Editor = Editor;
-  FS.editor = { getCaret, getCaretEnd, setCaret, pointAt, TEXT_TYPES };
+  FS.editor = { getCaret, getCaretEnd, setCaret, pointAt, wrapLines, TEXT_TYPES };
 })();

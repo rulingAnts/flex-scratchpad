@@ -283,3 +283,134 @@ def test_paste_table_from_excel_and_html(app):
     assert "| a | b |\n|---|---|\n| 1 | 2 |" in body_of(h)
     assert page.locator("table.md-table").count() == 2
     assert not errors
+
+
+def test_insert_flex_into_table_cell_and_overlay(app):
+    h, page, errors = app
+    # edit a cell, then insert through the toolbar button (which closes the cell editor first)
+    cell = page.locator("table.md-table td .cell-view").nth(1)
+    cell.scroll_into_view_if_needed()
+    cell.dispatch_event("mousedown")
+    page.wait_for_selector(".cell-edit")
+    page.keyboard.press("End")
+    page.locator("#btn-insert-flex").click()
+    page.fill(".picker input[type=text]", "kab")
+    page.wait_for_selector(".pick-item .hw")
+    page.locator(".pick-item").first.click()
+    page.wait_for_selector(".picker-preview .entry-card")
+    page.locator(".btn.primary", has_text="Insert rendered").click()
+    page.wait_for_selector("table.md-table .flex-collapsed")
+    page.wait_for_timeout(900)
+    assert "| Form | A vernacular form {{flex:entry 6a5f3a2e-1b1e-4c2a-9f10-0d2c1a7e0001}} |" in body_of(h)
+    # the chip shows the headword; clicking it opens the overlay with the full card, no layout change
+    chip = page.locator("table.md-table .flex-collapsed")
+    page.wait_for_function("document.querySelector('table.md-table .flex-collapsed .cttl').textContent.startsWith('kabir')")
+    height_before = page.evaluate("document.querySelector('table.md-table').getBoundingClientRect().height")
+    chip.click()
+    page.wait_for_selector(".flex-overlay.pinned .entry-card")
+    assert page.evaluate("document.querySelector('table.md-table').getBoundingClientRect().height") == height_before
+    page.keyboard.press("Escape")
+    page.wait_for_selector(".flex-overlay", state="detached")
+    # Ctrl+Shift+L from inside a cell reaches the app too
+    cell2 = page.locator("table.md-table td .cell-view").nth(3)
+    cell2.dispatch_event("mousedown")
+    page.wait_for_selector(".cell-edit")
+    page.keyboard.press("Control+Shift+L")
+    page.wait_for_selector(".picker")
+    page.keyboard.press("Escape")
+    assert not errors
+
+
+def test_collapse_expand_and_hover_overlay(app):
+    h, page, errors = app
+    new_note(page, "Collapse")
+    page.keyboard.type("{{flex:text %s seg=1-2}}" % T_STORY)
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#editor .text-obj")
+    # collapse from the header → chip, flag saved in the note
+    page.locator("#editor .text-obj .flex-head button[title='Collapse to a chip']").click()
+    page.wait_for_selector("#editor .flex-collapsed")
+    page.wait_for_timeout(900)
+    assert "{{flex:text %s seg=1-2 collapsed}}" % T_STORY in body_of(h)
+    assert page.locator("#editor .flex-collapsed .crange").inner_text() == "1–2"
+    # hover → temporary overlay with the interlinear; moving away closes it
+    page.hover("#editor .flex-collapsed")
+    page.wait_for_selector(".flex-overlay .text-obj .segment")
+    assert page.locator(".flex-overlay.pinned").count() == 0
+    page.mouse.move(5, 5)
+    page.wait_for_selector(".flex-overlay", state="detached")
+    # ⤢ expands in place and removes the flag
+    page.locator("#editor .flex-collapsed .cexp").click()
+    page.wait_for_selector("#editor .text-obj .segment")
+    page.wait_for_timeout(900)
+    assert "collapsed" not in body_of(h)
+    assert not errors
+
+
+def test_panes_resize_and_collapse(app):
+    h, page, errors = app
+    rail_w = lambda: page.evaluate("document.getElementById('rail').getBoundingClientRect().width")
+    assert 230 <= rail_w() <= 250
+    sp = page.locator("#split-rail")
+    box = sp.bounding_box()
+    page.mouse.move(box["x"] + 2, box["y"] + 200)
+    page.mouse.down()
+    page.mouse.move(box["x"] + 102, box["y"] + 200, steps=5)
+    page.mouse.up()
+    assert 335 <= rail_w() <= 345
+    assert page.evaluate("JSON.parse(localStorage.getItem('fs:panes')).railW") == 340
+    # double-click collapses one pane; Ctrl+\ hides both; the handle brings them back
+    sp.dblclick()
+    assert page.locator("#app.rail-collapsed").count() == 1 and rail_w() == 0
+    page.keyboard.press("Control+\\")
+    assert page.locator("#app.rail-collapsed.list-collapsed").count() == 1
+    assert page.locator("#btn-nav").is_visible()
+    page.locator("#btn-nav").click()
+    assert page.locator("#app.rail-collapsed").count() == 0 and rail_w() == 340
+    assert not errors
+
+
+def test_multiline_emphasis_wraps_per_line(app):
+    h, page, errors = app
+    new_note(page, "Emphasis")
+    page.keyboard.type("first line")
+    page.keyboard.press("Shift+Enter")
+    page.keyboard.type("second line")
+    page.keyboard.press("Control+a")
+    page.keyboard.press("Control+i")
+    page.wait_for_timeout(900)
+    assert body_of(h) == "*first line*\n*second line*"
+    assert page.locator("#editor .md-i").count() == 2
+    page.keyboard.press("Control+a")
+    page.keyboard.press("Control+i")
+    page.wait_for_timeout(900)
+    assert body_of(h) == "first line\nsecond line"
+
+
+def test_column_resize_writes_width_and_wide(app):
+    h, page, errors = app
+    th = page.locator("table.md-table thead th").first
+    th.scroll_into_view_if_needed()
+    handle = th.locator(".col-resizer")
+    box = handle.bounding_box()
+    page.mouse.move(box["x"] + 4, box["y"] + box["height"] / 2)
+    page.mouse.down()
+    page.mouse.move(box["x"] + 124, box["y"] + box["height"] / 2, steps=6)
+    page.mouse.up()
+    page.wait_for_timeout(900)
+    body = body_of(h)
+    import re
+    m = re.search(r"col 1: bold, width (\d+)px", body)
+    assert m and 150 <= int(m.group(1)) <= 260, body.split("\n")[-1]
+    # dragging far beyond the pane turns the wide flag on and the wrapper scrolls sideways
+    th = page.locator("table.md-table thead th").first
+    handle = th.locator(".col-resizer")
+    box = handle.bounding_box()
+    page.mouse.move(box["x"] + 4, box["y"] + box["height"] / 2)
+    page.mouse.down()
+    page.mouse.move(box["x"] + 900, box["y"] + box["height"] / 2, steps=8)
+    page.mouse.up()
+    page.wait_for_timeout(900)
+    assert "{table: striped; wide; col 1: bold, width" in body_of(h)
+    assert page.evaluate("(() => { const w = document.querySelector('.tbl-wrap'); return w.scrollWidth > w.clientWidth; })()")
+    assert not errors

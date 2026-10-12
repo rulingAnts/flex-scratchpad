@@ -222,11 +222,82 @@ class FlexiconBackend:
         self.media_map = dict(media_map or {})
 
     # -- writing systems ---------------------------------------------------------
+    #
+    # ⚠ A text's vernacular is often NOT the project's default vernacular (an IPA or
+    # phonemic WS beside the orthographic one, several languages in one project). Reading
+    # forms with the default handle then returns '' (Seth's first run, 2026-10-12: "The
+    # writing systems are all messed up"). So every vernacular string is read with the
+    # TEXT'S OWN baseline WS first, then LCM's BestVernacularAlternative, then each
+    # vernacular WS in turn — and never from a token's gloss.
 
     def _ws_info(self, tag: str, name: str) -> dict:
         ops = self.project.WritingSystems
-        return model.make_ws(tag, name or tag, _t(lambda: ops.GetFontName(tag), ""),
+        return model.make_ws(tag, name or _s(_t(lambda: ops.GetDisplayName(tag), "")) or tag,
+                             _t(lambda: ops.GetFontName(tag), ""),
                              bool(_t(lambda: ops.GetRightToLeft(tag), False)))
+
+    def _vern_handles(self) -> list:
+        """Handles of every current vernacular WS, default first."""
+        p = self.project
+        out = []
+        for item in _t(lambda: list(p.GetAllVernacularWSs()), []):
+            tag = item[0] if isinstance(item, (tuple, list)) else item
+            h = _t(lambda: p.WSHandle(tag), None)
+            if h is not None and h not in out:
+                out.append(h)
+        dflt = _t(lambda: p.GetDefaultVernacularWSHandle(), None)
+        if dflt is not None and dflt not in out:
+            out.insert(0, dflt)
+        return out
+
+    def _ws_tag_of_handle(self, handle) -> str:
+        p = self.project
+        for fn in (lambda: p.project.ServiceLocator.WritingSystemManager.Get(handle).Id,
+                   lambda: p.project.ServiceLocator.WritingSystemManager.Get(handle).LanguageTag,
+                   lambda: p.WritingSystems.GetLanguageTag(handle),
+                   lambda: p.lp.Services.WritingSystemManager.Get(handle).Id):
+            tag = _s(_t(fn, ""))
+            if tag:
+                return tag
+        return ""
+
+    def _vern_text(self, multi, ws_handle=None) -> str:
+        """Vernacular text of an IMultiUnicode / IMultiString."""
+        if multi is None:
+            return ""
+        if ws_handle is not None:
+            s = _s(_t(lambda: multi.get_String(ws_handle), ""))
+            if s:
+                return s
+        s = _s(_t(lambda: multi.BestVernacularAlternative, ""))
+        if s and s != "***":
+            return s
+        for h in self._vern_handles():
+            s = _s(_t(lambda: multi.get_String(h), ""))
+            if s:
+                return s
+        return ""
+
+    def _anal_text(self, multi) -> str:
+        if multi is None:
+            return ""
+        s = _s(_t(lambda: multi.BestAnalysisAlternative, ""))
+        return "" if s == "***" else s
+
+    def _baseline_ws(self, text):
+        """(handle, tag) of the writing system the text is actually written in: read off the
+        first run of the first paragraph's contents."""
+        p = self.project
+        for para in _t(lambda: list(p.Paragraphs.GetAll(text)), [])[:3]:
+            tss = _t(lambda: para.Contents, None)
+            if tss is None or not _s(_t(lambda: tss.Text, "")):
+                continue
+            h = _t(lambda: tss.get_WritingSystemAt(0), None)
+            if h is None:
+                h = _t(lambda: tss.get_WritingSystem(0), None)
+            if h is not None:
+                return h, self._ws_tag_of_handle(h)
+        return None, ""
 
     def _writing_systems(self) -> dict:
         if self._ws is None:
@@ -324,8 +395,8 @@ class FlexiconBackend:
     def _entry_dict(self, e) -> dict:
         p = self.project
         d = model.empty_entry(_guid(e), _s(_t(lambda: p.LexiconGetHeadword(e), "")))
-        d["lexemeForm"] = _s(_t(lambda: p.LexiconGetLexemeForm(e), ""))
-        d["citationForm"] = _s(_t(lambda: p.LexiconGetCitationForm(e), ""))
+        d["lexemeForm"] = _s(_t(lambda: p.LexiconGetLexemeForm(e), "")) or self._vern_text(_t(lambda: e.LexemeFormOA.Form, None))
+        d["citationForm"] = _s(_t(lambda: p.LexiconGetCitationForm(e), "")) or self._vern_text(_t(lambda: e.CitationForm, None))
         d["morphType"] = self._morph_type_name(e)
         d["homograph"] = int(_t(lambda: e.HomographNumber, 0) or 0)
         d["ws"] = self._writing_systems()
@@ -456,7 +527,10 @@ class FlexiconBackend:
     def _text_dict(self, text, seg_from, seg_to, max_segments: int = 60) -> dict:
         p = self.project
         ws = self._writing_systems()
-        d = model.empty_text(_guid(text), self._text_title(text), ws["vern"], ws["anal"])
+        vern_handle, vern_tag = self._baseline_ws(text)
+        vern_ws = self._ws_info(vern_tag, "") if vern_tag else ws["vern"]
+        d = model.empty_text(_guid(text), self._text_title(text), vern_ws, ws["anal"])
+        self._cur_vern_handle = vern_handle
         d["abbrev"] = _s(_t(lambda: p.Texts.GetAbbreviation(text), ""))
         d["url"] = self._goto(text, "text")
         d["media"] = self._media(text)
@@ -498,13 +572,23 @@ class FlexiconBackend:
 
     def _word_dict(self, tok) -> dict:
         p = self.project
+        vh = getattr(self, "_cur_vern_handle", None)
         cls = _t(lambda: tok.ClassName, "")
         if cls == "PunctuationForm":
-            return model.make_word(_s(_t(lambda: tok.Form, "")), punct=True, guid=_guid(tok))
-        wf = _t(lambda: tok.Wordform, None)
-        txt = _s(_t(lambda: p.Wordforms.GetForm(wf), "")) if wf is not None else ""
-        if not txt:
-            txt = _s(_t(lambda: p.BestStr(tok.Form), "")) or _s(_t(lambda: tok.ShortName, ""))
+            form = _t(lambda: tok.Form, None)
+            return model.make_word(_s(_t(lambda: form.Text, "")) or _s(form), punct=True, guid=_guid(tok))
+        # the wordform behind a WfiGloss / WfiAnalysis / WfiWordform token
+        wf = tok if cls == "WfiWordform" else _t(lambda: tok.Wordform, None)
+        if wf is None and cls == "WfiGloss":
+            wf = _t(lambda: tok.Owner.Owner, None)
+        elif wf is None and cls == "WfiAnalysis":
+            wf = _t(lambda: tok.Owner, None)
+        txt = self._vern_text(_t(lambda: wf.Form, None), vh) if wf is not None else ""
+        if not txt and wf is not None:
+            txt = _s(_t(lambda: p.Wordforms.GetForm(wf, vh) if vh is not None else p.Wordforms.GetForm(wf), ""))
+        if not txt and cls == "WfiWordform":
+            txt = self._vern_text(_t(lambda: tok.Form, None), vh)
+        # ⚠ never fall back to tok.Form for a WfiGloss: that is the GLOSS, not the word
         gls = _s(_t(lambda: p.Segments.GetGloss(tok), ""))
         analysis = _t(lambda: tok.Analysis, None)
         pos = ""
@@ -519,9 +603,14 @@ class FlexiconBackend:
                     ent = self._owning_entry(sense)
                     if ent is not None:
                         cf = _s(_t(lambda: p.LexiconGetHeadword(ent), ""))
+                form = self._vern_text(_t(lambda: b.Form, None), vh)
+                if not form:
+                    form = _s(_t(lambda: p.WfiMorphBundles.GetForm(b, vh) if vh is not None else p.WfiMorphBundles.GetForm(b), ""))
+                if not form:   # a bundle with no form of its own shows its allomorph's
+                    form = self._vern_text(_t(lambda: b.MorphRA.Form, None), vh)
                 morphs.append(model.make_morph(
-                    _s(_t(lambda: p.WfiMorphBundles.GetForm(b), "")),
-                    _s(_t(lambda: p.WfiMorphBundles.GetGloss(b), "")),
+                    form,
+                    _s(_t(lambda: p.WfiMorphBundles.GetGloss(b), "")) or self._anal_text(_t(lambda: sense.Gloss, None)),
                     _s(_t(lambda: msa.InterlinearAbbr, "")) if msa is not None else "",
                     cf,
                 ))

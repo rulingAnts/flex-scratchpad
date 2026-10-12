@@ -129,7 +129,7 @@
     const cls = [];
     const a = row.align || col.align || t.aligns[c];
     if (a) css.textAlign = a;
-    if (col.width) css.width = col.width;
+    if (col.width) { css.width = col.width; css.minWidth = col.width; }
     if (row.bg || col.bg) css.background = row.bg || col.bg;
     if (row.color || col.color) css.color = row.color || col.color;
     if (row.size || col.size) css.fontSize = row.size || col.size;
@@ -150,12 +150,22 @@
     const table = el('table', { class: 'md-table ' + [...t.style.flags].join(' ') });
     const thead = el('thead'), tbody = el('tbody');
     const commit = () => opts.onChange && opts.onChange(serialize(t));
+    /* Put text into a cell that is not being edited (the picker closed the cell editor). */
+    widget.insertInto = (r, c, text, caret) => {
+      const s = t.rows[r][c] || '';
+      const at = caret == null ? s.length : Math.min(caret, s.length);
+      const sep = (at > 0 && !/\s$/.test(s.slice(0, at))) ? ' ' : '';
+      t.rows[r][c] = s.slice(0, at) + sep + text + s.slice(at);
+      commit();
+      widget.refresh();
+    };
     t.rows.forEach((row, r) => {
       const tr = el('tr');
       row.forEach((cell, c) => {
         const { css, cls } = cellStyle(t, r, c);
         const td = el(r === 0 ? 'th' : 'td', { class: cls.join(' '), style: css, dataset: { r, c } });
         mountCell(td, t, r, c, widget, commit, opts);
+        if (r === 0) td.appendChild(colResizer(td, t, c, widget, commit));
         tr.appendChild(td);
       });
       (r === 0 ? thead : tbody).appendChild(tr);
@@ -178,6 +188,36 @@
     return widget;
   }
 
+  /* Drag the right edge of a header cell to set that column's width (saved as `col N: width
+   * NNNpx` in the style line). A table dragged wider than the pane turns `wide` on, so the
+   * cells keep their widths and the table scrolls sideways inside the note instead of being
+   * squeezed (Seth, 2026-10-12: "the table can be wider than the document content pane, if the
+   * user wants"). */
+  function colResizer(th, t, c, widget, commit) {
+    const h = el('div', { class: 'col-resizer', title: 'Drag to resize this column' });
+    h.addEventListener('mousedown', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const startX = e.clientX, startW = th.getBoundingClientRect().width;
+      const table = th.closest('table');
+      const wrap = widget.container.querySelector('.tbl-wrap');
+      h.classList.add('dragging'); document.body.classList.add('resizing');
+      const cells = [...table.querySelectorAll('tr')].map((tr) => tr.children[c]).filter(Boolean);
+      let w = startW;
+      const move = (ev) => { w = Math.max(40, Math.round(startW + ev.clientX - startX)); for (const cell of cells) { cell.style.width = w + 'px'; cell.style.minWidth = w + 'px'; } };
+      const up = () => {
+        document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up);
+        h.classList.remove('dragging'); document.body.classList.remove('resizing');
+        t.style.cols[c + 1] = Object.assign(t.style.cols[c + 1] || {}, { width: w + 'px' });
+        const total = [...table.querySelectorAll('thead th')].reduce((a, x) => a + x.getBoundingClientRect().width, 0);
+        if (wrap && total > wrap.clientWidth + 2) t.style.flags.add('wide');
+        commit(); widget.refresh();
+      };
+      document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+    });
+    h.addEventListener('dblclick', (e) => { e.stopPropagation(); if (t.style.cols[c + 1]) { delete t.style.cols[c + 1].width; commit(); widget.refresh(); } });
+    return h;
+  }
+
   function shiftRowStyles(t, from, by) { const o = {}; for (const [k, v] of Object.entries(t.style.rows)) o[+k >= from ? +k + by : +k] = v; t.style.rows = o; }
   function shiftColStyles(t, from, by) { const o = {}; for (const [k, v] of Object.entries(t.style.cols)) o[+k >= from ? +k + by : +k] = v; t.style.cols = o; }
 
@@ -195,7 +235,8 @@
       ed.innerHTML = FS.markdown.decorate(ed.textContent, 'p') || '';
       td.appendChild(ed);
       widget.focus = { r, c };
-      widget.insertText = (text) => { insertAtCaret(ed, text); refresh(); };
+      widget.insertText = (text) => { if (ed.isConnected) { insertAtCaret(ed, text); refresh(); } else widget.insertInto(r, c, text); };
+      widget.lastCaret = () => (ed.isConnected ? FS.editor.getCaret(ed) : null);
       ed.focus();
       FS.editor && FS.editor.setCaret(ed, offset == null ? ed.textContent.length : offset);
       const refresh = () => {
@@ -229,14 +270,16 @@
         else if (e.key === 'ArrowDown' && e.altKey) { e.preventDefault(); finish(); moveTo(r + 1, c); }
         else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') { e.preventDefault(); wrapSel(ed, '**'); refresh(); }
         else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'i') { e.preventDefault(); wrapSel(ed, '*'); refresh(); }
-        e.stopPropagation();
+        else if (!(e.ctrlKey || e.metaKey)) e.stopPropagation();   // plain keys are the cell's; app shortcuts pass through
       });
       ed.addEventListener('blur', () => setTimeout(() => { if (ed.isConnected) finish(); }, 0));
       const finish = () => {
         if (!ed.isConnected) return;
         const val = ed.textContent.replace(/\n+$/, '');
         ed.remove();
-        if (widget.insertText) widget.insertText = null;
+        const caret = FS.editor.getCaret(ed);
+        widget.lastCell = { r, c, caret };
+        widget.insertText = (text) => widget.insertInto(r, c, text, caret);
         if (val !== t.rows[r][c]) { t.rows[r][c] = val; commit(); }
         view.innerHTML = FS.markdown.renderInline(t.rows[r][c]) || '<span class="muted">&nbsp;</span>';
         hydrate(view, t, r, c, commit, opts);
@@ -262,7 +305,7 @@
   function hydrate(view, t, r, c, commit, opts) {
     view.querySelectorAll('.flex-inline[data-src]').forEach((ph) => {
       const mount = (spec) => FS.interlinear.render(ph, spec, {
-        editable: true, compact: true,
+        editable: true, compact: true, inCell: true,
         onSpecChange: (s) => {
           const ns = FS.flexref.serialize(s);
           t.rows[r][c] = t.rows[r][c].replace(ph.dataset.src, ns);
@@ -287,10 +330,10 @@
   }
   function wrapSel(ed, m) {
     const a = FS.editor.getCaret(ed), b = FS.editor.getCaretEnd(ed);
-    const s = ed.textContent;
-    const sel = s.slice(a, b);
-    if (sel.startsWith(m) && sel.endsWith(m) && sel.length >= m.length * 2) { ed.textContent = s.slice(0, a) + sel.slice(m.length, -m.length) + s.slice(b); FS.editor.setCaret(ed, a, b - 2 * m.length); }
-    else { ed.textContent = s.slice(0, a) + m + sel + m + s.slice(b); FS.editor.setCaret(ed, a + m.length, b + m.length); }
+    const r = FS.editor.wrapLines(ed.textContent, a, b, m);
+    ed.textContent = r.text;
+    ed.innerHTML = FS.markdown.decorate(ed.textContent, 'p');
+    FS.editor.setCaret(ed, r.a, r.z);
   }
 
   /* ------------------------------------------------------------------ style popovers */
@@ -337,7 +380,7 @@
         pop.innerHTML = '';
         pop.appendChild(el('div', { class: 'row' }, el('b', {}, 'Table')));
         const flag = (f, label) => el('button', { class: 'tog' + (t.style.flags.has(f) ? ' on' : ''), onclick: () => { t.style.flags.has(f) ? t.style.flags.delete(f) : t.style.flags.add(f); commit(); widget.refresh(); render(); } }, label);
-        pop.appendChild(el('div', { class: 'row' }, flag('striped', 'Striped'), flag('header-col', 'Header column'), flag('compact', 'Compact'), flag('full', 'Full width')));
+        pop.appendChild(el('div', { class: 'row' }, flag('striped', 'Striped'), flag('header-col', 'Header column'), flag('compact', 'Compact'), flag('full', 'Full width'), flag('wide', 'Wide (scroll sideways)')));
         const b = el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Borders'));
         for (const [v, l] of [['', 'Normal'], ['borders-light', 'Light'], ['borders-none', 'None']]) b.appendChild(el('button', { class: 'tog' + ((v ? t.style.flags.has(v) : !t.style.flags.has('borders-light') && !t.style.flags.has('borders-none')) ? ' on' : ''), onclick: () => { t.style.flags.delete('borders-light'); t.style.flags.delete('borders-none'); if (v) t.style.flags.add(v); commit(); widget.refresh(); render(); } }, l));
         pop.appendChild(b);

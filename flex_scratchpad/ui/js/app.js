@@ -455,8 +455,65 @@
     try { const t = await FS.api.add_tab(name.trim()); S.tab = t.dir; S.folder = null; applyInit(await FS.api.init()); } catch (e) { FS.toast(e.message, 'error'); }
   }
 
+  /* ------------------------------------------------------------------ panes
+   * Both navigation columns can be dragged narrower or wider (widths remembered), collapsed
+   * one at a time by double-clicking their splitter, or hidden together with the « button /
+   * Ctrl+\ and brought back with the ☰ handle that then appears in the editor pane. */
+  const PANES = { rail: { min: 170, max: 480, dflt: 240 }, list: { min: 200, max: 640, dflt: 300 } };
+  function paneState() {
+    try { return JSON.parse(localStorage.getItem('fs:panes') || '{}'); } catch (e) { return {}; }
+  }
+  function savePanes(st) { try { localStorage.setItem('fs:panes', JSON.stringify(st)); } catch (e) { /* ignore */ } }
+  function applyPanes() {
+    const st = paneState();
+    const app = $('app');
+    for (const k of ['rail', 'list']) {
+      const w = Math.min(PANES[k].max, Math.max(PANES[k].min, +st[k + 'W'] || PANES[k].dflt));
+      document.documentElement.style.setProperty('--' + k + '-w', w + 'px');
+      app.classList.toggle(k + '-collapsed', !!st[k + 'Collapsed']);
+    }
+  }
+  function setupPanes() {
+    applyPanes();
+    const start = (k, e) => {
+      e.preventDefault();
+      const sp = $('split-' + k);
+      const st = paneState();
+      if (st[k + 'Collapsed']) { st[k + 'Collapsed'] = false; savePanes(st); applyPanes(); }
+      const startX = e.clientX;
+      const startW = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--' + k + '-w')) || PANES[k].dflt;
+      sp.classList.add('dragging'); document.body.classList.add('resizing');
+      const move = (ev) => { const w = Math.min(PANES[k].max, Math.max(PANES[k].min, startW + ev.clientX - startX)); document.documentElement.style.setProperty('--' + k + '-w', w + 'px'); };
+      const up = (ev) => {
+        document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up);
+        sp.classList.remove('dragging'); document.body.classList.remove('resizing');
+        const s2 = paneState(); s2[k + 'W'] = Math.min(PANES[k].max, Math.max(PANES[k].min, startW + ev.clientX - startX)); savePanes(s2);
+      };
+      document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+    };
+    for (const k of ['rail', 'list']) {
+      const sp = $('split-' + k);
+      sp.addEventListener('mousedown', (e) => start(k, e));
+      sp.addEventListener('dblclick', () => togglePane(k));
+    }
+    $('btn-nav').addEventListener('click', () => toggleNav());
+    $('btn-nav-hide').addEventListener('click', () => toggleNav(true));
+  }
+  function togglePane(k, collapsed) {
+    const st = paneState();
+    st[k + 'Collapsed'] = collapsed == null ? !st[k + 'Collapsed'] : !!collapsed;
+    savePanes(st); applyPanes();
+  }
+  function toggleNav(hide) {
+    const st = paneState();
+    const both = hide == null ? !(st.railCollapsed && st.listCollapsed) : !!hide;
+    st.railCollapsed = both; st.listCollapsed = both;
+    savePanes(st); applyPanes();
+  }
+
   /* ------------------------------------------------------------------ wiring */
   function wire() {
+    setupPanes();
     $('search').addEventListener('input', runSearch);
     $('search').addEventListener('keydown', (e) => { if (e.key === 'Escape') { clearSearch(); renderRail(); renderList(); } });
     $('btn-new-note').addEventListener('click', newNote);
@@ -487,6 +544,7 @@
       else if (mod && e.key.toLowerCase() === 's') { e.preventDefault(); flushSave().then(() => FS.toast('Saved')); }
       else if (mod && e.altKey && /^[1-3]$/.test(e.key)) { e.preventDefault(); ensureEditor().linePrefix('h', +e.key); }
       else if (mod && e.key === ',') { e.preventDefault(); openSettings(); }
+      else if (mod && (e.key === '\\' || e.code === 'Backslash')) { e.preventDefault(); toggleNav(); }
     });
     window.addEventListener('beforeunload', () => { scheduleSave.flush(); });
     FS.on('py:progress', (d) => { const pill = $('flex-pill'); pill.querySelector('.label').textContent = d.message || '…'; });

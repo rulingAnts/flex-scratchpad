@@ -174,6 +174,7 @@
       head.appendChild(el('button', { class: 'lnk', title: 'Play this range', onclick: () => playRange(box, obj, segs, mediaByGuid, opts) }, '▶ Play ' + range[0] + '–' + range[1]));
     }
     head.appendChild(el('button', { class: 'lnk', title: 'Reload from FLEx', onclick: () => opts.refresh && opts.refresh() }, '↻'));
+    if (opts.editable && !opts.overlay) head.appendChild(el('button', { class: 'lnk', title: 'Collapse to a chip', onclick: () => setCollapsed(spec, opts, true) }, '⤡'));
     if (obj.url) head.appendChild(el('a', { href: obj.url, title: 'Open in FieldWorks', onclick: (e) => { e.preventDefault(); openInFlex(obj.url); } }, 'Open in FLEx ↗'));
     if (opts.editable) head.appendChild(el('button', { class: 'lnk', title: 'Options', onclick: (e) => embedMenu(e.currentTarget, spec, opts, obj) }, '⋯'));
     box.appendChild(head);
@@ -433,6 +434,7 @@
     if (obj.cached) head.appendChild(el('span', { class: 'badge warn', title: obj.liveError || '' }, 'cached' + (obj.cachedAt ? ' ' + obj.cachedAt.slice(0, 10) : '')));
     head.appendChild(el('span', { class: 'spacer' }));
     head.appendChild(el('button', { class: 'lnk', title: 'Reload from FLEx', onclick: () => opts.refresh && opts.refresh() }, '↻'));
+    if (opts.editable && !opts.overlay) head.appendChild(el('button', { class: 'lnk', title: 'Collapse to a chip', onclick: () => setCollapsed(spec, opts, true) }, '⤡'));
     if (obj.url) head.appendChild(el('a', { href: obj.url, onclick: (e) => { e.preventDefault(); openInFlex(obj.url); } }, 'Open in FLEx ↗'));
     if (opts.editable) head.appendChild(el('button', { class: 'lnk', onclick: (e) => embedMenu(e.currentTarget, spec, opts, obj) }, '⋯'));
     box.appendChild(head);
@@ -460,14 +462,136 @@
     return box;
   }
 
+  /* ------------------------------------------------------------------ collapsed chips + overlay
+   * A block embed is expanded unless it carries the `collapsed` flag; an embed inside a table
+   * cell is a chip unless it carries `expanded`. Both flags live in the embed line, so the
+   * layout is saved with the note. A chip expands in place with its ⤢ button; clicking the
+   * chip opens a floating overlay (no layout change), and so does hovering it for a moment. */
+  function isCollapsed(spec, opts) {
+    if (opts.force) return false;
+    const x = spec.extra || {};
+    return opts.inCell ? !x.expanded : !!x.collapsed;
+  }
+  function setCollapsed(spec, opts, collapsed) {
+    spec.extra = spec.extra || {};
+    if (opts.inCell) { if (collapsed) delete spec.extra.expanded; else spec.extra.expanded = true; }
+    else { if (collapsed) spec.extra.collapsed = true; else delete spec.extra.collapsed; }
+    opts.onSpecChange && opts.onSpecChange(spec);
+  }
+  function chipTitle(spec, obj) {
+    if (spec.label) return spec.label;
+    if (!obj) return spec.kind + ' ' + spec.guid.slice(0, 8) + '…';
+    if (obj.kind === 'entry') {
+      if (spec.kind === 'sense') { const sn = (obj.senses || []).find((x) => x.guid === spec.guid); if (sn) return (obj.headword || '') + ' ' + (sn.number ? sn.number + '. ' : '') + (sn.gloss || ''); }
+      return (obj.headword || obj.lexemeForm || '?') + (obj.senses && obj.senses[0] && obj.senses[0].gloss ? ' ‘' + obj.senses[0].gloss + '’' : '');
+    }
+    if (obj.kind === 'wordform') return obj.form || '?';
+    return obj.title || '(untitled text)';
+  }
+  function chipRange(spec, obj) {
+    if (spec.kind !== 'text') return '';
+    const r = spec.seg || (obj && obj.range) || null;
+    if (!r) return 'all';
+    return r[0] === r[1] ? String(r[0]) : r[0] + '–' + r[1];
+  }
+
+  function renderChip(container, spec, opts) {
+    container.innerHTML = '';
+    const icon = spec.kind === 'text' ? '¶' : spec.kind === 'wordform' ? 'ω' : '📖';
+    const chip = el('span', { class: 'flex-collapsed kind-' + spec.kind, tabindex: 0, title: 'Click to preview; ⤡ to expand' });
+    const ttl = el('span', { class: 'cttl' }, chipTitle(spec, null));
+    chip.appendChild(el('span', { class: 'cicon' }, icon));
+    chip.appendChild(ttl);
+    const range = chipRange(spec, null);
+    const rangeEl = el('span', { class: 'crange' }, range);
+    if (spec.kind === 'text') chip.appendChild(rangeEl);
+    if (opts.editable) chip.appendChild(el('button', { class: 'cexp', title: opts.inCell ? 'Show the full example in this cell' : 'Expand in place', onclick: (e) => { e.stopPropagation(); closeOverlay(); setCollapsed(spec, opts, false); } }, '⤢'));
+    container.appendChild(chip);
+    // fill the title from the (cached) object without blocking the chip
+    const kind = spec.kind === 'sense' ? 'entry' : spec.kind;
+    flexGet(kind, spec.guid, spec.kind === 'text' && spec.seg ? spec.seg[0] : null, spec.kind === 'text' && spec.seg ? spec.seg[1] : null, false)
+      .then((obj) => { ttl.textContent = chipTitle(spec, obj); rangeEl.textContent = chipRange(spec, obj); const ws = obj.ws && obj.ws.vern; if (ws && obj.kind !== 'wordform') { if (ws.rtl) ttl.dir = 'rtl'; if (ws.tag) ttl.lang = ws.tag; } if (obj.cached) chip.classList.add('cached'); })
+      .catch((e) => { chip.classList.add('err'); chip.title = e.message || String(e); });
+    // click → pinned overlay; hover → temporary overlay
+    chip.addEventListener('click', (e) => { if (e.target.closest('.cexp')) return; openOverlay(chip, spec, opts, { pinned: true }); });
+    chip.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openOverlay(chip, spec, opts, { pinned: true }); } });
+    let hoverTimer = null;
+    chip.addEventListener('mouseenter', () => { if (overlay.current && overlay.current.pinned) return; hoverTimer = setTimeout(() => openOverlay(chip, spec, opts, { pinned: false }), 380); });
+    chip.addEventListener('mouseleave', () => { clearTimeout(hoverTimer); scheduleHoverClose(); });
+    return chip;
+  }
+
+  const overlay = { current: null, closeTimer: null };
+  function closeOverlay() {
+    const o = overlay.current;
+    if (!o) return;
+    overlay.current = null;
+    clearTimeout(overlay.closeTimer);
+    o.node.remove();
+    document.removeEventListener('mousedown', o.onDown, true);
+    document.removeEventListener('keydown', o.onKey, true);
+  }
+  function scheduleHoverClose() {
+    const o = overlay.current;
+    if (!o || o.pinned) return;
+    clearTimeout(overlay.closeTimer);
+    overlay.closeTimer = setTimeout(() => {
+      const oo = overlay.current;
+      if (!oo || oo.pinned || oo.hovering || document.querySelector('.popover')) return;
+      closeOverlay();
+    }, 320);
+  }
+  /* The floating preview of a collapsed embed: full rendering, editable (styles save back),
+   * positioned near the chip, never changing the note's layout. */
+  function openOverlay(anchor, spec, opts, mode) {
+    if (overlay.current && overlay.current.anchor === anchor) {
+      if (mode.pinned) overlay.current.pinned = true;
+      return overlay.current.node;
+    }
+    closeOverlay();
+    const node = el('div', { class: 'flex-overlay' + (mode.pinned ? ' pinned' : '') });
+    const inner = el('div', { class: 'flex-overlay-inner' });
+    const bar = el('div', { class: 'flex-overlay-bar' },
+      el('span', { class: 'muted small' }, mode.pinned ? 'Preview' : 'Preview — click the chip to keep it open'),
+      el('span', { class: 'spacer' }),
+      opts.editable ? el('button', { class: 'lnk', onclick: () => { closeOverlay(); setCollapsed(spec, opts, false); } }, opts.inCell ? '⤢ Show in cell' : '⤢ Expand in note') : null,
+      el('button', { class: 'lnk', onclick: () => closeOverlay() }, '✕'));
+    node.append(bar, inner);
+    document.body.appendChild(node);
+    const o = { node, anchor, pinned: !!mode.pinned, hovering: false };
+    o.onDown = (e) => { if (!node.contains(e.target) && !anchor.contains(e.target) && !e.target.closest('.popover, .modal')) closeOverlay(); };
+    o.onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); closeOverlay(); } };
+    document.addEventListener('mousedown', o.onDown, true);
+    document.addEventListener('keydown', o.onKey, true);
+    node.addEventListener('mouseenter', () => { o.hovering = true; clearTimeout(overlay.closeTimer); });
+    node.addEventListener('mouseleave', () => { o.hovering = false; scheduleHoverClose(); });
+    node.addEventListener('mousedown', () => { o.pinned = true; node.classList.add('pinned'); });
+    overlay.current = o;
+    render(inner, spec, Object.assign({}, opts, { force: true, overlay: true, editable: !!opts.editable }));
+    // position: below the chip, flipped above when there is no room; clamp to the viewport
+    const r = anchor.getBoundingClientRect();
+    const w = Math.min(760, window.innerWidth - 24);
+    node.style.width = w + 'px';
+    let left = Math.max(12, Math.min(r.left, window.innerWidth - w - 12));
+    node.style.left = left + 'px';
+    const h = Math.min(node.offsetHeight, window.innerHeight * 0.7);
+    let top = r.bottom + 8;
+    if (top + h > window.innerHeight - 12) top = Math.max(12, r.top - h - 8);
+    node.style.top = top + 'px';
+    node.style.maxHeight = (window.innerHeight * 0.7) + 'px';
+    return node;
+  }
+
   /* ------------------------------------------------------------------ entry point */
   /* Render an embed spec into `container` (replacing its content). opts:
-   *   editable      show the styling popovers and the ⋯ menu
-   *   onSpecChange  called with the mutated spec when styles/lines/range change
+   *   editable      show the styling popovers, the ⋯ menu and collapse/expand controls
+   *   onSpecChange  called with the mutated spec when styles/lines/range/collapse change
    *   editSource    callback for "Edit source"
-   *   compact       table-cell mode */
+   *   inCell        table-cell mode: a chip unless the embed says `expanded`
+   *   force         render fully whatever the flags say (overlays) */
   async function render(container, spec, opts) {
     opts = opts || {};
+    if (isCollapsed(spec, opts)) { renderChip(container, spec, opts); return; }
     container.innerHTML = '';
     container.appendChild(el('div', { class: 'flex-obj' }, el('div', { class: 'flex-loading' }, 'Loading from FLEx…')));
     const doRender = async (refresh) => {
@@ -491,5 +615,5 @@
     await doRender(false);
   }
 
-  FS.interlinear = { render, renderText, renderEntry, renderWordform, styled, styledParts, invalidate, flexGet, openInFlex, HL_COLORS };
+  FS.interlinear = { render, renderText, renderEntry, renderWordform, renderChip, openOverlay, closeOverlay, isCollapsed, setCollapsed, styled, styledParts, invalidate, flexGet, openInFlex, HL_COLORS };
 })();
