@@ -157,6 +157,19 @@ class FlexiconBackend:
             self._mod = flexicon
         return self._mod
 
+    def _c(self, obj):
+        """View an LCM object through its concrete interface. pythonnet exposes only the
+        members of the interface an object was handed out as (ICmObject from most
+        collections), so `text.ContentsOA`, `t.Name`, `seg.BeginTimeOffset` all come back
+        empty without this (Seth's dumps, 2026-10-12). flexicon's cast_to_concrete is total:
+        unknown objects come back unchanged."""
+        if obj is None:
+            return None
+        try:
+            return self._mod.cast_to_concrete(obj)
+        except Exception:  # noqa: BLE001
+            return obj
+
     def list_projects(self) -> list[str]:
         def go():
             mod = self._import()
@@ -372,20 +385,16 @@ class FlexiconBackend:
         touching .Contents (Seth's dump, 2026-10-12: without the cast the detection failed and
         `deja` rendered as the orthographic `deia`)."""
         p = self.project
-        h = _t(lambda: int(text.ContentsOA.MainWritingSystem), None)
+        text = self._c(text)
+        contents = self._c(_t(lambda: text.ContentsOA, None))
+        h = _t(lambda: int(contents.MainWritingSystem), None)
         if h and h > 0:
             tag = self._ws_tag_of_handle(h)
             if tag:
                 return h, tag
-        cast = None
-        try:
-            from SIL.LCModel import IStTxtPara  # type: ignore
-            cast = IStTxtPara
-        except Exception:  # noqa: BLE001
-            cast = None
         for para in _t(lambda: list(p.Paragraphs.GetAll(text)), [])[:3]:
-            tp = _t(lambda: cast(para), None) if cast else None
-            tss = _t(lambda: (tp or para).Contents, None)
+            tp = self._c(para)
+            tss = _t(lambda: tp.Contents, None)
             if tss is None or not _s(_t(lambda: tss.Text, "")):
                 continue
             h = self._run_ws(tss)
@@ -404,7 +413,8 @@ class FlexiconBackend:
                     cls = _t(lambda: tok.ClassName, "")
                     if cls == "PunctuationForm":
                         continue
-                    wf = tok if cls == "WfiWordform" else _t(lambda: tok.Wordform, None)
+                    tok = self._c(tok)
+                    wf = self._c(tok if cls == "WfiWordform" else _t(lambda: tok.Wordform, None))
                     for h in _t(lambda: list(wf.Form.AvailableWritingSystemIds), []):
                         votes[h] = votes.get(h, 0) + 1
         if votes:
@@ -432,6 +442,7 @@ class FlexiconBackend:
         out = []
         n = 0
         for e in p.LexiconAllEntries():
+            e = self._c(e)
             n += 1
             if n % 500 == 0:
                 self.progress(f"Indexing lexicon… {n}")
@@ -450,7 +461,8 @@ class FlexiconBackend:
         return out
 
     def _morph_type_name(self, e) -> str:
-        mt = _t(lambda: e.LexemeFormOA.MorphTypeRA, None)
+        e = self._c(e)
+        mt = self._c(_t(lambda: self._c(e.LexemeFormOA).MorphTypeRA, None))
         if mt is None:
             return ""
         return _s(_t(lambda: self.project.BestStr(mt.Name), ""))
@@ -487,7 +499,7 @@ class FlexiconBackend:
     def get_entry(self, guid: str) -> dict:
         def go():
             self._need()
-            obj = self.project.Object(guid)
+            obj = self._c(self.project.Object(guid))
             entry = self._owning_entry(obj)
             if entry is None:
                 raise FlexError("That GUID is not a lexical entry or sense.", "", "no-object")
@@ -503,12 +515,13 @@ class FlexiconBackend:
             if cur is None:
                 return None
             if _t(lambda: cur.ClassName, "") == "LexEntry":
-                return cur
-            cur = _t(lambda: cur.Owner, None)
+                return self._c(cur)
+            cur = self._c(_t(lambda: cur.Owner, None))
         return None
 
     def _entry_dict(self, e) -> dict:
         p = self.project
+        e = self._c(e)
         d = model.empty_entry(_guid(e), _s(_t(lambda: p.LexiconGetHeadword(e), "")))
         d["lexemeForm"] = _s(_t(lambda: p.LexiconGetLexemeForm(e), "")) or self._vern_text(_t(lambda: e.LexemeFormOA.Form, None))
         d["citationForm"] = _s(_t(lambda: p.LexiconGetCitationForm(e), "")) or self._vern_text(_t(lambda: e.CitationForm, None))
@@ -520,6 +533,7 @@ class FlexiconBackend:
         if senses is None:
             senses = _t(lambda: list(e.SensesOS), [])
         for s in senses:
+            s = self._c(s)
             sd = model.make_sense(
                 _guid(s),
                 _s(_t(lambda: p.LexiconGetSenseNumber(s), "")),
@@ -528,6 +542,7 @@ class FlexiconBackend:
                 _s(_t(lambda: p.LexiconGetSensePOS(s), "")),
             )
             for ex in _t(lambda: list(s.ExamplesOS), []):
+                ex = self._c(ex)
                 sd["examples"].append({
                     "guid": _guid(ex),
                     "text": _s(_t(lambda: p.Examples.GetExample(ex), "")),
@@ -546,7 +561,8 @@ class FlexiconBackend:
             count = 0
             for para in _t(lambda: list(p.Paragraphs.GetAll(t)), []):
                 count += int(_t(lambda: p.Paragraphs.GetSegmentCount(para), 0) or 0)
-            media = _t(lambda: list(t.MediaFilesOA.MediaURIsOC), [])
+            tc = self._c(t)
+            media = _t(lambda: list(self._c(tc.MediaFilesOA).MediaURIsOC), [])
             out.append({
                 "guid": _guid(t),
                 "title": self._text_title(t),
@@ -559,6 +575,7 @@ class FlexiconBackend:
 
     def _title_alternatives(self, t) -> dict:
         """{ws tag: title} for every writing system the text has a non-empty title in."""
+        t = self._c(t)
         return self._ws_alternatives(_t(lambda: t.Name, None))
 
     def _text_title(self, t, ws_tag: str = "", vern_tag: str = "") -> str:
@@ -602,7 +619,7 @@ class FlexiconBackend:
                  max_segments: int = 60, ws: dict | None = None, diag: bool = False) -> dict:
         def go():
             self._need()
-            obj = self.project.Object(guid)
+            obj = self._c(self.project.Object(guid))
             text = self._owning_text(obj)
             if text is None:
                 raise FlexError("That GUID is not an interlinear text.", "", "no-object")
@@ -618,14 +635,17 @@ class FlexiconBackend:
             if cur is None:
                 return None
             if _t(lambda: cur.ClassName, "") == "Text":
-                return cur
-            cur = _t(lambda: cur.Owner, None)
+                return self._c(cur)
+            cur = self._c(_t(lambda: cur.Owner, None))
         return None
 
     def _media(self, text) -> list[dict]:
         out = []
         linked = _s(_t(lambda: self.project.GetLinkedFilesDir(), ""))
-        for m in _t(lambda: list(text.MediaFilesOA.MediaURIsOC), []):
+        text = self._c(text)
+        container = self._c(_t(lambda: text.MediaFilesOA, None))
+        for m in _t(lambda: list(container.MediaURIsOC), []):
+            m = self._c(m)
             uri = _s(_t(lambda: m.MediaURI, ""))
             guid = _guid(m)
             path, found = self._resolve_media(guid, uri, linked)
@@ -695,6 +715,7 @@ class FlexiconBackend:
 
     def _segment_dict(self, seg, n: int, para: int, media_by_guid: dict) -> dict:
         p = self.project
+        seg = self._c(seg)
         words = [self._word_dict(tok) for tok in _t(lambda: list(p.Segments.GetAnalyses(seg)), [])]
         baseline = _s(_t(lambda: p.Segments.GetBaselineText(seg), "")) or model.baseline_from_words(words)
         # The baseline is already in the text's writing system; when its word tokens line up
@@ -709,6 +730,7 @@ class FlexiconBackend:
                     w["txt"] = tk
         notes = []
         for note in _t(lambda: list(p.Segments.GetNotes(seg)), []):
+            note = self._c(note)
             s = _s(_t(lambda: p.BestStr(note.Content), ""))
             if s:
                 notes.append(s)
@@ -736,24 +758,26 @@ class FlexiconBackend:
         gloss, the free translation — the per-line `lang`s a flextext export would write."""
         p = self.project
         d = {"baselineRunWs": "", "wordformAlternatives": {}, "morphAlternatives": {}, "glossAlternatives": {}, "freeAlternatives": {}}
+        seg = self._c(seg)
         tss = _t(lambda: seg.BaselineText, None)
         h = self._run_ws(tss)
         d["baselineRunWs"] = self._ws_tag_of_handle(h) if h else ""
         text = self._owning_text(seg)
-        d["mainWritingSystem"] = _t(lambda: int(text.ContentsOA.MainWritingSystem), None) if text is not None else None
+        d["mainWritingSystem"] = _t(lambda: int(self._c(text.ContentsOA).MainWritingSystem), None) if text is not None else None
         d["titleAlternativesRaw"] = {"stringCount": _t(lambda: int(text.Name.StringCount), None), "available": _t(lambda: list(text.Name.AvailableWritingSystemIds), None)} if text is not None else {}
         toks = _t(lambda: list(p.Segments.GetAnalyses(seg)), [])
         for tok in toks:
             cls = _t(lambda: tok.ClassName, "")
             if cls == "PunctuationForm":
                 continue
-            wf = tok if cls == "WfiWordform" else _t(lambda: tok.Wordform, None)
+            tok = self._c(tok)
+            wf = self._c(tok if cls == "WfiWordform" else _t(lambda: tok.Wordform, None))
             d["wordformAlternatives"] = self._ws_alternatives(_t(lambda: wf.Form, None))
-            an = _t(lambda: tok.Analysis, None)
-            b = next(iter(_t(lambda: list(p.WfiMorphBundles.GetAll(an)), [])), None) if an is not None else None
+            an = self._c(_t(lambda: tok.Analysis, None))
+            b = self._c(next(iter(_t(lambda: list(p.WfiMorphBundles.GetAll(an)), [])), None)) if an is not None else None
             if b is not None:
                 d["morphAlternatives"] = self._ws_alternatives(_t(lambda: b.Form, None))
-                sense = _t(lambda: b.SenseRA, None)
+                sense = self._c(_t(lambda: b.SenseRA, None))
                 d["morphGlossAlternatives"] = self._ws_alternatives(_t(lambda: sense.Gloss, None)) if sense is not None else {}
             if cls == "WfiGloss":
                 d["glossAlternatives"] = self._ws_alternatives(_t(lambda: tok.Form, None))
@@ -764,6 +788,7 @@ class FlexiconBackend:
     def _word_dict(self, tok) -> dict:
         p = self.project
         vh = getattr(self, "_cur_vern_handle", None)
+        tok = self._c(tok)
         cls = _t(lambda: tok.ClassName, "")
         if cls == "PunctuationForm":
             form = _t(lambda: tok.Form, None)
@@ -774,6 +799,7 @@ class FlexiconBackend:
             wf = _t(lambda: tok.Owner.Owner, None)
         elif wf is None and cls == "WfiAnalysis":
             wf = _t(lambda: tok.Owner, None)
+        wf = self._c(wf)
         sel = getattr(self, "_sel", {}) or {}
         vh = sel.get("txt", vh)
         txt = self._vern_text(_t(lambda: wf.Form, None), vh) if wf is not None else ""
@@ -784,14 +810,15 @@ class FlexiconBackend:
         # ⚠ never fall back to tok.Form for a WfiGloss: that is the GLOSS, not the word
         hg, hp, hm, hmg, hcf = sel.get("gls"), sel.get("pos"), sel.get("morph", vh), sel.get("mgls"), sel.get("cf", vh)
         gls = _s(_t(lambda: p.Segments.GetGloss(tok, hg) if hg is not None else p.Segments.GetGloss(tok), ""))
-        analysis = _t(lambda: tok.Analysis, None)
+        analysis = self._c(_t(lambda: tok.Analysis, None))
         pos = ""
         morphs: list[dict] = []
         if analysis is not None:
             pos = _s(_t(lambda: p.WfiAnalyses.GetCategoryAbbrev(analysis, hp) if hp is not None else p.WfiAnalyses.GetCategoryAbbrev(analysis), ""))
             for b in _t(lambda: list(p.WfiMorphBundles.GetAll(analysis)), []):
-                msa = _t(lambda: p.WfiMorphBundles.GetMSA(b), None)
-                sense = _t(lambda: p.WfiMorphBundles.GetSense(b), None)
+                b = self._c(b)
+                msa = self._c(_t(lambda: p.WfiMorphBundles.GetMSA(b), None))
+                sense = self._c(_t(lambda: p.WfiMorphBundles.GetSense(b), None))
                 cf = ""
                 if sense is not None:
                     ent = self._owning_entry(sense)
@@ -801,8 +828,8 @@ class FlexiconBackend:
                 form = self._vern_text(_t(lambda: b.Form, None), hm)
                 if not form:
                     form = _s(_t(lambda: p.WfiMorphBundles.GetForm(b, hm) if hm is not None else p.WfiMorphBundles.GetForm(b), ""))
-                if not form:   # a bundle with no form of its own shows its allomorph's
-                    form = self._vern_text(_t(lambda: b.MorphRA.Form, None), hm)
+                if not form:   # a bundle with no form of its own shows its allomorph's (vernacular, never analysis)
+                    form = self._vern_text(_t(lambda: self._c(b.MorphRA).Form, None), hm)
                 mgls = self._anal_text(_t(lambda: sense.Gloss, None), hmg) if (sense is not None and hmg is not None) else ""
                 if not mgls:
                     mgls = _s(_t(lambda: p.WfiMorphBundles.GetGloss(b), "")) or self._anal_text(_t(lambda: sense.Gloss, None))
@@ -827,7 +854,7 @@ class FlexiconBackend:
         def go():
             self._need()
             try:
-                obj = self.project.Object(guid)
+                obj = self._c(self.project.Object(guid))
             except Exception:  # noqa: BLE001
                 return None
             cls = _t(lambda: obj.ClassName, "")
@@ -849,7 +876,7 @@ class FlexiconBackend:
                     out.update(self._locate(text, obj, cls))
                 return out
             if cls in ("WfiWordform", "WfiAnalysis", "WfiGloss"):
-                wf = _t(lambda: obj.Wordform, None) or obj
+                wf = self._c(_t(lambda: obj.Wordform, None) or obj)
                 return {"kind": "wordform", "guid": _guid(wf), "title": _s(_t(lambda: p.Wordforms.GetForm(wf), ""))}
             return {"kind": "other", "guid": guid.lower(), "title": cls}
         try:
@@ -876,7 +903,7 @@ class FlexiconBackend:
         def go():
             self._need()
             p = self.project
-            wf = p.Object(guid)
+            wf = self._c(p.Object(guid))
             d = {"kind": "wordform", "guid": _guid(wf), "form": _s(_t(lambda: p.Wordforms.GetForm(wf), "")),
                  "glosses": [], "pos": [], "url": self._goto(wf, "wordform"), "ws": self._writing_systems()}
             for an in _t(lambda: list(p.WfiAnalyses.GetAll(wf)), []):
