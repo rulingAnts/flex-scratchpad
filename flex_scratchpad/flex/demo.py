@@ -73,6 +73,7 @@ def _story() -> dict:
     t = model.empty_text(T_STORY, "The dog and the river", WS_VERN, WS_ANAL)
     t["abbrev"] = "DOG"
     t["wsOptions"] = {"vernacular": [WS_VERN, WS_ARAB], "analysis": [WS_ANAL]}
+    t["titleAlternatives"] = {"en": "The dog and the river", "kal": "Kabir pemu"}
     t["url"] = model.goto_url(PROJECT, "text", T_STORY)
     t["media"] = [{"guid": MEDIA_STORY, "uri": "AudioVisual/kalu-story.wav", "path": "", "fileUrl": "", "found": False}]
     segs = [

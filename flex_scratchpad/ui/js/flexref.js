@@ -109,7 +109,7 @@
       } else if (tok.key === 'ws') {
         // ws=txt:fau-fonipa,gls:id — which writing system each interlinear line shows
         spec.ws = {};
-        for (const item of splitItems(tok.val)) { const i = item.indexOf(':'); if (i > 0) { const line = item.slice(0, i).toLowerCase(); if (LINES.includes(line)) spec.ws[line] = item.slice(i + 1); } }
+        for (const item of splitItems(tok.val)) { const i = item.indexOf(':'); if (i > 0) { const line = item.slice(0, i).toLowerCase(); if (LINES.includes(line) || line === 'title') spec.ws[line] = item.slice(i + 1); } }
         if (!Object.keys(spec.ws).length) spec.ws = null;
       } else if (tok.key === 'lines') {
         spec.lines = splitItems(tok.val).map((x) => x.toLowerCase()).filter((x) => LINES.includes(x));

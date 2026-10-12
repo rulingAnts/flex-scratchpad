@@ -85,3 +85,10 @@ test('ws= pins a writing system per line and round-trips', () => {
   assert.equal(R.serialize(spec), src);
   assert.equal(R.parse('{{flex:text ' + G + ' ws=bogus:x}}').ws, null);
 });
+
+test('ws=title picks the title writing system; label survives', () => {
+  const spec = R.parse('{{flex:text ' + G + ' ws=title:kal "causative ex. 3"}}');
+  assert.deepEqual(spec.ws, { title: 'kal' });
+  assert.equal(spec.label, 'causative ex. 3');
+  assert.equal(R.serialize(spec), '{{flex:text ' + G + ' ws=title:kal "causative ex. 3"}}');
+});

@@ -327,6 +327,7 @@ class FlexiconBackend:
             sel[line] = vern_handle
         for line in self.ANAL_LINES:
             sel[line] = None
+        sel["title"] = None
         for line, tag in (ws or {}).items():
             if line in sel and tag:
                 h = _t(lambda: p.WSHandle(tag), None)
@@ -505,13 +506,30 @@ class FlexiconBackend:
         out.sort(key=lambda r: r["title"].casefold())
         return out
 
-    def _text_title(self, t) -> str:
+    def _title_alternatives(self, t) -> dict:
+        """{ws tag: title} for every writing system the text has a non-empty title in."""
+        return self._ws_alternatives(_t(lambda: t.Name, None))
+
+    def _text_title(self, t, ws_tag: str = "", vern_tag: str = "") -> str:
+        """The title in the writing system asked for; otherwise the first non-empty one — the
+        text's own vernacular WS, then the default analysis WS, then whatever exists (Seth's
+        first run, 2026-10-12: a text titled only in the vernacular showed as untitled)."""
         p = self.project
-        for fn in (lambda: p.Texts.GetName(t), lambda: p.Texts.GetTitle(t),
-                   lambda: p.BestStr(t.Name), lambda: t.Name.BestVernacularAnalysisAlternative.Text):
+        alts = self._title_alternatives(t)
+        if ws_tag and alts.get(ws_tag):
+            return alts[ws_tag]
+        for fn in (lambda: p.Texts.GetName(t), lambda: p.Texts.GetTitle(t)):
             s = _s(_t(fn, ""))
             if s:
                 return s
+        if vern_tag and alts.get(vern_tag):
+            return alts[vern_tag]
+        for ws in self._ws_lists().get("vernacular", []) + self._ws_lists().get("analysis", []):
+            if alts.get(ws["tag"]):
+                return alts[ws["tag"]]
+        for v in alts.values():
+            if v:
+                return v
         return "(untitled text)"
 
     def list_texts(self) -> list[dict]:
@@ -598,7 +616,8 @@ class FlexiconBackend:
         vern_ws = self._ws_info(txt_tag, "") if txt_tag else ws["vern"]
         anal_tag = (ws_sel or {}).get("gls") or (ws_sel or {}).get("ft") or ""
         anal_ws = self._ws_info(anal_tag, "") if anal_tag else ws["anal"]
-        d = model.empty_text(_guid(text), self._text_title(text), vern_ws, anal_ws)
+        d = model.empty_text(_guid(text), self._text_title(text, (ws_sel or {}).get("title", ""), vern_tag), vern_ws, anal_ws)
+        d["titleAlternatives"] = self._title_alternatives(text)
         d["wsOptions"] = self._ws_lists()
         d["wsDetected"] = {"tag": vern_tag, "handle": vern_handle}
         d["wsSelection"] = dict(ws_sel or {})

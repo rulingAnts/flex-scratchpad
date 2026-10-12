@@ -414,3 +414,23 @@ def test_column_resize_writes_width_and_wide(app):
     assert "{table: striped; wide; col 1: bold, width" in body_of(h)
     assert page.evaluate("(() => { const w = document.querySelector('.tbl-wrap'); return w.scrollWidth > w.clientWidth; })()")
     assert not errors
+
+
+def test_label_and_title_ws_from_menu(app):
+    h, page, errors = app
+    new_note(page, "Label")
+    page.keyboard.type("{{flex:text %s seg=1}}" % T_STORY)
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#editor .text-obj")
+    page.locator("#editor .text-obj .flex-head button[title='Options']").click()
+    page.wait_for_selector(".popover input[type=text]")
+    page.fill(".popover input[type=text]", "causative ex. 3")
+    page.keyboard.press("Enter")
+    page.wait_for_timeout(900)
+    assert '{{flex:text %s seg=1 "causative ex. 3"}}' % T_STORY in body_of(h)
+    assert page.locator("#editor .text-obj .flex-head .badge", has_text="causative ex. 3").count() == 1
+    # collapse: the chip shows the label
+    page.locator("#editor .text-obj .flex-head button[title='Collapse to a chip']").click()
+    page.wait_for_selector("#editor .flex-collapsed")
+    assert page.locator("#editor .flex-collapsed .cttl").inner_text() == "causative ex. 3"
+    assert not errors

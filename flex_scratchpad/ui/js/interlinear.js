@@ -394,6 +394,20 @@
 
   function embedMenu(anchor, spec, opts, obj) {
     FS.popover(anchor, (pop, close) => {
+      // A short label of the author's own: shown on the chip when collapsed and as a badge
+      // when expanded (`"label"` at the end of the embed line).
+      const label = el('input', { type: 'text', value: spec.label || '', placeholder: 'e.g. causative example 3', style: { width: '200px' } });
+      label.addEventListener('change', () => { spec.label = label.value.trim(); opts.onSpecChange && opts.onSpecChange(spec); });
+      label.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); label.blur(); close(); } });
+      pop.appendChild(el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Label'), label));
+      if (spec.kind === 'text' && obj && obj.titleAlternatives && Object.keys(obj.titleAlternatives).length > 1) {
+        const sel = el('select', { style: { width: '200px' } });
+        sel.appendChild(el('option', { value: '' }, 'default'));
+        for (const [tag, title] of Object.entries(obj.titleAlternatives)) sel.appendChild(el('option', { value: tag, selected: !!(spec.ws && spec.ws.title === tag) }, title + '  (' + tag + ')'));
+        sel.addEventListener('change', () => { spec.ws = spec.ws || {}; if (sel.value) spec.ws.title = sel.value; else delete spec.ws.title; if (!Object.keys(spec.ws).length) spec.ws = null; opts.onSpecChange && opts.onSpecChange(spec); });
+        pop.appendChild(el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Title'), sel));
+      }
+      pop.appendChild(el('hr'));
       pop.appendChild(el('div', { class: 'row' }, el('b', {}, 'Lines to show')));
       const names = { txt: 'Word', morph: 'Morphemes', mgls: 'Morph glosses', cf: 'Lex. entries', gls: 'Word gloss', pos: 'Category', ft: 'Free translation', lit: 'Literal translation', note: 'Notes' };
       const current = spec.lines && spec.lines.length ? spec.lines : R.DEFAULT_LINES;
