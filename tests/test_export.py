@@ -13,6 +13,11 @@ DOC = {"title": "Past tense", "blocks": [
     {"type": "list", "items": [{"runs": [{"text": "one"}], "task": True, "checked": True}, {"runs": [{"text": "two"}], "ordered": True, "n": 1}]},
     {"type": "table", "rows": [[{"runs": [{"text": "Form"}]}, {"runs": [{"text": "Gloss"}]}], [{"runs": [{"text": "kabir"}]}, {"blocks": [{"type": "p", "runs": [{"text": "dog"}]}]}]],
      "aligns": ["left", None], "style": {"flags": ["striped"], "cols": {"1": {"bold": True, "width": "120px"}}, "rows": {}}},
+    {"type": "table", "rows": [[{"runs": [{"text": "h1"}]}, {"runs": [{"text": "h2"}]}, {"runs": [{"text": "h3"}]}],
+                               [{"runs": [{"text": "wide"}]}, {"runs": [], "covered": True}, {"runs": [{"text": "r1"}]}],
+                               [{"runs": [{"text": "tall"}]}, {"runs": [{"text": "x"}]}, {"runs": [{"text": "y"}]}],
+                               [{"runs": [], "covered": True}, {"runs": [{"text": "z"}]}, {"runs": [{"text": "w"}]}]],
+     "aligns": [None, None, None], "style": {"flags": [], "cols": {}, "rows": {}, "spans": {"2.1": {"rows": 1, "cols": 2}, "3.1": {"rows": 2, "cols": 1}}}},
     {"type": "interlinear", "title": "The dog", "label": "ex. 1", "ws": {"font": "Charis SIL"}, "segments": [
         {"n": 1, "lines": [{"name": "txt", "cells": [[{"text": "Kabir", "font": "Charis SIL", "color": "#00379c"}], [{"text": "ka-", "u": True}, {"text": "nuwa-mo"}]]},
                             {"name": "gls", "cells": [[{"text": "dog"}], [{"text": "slept"}]]}],
@@ -32,7 +37,10 @@ def test_docx_is_a_valid_package_with_the_content(tmp_path):
     ET.fromstring(xml)                                   # well-formed
     for needle in ("Heading", "bold", "kabir", "Kabir", "nuwa-mo", "The dog slept.", "a domestic dog", ">\u2611 <", ">one<", ">1. <", ">two<"):
         assert needle in xml, needle
-    assert xml.count("<w:tbl>") == 2                     # the note table and the interlinear grid
+    assert xml.count("<w:tbl>") == 3                     # the note tables and the interlinear grid
+    assert '<w:gridSpan w:val="2"/>' in xml and '<w:vMerge w:val="restart"/>' in xml and "<w:vMerge/>" in xml
+    tbl2 = xml.split("<w:tbl>")[2]
+    assert tbl2.count("<w:tc>") == 3 + 2 + 3 + 3      # merged-right row has two cells; the vMerge continuation cell exists
     assert '<w:highlight w:val="lightGray"/>' in xml and '<w:color w:val="C0392B"/>' in xml
     assert '<w:u w:val="single"/>' in xml and '<w:rFonts w:ascii="Charis SIL"' in xml
     assert '<w:tcW w:w="1800"' in xml                    # 120px column → twentieths of a point

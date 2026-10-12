@@ -754,7 +754,11 @@ class FlexiconBackend:
                 n += 1
                 if n < a or (b is not None and n > b) or (n - a) >= max_segments:
                     continue
-                d["segments"].append(self._segment_dict(seg, n, pi, media_by_guid))
+                try:
+                    d["segments"].append(self._segment_dict(seg, n, pi, media_by_guid))
+                except Exception as exc:  # noqa: BLE001 — one odd segment must not take the text down
+                    d["segments"].append(model.make_segment(_guid(seg), n, pi, "", [], notes=[f"⚠ could not read this segment: {exc}"]))
+                    d.setdefault("errors", []).append({"segment": n, "error": str(exc)})
         d["segmentCount"] = n
         d["range"] = [a, min(n, b or n)] if n else [0, 0]
         return d
@@ -762,7 +766,12 @@ class FlexiconBackend:
     def _segment_dict(self, seg, n: int, para: int, media_by_guid: dict) -> dict:
         p = self.project
         seg = self._c(seg)
-        words = [self._word_dict(tok) for tok in _t(lambda: list(p.Segments.GetAnalyses(seg)), [])]
+        words = []
+        for tok in _t(lambda: list(p.Segments.GetAnalyses(seg)), []):
+            try:
+                words.append(self._word_dict(tok))
+            except Exception as exc:  # noqa: BLE001 — a word that cannot be read shows as "?" with the reason
+                words.append(model.make_word("?", gls=f"⚠ {exc}", guid=_guid(tok)))
         baseline = _s(_t(lambda: p.Segments.GetBaselineText(seg), "")) or model.baseline_from_words(words)
         # The baseline is already in the text's writing system; when its word tokens line up
         # with the analyses, show those surface forms (as FLEx and flextext-editor do) rather

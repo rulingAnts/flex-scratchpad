@@ -568,3 +568,37 @@ def test_freeze_panes(app):
     th = page.locator("table.md-table thead th").first
     assert page.evaluate("(el) => getComputedStyle(el).position", th.element_handle()) == "sticky"
     assert page.locator(".tbl-wrap.frozen").count() == 1
+
+
+def test_merge_cells_split_and_merge_tables(app):
+    h, page, errors = app
+    # merge the first body cell with the one to its right
+    cell = page.locator("table.md-table td .cell-view").nth(0)
+    cell.scroll_into_view_if_needed()
+    cell.dispatch_event("mousedown")
+    page.wait_for_selector(".cell-edit")
+    page.locator(".tbl-tools button", has_text="Cells").click()
+    page.locator(".popover .menu-item", has_text="to the right").click()
+    page.wait_for_timeout(900)
+    assert "span 2.1: 1x2" in body_of(h)
+    assert page.locator("table.md-table td[colspan='2']").count() == 1
+    # split the table above its last row
+    last = page.locator("table.md-table tbody tr").last.locator(".cell-view").first
+    last.dispatch_event("mousedown")
+    page.wait_for_selector(".cell-edit")
+    page.locator(".tbl-tools button", has_text="Table").click()
+    page.locator(".popover button", has_text="Split above row").click()
+    page.wait_for_timeout(900)
+    assert page.locator("table.md-table").count() == 2
+    body = body_of(h)
+    assert body.count("{table:") == 2
+    assert "span 2.1: 1x2" in body
+    # and merge them back through the second table's Table menu
+    page.locator("table.md-table").nth(1).locator("td .cell-view").first.dispatch_event("mousedown")
+    page.wait_for_selector(".cell-edit")
+    page.locator(".tbl-tools button", has_text="Table").nth(1).click()
+    page.locator(".popover button", has_text="Merge with table above").click()
+    page.wait_for_timeout(900)
+    assert page.locator("table.md-table").count() == 1
+    assert body_of(h).count("{table:") == 1
+    assert not errors

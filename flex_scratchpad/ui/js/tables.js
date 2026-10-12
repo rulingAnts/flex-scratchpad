@@ -37,7 +37,7 @@
   }
 
   function parseStyle(line) {
-    const st = { flags: new Set(), cols: {}, rows: {} };
+    const st = { flags: new Set(), cols: {}, rows: {}, spans: {} };
     const m = /^\s*\{table\s*:?\s*([^}]*)\}\s*$/.exec(line || '');
     if (!m) return st;
     for (const part of m[1].split(';')) {
@@ -51,7 +51,9 @@
         const fm = /^borders?\s+(\w+)$/i.exec(p);
         const fr = /^freeze\s+(rows?|cols?|columns?)\s+(\d+)$/i.exec(p);
         const mh = /^(?:max-?height|height)\s+(\S+)$/i.exec(p);
+        const sp = /^span\s+(\d+)\.(\d+)\s*:\s*(\d+)\s*[x×]\s*(\d+)$/i.exec(p);
         if (fm) st.flags.add('borders-' + fm[1].toLowerCase());
+        else if (sp) { if (+sp[3] > 1 || +sp[4] > 1) st.spans[sp[1] + '.' + sp[2]] = { rows: Math.max(1, +sp[3]), cols: Math.max(1, +sp[4]) }; }
         else if (fr) st[fr[1].toLowerCase().startsWith('r') ? 'freezeRows' : 'freezeCols'] = +fr[2];
         else if (mh) st.maxHeight = mh[1];
         else st.flags.add(p.toLowerCase().replace(/\s+/g, '-'));
@@ -88,6 +90,7 @@
     if (st.freezeRows) parts.push('freeze rows ' + st.freezeRows);
     if (st.freezeCols) parts.push('freeze cols ' + st.freezeCols);
     if (st.maxHeight) parts.push('max-height ' + st.maxHeight);
+    for (const [k, v] of Object.entries(st.spans || {})) parts.push('span ' + k + ': ' + v.rows + 'x' + v.cols);
     for (const [i, o] of Object.entries(st.cols)) { const s = serializeProps(o); if (s) parts.push('col ' + i + ': ' + s); }
     for (const [i, o] of Object.entries(st.rows)) { const s = serializeProps(o); if (s) parts.push('row ' + i + ': ' + s); }
     return parts.length ? '{table: ' + parts.join('; ') + '}' : '';
@@ -111,6 +114,98 @@
     const w = Math.max(...t.rows.map((r) => r.length));
     for (const r of t.rows) while (r.length < w) r.push('');
     while (t.aligns.length < w) t.aligns.push(null);
+    return t;
+  }
+
+  /* Merged cells (Seth, 2026-10-12: "Merging cells would also be great, but I realize that's
+   * not allowed in Markdown"). They are not: the grid stays a plain pipe table — every cell is
+   * still there, a covered cell is simply empty — and the style line carries
+   * `span R.C: RxC` (1-based anchor, rows × cols). Rendered as rowspan/colspan; a markdown
+   * export keeps the table readable and only loses the merge. */
+  function spanMap(t) {
+    const covered = new Map();                 // "r.c" (0-based) → anchor key
+    const anchors = {};
+    const nr = t.rows.length, nc = t.rows[0] ? t.rows[0].length : 0;
+    for (const [k, v] of Object.entries(t.style.spans || {})) {
+      const [r, c] = k.split('.').map((x) => +x - 1);
+      if (r < 0 || c < 0 || r >= nr || c >= nc) continue;
+      let rows = Math.min(v.rows, nr - r), cols = Math.min(v.cols, nc - c);
+      if (r === 0 && rows > 1) rows = 1;       // the header row cannot reach into the body
+      if (rows < 2 && cols < 2) continue;
+      anchors[r + '.' + c] = { rows, cols };
+      for (let i = r; i < r + rows; i++) for (let j = c; j < c + cols; j++) if (i !== r || j !== c) covered.set(i + '.' + j, r + '.' + c);
+    }
+    return { anchors, covered };
+  }
+  function remapSpans(t, fn) {
+    const o = {};
+    for (const [k, v] of Object.entries(t.style.spans || {})) {
+      const [r, c] = k.split('.').map(Number);
+      const n = fn(r, c, v.rows, v.cols);
+      if (n && n.rows >= 1 && n.cols >= 1 && (n.rows > 1 || n.cols > 1)) o[n.r + '.' + n.c] = { rows: n.rows, cols: n.cols };
+    }
+    t.style.spans = o;
+  }
+  /* Merge the current cell with its neighbour to the right or below: the anchor's span grows
+   * and the newly covered cells' text moves into it. Fails quietly across the header edge or
+   * into another merged cell. */
+  function mergeCell(t, r, c, dir) {
+    const { anchors, covered } = spanMap(t);
+    if (covered.has(r + '.' + c)) return false;
+    const sp = anchors[r + '.' + c] || { rows: 1, cols: 1 };
+    const nr = t.rows.length, nc = t.rows[0].length;
+    const next = dir === 'right' ? { rows: sp.rows, cols: sp.cols + 1 } : { rows: sp.rows + 1, cols: sp.cols };
+    if (r + next.rows > nr || c + next.cols > nc) return false;
+    if (dir === 'down' && r === 0) return false;
+    const taken = [];
+    for (let i = r; i < r + next.rows; i++) for (let j = c; j < c + next.cols; j++) {
+      if (i === r && j === c) continue;
+      const k = i + '.' + j;
+      const inOld = i < r + sp.rows && j < c + sp.cols;
+      if (!inOld && (anchors[k] || (covered.has(k) && covered.get(k) !== r + '.' + c))) return false;
+      if (!inOld) taken.push([i, j]);
+    }
+    const extra = taken.map(([i, j]) => t.rows[i][j]).filter((x) => x && x.trim());
+    if (extra.length) t.rows[r][c] = [t.rows[r][c], ...extra].filter((x) => x && x.trim()).join('<br>');   // cells keep <br> as their line break
+    for (const [i, j] of taken) t.rows[i][j] = '';
+    t.style.spans[(r + 1) + '.' + (c + 1)] = next;
+    return true;
+  }
+  function unmergeCell(t, r, c) {
+    const { covered } = spanMap(t);
+    const key = covered.get(r + '.' + c) || (r + '.' + c);
+    const [ar, ac] = key.split('.').map(Number);
+    if (!t.style.spans[(ar + 1) + '.' + (ac + 1)]) return false;
+    delete t.style.spans[(ar + 1) + '.' + (ac + 1)];
+    return true;
+  }
+
+  /* Split a table above row r (0-based, body rows only): both halves keep the header, the
+   * column styles and the flags; row styles and spans follow their rows. Returns [top, bottom]. */
+  function splitAt(t, r) {
+    if (r <= 0 || r >= t.rows.length) return null;
+    const clone = (rows) => ({ rows: rows.map((x) => x.slice()), aligns: t.aligns.slice(), style: { flags: new Set(t.style.flags), cols: JSON.parse(JSON.stringify(t.style.cols)), rows: {}, spans: {}, freezeRows: t.style.freezeRows, freezeCols: t.style.freezeCols, maxHeight: t.style.maxHeight } });
+    const top = clone(t.rows.slice(0, r)), bottom = clone([t.rows[0], ...t.rows.slice(r)]);
+    for (const [k, v] of Object.entries(t.style.rows)) { const n = +k; if (n <= r) top.style.rows[n] = v; else bottom.style.rows[n - r + 1] = v; }
+    for (const [k, v] of Object.entries(t.style.spans || {})) {
+      const [ar, ac] = k.split('.').map(Number);
+      if (ar <= r) top.style.spans[k] = { rows: Math.min(v.rows, r - ar + 1), cols: v.cols };
+      else bottom.style.spans[(ar - r + 1) + '.' + ac] = { rows: v.rows, cols: v.cols };
+    }
+    return [top, bottom];
+  }
+  /* Append table b under table a. b's header row is dropped when it repeats a's (a split put
+   * it there); otherwise it becomes an ordinary row. Column styles and flags are a's. */
+  function mergeTables(a, b) {
+    const same = b.rows[0].length === a.rows[0].length && b.rows[0].every((x, i) => (x || '').trim() === (a.rows[0][i] || '').trim());
+    const w = Math.max(a.rows[0].length, b.rows[0].length);
+    const t = { rows: a.rows.map((x) => x.slice()), aligns: a.aligns.slice(), style: { flags: new Set(a.style.flags), cols: JSON.parse(JSON.stringify(a.style.cols)), rows: JSON.parse(JSON.stringify(a.style.rows)), spans: JSON.parse(JSON.stringify(a.style.spans || {})), freezeRows: a.style.freezeRows, freezeCols: a.style.freezeCols, maxHeight: a.style.maxHeight } };
+    const skip = same ? 1 : 0, base = a.rows.length;
+    for (const row of b.rows.slice(skip)) t.rows.push(row.slice());
+    for (const r of t.rows) while (r.length < w) r.push('');
+    while (t.aligns.length < w) t.aligns.push(null);
+    for (const [k, v] of Object.entries(b.style.rows)) { const n = +k - skip; if (n >= 1) t.style.rows[n + base] = v; }
+    for (const [k, v] of Object.entries(b.style.spans || {})) { const [ar, ac] = k.split('.').map(Number); const n = ar - skip; if (n >= 1) t.style.spans[(n + base) + '.' + ac] = v; }
     return t;
   }
 
@@ -166,11 +261,15 @@
       commit();
       widget.refresh();
     };
+    const spans = spanMap(t);
     t.rows.forEach((row, r) => {
       const tr = el('tr');
       row.forEach((cell, c) => {
+        if (spans.covered.has(r + '.' + c)) return;
         const { css, cls } = cellStyle(t, r, c);
         const td = el(r === 0 ? 'th' : 'td', { class: cls.join(' '), style: css, dataset: { r, c } });
+        const sp = spans.anchors[r + '.' + c];
+        if (sp) { if (sp.rows > 1) td.rowSpan = sp.rows; if (sp.cols > 1) td.colSpan = sp.cols; td.classList.add('merged'); }
         mountCell(td, t, r, c, widget, commit, opts);
         if (r === 0) td.appendChild(colResizer(td, t, c, widget, commit));
         tr.appendChild(td);
@@ -192,7 +291,8 @@
       el('button', { title: 'Delete the current column', onclick: () => { const { c } = cur(); if (t.rows[0].length <= 1) return; t.rows.forEach((row) => row.splice(c, 1)); t.aligns.splice(c, 1); delete t.style.cols[c + 1]; shiftColStyles(t, c + 2, -1); commit(); widget.refresh(); } }, '− Column'),
       el('button', { onclick: (e) => colPopover(e.currentTarget, t, cur().c, commit, widget) }, 'Column ▾'),
       el('button', { onclick: (e) => rowPopover(e.currentTarget, t, cur().r, commit, widget) }, 'Row ▾'),
-      el('button', { onclick: (e) => tablePopover(e.currentTarget, t, commit, widget) }, 'Table ▾'),
+      el('button', { onclick: (e) => cellPopover(e.currentTarget, t, cur(), commit, widget) }, 'Cells ▾'),
+      el('button', { onclick: (e) => tablePopover(e.currentTarget, t, commit, widget, opts) }, 'Table ▾'),
     );
     container.appendChild(tools);
     return widget;
@@ -254,8 +354,27 @@
     });
   }
 
-  function shiftRowStyles(t, from, by) { const o = {}; for (const [k, v] of Object.entries(t.style.rows)) o[+k >= from ? +k + by : +k] = v; t.style.rows = o; }
-  function shiftColStyles(t, from, by) { const o = {}; for (const [k, v] of Object.entries(t.style.cols)) o[+k >= from ? +k + by : +k] = v; t.style.cols = o; }
+  function shiftRowStyles(t, from, by) {
+    const o = {}; for (const [k, v] of Object.entries(t.style.rows)) o[+k >= from ? +k + by : +k] = v; t.style.rows = o;
+    // by = +1: a row was inserted at 1-based `from`; by = -1: the row at `from - 1` was deleted
+    remapSpans(t, (r, c, rows, cols) => {
+      if (by > 0) return r >= from ? { r: r + 1, c, rows, cols } : (from > r && from < r + rows ? { r, c, rows: rows + 1, cols } : { r, c, rows, cols });
+      const d = from - 1;
+      if (r === d) return null;
+      if (r > d) return { r: r - 1, c, rows, cols };
+      return d < r + rows ? { r, c, rows: rows - 1, cols } : { r, c, rows, cols };
+    });
+  }
+  function shiftColStyles(t, from, by) {
+    const o = {}; for (const [k, v] of Object.entries(t.style.cols)) o[+k >= from ? +k + by : +k] = v; t.style.cols = o;
+    remapSpans(t, (r, c, rows, cols) => {
+      if (by > 0) return c >= from ? { r, c: c + 1, rows, cols } : (from > c && from < c + cols ? { r, c, rows, cols: cols + 1 } : { r, c, rows, cols });
+      const d = from - 1;
+      if (c === d) return null;
+      if (c > d) return { r, c: c - 1, rows, cols };
+      return d < c + cols ? { r, c, rows, cols: cols - 1 } : { r, c, rows, cols };
+    });
+  }
 
   /* A cell shows rendered markdown (embeds hydrated); clicking it edits the source in place. */
   function mountCell(td, t, r, c, widget, commit, opts) {
@@ -420,11 +539,34 @@
     const props = t.style.rows[r + 1] = t.style.rows[r + 1] || {};
     propsPopover(anchor, r === 0 ? 'Header row' : 'Row ' + (r + 1), props, () => { commit(); widget.refresh(); });
   }
-  function tablePopover(anchor, t, commit, widget) {
+  function cellPopover(anchor, t, at, commit, widget) {
+    FS.popover(anchor, (pop, close) => {
+      const { anchors, covered } = spanMap(t);
+      const key = at.r + '.' + at.c;
+      pop.appendChild(el('div', { class: 'row' }, el('b', {}, 'Cell ' + (at.r + 1) + ',' + (at.c + 1))));
+      const item = (label, fn, disabled) => pop.appendChild(el('button', { class: 'menu-item', disabled: !!disabled, onclick: () => { close(); if (fn()) { commit(); widget.refresh(); } } }, label));
+      item('Merge with the cell to the right', () => mergeCell(t, at.r, at.c, 'right'), covered.has(key));
+      item('Merge with the cell below', () => mergeCell(t, at.r, at.c, 'down'), covered.has(key) || at.r === 0);
+      item('Unmerge', () => unmergeCell(t, at.r, at.c), !(anchors[key] || covered.has(key)));
+      pop.appendChild(el('div', { class: 'hint' }, 'Merged cells are kept as `span row.col: rows×cols` in the style line; a plain Markdown reader sees the grid with the covered cells empty.'));
+    });
+  }
+  function tablePopover(anchor, t, commit, widget, opts) {
+    opts = opts || {};
     FS.popover(anchor, (pop, close) => {
       const render = () => {
         pop.innerHTML = '';
         pop.appendChild(el('div', { class: 'row' }, el('b', {}, 'Table')));
+        if (opts.onSplit || opts.onMerge) {
+          const row = el('div', { class: 'row' });
+          const r = widget.focus ? widget.focus.r : 0;
+          if (opts.onSplit) row.appendChild(el('button', { class: 'tog', disabled: r <= 0, title: 'Split the table above the current row, with an empty line between the halves', onclick: () => { close(); opts.onSplit(r); } }, 'Split above row ' + (r + 1)));
+          if (opts.onMerge && opts.canMerge) {
+            if (opts.canMerge(-1)) row.appendChild(el('button', { class: 'tog', onclick: () => { close(); opts.onMerge(-1); } }, 'Merge with table above'));
+            if (opts.canMerge(1)) row.appendChild(el('button', { class: 'tog', onclick: () => { close(); opts.onMerge(1); } }, 'Merge with table below'));
+          }
+          pop.appendChild(row);
+        }
         const flag = (f, label) => el('button', { class: 'tog' + (t.style.flags.has(f) ? ' on' : ''), onclick: () => { t.style.flags.has(f) ? t.style.flags.delete(f) : t.style.flags.add(f); commit(); widget.refresh(); render(); } }, label);
         pop.appendChild(el('div', { class: 'row' }, flag('striped', 'Striped'), flag('header-col', 'Header column'), flag('compact', 'Compact'), flag('full', 'Full width'), flag('wide', 'Wide (scroll sideways)')));
         const fr = el('input', { type: 'number', min: 0, max: 10, value: t.style.freezeRows || 0, style: { width: '56px' } });
@@ -511,5 +653,5 @@
     return fromHtml(html) || fromTsv(dt.getData && dt.getData('text/plain'));
   }
 
-  FS.tables = { parse, serialize, splitRow, parseStyle, serializeStyle, render, template, fromHtml, fromTsv, fromClipboard, cellMarkdown };
+  FS.tables = { spanMap, mergeCell, unmergeCell, splitAt, mergeTables, parse, serialize, splitRow, parseStyle, serializeStyle, render, template, fromHtml, fromTsv, fromClipboard, cellMarkdown };
 })();

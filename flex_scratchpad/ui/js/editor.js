@@ -167,6 +167,9 @@
           openLink: (href) => this.openLink(href),
           onPasteLink: (text, insert) => this.opts.onPasteLink && this.opts.onPasteLink(text, insert),
           onPasteLocate: (text, insert, fallback) => this.opts.onPasteLocate ? this.opts.onPasteLocate(text, insert, fallback) : fallback(),
+          onSplit: (r) => this.splitTable(b, r),
+          canMerge: (dir) => !!this.neighbourTable(b, dir),
+          onMerge: (dir) => this.mergeTables(b, dir),
         });
       } else if (b.type === 'flex') {
         const spec = FS.flexref.parse(b.src);
@@ -614,6 +617,40 @@
       for (const p of parts) last = this.insertBlockAfter(last, p, false);
       this.insertBlockAfter(last, { type: 'p', src: '' }, true);
     }
+    /* -- tables as blocks: split one into two, join two into one (Seth, 2026-10-12) ------ */
+    splitTable(b, r) {
+      const halves = FS.tables.splitAt(FS.tables.parse(b.src), r);
+      if (!halves) return;
+      const i = this.blocks.indexOf(b);
+      const seq = [{ id: FS.uid(), type: 'table', src: FS.tables.serialize(halves[0]) }, { id: FS.uid(), type: 'p', src: '' }, { id: FS.uid(), type: 'table', src: FS.tables.serialize(halves[1]) }];
+      this.blocks.splice(i, 1, ...seq);
+      this.renderAll();
+      this.changed({ force: true });
+      this.focusBlock(i + 1, 0);
+    }
+    /* The table block next to b in direction dir (-1 above, +1 below), looking past empty
+     * paragraphs; null when there is none. */
+    neighbourTable(b, dir) {
+      const i = this.blocks.indexOf(b);
+      for (let j = i + dir; j >= 0 && j < this.blocks.length; j += dir) {
+        const x = this.blocks[j];
+        if (x.type === 'table') return x;
+        if (x.type === 'p' && x.src.trim() === '') continue;
+        return null;
+      }
+      return null;
+    }
+    mergeTables(b, dir) {
+      const other = this.neighbourTable(b, dir);
+      if (!other) return;
+      const [top, bottom] = dir > 0 ? [b, other] : [other, b];
+      const merged = FS.tables.serialize(FS.tables.mergeTables(FS.tables.parse(top.src), FS.tables.parse(bottom.src)));
+      const i = this.blocks.indexOf(top), j = this.blocks.indexOf(bottom);
+      this.blocks.splice(i, j - i + 1, { id: FS.uid(), type: 'table', src: merged });
+      this.renderAll();
+      this.changed({ force: true });
+      this.focusBlock(i, 0);
+    }
     deleteBlock(b) {
       const i = this.blocks.indexOf(b);
       if (i < 0) return;
@@ -665,6 +702,10 @@
         } else {
           pop.appendChild(el('hr'));
           item('Edit source', () => this.editSource(b));
+          if (b.type === 'table') {
+            if (this.neighbourTable(b, -1)) item('Merge with table above', () => this.mergeTables(b, -1));
+            if (this.neighbourTable(b, 1)) item('Merge with table below', () => this.mergeTables(b, 1));
+          }
         }
         pop.appendChild(el('hr'));
         item('Duplicate', () => this.insertBlockAfter(b, { type: b.type, src: b.src, lang: b.lang }, false));

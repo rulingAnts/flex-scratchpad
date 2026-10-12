@@ -334,6 +334,8 @@ table.md-table.borders-light th, table.md-table.borders-light td { border-color:
 table.md-table.compact th, table.md-table.compact td { padding: 3px 7px; font-size: 13.5px; }
 table.md-table.header-col tbody td:first-child { font-weight: 650; background: var(--panel); }
 table.md-table.full { width: 100%; }
+table.md-table td.merged, table.md-table th.merged { vertical-align: top; }
+.popover .menu-item[disabled] { opacity: 0.45; pointer-events: none; }
 table.md-table.wide { max-width: none; }
 .tbl-wrap { overflow-x: auto; overflow-y: hidden; padding-bottom: 2px; }
 .tbl-wrap.frozen { overflow: auto; border: 1px solid var(--border-soft); border-radius: 6px; }

@@ -79,3 +79,39 @@ test('tables: freeze panes and height round-trip through the style line', () => 
   assert.equal(t.style.freezeRows, 1); assert.equal(t.style.freezeCols, 2); assert.equal(t.style.maxHeight, '300px');
   assert.equal(FS.tables.serialize(t).split('\n').pop(), '{table: striped; freeze rows 1; freeze cols 2; max-height 300px}');
 });
+
+test('tables: merged cells live in the style line and split/merge keep them', () => {
+  const T = FS.tables;
+  const t = T.parse('| a | b | c |\n|---|---|---|\n| 1 | 2 | 3 |\n| 4 | 5 | 6 |\n| 7 | 8 | 9 |');
+  assert.ok(T.mergeCell(t, 1, 0, 'right'));
+  assert.ok(T.mergeCell(t, 1, 0, 'down'));
+  assert.deepEqual(t.style.spans, { '2.1': { rows: 2, cols: 2 } });
+  assert.equal(t.rows[1][0], '1<br>2<br>4<br>5');
+  assert.equal(t.rows[1][1] + t.rows[2][0] + t.rows[2][1], '');
+  assert.ok(!T.mergeCell(t, 0, 0, 'down'), 'header never merges into the body');
+  assert.ok(!T.mergeCell(t, 2, 2, 'right'), 'cannot leave the grid');
+  const out = T.serialize(t);
+  assert.ok(out.endsWith('{table: span 2.1: 2x2}'), out);
+  const back = T.parse(out);
+  const m = T.spanMap(back);
+  assert.deepEqual(m.anchors, { '1.0': { rows: 2, cols: 2 } });
+  assert.deepEqual([...m.covered.keys()].sort(), ['1.1', '2.0', '2.1']);
+  // split above body row 3 (0-based 3 = "7 8 9"): both halves keep the header
+  const [top, bottom] = T.splitAt(back, 3);
+  assert.deepEqual(top.rows.map((r) => r[0]), ['a', '1<br>2<br>4<br>5', '']);
+  assert.deepEqual(bottom.rows, [['a', 'b', 'c'], ['7', '8', '9']]);
+  assert.deepEqual(top.style.spans, { '2.1': { rows: 2, cols: 2 } });
+  // merge back: the repeated header is dropped
+  const merged = T.mergeTables(top, bottom);
+  assert.equal(T.serialize(merged), out);
+  // a table with a different header keeps that header as a body row
+  const other = T.parse('| x | y |\n|---|---|\n| 10 | 11 |');
+  const m2 = T.mergeTables(bottom, other);
+  assert.deepEqual(m2.rows, [['a', 'b', 'c'], ['7', '8', '9'], ['x', 'y', ''], ['10', '11', '']]);
+  // deleting the anchor row drops the span; inserting a row inside it grows it
+  const t3 = T.parse(out);
+  t3.rows.splice(2, 0, ['n', 'n', 'n']);
+  FS.tables.shiftRowStyles && FS.tables.shiftRowStyles(t3, 3, 1);
+  assert.ok(!T.unmergeCell(T.parse('| a |\n|---|\n| 1 |'), 1, 0));
+  assert.ok(T.unmergeCell(T.parse(out), 2, 1), 'unmerge from a covered cell');
+});

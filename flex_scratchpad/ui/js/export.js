@@ -128,16 +128,20 @@
       } else if (b.type === 'table') {
         const t = FS.tables.parse(b.src);
         const rows = [];
-        for (const row of t.rows) {
+        const spans = FS.tables.spanMap(t);
+        for (const [ri, row] of t.rows.entries()) {
           const cells = [];
-          for (const cell of row) {
+          for (const [ci, cell] of row.entries()) {
             const parts = await textWithEmbeds(cell);
-            if (parts.length === 1 && !parts[0].type) cells.push({ runs: parts[0].runs });
-            else cells.push({ runs: null, blocks: parts.map((p) => (p.type ? p : { type: 'p', runs: p.runs })) });
+            const out = (parts.length === 1 && !parts[0].type) ? { runs: parts[0].runs } : { runs: null, blocks: parts.map((p) => (p.type ? p : { type: 'p', runs: p.runs })) };
+            const sp = spans.anchors[ri + '.' + ci];
+            if (sp) { out.rowspan = sp.rows; out.colspan = sp.cols; }
+            if (spans.covered.has(ri + '.' + ci)) out.covered = true;
+            cells.push(out);
           }
           rows.push(cells);
         }
-        blocks.push({ type: 'table', rows, aligns: t.aligns, header: true, style: { flags: [...t.style.flags], cols: t.style.cols, rows: t.style.rows } });
+        blocks.push({ type: 'table', rows, aligns: t.aligns, header: true, style: { flags: [...t.style.flags], cols: t.style.cols, rows: t.style.rows, spans: t.style.spans } });
       } else if (b.type === 'chart') {
         const canvas = b.el && b.el.querySelector('canvas');
         if (canvas) blocks.push({ type: 'image', png: canvas.toDataURL('image/png'), width: canvas.clientWidth, height: canvas.clientHeight, alt: 'chart' });
@@ -216,7 +220,8 @@
         const cols = (b.style && b.style.cols) || {}, rows = (b.style && b.style.rows) || {};
         const cellStyle = (ri, ci) => { const c = cols[ci + 1] || {}, r = rows[ri + 1] || {}; const css = []; const a = r.align || c.align || (b.aligns || [])[ci]; if (a) css.push('text-align:' + a); if (c.width) css.push('width:' + c.width); if (r.bg || c.bg) css.push('background:' + (r.bg || c.bg)); if (r.color || c.color) css.push('color:' + (r.color || c.color)); if (r.bold || c.bold) css.push('font-weight:700'); if (r.italic || c.italic) css.push('font-style:italic'); if (r.nowrap || c.nowrap) css.push('white-space:nowrap'); if (r.vern || c.vern) css.push('font-family:"Charis SIL",serif;color:#00379c'); return css.length ? ' style="' + css.join(';') + '"' : ''; };
         const cellHtml = (c) => c.blocks ? c.blocks.map(blockHtml).join('') : runsHtml(c.runs);
-        return '<table class="note ' + flags.join(' ') + '">' + b.rows.map((row, ri) => '<tr>' + row.map((c, ci) => (ri === 0 ? '<th' : '<td') + cellStyle(ri, ci) + '>' + cellHtml(c) + (ri === 0 ? '</th>' : '</td>')).join('') + '</tr>').join('') + '</table>';
+        const spanAttr = (c) => (c.rowspan > 1 ? ' rowspan="' + c.rowspan + '"' : '') + (c.colspan > 1 ? ' colspan="' + c.colspan + '"' : '');
+        return '<table class="note ' + flags.join(' ') + '">' + b.rows.map((row, ri) => '<tr>' + row.map((c, ci) => c.covered ? '' : (ri === 0 ? '<th' : '<td') + spanAttr(c) + cellStyle(ri, ci) + '>' + cellHtml(c) + (ri === 0 ? '</th>' : '</td>')).join('') + '</tr>').join('') + '</table>';
       }
       case 'interlinear': {
         const rtl = b.ws && b.ws.rtl;

@@ -36,6 +36,31 @@ JavaScript mock with demo data when no bridge is present, so the page runs in an
 5. A click opens the style popover; `flexref.toggleStyle` mutates the spec; the editor writes
    `flexref.serialize(spec)` back into the block source (or the table cell) and autosaves.
 
+## The file format: Markdown with a declared extension vocabulary
+
+Seth asked (2026-10-12) whether the raw format should be HTML under the hood, "tolerating and
+auto-rendering markdown as well", for the things Markdown cannot say. The answer this app has
+settled on is the other way round: **the file is Markdown, and every non-Markdown need gets one
+small, named extension in a form a plain Markdown reader survives.** The current vocabulary:
+
+| need | extension | what a plain reader sees |
+|---|---|---|
+| live FLEx objects | `{{flex:… }}` line or inline | a literal `{{…}}` |
+| table styling, widths, frozen panes | a `{table: …}` line after the table | a stray `{…}` line |
+| merged cells | `span R.C: RxC` in that line; covered cells left empty | the grid, with gaps |
+| line breaks in a cell | `<br>` (GFM already allows it) | a line break |
+| charts | a ```chart fence | a code block |
+
+Why not HTML storage: the editor's one invariant is that a block's `textContent` **is** the
+source (decoration only wraps characters), which is what makes typing, undo, search, cloud
+sync, exports and "readable without the app" all cheap. HTML as the base would move every one
+of those onto a DOM-diffing editor and a sanitiser, for the sake of merged cells and the like
+that the style line already covers. The rule for the next need is therefore: **add a key to the
+vocabulary above** (and to `tables.parseStyle` / `flexref` / `markdown.js`), and make sure the
+Markdown export degrades to something readable. If a need ever does not fit a line in the style
+line, a raw HTML block passed through verbatim is the escape hatch — but it has not been
+needed yet.
+
 ## Audio
 
 `FlexService.ensure_clip(text, media, begin, end)` resolves the media file (LinkedFiles + URI,

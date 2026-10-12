@@ -141,8 +141,10 @@ class Docx:
         elif t == "wordform":
             self.body.append(self.para([{"text": block.get("form", ""), "b": True, "font": block.get("font")}, {"text": "  " + "; ".join(block.get("glosses", []))}]))
 
-    def cell(self, cell: dict, width: int | None = None, shade: str = "", borders: bool = True) -> str:
+    def cell(self, cell: dict, width: int | None = None, shade: str = "", borders: bool = True, extra: str = "") -> str:
         tcpr = []
+        if extra:
+            tcpr.append(extra)                    # gridSpan / vMerge for merged cells
         if width:
             tcpr.append(f'<w:tcW w:w="{width}" w:type="dxa"/>')
         if shade:
@@ -181,6 +183,23 @@ class Docx:
         out = [f"<w:tbl>{tblpr}"]
         cols = style.get("cols", {}) or {}
         rowst = style.get("rows", {}) or {}
+        spans: dict = {}
+        covered: dict = {}
+        for key, v in (style.get("spans") or {}).items():
+            try:
+                ar, ac = (int(x) - 1 for x in str(key).split("."))
+                rn, cn = int(v.get("rows", 1)), int(v.get("cols", 1))
+            except (TypeError, ValueError, AttributeError):
+                continue
+            rn = min(rn, len(rows) - ar)
+            cn = min(cn, len(rows[0]) - ac) if rows else 1
+            if ar < 0 or ac < 0 or rn < 1 or cn < 1 or (rn == 1 and cn == 1):
+                continue
+            spans[(ar, ac)] = (rn, cn)
+            for i in range(ar, ar + rn):
+                for j in range(ac, ac + cn):
+                    if (i, j) != (ar, ac):
+                        covered[(i, j)] = (ar, ac, rn, cn)
         for ri, row in enumerate(rows):
             cells = []
             for ci, c in enumerate(row):
@@ -200,7 +219,24 @@ class Docx:
                         width = int(float(w[:-2]) * 15)   # px → twentieths of a point (~96 dpi)
                     except ValueError:
                         width = None
-                cells.append(self.cell(c, width, shade))
+                # merged cells: a horizontal span is one <w:tc> with gridSpan; a vertical one is
+                # the anchor marked vMerge="restart" and each covered cell below it a vMerge
+                # continuation (Word needs the continuation cells to exist).
+                cov = covered.get((ri, ci))
+                if cov is not None:
+                    ar, ac, rows_n, cols_n = cov
+                    if ci != ac:
+                        continue                     # inside a horizontal span: no cell at all
+                    cells.append(self.cell({"runs": []}, width, shade, extra=(f'<w:gridSpan w:val="{cols_n}"/>' if cols_n > 1 else "") + "<w:vMerge/>"))
+                    continue
+                sp = spans.get((ri, ci))
+                extra = ""
+                if sp:
+                    if sp[1] > 1:
+                        extra += f'<w:gridSpan w:val="{sp[1]}"/>'
+                    if sp[0] > 1:
+                        extra += '<w:vMerge w:val="restart"/>'
+                cells.append(self.cell(c, width, shade, extra=extra))
             out.append(f"<w:tr>{''.join(cells)}</w:tr>")
         out.append("</w:tbl>")
         return "".join(out)
