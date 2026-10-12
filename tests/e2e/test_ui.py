@@ -404,7 +404,7 @@ def test_multiline_emphasis_wraps_per_line(app):
 
 def test_column_resize_writes_width_and_wide(app):
     h, page, errors = app
-    th = page.locator("table.md-table thead th").first
+    th = page.locator("table.md-table thead th[data-c]").first
     th.scroll_into_view_if_needed()
     handle = th.locator(".col-resizer")
     box = handle.bounding_box()
@@ -418,7 +418,7 @@ def test_column_resize_writes_width_and_wide(app):
     m = re.search(r"col 1: bold, width (\d+)px", body)
     assert m and 150 <= int(m.group(1)) <= 260, body.split("\n")[-1]
     # dragging far beyond the pane turns the wide flag on and the wrapper scrolls sideways
-    th = page.locator("table.md-table thead th").first
+    th = page.locator("table.md-table thead th[data-c]").first
     handle = th.locator(".col-resizer")
     box = handle.bounding_box()
     page.mouse.move(box["x"] + 4, box["y"] + box["height"] / 2)
@@ -571,7 +571,7 @@ def test_freeze_panes(app):
     rows.dispatch_event("change")
     page.wait_for_timeout(900)
     assert "freeze rows 1" in body_of(h)
-    th = page.locator("table.md-table thead th").first
+    th = page.locator("table.md-table thead th[data-c]").first
     assert page.evaluate("(el) => getComputedStyle(el).position", th.element_handle()) == "sticky"
     assert page.locator(".tbl-wrap.frozen").count() == 1
 
@@ -671,7 +671,7 @@ def test_table_rerender_saves_the_open_cell(app):
     page.keyboard.press("End")
     page.keyboard.type(" TYPED")
     page.wait_for_timeout(300)
-    th = page.locator("table.md-table thead th").nth(1)
+    th = page.locator("table.md-table thead th[data-c]").nth(1)
     handle = th.locator(".col-resizer")
     box = handle.bounding_box()
     page.mouse.move(box["x"] + 4, box["y"] + box["height"] / 2)
@@ -769,4 +769,103 @@ def test_pasted_html_table_keeps_merged_cells(app):
     assert "span 1.1: 1x2" in body and "span 2.1: 2x1" in body
     assert page.locator("table.md-table th[colspan='2']").count() == 1
     assert page.locator("table.md-table td[rowspan='2']").count() == 1
+    assert not errors
+
+
+def test_row_column_and_table_selection_handles(app):
+    h, page, errors = app
+    table = page.locator("table.md-table")
+    table.scroll_into_view_if_needed()
+    table.hover()
+    ncols = page.locator("table.md-table thead th[data-c]").count()
+    nrows = page.locator("table.md-table tr:not(.gutter-row)").count()
+    # a column handle selects the whole column
+    page.locator("table.md-table th.gutter.col").nth(1).dispatch_event("mousedown", {"button": 0, "bubbles": True})
+    page.wait_for_timeout(100)
+    assert page.locator("table.md-table .sel").count() == nrows
+    assert page.locator("table.md-table th.gutter.col.on").count() == 1
+    # Shift-click the first column handle extends to both columns
+    page.locator("table.md-table th.gutter.col").nth(0).dispatch_event("mousedown", {"button": 0, "shiftKey": True, "bubbles": True})
+    page.wait_for_timeout(100)
+    assert page.locator("table.md-table .sel").count() == nrows * 2
+    # a row handle selects the row; the corner selects everything
+    page.locator("table.md-table th.gutter.row").nth(2).dispatch_event("mousedown", {"button": 0, "bubbles": True})
+    page.wait_for_timeout(100)
+    assert page.locator("table.md-table .sel").count() == ncols
+    assert page.locator("table.md-table th.gutter.row.on").count() == 1
+    page.locator("table.md-table th.gutter.all").dispatch_event("mousedown", {"button": 0, "bubbles": True})
+    page.wait_for_timeout(100)
+    assert page.locator("table.md-table .sel").count() == nrows * ncols
+    # right-click a row handle outside the selection: the menu acts on that row alone
+    page.locator("table.md-table td .cell-view").first.dispatch_event("mousedown")
+    page.keyboard.press("Escape")
+    page.locator("table.md-table th.gutter.row").last.click(button="right")
+    page.wait_for_selector(".popover.menu")
+    page.locator(".popover.menu .menu-item", has_text="Delete row").click()
+    page.wait_for_timeout(900)
+    assert page.locator("table.md-table tr:not(.gutter-row)").count() == nrows - 1
+    # the column handle still resizes and the grid still edits after all that
+    page.locator("table.md-table td .cell-view").first.dispatch_event("mousedown")
+    page.wait_for_selector(".cell-edit")
+    assert not errors
+
+
+def clip_event(page, kind, plain, html=None):
+    """Fire a clipboard event on the document with the given data; returns the DataTransfer's text afterwards."""
+    return page.evaluate("""([kind, plain, html]) => {
+      const dt = new DataTransfer(); if (plain != null) dt.setData('text/plain', plain); if (html) dt.setData('text/html', html);
+      const ev = new ClipboardEvent(kind, { clipboardData: dt, bubbles: true, cancelable: true });
+      document.body.dispatchEvent(ev);
+      return { prevented: ev.defaultPrevented, text: dt.getData('text/plain'), html: dt.getData('text/html') };
+    }""", [kind, plain, html])
+
+
+def test_copy_paste_rows_columns_and_cells(app):
+    h, page, errors = app
+    table = page.locator("table.md-table")
+    table.scroll_into_view_if_needed()
+    table.hover()
+    nrows = page.locator("table.md-table tr:not(.gutter-row)").count()
+    ncols = page.locator("table.md-table thead th[data-c]").count()
+    # select row 2 (handle) and paste two TSV rows: they go in above it
+    page.locator("table.md-table th.gutter.row").nth(1).dispatch_event("mousedown", {"button": 0, "bubbles": True})
+    page.wait_for_timeout(100)
+    r = clip_event(page, "paste", "new1\tx1\nnew2\tx2")
+    assert r["prevented"]
+    page.wait_for_timeout(900)
+    body = body_of(h)
+    assert page.locator("table.md-table tr:not(.gutter-row)").count() == nrows + 2
+    assert "| new1 | x1 |" in body and "| new2 | x2 |" in body
+    assert body.index("| new2 | x2 |") < body.index("| Example |")
+    # select column 2 and paste an HTML column: inserted to the left, grid grows if taller
+    page.locator("table.md-table th.gutter.col").nth(1).dispatch_event("mousedown", {"button": 0, "bubbles": True})
+    page.wait_for_timeout(100)
+    clip_event(page, "paste", "H\nv1\nv2", "<table><tr><td>H</td></tr><tr><td>v1</td></tr><tr><td>v2</td></tr></table>")
+    page.wait_for_timeout(900)
+    assert page.locator("table.md-table thead th[data-c]").count() == ncols + 1
+    assert "| Column | H | What goes here |" in body_of(h) and "| new1 | v1 | x1 |" in body_of(h) and "| Form |  | A vernacular form |" in body_of(h)
+    # a plain range: copy gives TSV of the source, Delete clears, paste overwrites from the corner
+    page.locator("table.md-table td[data-r='1'][data-c='0'] .cell-view").dispatch_event("mousedown")
+    page.wait_for_selector(".cell-edit")
+    page.locator("table.md-table td[data-r='2'][data-c='1'] .cell-view").dispatch_event("mousedown", {"shiftKey": True, "bubbles": True})
+    page.wait_for_timeout(100)
+    r = clip_event(page, "copy", None)
+    assert r["prevented"] and r["text"] == "new1\tv1\nnew2\tv2", r
+    assert "<td>new1</td>" in r["html"]
+    page.keyboard.press("Delete")
+    page.wait_for_timeout(900)
+    assert "| new1 |" not in body_of(h) and "|  |  | x1 |" in body_of(h)
+    # paste over a range from its top-left corner, growing the table to fit
+    page.locator("table.md-table td[data-r='4'][data-c='1'] .cell-view").dispatch_event("mousedown")
+    page.wait_for_selector(".cell-edit")
+    page.locator("table.md-table td[data-r='4'][data-c='2'] .cell-view").dispatch_event("mousedown", {"shiftKey": True, "bubbles": True})
+    page.wait_for_timeout(100)
+    clip_event(page, "paste", "a\tb\tc\nd\te\tf")
+    page.wait_for_timeout(900)
+    body = body_of(h)
+    assert "| Example | a | b | c |" in body and "|  | d | e | f |" in body
+    page.locator("table.md-table td[data-r='1'][data-c='0']").click(button="right")
+    page.wait_for_selector(".popover.menu")
+    assert page.locator(".popover.menu .menu-item", has_text="Paste rows above").count() == 1
+    page.keyboard.press("Escape")
     assert not errors

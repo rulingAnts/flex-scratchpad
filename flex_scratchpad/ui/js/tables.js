@@ -289,6 +289,7 @@
     // the old DOM and the blur that would have saved it never fires on a removed element
     // (Seth, 2026-10-12: "Resizing columns … loses data … and since there's no undo, I
     // can't get it back"). finishEdit is set by the open cell editor and cleared by it.
+    if (activeWidget && activeWidget.container === container) activeWidget = null;   // a re-render drops the old selection
     const widget = { t, container, focus: null, insertText: null, finishEdit: null };
     widget.refresh = () => { if (widget.finishEdit) widget.finishEdit(); render(container, serialize(t), opts); };
     const table = el('table', { class: 'md-table ' + [...t.style.flags].join(' ') });
@@ -304,8 +305,35 @@
       widget.refresh();
     };
     const spans = spanMap(t);
+    const nRows = t.rows.length, nCols = t.rows[0] ? t.rows[0].length : 0;
+    /* Selection handles like a spreadsheet's (Seth, 2026-10-12): a strip above the header
+     * selects columns, a strip left of each row selects rows, the corner selects the table;
+     * drag or Shift-click across the strips for a range. They carry no data-r/data-c, so the
+     * grid code (spans, freeze, resize) never sees them. */
+    const gutterSelect = (kind, a, b) => {
+      if (widget.finishEdit) widget.finishEdit();
+      if (kind === 'col') widget.select({ r: 0, c: Math.min(a, b) }, { r: nRows - 1, c: Math.max(a, b) });
+      else if (kind === 'row') widget.select({ r: Math.min(a, b), c: 0 }, { r: Math.max(a, b), c: nCols - 1 });
+      else widget.select({ r: 0, c: 0 }, { r: nRows - 1, c: nCols - 1 });
+      widget.gsel = { kind, a };
+    };
+    const gutter = (kind, i, title) => {
+      const g = el('th', { class: 'gutter ' + kind, title, dataset: kind === 'col' ? { gc: i } : kind === 'row' ? { gr: i } : {} });
+      g.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        const a = (e.shiftKey && widget.gsel && widget.gsel.kind === kind) ? widget.gsel.a : i;
+        gutterSelect(kind, a, i);
+        if (!e.shiftKey) widget.gsel = { kind, a: i };
+      });
+      g.addEventListener('mouseenter', (e) => { if ((e.buttons & 1) && widget.gsel && widget.gsel.kind === kind && kind !== 'all') gutterSelect(kind, widget.gsel.a, i); });
+      return g;
+    };
+    const gutterRow = el('tr', { class: 'gutter-row' }, gutter('all', 0, 'Select the whole table'));
+    for (let c = 0; c < nCols; c++) gutterRow.appendChild(gutter('col', c, 'Select column ' + (c + 1) + ' (drag or Shift-click for several)'));
+    thead.appendChild(gutterRow);
     t.rows.forEach((row, r) => {
-      const tr = el('tr');
+      const tr = el('tr', {}, gutter('row', r, 'Select row ' + (r + 1) + ' (drag or Shift-click for several)'));
       row.forEach((cell, c) => {
         if (spans.covered.has(r + '.' + c)) return;
         const { css, cls } = cellStyle(t, r, c);
@@ -339,19 +367,76 @@
       freezeFirst: () => { t.style.freezeCols = 1; done(); },
       unfreeze: () => { t.style.freezeRows = 0; t.style.freezeCols = 0; done(); },
     };
+    /* Clipboard and keys for a selection (Seth, 2026-10-12: "paste rows or columns into a
+     * table"): with cells selected and no cell open, Ctrl+C / Ctrl+X copy them as TSV + HTML,
+     * Delete clears them, and Ctrl+V pastes a grid — over the cells from the top-left corner
+     * (growing the table as needed), or, when whole rows / columns are selected, as new rows
+     * above / columns to the left of them, like a spreadsheet's Insert Copied Cells. */
+    const grow = (nr, nc) => {
+      while (t.rows.length < nr) t.rows.push(t.rows[0].map(() => ''));
+      if (nc > t.rows[0].length) { t.rows.forEach((row) => { while (row.length < nc) row.push(''); }); while (t.aligns.length < nc) t.aligns.push(null); }
+    };
+    ops.pasteOver = (r, c, rows) => {
+      grow(r + rows.length, c + Math.max(...rows.map((x) => x.length)));
+      rows.forEach((row, i) => row.forEach((v, j) => { t.rows[r + i][c + j] = String(v == null ? '' : v); }));
+      done();
+    };
+    ops.pasteRowsAt = (i, rows) => {
+      i = Math.max(1, Math.min(i, t.rows.length));
+      grow(0, Math.max(...rows.map((x) => x.length)));
+      rows.forEach((row, k) => { const nr = t.rows[0].map((_, j) => String(row[j] == null ? '' : row[j])); t.rows.splice(i + k, 0, nr); shiftRowStyles(t, i + k + 1, 1); });
+      done();
+    };
+    ops.pasteColsAt = (i, rows) => {
+      i = Math.max(0, Math.min(i, t.rows[0].length));
+      const m = Math.max(...rows.map((x) => x.length));
+      grow(rows.length, 0);
+      for (let j = 0; j < m; j++) { t.rows.forEach((row, r) => row.splice(i + j, 0, String(rows[r] && rows[r][j] != null ? rows[r][j] : ''))); t.aligns.splice(i + j, 0, null); shiftColStyles(t, i + j + 1, 1); }
+      done();
+    };
+    ops.clear = (sel) => { for (let r = sel.r1; r <= sel.r2; r++) for (let c = sel.c1; c <= sel.c2; c++) t.rows[r][c] = ''; done(); };
+    widget.selectedRows = () => { const s = widget.sel; if (!s) return []; const out = []; for (let r = s.r1; r <= s.r2; r++) out.push(t.rows[r].slice(s.c1, s.c2 + 1)); return out; };
+    widget.wholeRows = () => widget.sel && widget.sel.c1 === 0 && widget.sel.c2 === t.rows[0].length - 1 && !(widget.sel.r1 === 0 && widget.sel.r2 === t.rows.length - 1 && widget.gsel && widget.gsel.kind === 'col');
+    widget.wholeCols = () => widget.sel && widget.sel.r1 === 0 && widget.sel.r2 === t.rows.length - 1 && !widget.wholeRows();
+    widget.pasteGrid = (rows, how) => {
+      const s = widget.sel || { r1: (widget.focus || { r: 1 }).r, c1: (widget.focus || { c: 0 }).c, r2: 0, c2: 0 };
+      how = how || (widget.wholeRows() ? 'rows-above' : widget.wholeCols() ? 'cols-left' : 'over');
+      if (how === 'rows-above') ops.pasteRowsAt(s.r1, rows);
+      else if (how === 'rows-below') ops.pasteRowsAt(s.r2 + 1, rows);
+      else if (how === 'cols-left') ops.pasteColsAt(s.c1, rows);
+      else if (how === 'cols-right') ops.pasteColsAt(s.c2 + 1, rows);
+      else ops.pasteOver(s.r1, s.c1, rows);
+    };
     // a selected range of cells (Shift+click or drag across cells): {r1,c1,r2,c2}, 0-based
     widget.sel = null;
     widget.select = (a, b) => {
       const raw = { r1: Math.min(a.r, b.r), c1: Math.min(a.c, b.c), r2: Math.max(a.r, b.r), c2: Math.max(a.c, b.c) };
       widget.sel = growToSpans(t, raw);
+      activeWidget = widget;
+      // the selection takes the keyboard: a text block or input that still had focus would
+      // otherwise swallow Ctrl+C / Ctrl+V / Delete
+      const act = document.activeElement;
+      if (act && act !== document.body && act.blur && !(act.closest && act.closest('.popover, .modal'))) act.blur();
       table.querySelectorAll('.sel').forEach((x) => x.classList.remove('sel'));
       table.querySelectorAll('td, th').forEach((cell) => { const r = +cell.dataset.r, c = +cell.dataset.c; if (r >= widget.sel.r1 && r <= widget.sel.r2 && c >= widget.sel.c1 && c <= widget.sel.c2) cell.classList.add('sel'); });
+      table.querySelectorAll('.gutter.row').forEach((g) => g.classList.toggle('on', +g.dataset.gr >= widget.sel.r1 && +g.dataset.gr <= widget.sel.r2));
+      table.querySelectorAll('.gutter.col').forEach((g) => g.classList.toggle('on', +g.dataset.gc >= widget.sel.c1 && +g.dataset.gc <= widget.sel.c2));
     };
-    widget.clearSelection = () => { widget.sel = null; table.querySelectorAll('.sel').forEach((x) => x.classList.remove('sel')); };
+    widget.clearSelection = () => { widget.sel = null; widget.gsel = null; if (activeWidget === widget) activeWidget = null; table.querySelectorAll('.sel, .gutter.on').forEach((x) => { x.classList.remove('sel'); x.classList.remove('on'); }); };
     table.addEventListener('contextmenu', (e) => {
       const cell = e.target.closest('td, th');
       if (!cell || !table.contains(cell)) return;
       e.preventDefault();
+      if (cell.classList.contains('gutter')) {
+        const kind = cell.classList.contains('col') ? 'col' : cell.classList.contains('row') ? 'row' : 'all';
+        const i = kind === 'col' ? +cell.dataset.gc : kind === 'row' ? +cell.dataset.gr : 0;
+        const inside = widget.sel && (kind === 'col' ? (i >= widget.sel.c1 && i <= widget.sel.c2 && widget.sel.r1 === 0 && widget.sel.r2 === nRows - 1) : kind === 'row' ? (i >= widget.sel.r1 && i <= widget.sel.r2 && widget.sel.c1 === 0 && widget.sel.c2 === nCols - 1) : false);
+        if (!inside) gutterSelect(kind, i, i);
+        const at = kind === 'col' ? { r: widget.sel.r1, c: i } : kind === 'row' ? { r: i, c: widget.sel.c1 } : { r: 0, c: 0 };
+        widget.focus = at;
+        contextMenu(e.clientX, e.clientY, t, at, commit, widget, opts);
+        return;
+      }
       const at = { r: +cell.dataset.r, c: +cell.dataset.c };
       const inSel = widget.sel && at.r >= widget.sel.r1 && at.r <= widget.sel.r2 && at.c >= widget.sel.c1 && at.c <= widget.sel.c2;
       if (!inSel) { widget.clearSelection(); widget.focus = at; }
@@ -374,6 +459,40 @@
     );
     container.appendChild(tools);
     return widget;
+  }
+
+  /* The table with the live cell selection, for the document-level clipboard and key handlers. */
+  let activeWidget = null;
+  const liveSelection = () => {
+    const w = activeWidget;
+    if (!w || !w.sel || !w.container.isConnected || w.finishEdit) return null;
+    const a = document.activeElement;
+    if (a && a.closest && a.closest('[contenteditable="true"], input, textarea, select')) return null;
+    return w;
+  };
+  document.addEventListener('copy', (e) => { const w = liveSelection(); if (!w) return; const rows = w.selectedRows(); e.clipboardData.setData('text/plain', tsvOf(rows)); e.clipboardData.setData('text/html', htmlOf(rows)); e.preventDefault(); });
+  document.addEventListener('cut', (e) => { const w = liveSelection(); if (!w) return; const rows = w.selectedRows(); e.clipboardData.setData('text/plain', tsvOf(rows)); e.clipboardData.setData('text/html', htmlOf(rows)); e.preventDefault(); w.ops.clear(w.sel); });
+  document.addEventListener('paste', (e) => { const w = liveSelection(); if (!w) return; const rows = clipGrid(e.clipboardData); if (!rows) return; e.preventDefault(); w.pasteGrid(rows); });
+  document.addEventListener('keydown', (e) => {
+    const w = liveSelection();
+    if (!w) return;
+    if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); w.ops.clear(w.sel); }
+    else if (e.key === 'Escape') { w.clearSelection(); }
+  });
+  /* The context menu's Paste… items read the clipboard themselves (Chromium asks once). */
+  async function readClipGrid() {
+    try {
+      if (navigator.clipboard && navigator.clipboard.read) {
+        for (const item of await navigator.clipboard.read()) {
+          if (item.types.includes('text/html')) { const g = htmlGrid(await (await item.getType('text/html')).text()); if (g) return g.rows; }
+          if (item.types.includes('text/plain')) { const text = (await (await item.getType('text/plain')).text()).replace(/\r\n?/g, '\n').replace(/\n+$/, ''); if (text) return text.split('\n').map((l) => l.split('\t')); }
+        }
+      } else if (navigator.clipboard && navigator.clipboard.readText) {
+        const text = (await navigator.clipboard.readText()).replace(/\r\n?/g, '\n').replace(/\n+$/, '');
+        if (text) return text.split('\n').map((l) => l.split('\t'));
+      }
+    } catch (err) { /* no permission: fall through */ }
+    return null;
   }
 
   /* Right-click menu on a cell: everything the bar and the popovers offer, in one place
@@ -407,6 +526,17 @@
         item('Merge with the cell below', () => ops.mergeDown(at.r, at.c), covered.has(key) || at.r === 0);
       }
       item('Unmerge', () => ops.unmerge(range), !(mergedInRange || covered.has(key)));
+      sep();
+      const copySel = () => { if (!widget.sel) widget.select(at, at); FS.copyText(tsvOf(widget.selectedRows())); };
+      item(multi ? 'Copy cells' : 'Copy cell', copySel);
+      item(multi ? 'Cut cells' : 'Cut cell', () => { copySel(); ops.clear(widget.sel); });
+      item(multi ? 'Clear cells' : 'Clear cell', () => ops.clear(range));
+      const pasteAs = (how, label) => item(label, async () => { const rows = await readClipGrid(); if (!rows) { FS.toast('Nothing tabular on the clipboard — or no permission to read it: select the cells and press Ctrl+V instead', 'error'); return; } if (!widget.sel) widget.select(at, at); widget.pasteGrid(rows, how); });
+      pasteAs('over', 'Paste over these cells');
+      pasteAs('rows-above', 'Paste rows above');
+      pasteAs('rows-below', 'Paste rows below');
+      pasteAs('cols-left', 'Paste columns to the left');
+      pasteAs('cols-right', 'Paste columns to the right');
       sep();
       const frozen = (t.style.freezeRows || 0) + (t.style.freezeCols || 0) > 0;
       item('Freeze panes here (rows above, columns to the left)', () => ops.freezeHere(at.r, at.c), at.r === 0 && at.c === 0);
@@ -442,7 +572,7 @@
       const table = th.closest('table');
       const wrap = widget.container.querySelector('.tbl-wrap');
       h.classList.add('dragging'); document.body.classList.add('resizing');
-      const cells = [...table.querySelectorAll('tr')].map((tr) => tr.children[c]).filter(Boolean);
+      const cells = [...table.querySelectorAll('[data-c="' + c + '"]')].filter((x) => (x.colSpan || 1) === 1);
       let w = startW;
       const move = (ev) => { w = Math.max(40, Math.round(startW + ev.clientX - startX)); for (const cell of cells) { cell.style.width = w + 'px'; cell.style.minWidth = w + 'px'; } };
       const up = () => {
@@ -464,24 +594,27 @@
    * style line). Offsets are measured, so resized columns and tall header rows still work. */
   function applyFreeze(table, t) {
     const rows = [...table.querySelectorAll('tr')];
-    const nr = Math.min(t.style.freezeRows || 0, rows.length), nc = t.style.freezeCols || 0;
+    const nr = t.style.freezeRows || 0, nc = t.style.freezeCols || 0;
     let top = 0;
-    rows.forEach((tr, ri) => {
+    rows.forEach((tr) => {
       const h = tr.getBoundingClientRect().height;
-      [...tr.children].forEach((cell, ci) => {
-        const sticky = ri < nr || ci < nc;
-        if (!sticky) return;
-        cell.classList.add('frozen');
-        cell.style.position = 'sticky';
-        if (ri < nr) cell.style.top = top + 'px';
-        if (ci < nc) {
-          let left = 0;
-          for (let k = 0; k < ci; k++) left += (tr.children[k] ? tr.children[k].getBoundingClientRect().width : 0);
-          cell.style.left = left + 'px';
+      const ri = tr.classList.contains('gutter-row') ? -1 : +(tr.querySelector('[data-r]') || { dataset: { r: 0 } }).dataset.r;
+      const stickyRow = nr > 0 && ri < nr;          // the column strip rides with frozen rows
+      let left = 0;
+      [...tr.children].forEach((cell) => {
+        const w = cell.getBoundingClientRect().width;
+        const ci = cell.classList.contains('gutter') ? -1 : +cell.dataset.c;
+        const stickyCol = nc > 0 && ci < nc;        // the row strip rides with frozen columns
+        if (stickyRow || stickyCol) {
+          cell.classList.add('frozen');
+          cell.style.position = 'sticky';
+          if (stickyRow) cell.style.top = top + 'px';
+          if (stickyCol) cell.style.left = left + 'px';
+          cell.style.zIndex = (stickyRow && stickyCol) ? 4 : (stickyRow ? 3 : 2);
         }
-        cell.style.zIndex = (ri < nr && ci < nc) ? 4 : (ri < nr ? 3 : 2);
+        left += w;
       });
-      if (ri < nr) top += h;
+      if (stickyRow) top += h;
     });
   }
 
@@ -766,7 +899,8 @@
     return out;
   }
 
-  function fromHtml(html) {
+  /* The grid of an HTML table: {rows, spans} with merged cells laid out, or null. */
+  function htmlGrid(html) {
     if (!html || !/<table[\s>]/i.test(html)) return null;
     let doc;
     try { doc = new DOMParser().parseFromString(html, 'text/html'); } catch (e) { return null; }
@@ -809,11 +943,28 @@
     if (rows.length < 1) return null;
     const w = Math.max(...rows.map((x) => x.length));
     rows.forEach((x) => { while (x.length < w) x.push(''); });
+    return { rows, spans };
+  }
+  function fromHtml(html) {
+    const g = htmlGrid(html);
+    if (!g) return null;
+    const rows = g.rows;
     if (rows.length === 1) rows.push(rows[0].map(() => ''));
     const style = parseStyle('');
-    for (const [k, v] of Object.entries(spans)) { const [ar] = k.split('.').map(Number); if (ar === 1 && v.rows > 1) { v.rows = 1; if (v.cols < 2) continue; } style.spans[k] = v; }
+    for (const [k, v] of Object.entries(g.spans)) { const [ar] = k.split('.').map(Number); if (ar === 1 && v.rows > 1) { v.rows = 1; if (v.cols < 2) continue; } style.spans[k] = v; }
     return serialize({ rows, aligns: [], style });
   }
+  /* Rows of cells out of a clipboard: an HTML table, tab-separated lines, or one value. */
+  function clipGrid(dt) {
+    if (!dt) return null;
+    const g = htmlGrid(dt.getData && dt.getData('text/html'));
+    if (g) return g.rows;
+    const text = String((dt.getData && dt.getData('text/plain')) || '').replace(/\r\n?/g, '\n').replace(/\n+$/, '');
+    if (!text) return null;
+    return text.split('\n').map((l) => l.split('\t'));
+  }
+  const tsvOf = (rows) => rows.map((r) => r.map((x) => String(x == null ? '' : x).replace(/\t/g, ' ')).join('\t')).join('\n');
+  const htmlOf = (rows) => '<table>' + rows.map((r) => '<tr>' + r.map((x) => '<td>' + FS.markdown.renderInline(x) + '</td>').join('') + '</tr>').join('') + '</table>';
 
   function fromTsv(text) {
     const lines = String(text || '').replace(/\r\n?/g, '\n').replace(/\n+$/, '').split('\n');
@@ -831,5 +982,5 @@
     return fromHtml(html) || fromTsv(dt.getData && dt.getData('text/plain'));
   }
 
-  FS.tables = { spanMap, mergeCell, unmergeCell, mergeRange, unmergeRange, growToSpans, splitAt, mergeTables, parse, serialize, splitRow, parseStyle, serializeStyle, render, template, fromHtml, fromTsv, fromClipboard, cellMarkdown };
+  FS.tables = { spanMap, mergeCell, unmergeCell, mergeRange, unmergeRange, growToSpans, splitAt, mergeTables, htmlGrid, clipGrid, tsvOf, parse, serialize, splitRow, parseStyle, serializeStyle, render, template, fromHtml, fromTsv, fromClipboard, cellMarkdown };
 })();

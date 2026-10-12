@@ -95,7 +95,10 @@ The suffix **-mo** marks past tense:
 {table: striped; col 1: bold}
 ```
 
-Tables: right-click any cell for every command (insert/delete rows and columns, merge or unmerge
+Tables: click the strip above a column or left of a row to select it (drag or Shift-click for
+several, the corner for the whole table); Ctrl+C / Ctrl+X / Delete act on the selection, and
+Ctrl+V pastes a grid over the cells, or as new rows / columns when whole rows / columns are
+selected (also in the menu: Paste rows above/below, Paste columns left/right). Right-click any cell for every command (insert/delete rows and columns, merge or unmerge
 cells, freeze panes, split or merge tables, styles). Shift-click or drag across cells to select a
 range and merge it. Columns resize by dragging; merged cells are kept as `span 2.1: 1x2` in the
 style line and survive a paste from Excel, Word or a browser; `freeze rows 1; freeze cols 1` pins
