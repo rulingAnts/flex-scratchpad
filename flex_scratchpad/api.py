@@ -23,24 +23,28 @@ from .notebook import Notebook, inline_tags
 
 
 class Api:
+    """Only the public METHODS of this object are the API. pywebview inspects every public
+    attribute (and recurses into objects), so all state lives in underscored attributes."""
+
     def __init__(self, config: AppConfig, notebook_dir: str | Path | None = None, demo: bool = False):
-        self.config = config
-        self.window = None                      # set by app.py once the window exists
-        self.lock = threading.RLock()
-        self.demo = demo
+        self._config = config
+        self._window = None                     # set by app.py once the window exists
+        self._lock = threading.RLock()
+        self._demo = demo
         self._open_notebook(notebook_dir or config.notebook_dir)
+
 
     # -- plumbing ----------------------------------------------------------------
 
     def _open_notebook(self, path: str | Path) -> None:
-        with self.lock:
+        with self._lock:
             svc_holder: dict = {}
             nb = Notebook(path, extra_text=lambda body: svc_holder["svc"].searchable_text_for_body(body) if "svc" in svc_holder else "")
             svc = FlexService(nb, progress=self._progress)
             svc_holder["svc"] = svc
             nb.reindex_all()
-            self.nb, self.flex = nb, svc
-            if self.demo:
+            self._nb, self._flex = nb, svc
+            if self._demo:
                 svc.configure(source="demo", project="Kalu Demo")
             svc.open()
 
@@ -49,7 +53,7 @@ class Api:
 
     def _emit(self, event: str, data: dict) -> None:
         """Push an event into the page (window.FS.onEvent). Safe to call from any thread."""
-        w = self.window
+        w = self._window
         if w is None:
             return
         try:
@@ -61,16 +65,16 @@ class Api:
 
     def init(self) -> dict:
         """Everything the page needs on load."""
-        with self.lock:
+        with self._lock:
             return {
                 "app": APP_NAME, "version": __version__, "platform": sys.platform,
-                "notebook": str(self.nb.root),
-                "config": self.nb.config,
-                "notes": self.nb.list_notes(),
-                "folders": self.nb.folders(),
-                "tags": self.nb.all_tags(),
-                "flex": self.flex.status(),
-                "canBrowse": self.window is not None,
+                "notebook": str(self._nb.root),
+                "config": self._nb.config,
+                "notes": self._nb.list_notes(),
+                "folders": self._nb.folders(),
+                "tags": self._nb.all_tags(),
+                "flex": self._flex.status(),
+                "canBrowse": self._window is not None,
             }
 
     def choose_notebook_folder(self) -> dict | None:
@@ -78,168 +82,168 @@ class Api:
         path = self._folder_dialog()
         if not path:
             return None
-        self.flex.close()
+        self._flex.close()
         self._open_notebook(path)
-        self.config.notebook_dir = path
+        self._config.notebook_dir = path
         return self.init()
 
     def open_notebook(self, path: str) -> dict:
-        self.flex.close()
+        self._flex.close()
         self._open_notebook(path)
-        self.config.notebook_dir = path
+        self._config.notebook_dir = path
         return self.init()
 
     def reveal_notebook(self) -> bool:
-        return self._reveal(self.nb.root)
+        return self._reveal(self._nb.root)
 
     def reveal_note(self, note_id: str) -> bool:
-        n = self.nb.get_note(note_id)
-        return self._reveal(n.path or self.nb.root)
+        n = self._nb.get_note(note_id)
+        return self._reveal(n.path or self._nb.root)
 
     # -- notes --------------------------------------------------------------------
 
     def list_notes(self) -> list[dict]:
-        return self.nb.list_notes()
+        return self._nb.list_notes()
 
     def folders(self) -> dict:
-        return self.nb.folders()
+        return self._nb.folders()
 
     def tags(self) -> list[dict]:
-        return self.nb.all_tags()
+        return self._nb.all_tags()
 
     def get_note(self, note_id: str) -> dict:
-        n = self.nb.get_note(note_id)
+        n = self._nb.get_note(note_id)
         d = n.meta()
         d["body"] = n.body
         d["inlineTags"] = inline_tags(n.body)
         return d
 
     def create_note(self, tab: str | None = None, folder: str = "", title: str = "", body: str = "") -> dict:
-        n = self.nb.create_note(tab, folder, title, body)
+        n = self._nb.create_note(tab, folder, title, body)
         return self.get_note(n.id)
 
     def save_note(self, note_id: str, patch: dict) -> dict:
         patch = patch or {}
-        n = self.nb.save_note(note_id, title=patch.get("title"), body=patch.get("body"),
+        n = self._nb.save_note(note_id, title=patch.get("title"), body=patch.get("body"),
                               tags=patch.get("tags"), pinned=patch.get("pinned"))
         return n.summary()
 
     def move_note(self, note_id: str, tab: str, folder: str = "") -> dict:
-        return self.nb.move_note(note_id, tab, folder).summary()
+        return self._nb.move_note(note_id, tab, folder).summary()
 
     def delete_note(self, note_id: str) -> bool:
-        self.nb.delete_note(note_id)
+        self._nb.delete_note(note_id)
         return True
 
     def search(self, q: str, filters: dict | None = None) -> list[dict]:
         f = filters or {}
-        return self.nb.search(q, tab=f.get("tab") or None, folder=f.get("folder"), tags=f.get("tags") or [],
+        return self._nb.search(q, tab=f.get("tab") or None, folder=f.get("folder"), tags=f.get("tags") or [],
                               limit=int(f.get("limit") or 100))
 
     def rescan(self) -> dict:
-        self.nb.scan()
-        self.nb.reindex_all()
+        self._nb.scan()
+        self._nb.reindex_all()
         return self.init()
 
     # -- tabs / folders / tags ----------------------------------------------------------
 
     def add_tab(self, name: str, color: str | None = None) -> dict:
-        return self.nb.add_tab(name, color)
+        return self._nb.add_tab(name, color)
 
     def update_tab(self, tab: str, patch: dict) -> dict:
         patch = patch or {}
-        return self.nb.update_tab(tab, name=patch.get("name"), color=patch.get("color"))
+        return self._nb.update_tab(tab, name=patch.get("name"), color=patch.get("color"))
 
     def reorder_tabs(self, dirs: list[str]) -> list[dict]:
-        self.nb.reorder_tabs(dirs)
-        return self.nb.config["tabs"]
+        self._nb.reorder_tabs(dirs)
+        return self._nb.config["tabs"]
 
     def delete_tab(self, tab: str) -> bool:
-        self.nb.delete_tab(tab)
+        self._nb.delete_tab(tab)
         return True
 
     def create_folder(self, tab: str, folder: str) -> str:
-        return self.nb.create_folder(tab, folder)
+        return self._nb.create_folder(tab, folder)
 
     def rename_folder(self, tab: str, folder: str, new_name: str) -> str:
-        return self.nb.rename_folder(tab, folder, new_name)
+        return self._nb.rename_folder(tab, folder, new_name)
 
     def delete_folder(self, tab: str, folder: str) -> bool:
-        self.nb.delete_folder(tab, folder)
+        self._nb.delete_folder(tab, folder)
         return True
 
     def set_tags(self, tags: list[dict]) -> list[dict]:
-        return self.nb.set_tags(tags)
+        return self._nb.set_tags(tags)
 
     def rename_tag(self, old: str, new: str) -> int:
-        return self.nb.rename_tag(old, new)
+        return self._nb.rename_tag(old, new)
 
     def set_setting(self, key: str, value) -> dict:
-        s = self.nb.config.setdefault("settings", {})
+        s = self._nb.config.setdefault("settings", {})
         s[key] = value
-        self.nb.save_config()
+        self._nb.save_config()
         if key == "diacriticsInsensitive":
-            self.nb.reindex_all()
+            self._nb.reindex_all()
         return s
 
     # -- attachments ------------------------------------------------------------------
 
     def save_attachment(self, name: str, data_base64: str) -> dict:
         raw = base64.b64decode(data_base64.split(",", 1)[-1])
-        p = self.nb.save_attachment(name, raw)
+        p = self._nb.save_attachment(name, raw)
         return {"path": str(p), "fileUrl": p.resolve().as_uri(), "name": p.name}
 
     # -- FLEx ---------------------------------------------------------------------------
 
     def flex_status(self) -> dict:
-        return self.flex.status()
+        return self._flex.status()
 
     def flex_projects(self) -> list[str]:
         try:
-            return self.flex.list_projects()
+            return self._flex.list_projects()
         except FlexError as e:
             raise RuntimeError(e.message)
 
     def flex_configure(self, source: str | None = None, project: str | None = None,
                        flextext_path: str | None = None) -> dict:
-        self.flex.configure(source, project, flextext_path)
-        st = self.flex.open()
-        self.nb.reindex_all()
+        self._flex.configure(source, project, flextext_path)
+        st = self._flex.open()
+        self._nb.reindex_all()
         return st
 
     def flex_open(self) -> dict:
-        return self.flex.open()
+        return self._flex.open()
 
     def flex_refresh(self) -> dict:
-        return self.flex.refresh()
+        return self._flex.refresh()
 
     def flex_get(self, kind: str, guid: str, seg_from: int | None = None, seg_to: int | None = None,
                  prefer_cache: bool = False) -> dict:
         try:
-            return self.flex.get_object(kind, guid, seg_from, seg_to, prefer_cache)
+            return self._flex.get_object(kind, guid, seg_from, seg_to, prefer_cache)
         except FlexError as e:
             raise RuntimeError(e.message)
 
     def flex_search_entries(self, q: str, limit: int = 30) -> list[dict]:
         try:
-            return self.flex.search_entries(q, limit)
+            return self._flex.search_entries(q, limit)
         except FlexError as e:
             raise RuntimeError(e.message)
 
     def flex_texts(self, q: str = "") -> list[dict]:
         try:
-            return self.flex.search_texts(q) if q else self.flex.list_texts()
+            return self._flex.search_texts(q) if q else self._flex.list_texts()
         except FlexError as e:
             raise RuntimeError(e.message)
 
     def flex_find_in_text(self, guid: str, phrase: str) -> list[int]:
         try:
-            return self.flex.find_in_text(guid, phrase)
+            return self._flex.find_in_text(guid, phrase)
         except FlexError as e:
             raise RuntimeError(e.message)
 
     def flex_resolve_link(self, text: str) -> dict | None:
-        return self.flex.resolve_link(text)
+        return self._flex.resolve_link(text)
 
     def flex_choose_file(self) -> dict | None:
         """Pick a .flextext file (fallback source)."""
@@ -249,7 +253,7 @@ class Api:
     def flex_open_object(self, kind: str, guid: str) -> bool:
         """Jump to an object in FieldWorks by kind + GUID (a link chip was clicked)."""
         from .flex import model
-        url = model.goto_url(self.flex.project_name, kind, guid)
+        url = model.goto_url(self._flex.project_name, kind, guid)
         return self._open_url(url)
 
     def open_in_flex(self, url: str) -> bool:
@@ -262,23 +266,23 @@ class Api:
 
     def audio_clip(self, text_guid: str, media_guid: str | None, begin: int, end: int) -> dict:
         try:
-            return self.flex.ensure_clip(text_guid, media_guid, begin, end)
+            return self._flex.ensure_clip(text_guid, media_guid, begin, end)
         except FlexError as e:
             raise RuntimeError(e.message)
 
     def audio_store_clip(self, text_guid: str, begin: int, end: int, data_base64: str, mime: str = "audio/webm") -> dict:
-        return self.flex.store_captured_clip(text_guid, begin, end, data_base64, mime)
+        return self._flex.store_captured_clip(text_guid, begin, end, data_base64, mime)
 
     def audio_browse_media(self, media_guid: str) -> dict | None:
         p = self._file_dialog(("Audio (*.wav;*.mp3;*.m4a;*.ogg;*.flac;*.wma)", "*.wav;*.mp3;*.m4a;*.ogg;*.flac;*.wma"),
                               ("All files (*.*)", "*.*"))
         if not p:
             return None
-        self.flex.set_media_path(media_guid, p)
+        self._flex.set_media_path(media_guid, p)
         return {"path": p, "fileUrl": Path(p).resolve().as_uri()}
 
     def audio_set_media_path(self, media_guid: str, path: str) -> dict:
-        return self.flex.set_media_path(media_guid, path)
+        return self._flex.set_media_path(media_guid, path)
 
     def save_file_as(self, suggested_name: str, source_path: str) -> str | None:
         """Save dialog + copy (used for *Save clip…*)."""
@@ -292,14 +296,14 @@ class Api:
     # -- native helpers ---------------------------------------------------------------------
 
     def _dialog(self, kind: str, **kw):
-        if self.window is None:
+        if self._window is None:
             return None
         import webview  # local import: only the real app has it
         try:
             dt = {"folder": webview.FileDialog.FOLDER, "open": webview.FileDialog.OPEN, "save": webview.FileDialog.SAVE}[kind]
         except AttributeError:  # pywebview 4
             dt = {"folder": webview.FOLDER_DIALOG, "open": webview.OPEN_DIALOG, "save": webview.SAVE_DIALOG}[kind]
-        res = self.window.create_file_dialog(dt, **kw)
+        res = self._window.create_file_dialog(dt, **kw)
         if not res:
             return None
         return res[0] if isinstance(res, (list, tuple)) else res

@@ -55,7 +55,7 @@ def app(browser):
 
 
 def body_of(h):
-    notes = h.api.nb.list_notes()
+    notes = h.api._nb.list_notes()
     return h.api.get_note(notes[0]["id"])["body"]
 
 
@@ -210,13 +210,13 @@ def test_audio_segment_plays_and_clip_is_cached(app):
     assert 1.4 <= t <= 3.3
     page.wait_for_timeout(2600)
     assert page.evaluate("!!FS.audio.current") is False       # stopped at `end`
-    clips = list(h.api.nb.cache_dir.rglob("*_1500-3200.wav"))
+    clips = list(h.api._nb.cache_dir.rglob("*_1500-3200.wav"))
     assert clips, "the clip was cut into the notebook cache"
     # the clip keeps playing after the source media is gone
     import os
-    src = h.api.flex.backend.texts[T_STORY]["media"][0]["path"]
+    src = h.api._flex.backend.texts[T_STORY]["media"][0]["path"]
     os.remove(src)
-    h.api.flex.backend._resolve_media()
+    h.api._flex.backend._resolve_media()
     info = h.api.audio_clip(T_STORY, None, 1500, 3200)
     assert info["found"] is False and info["clipUrl"].endswith("_1500-3200.wav")
 

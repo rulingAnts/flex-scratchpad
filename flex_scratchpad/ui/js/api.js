@@ -8,16 +8,29 @@
   const FS = (window.FS = window.FS || {});
 
   let ready = null;
+  /* pywebview creates an EMPTY window.pywebview.api first and fills in the methods a moment
+   * later, firing `pywebviewready` when they are there — so "the object exists" is not the
+   * test; "init is a function" is. The JS mock is used only when there is no pywebview at all. */
+  const live = () => !!(window.pywebview && window.pywebview.api && typeof window.pywebview.api.init === 'function');
   function bridge() {
     if (ready) return ready;
     ready = new Promise((resolve) => {
-      if (window.pywebview && window.pywebview.api) return resolve(window.pywebview.api);
+      if (live()) return resolve(window.pywebview.api);
       let done = false;
       const finish = (api) => { if (!done) { done = true; resolve(api); } };
-      window.addEventListener('pywebviewready', () => finish(window.pywebview.api), { once: true });
-      // No pywebview after the page has fully loaded (plus a grace period) → mock.
-      const giveUp = () => setTimeout(() => { if (window.pywebview && window.pywebview.api) finish(window.pywebview.api); else finish(FS.mockApi()); }, 400);
-      if (document.readyState === 'complete') giveUp(); else window.addEventListener('load', giveUp, { once: true });
+      window.addEventListener('pywebviewready', () => { if (live()) finish(window.pywebview.api); }, { once: false });
+      const started = Date.now();
+      const poll = () => {
+        if (done) return;
+        if (live()) return finish(window.pywebview.api);
+        const hasPywebview = !!window.pywebview;
+        const waited = Date.now() - started;
+        // no pywebview object at all after the page loaded → plain browser → mock;
+        // a pywebview object that stays empty for 15 s → give up and mock too (shows demo data)
+        if ((!hasPywebview && document.readyState === 'complete' && waited > 600) || waited > 15000) return finish(FS.mockApi());
+        setTimeout(poll, 100);
+      };
+      poll();
     });
     return ready;
   }

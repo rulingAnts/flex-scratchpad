@@ -71,4 +71,4 @@ def test_tabs_folders_settings(tmp_path):
     s = api.set_setting("diacriticsInsensitive", False)
     assert s["diacriticsInsensitive"] is False
     api.set_tags([{"name": "#todo", "color": "#000"}, {"name": "todo"}])
-    assert [x["name"] for x in api.nb.config["tags"]] == ["todo"]
+    assert [x["name"] for x in api._nb.config["tags"]] == ["todo"]

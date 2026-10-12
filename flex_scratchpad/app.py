@@ -29,7 +29,7 @@ def run(notebook_dir: str | None = None, demo: bool = False, debug: bool = False
         min_size=(760, 480),
         text_select=True,
     )
-    api.window = window
+    api._window = window
 
     def on_closing():
         try:
@@ -37,7 +37,7 @@ def run(notebook_dir: str | None = None, demo: bool = False, debug: bool = False
             config.save()
         except Exception:  # noqa: BLE001
             pass
-        api.flex.close()
+        api._flex.close()
 
     window.events.closing += on_closing
     storage = local_data_dir() / "webview"
