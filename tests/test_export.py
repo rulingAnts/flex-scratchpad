@@ -30,7 +30,7 @@ def test_docx_is_a_valid_package_with_the_content(tmp_path):
     assert {"[Content_Types].xml", "_rels/.rels", "word/document.xml", "word/styles.xml", "word/_rels/document.xml.rels", "word/media/image1.png"} <= names
     xml = z.read("word/document.xml").decode("utf-8")
     ET.fromstring(xml)                                   # well-formed
-    for needle in ("Heading", "bold", "kabir", "Kabir", "nuwa-mo", "The dog slept.", "a domestic dog", "☑ one", "1. two"):
+    for needle in ("Heading", "bold", "kabir", "Kabir", "nuwa-mo", "The dog slept.", "a domestic dog", ">\u2611 <", ">one<", ">1. <", ">two<"):
         assert needle in xml, needle
     assert xml.count("<w:tbl>") == 2                     # the note table and the interlinear grid
     assert '<w:highlight w:val="lightGray"/>' in xml and '<w:color w:val="C0392B"/>' in xml
