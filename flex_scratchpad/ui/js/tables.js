@@ -248,7 +248,13 @@
     opts = opts || {};
     const t = parse(src);
     container.innerHTML = '';
-    const widget = { t, container, focus: null, insertText: null, refresh: () => render(container, serialize(t), opts) };
+    // ⚠ Every structural change re-renders the whole table. A cell that is still being edited
+    // must be saved FIRST, or whatever was typed in it is lost: its editor is torn down with
+    // the old DOM and the blur that would have saved it never fires on a removed element
+    // (Seth, 2026-10-12: "Resizing columns … loses data … and since there's no undo, I
+    // can't get it back"). finishEdit is set by the open cell editor and cleared by it.
+    const widget = { t, container, focus: null, insertText: null, finishEdit: null };
+    widget.refresh = () => { if (widget.finishEdit) widget.finishEdit(); render(container, serialize(t), opts); };
     const table = el('table', { class: 'md-table ' + [...t.style.flags].join(' ') });
     const thead = el('thead'), tbody = el('tbody');
     const commit = () => opts.onChange && opts.onChange(serialize(t));
@@ -440,6 +446,7 @@
       ed.addEventListener('blur', () => setTimeout(() => { if (ed.isConnected) finish(); }, 0));
       const finish = () => {
         if (!ed.isConnected) return;
+        widget.finishEdit = null;
         const val = ed.textContent.replace(/\n+$/, '');
         ed.remove();
         const caret = FS.editor.getCaret(ed);
@@ -450,6 +457,7 @@
         hydrate(view, t, r, c, commit, opts);
         td.appendChild(view);
       };
+      widget.finishEdit = finish;
       const moveTo = (rr, cc, create) => {
         if (rr < 0 || cc < 0) return;
         if (rr >= t.rows.length) { if (!create) return; t.rows.push(t.rows[0].map(() => '')); commit(); widget.refresh(); setTimeout(() => { const cell = widget.container.querySelector('[data-r="' + rr + '"][data-c="' + cc + '"] .cell-view'); if (cell) cell.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); }, 0); return; }
@@ -548,6 +556,13 @@
       item('Merge with the cell to the right', () => mergeCell(t, at.r, at.c, 'right'), covered.has(key));
       item('Merge with the cell below', () => mergeCell(t, at.r, at.c, 'down'), covered.has(key) || at.r === 0);
       item('Unmerge', () => unmergeCell(t, at.r, at.c), !(anchors[key] || covered.has(key)));
+      pop.appendChild(el('hr'));
+      pop.appendChild(el('div', { class: 'row' }, el('b', {}, 'Freeze panes')));
+      const frozen = (t.style.freezeRows || 0) + (t.style.freezeCols || 0) > 0;
+      item('Freeze panes here (rows above, columns to the left)', () => { t.style.freezeRows = at.r; t.style.freezeCols = at.c; return true; }, at.r === 0 && at.c === 0);
+      item('Freeze top row', () => { t.style.freezeRows = 1; return true; });
+      item('Freeze first column', () => { t.style.freezeCols = 1; return true; });
+      item('Unfreeze panes', () => { t.style.freezeRows = 0; t.style.freezeCols = 0; return true; }, !frozen);
       pop.appendChild(el('div', { class: 'hint' }, 'Merged cells are kept as `span row.col: rows×cols` in the style line; a plain Markdown reader sees the grid with the covered cells empty.'));
     });
   }
@@ -569,12 +584,20 @@
         }
         const flag = (f, label) => el('button', { class: 'tog' + (t.style.flags.has(f) ? ' on' : ''), onclick: () => { t.style.flags.has(f) ? t.style.flags.delete(f) : t.style.flags.add(f); commit(); widget.refresh(); render(); } }, label);
         pop.appendChild(el('div', { class: 'row' }, flag('striped', 'Striped'), flag('header-col', 'Header column'), flag('compact', 'Compact'), flag('full', 'Full width'), flag('wide', 'Wide (scroll sideways)')));
+        const at = widget.focus || { r: 0, c: 0 };
+        const fz = el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Freeze'));
+        const fzb = (label, fn, dis, title) => fz.appendChild(el('button', { class: 'tog', disabled: !!dis, title: title || '', onclick: () => { fn(); commit(); widget.refresh(); render(); } }, label));
+        fzb('Here', () => { t.style.freezeRows = at.r; t.style.freezeCols = at.c; }, at.r === 0 && at.c === 0, 'Freeze the rows above and the columns to the left of the current cell (like Excel)');
+        fzb('Top row', () => { t.style.freezeRows = 1; });
+        fzb('First column', () => { t.style.freezeCols = 1; });
+        fzb('Unfreeze', () => { t.style.freezeRows = 0; t.style.freezeCols = 0; }, !(t.style.freezeRows || t.style.freezeCols));
+        pop.appendChild(fz);
         const fr = el('input', { type: 'number', min: 0, max: 10, value: t.style.freezeRows || 0, style: { width: '56px' } });
         const fc = el('input', { type: 'number', min: 0, max: 10, value: t.style.freezeCols || 0, style: { width: '56px' } });
         const mh = el('input', { type: 'text', value: t.style.maxHeight || '', placeholder: '60vh', style: { width: '70px' } });
         const setFreeze = () => { t.style.freezeRows = +fr.value || 0; t.style.freezeCols = +fc.value || 0; t.style.maxHeight = mh.value.trim(); commit(); widget.refresh(); };
         fr.addEventListener('change', setFreeze); fc.addEventListener('change', setFreeze); mh.addEventListener('change', setFreeze);
-        pop.appendChild(el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Freeze'), el('span', { class: 'small muted' }, 'rows'), fr, el('span', { class: 'small muted' }, 'cols'), fc, el('span', { class: 'small muted' }, 'height'), mh));
+        pop.appendChild(el('div', { class: 'row' }, el('span', { class: 'lbl' }, ''), el('span', { class: 'small muted' }, 'rows'), fr, el('span', { class: 'small muted' }, 'cols'), fc, el('span', { class: 'small muted' }, 'height'), mh));
         pop.appendChild(el('div', { class: 'hint' }, 'Frozen rows and columns stay put while the table scrolls inside its box (set height to e.g. 300px or 60vh).'));
         const b = el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Borders'));
         for (const [v, l] of [['', 'Normal'], ['borders-light', 'Light'], ['borders-none', 'None']]) b.appendChild(el('button', { class: 'tog' + ((v ? t.style.flags.has(v) : !t.style.flags.has('borders-light') && !t.style.flags.has('borders-none')) ? ' on' : ''), onclick: () => { t.style.flags.delete('borders-light'); t.style.flags.delete('borders-none'); if (v) t.style.flags.add(v); commit(); widget.refresh(); render(); } }, l));

@@ -35,8 +35,22 @@
     }
   }
 
+  function applyMarkers() {
+    const hide = !!((S.config && S.config.settings) || {}).hideMarkers;
+    document.body.classList.toggle('md-hide', hide);
+    const btn = $('btn-markers');
+    if (btn) { btn.classList.toggle('on', !hide); btn.title = (hide ? 'Markdown markers are hidden — click to show them' : 'Markdown markers are shown — click to hide them') + ' (**bold**, # heading, - list)'; }
+    if (FS.editor && FS.editor.revealMarkers) FS.editor.revealMarkers();
+  }
+  async function toggleMarkers() {
+    const hide = !((S.config.settings || {}).hideMarkers);
+    try { S.config.settings = await FS.api.set_setting('hideMarkers', hide); } catch (e) { FS.toast(e.message, 'error'); return; }
+    applyMarkers();
+    FS.toast(hide ? 'Markdown markers hidden' : 'Markdown markers shown');
+  }
   function applyInit(init) {
     S.init = init; S.config = init.config; S.notes = init.notes; S.folders = init.folders; S.tags = init.tags; S.flex = init.flex;
+    applyMarkers();
     if (!S.tab || !S.config.tabs.some((t) => t.dir === S.tab)) S.tab = (S.config.tabs[0] || {}).dir || null;
     renderRail();
     renderList();
@@ -399,6 +413,9 @@
     const dia = el('input', { type: 'checkbox', checked: !!(S.config.settings || {}).diacriticsInsensitive });
     dia.addEventListener('change', async () => { S.config.settings = await FS.api.set_setting('diacriticsInsensitive', dia.checked); });
     nb.appendChild(el('label', { class: 'small', style: { display: 'flex', gap: '6px', marginTop: '8px' } }, dia, 'Search ignores diacritics (ā = a)'));
+    const mk = el('input', { type: 'checkbox', checked: !!(S.config.settings || {}).hideMarkers });
+    mk.addEventListener('change', async () => { S.config.settings = await FS.api.set_setting('hideMarkers', mk.checked); applyMarkers(); });
+    nb.appendChild(el('label', { class: 'small', style: { display: 'flex', gap: '6px', marginTop: '8px' } }, mk, 'Hide Markdown markers while editing (**bold**, # heading, - list) — the toolbar still formats, and typing the markers still works'));
     body.appendChild(nb);
     // FLEx
     const fx = el('div', { class: 'setting-block' }, el('h3', {}, 'FieldWorks project'));
@@ -549,6 +566,7 @@
     $('btn-insert-flex').addEventListener('click', insertFlex);
     $('toolbar').querySelectorAll('[data-ins]').forEach((b) => b.addEventListener('mousedown', (e) => { e.preventDefault(); toolbarAction(b.dataset.ins); }));
     $('btn-find').addEventListener('click', openFind);
+    $('btn-markers').addEventListener('click', toggleMarkers);
     $('find-input').addEventListener('input', doFind);
     $('find-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); S.editor.findNext(e.shiftKey ? -1 : 1); } if (e.key === 'Escape') closeFind(); });
     $('find-next').addEventListener('click', () => S.editor && S.editor.findNext(1));

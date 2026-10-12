@@ -193,6 +193,18 @@ body.resizing * { pointer-events: none; }
 .md-quote-mk { color: var(--faint); }
 .md-br { color: var(--faint); font-size: 0.8em; }
 
+/* Markers hidden (Settings / the "** Markup" toolbar button): the text is still the markdown,
+ * the marker characters are simply not displayed — except the ones of the styled run the
+ * caret is in, so what you are editing is never a mystery (editor.js revealMarkers). Line
+ * prefixes keep their width so the bullet / checkbox / number still draw. */
+body.md-hide .md-marker { display: none; }
+body.md-hide .md-marker.reveal { display: inline; }
+body.md-hide .md-marker.md-task, body.md-hide .md-marker.md-num, body.md-hide .md-marker.md-bullet { display: inline-block; }
+body.md-hide .md-marker.md-bullet { color: transparent; }
+body.md-hide .blk-code .md-marker { display: inline; }
+#btn-markers.on { background: var(--accent-soft); color: var(--text); }
+.toolbar .spacer { flex: 1; }
+
 /* ---------- widgets (table / flex / chart) ---------- */
 .widget { position: relative; margin: 6px 0 10px; }
 .widget-bar { position: absolute; right: 4px; top: -10px; display: flex; gap: 2px; opacity: 0; transition: opacity 0.12s; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 2px; box-shadow: 0 2px 10px rgba(0,0,0,0.08); z-index: 3; }

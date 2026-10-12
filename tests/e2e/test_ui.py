@@ -602,3 +602,93 @@ def test_merge_cells_split_and_merge_tables(app):
     assert page.locator("table.md-table").count() == 1
     assert body_of(h).count("{table:") == 1
     assert not errors
+
+
+def test_hide_markers_toggle(app):
+    h, page, errors = app
+    assert page.locator(".md-marker").first.is_visible()
+    page.locator("#btn-markers").click()
+    page.wait_for_function("() => document.body.classList.contains('md-hide')")
+    # the heading's "# " is not displayed, the text is intact
+    assert not page.locator(".blk-h .md-marker").first.is_visible()
+    assert page.locator(".blk-h .blk-body").first.inner_text().strip() == "Welcome to FLEx Scratchpad"
+    assert h.api._nb.config["settings"]["hideMarkers"] is True
+    # putting the caret inside a bold run reveals its markers
+    bold = page.locator(".blk-body .md-b").first
+    bold.scroll_into_view_if_needed()
+    page.evaluate("""(el) => { const r = document.createRange(); r.setStart(el.firstChild, 2); r.collapse(true); const s = getSelection(); s.removeAllRanges(); s.addRange(r); el.closest('.blk-body').focus(); }""", bold.element_handle())
+    page.wait_for_timeout(200)
+    assert page.locator(".md-marker.reveal").count() >= 2
+    assert page.locator(".md-marker.reveal").first.is_visible()
+    # Backspace right after a hidden list bullet removes the whole bullet
+    new_note(page, "Bullets")
+    page.click(".blk-body")
+    page.keyboard.type("- item")
+    page.wait_for_timeout(300)
+    page.keyboard.press("Home")
+    page.keyboard.press("Backspace")
+    page.wait_for_timeout(900)
+    assert body_of(h).strip() == "item" or "item" in page.locator(".blk-body").last.inner_text()
+    assert "- item" not in page.locator(".blk-body").last.inner_text()
+    page.locator("#btn-markers").click()
+    page.wait_for_function("() => !document.body.classList.contains('md-hide')")
+    assert not errors
+
+
+def test_freeze_panes_menu(app):
+    h, page, errors = app
+    cell = page.locator("table.md-table td .cell-view").nth(1)
+    cell.scroll_into_view_if_needed()
+    cell.dispatch_event("mousedown")
+    page.wait_for_selector(".cell-edit")
+    page.locator(".tbl-tools button", has_text="Cells").click()
+    page.locator(".popover .menu-item", has_text="Freeze panes here").click()
+    page.wait_for_timeout(900)
+    assert "freeze rows 1; freeze cols 1" in body_of(h)
+    assert page.locator(".tbl-wrap.frozen").count() == 1
+    page.locator("table.md-table td .cell-view").nth(0).dispatch_event("mousedown")
+    page.wait_for_selector(".cell-edit")
+    page.locator(".tbl-tools button", has_text="Table").click()
+    page.locator(".popover button", has_text="Unfreeze").click()
+    page.wait_for_timeout(900)
+    assert "freeze" not in body_of(h)
+    assert not errors
+
+
+def test_table_rerender_saves_the_open_cell(app):
+    """Typing in a cell and then resizing the column (or pressing + Row) must keep the text."""
+    h, page, errors = app
+    cell = page.locator("table.md-table td .cell-view").nth(1)
+    cell.scroll_into_view_if_needed()
+    cell.dispatch_event("mousedown")
+    page.wait_for_selector(".cell-edit")
+    page.keyboard.press("End")
+    page.keyboard.type(" TYPED")
+    page.wait_for_timeout(300)
+    th = page.locator("table.md-table thead th").nth(1)
+    handle = th.locator(".col-resizer")
+    box = handle.bounding_box()
+    page.mouse.move(box["x"] + 4, box["y"] + box["height"] / 2)
+    page.mouse.down()
+    page.mouse.move(box["x"] + 80, box["y"] + box["height"] / 2, steps=6)
+    page.mouse.up()
+    page.wait_for_timeout(900)
+    assert "TYPED" in body_of(h)
+    assert "col 2: width" in body_of(h)
+    # the same through a tool button while a cell is open
+    cell = page.locator("table.md-table td .cell-view").nth(0)
+    cell.dispatch_event("mousedown")
+    page.wait_for_selector(".cell-edit")
+    page.keyboard.press("End")
+    page.keyboard.type(" MORE")
+    page.wait_for_timeout(200)
+    page.locator(".tbl-tools button", has_text="+ Row").click()
+    page.wait_for_timeout(900)
+    body = body_of(h)
+    assert "MORE" in body and "TYPED" in body
+    # and both edits are on the undo stack
+    page.keyboard.press("Escape")
+    page.locator("#btn-undo").click()
+    page.wait_for_timeout(900)
+    assert body_of(h).count("|") < body.count("|")
+    assert not errors

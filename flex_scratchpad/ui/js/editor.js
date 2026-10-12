@@ -92,6 +92,37 @@
   const PLACEHOLDER = 'Write something, or type / for a menu';
 
   /* ------------------------------------------------------------------ the editor */
+  /* With markers hidden, show the markers of the styled run the caret is in (Typora-style), so
+   * a bold word being edited reads **bold** and the boundary is visible. Pure DOM: runs are the
+   * maximal sequences of decorated spans on the caret's line; line prefixes never reveal. */
+  function revealMarkers() {
+    document.querySelectorAll('.md-marker.reveal').forEach((x) => x.classList.remove('reveal'));
+    if (!document.body.classList.contains('md-hide')) return;
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount || !sel.anchorNode) return;
+    const elOf = (n) => (n.nodeType === 1 ? n : n.parentNode);
+    const host = elOf(sel.anchorNode).closest('.blk-body, .cell-edit');
+    if (!host) return;
+    const line = elOf(sel.anchorNode).closest('.md-line') || host;
+    const r = document.createRange();
+    r.setStart(line, 0);
+    try { r.setEnd(sel.anchorNode, sel.anchorOffset); } catch (e) { return; }
+    const caret = r.toString().length;
+    const runs = [];
+    let pos = 0, run = [], runStart = 0;
+    for (const ch of line.childNodes) {
+      if (ch.nodeType === 1 && ch.tagName !== 'BR') { if (!run.length) runStart = pos; run.push(ch); }
+      else if (run.length) { runs.push({ start: runStart, end: pos, els: run }); run = []; }
+      pos += ch.textContent.length;
+    }
+    if (run.length) runs.push({ start: runStart, end: pos, els: run });
+    for (const rr of runs) {
+      if (caret < rr.start || caret > rr.end) continue;
+      for (const e of rr.els) if (e.classList.contains('md-marker') && !/\bmd-(h\d?|quote-mk|bullet|num|task)\b/.test(e.className)) e.classList.add('reveal');
+    }
+  }
+  document.addEventListener('selectionchange', revealMarkers);
+
   class Editor {
     constructor(root, opts) {
       this.root = root;
@@ -289,6 +320,18 @@
       if (mod && e.key === 'Enter') { e.preventDefault(); this.insertBlockAfter(b, { type: 'p', src: '' }, true); return; }
       if (e.key === 'Tab' && (b.type === 'list' || b.type === 'code')) { e.preventDefault(); this.indent(body, b, e.shiftKey ? -1 : 1); return; }
       if (e.key === 'Escape') { body.blur(); return; }
+      if (e.key === 'Backspace' && !mod && !e.altKey && document.body.classList.contains('md-hide')) {
+        // markers hidden: Backspace right after a line prefix removes the whole prefix (the
+        // bullet, the heading, the quote bar) instead of eating one invisible character
+        const sel = window.getSelection();
+        if (sel && sel.isCollapsed) {
+          const a = getCaret(body), s = body.textContent;
+          const ls = s.lastIndexOf('\n', a - 1) + 1, le = s.indexOf('\n', ls);
+          const line = s.slice(ls, le < 0 ? s.length : le);
+          const pre = MD.linePrefix(line, b.type);
+          if (pre && a - ls === pre.len) { e.preventDefault(); this.setText(body, b, s.slice(0, ls) + s.slice(ls + pre.len), ls); this.resplit(b); return; }
+        }
+      }
       if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
         if (e.shiftKey || e.altKey) return;
         const sel = window.getSelection();
@@ -866,5 +909,5 @@
   }
 
   FS.Editor = Editor;
-  FS.editor = { getCaret, getCaretEnd, setCaret, pointAt, wrapLines, TEXT_TYPES };
+  FS.editor = { getCaret, getCaretEnd, setCaret, pointAt, wrapLines, revealMarkers, TEXT_TYPES };
 })();
