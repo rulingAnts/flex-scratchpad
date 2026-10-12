@@ -443,3 +443,30 @@ def test_label_and_title_ws_from_menu(app):
     page.wait_for_selector("#editor .flex-collapsed")
     assert page.locator("#editor .flex-collapsed .cttl").inner_text() == "causative ex. 3"
     assert not errors
+
+
+def test_undo_redo_from_anywhere(app):
+    h, page, errors = app
+    new_note(page, "Undo")
+    page.keyboard.type("{{flex:text %s seg=1}}" % T_STORY)
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#editor .text-obj")
+    # a styling change made through the popover (focus is not in a text block afterwards)
+    page.locator("#editor .text-obj .word-cell").first.click()
+    page.wait_for_selector(".popover")
+    page.locator(".popover .tog", has_text="Bold").click()
+    page.wait_for_selector("#editor .text-obj .st-b")
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(700)
+    assert "b=1.1" in body_of(h)
+    page.locator("#editor-pane").click(position={"x": 400, "y": 60})
+    page.keyboard.press("Control+z")
+    page.wait_for_timeout(700)
+    assert "b=1.1" not in body_of(h)
+    page.keyboard.press("Control+y")
+    page.wait_for_timeout(700)
+    assert "b=1.1" in body_of(h)
+    page.locator("#btn-undo").dispatch_event("mousedown")
+    page.wait_for_timeout(700)
+    assert "b=1.1" not in body_of(h)
+    assert not errors

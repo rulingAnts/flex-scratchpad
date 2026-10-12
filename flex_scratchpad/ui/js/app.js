@@ -541,8 +541,24 @@
     $('find-next').addEventListener('click', () => S.editor && S.editor.findNext(1));
     $('find-prev').addEventListener('click', () => S.editor && S.editor.findNext(-1));
     $('find-close').addEventListener('click', closeFind);
+    $('btn-undo').addEventListener('mousedown', (e) => { e.preventDefault(); if (S.editor) S.editor.undoStep(); });
+    $('btn-redo').addEventListener('mousedown', (e) => { e.preventDefault(); if (S.editor) S.editor.redoStep(); });
     document.addEventListener('keydown', (e) => {
       const mod = e.ctrlKey || e.metaKey;
+      // Undo / redo for everything that is not a plain text field: the note's own history
+      // (every change — typing, styling a word, a table edit, a collapse — is a snapshot).
+      // Text blocks and widgets handle the keys themselves; inputs, the search box and a cell
+      // being edited keep the browser's native undo.
+      if (mod && !e.altKey && (e.key.toLowerCase() === 'z' || e.key.toLowerCase() === 'y')) {
+        const ae = document.activeElement;
+        const native = ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.classList.contains('cell-edit'));
+        const own = ae && (ae.closest('.blk-body') || ae.classList.contains('widget'));
+        if (!native && !own && S.note && S.editor) {
+          e.preventDefault();
+          if (e.key.toLowerCase() === 'y' || e.shiftKey) S.editor.redoStep(); else S.editor.undoStep();
+          return;
+        }
+      }
       if (mod && e.key.toLowerCase() === 'n' && !e.shiftKey) { e.preventDefault(); newNote(); }
       else if (mod && e.shiftKey && e.key.toLowerCase() === 'f') { e.preventDefault(); $('search').focus(); $('search').select(); }
       else if (mod && !e.shiftKey && e.key.toLowerCase() === 'f') { if (S.note) { e.preventDefault(); openFind(); } }

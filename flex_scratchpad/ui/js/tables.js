@@ -247,7 +247,7 @@
       let composing = false;
       ed.addEventListener('compositionstart', () => { composing = true; });
       ed.addEventListener('compositionend', () => { composing = false; refresh(); });
-      ed.addEventListener('input', () => { if (!composing) refresh(); });
+      ed.addEventListener('input', () => { if (!composing) refresh(); });   // also after a native undo/redo
       ed.addEventListener('beforeinput', (e) => {
         const it = e.inputType;
         if (it === 'insertParagraph') { e.preventDefault(); finish(); moveTo(r + 1, c, true); return; }
@@ -260,7 +260,7 @@
         }
         if (it === 'formatBold') { e.preventDefault(); wrapSel(ed, '**'); refresh(); return; }
         if (it === 'formatItalic') { e.preventDefault(); wrapSel(ed, '*'); refresh(); return; }
-        if (/^(insertText|insertCompositionText|insertReplacementText|deleteContent|deleteWord|deleteByCut|deleteSoftLineBackward|deleteHardLineBackward)/.test(it)) return;
+        if (/^(insertText|insertCompositionText|insertReplacementText|deleteContent|deleteWord|deleteByCut|deleteSoftLineBackward|deleteHardLineBackward|historyUndo|historyRedo)/.test(it)) return;
         e.preventDefault();
       });
       ed.addEventListener('keydown', (e) => {
