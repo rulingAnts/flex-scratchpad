@@ -252,7 +252,8 @@ class FlexiconBackend:
 
     def _ws_tag_of_handle(self, handle) -> str:
         p = self.project
-        for fn in (lambda: p.project.ServiceLocator.WritingSystemManager.Get(handle).Id,
+        for fn in (lambda: p.project.WritingSystemFactory.GetStrFromWs(handle),
+                   lambda: p.project.ServiceLocator.WritingSystemManager.Get(handle).Id,
                    lambda: p.project.ServiceLocator.WritingSystemManager.Get(handle).LanguageTag,
                    lambda: p.WritingSystems.GetLanguageTag(handle),
                    lambda: p.lp.Services.WritingSystemManager.Get(handle).Id):
@@ -285,17 +286,30 @@ class FlexiconBackend:
         return "" if s == "***" else s
 
     def _baseline_ws(self, text):
-        """(handle, tag) of the writing system the text is actually written in: read off the
-        first run of the first paragraph's contents."""
+        """(handle, tag) of the writing system the text is actually written in. FLEx records it
+        on the text's contents (IStText.MainWritingSystem); failing that, the first run of the
+        first paragraph. ⚠ Paragraphs come back typed as IStPara: cast to IStTxtPara before
+        touching .Contents (Seth's dump, 2026-10-12: without the cast the detection failed and
+        `deja` rendered as the orthographic `deia`)."""
         p = self.project
+        h = _t(lambda: int(text.ContentsOA.MainWritingSystem), None)
+        if h:
+            return h, self._ws_tag_of_handle(h)
+        cast = None
+        try:
+            from SIL.LCModel import IStTxtPara  # type: ignore
+            cast = IStTxtPara
+        except Exception:  # noqa: BLE001
+            cast = None
         for para in _t(lambda: list(p.Paragraphs.GetAll(text)), [])[:3]:
-            tss = _t(lambda: para.Contents, None)
+            tp = _t(lambda: cast(para), None) if cast else None
+            tss = _t(lambda: (tp or para).Contents, None)
             if tss is None or not _s(_t(lambda: tss.Text, "")):
                 continue
             h = _t(lambda: tss.get_WritingSystemAt(0), None)
             if h is None:
                 h = _t(lambda: tss.get_WritingSystem(0), None)
-            if h is not None:
+            if h:
                 return h, self._ws_tag_of_handle(h)
         return None, ""
 
@@ -554,6 +568,16 @@ class FlexiconBackend:
         p = self.project
         words = [self._word_dict(tok) for tok in _t(lambda: list(p.Segments.GetAnalyses(seg)), [])]
         baseline = _s(_t(lambda: p.Segments.GetBaselineText(seg), "")) or model.baseline_from_words(words)
+        # The baseline is already in the text's writing system; when its word tokens line up
+        # with the analyses, show those surface forms (as FLEx and flextext-editor do) rather
+        # than a wordform alternative from another WS.
+        toks = [t["txt"] for t in model.tokenize(baseline) if not t["punct"]]
+        lex = [w for w in words if not w["punct"]]
+        if toks and len(toks) == len(lex):
+            for w, tk in zip(lex, toks):
+                if w["txt"] != tk:
+                    w["wf"] = w["txt"]
+                    w["txt"] = tk
         notes = []
         for note in _t(lambda: list(p.Segments.GetNotes(seg)), []):
             s = _s(_t(lambda: p.BestStr(note.Content), ""))
@@ -619,8 +643,10 @@ class FlexiconBackend:
     # -- links -------------------------------------------------------------------
 
     def _goto(self, obj, kind: str) -> str:
-        url = _s(_t(lambda: self.project.BuildGotoURL(obj), ""))
-        return url or model.goto_url(self.project_name, kind, _guid(obj))
+        # Built by hand in the exact shape FLEx's own "Copy Location as Hyperlink" produces;
+        # flexicon's BuildGotoURL returned a percent-encoded query (`database%3d…%26tool%3d…`)
+        # on Seth's first run (2026-10-12).
+        return model.goto_url(self.project_name, kind, _guid(obj))
 
     def resolve_guid(self, guid: str) -> dict | None:
         """What is this GUID? → {kind, guid, title, seg?, sense?} for the kinds the UI can embed."""
