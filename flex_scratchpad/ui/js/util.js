@@ -144,6 +144,13 @@
     return pop;
   };
 
+  /* A popover at a screen point (context menus): a zero-size fixed anchor, removed on close. */
+  FS.popoverAt = function (x, y, build, opts) {
+    const anchor = FS.el('div', { style: { position: 'fixed', left: x + 'px', top: (y - 6) + 'px', width: '0', height: '0' } });
+    document.body.appendChild(anchor);
+    return FS.popover(anchor, build, Object.assign({}, opts || {}, { onClose: () => { anchor.remove(); if (opts && opts.onClose) opts.onClose(); } }));
+  };
+
   FS.copyText = async function (text) {
     try { await navigator.clipboard.writeText(text); return true; } catch (e) { /* fall through */ }
     const ta = FS.el('textarea', { style: { position: 'fixed', left: '-1000px' } }, text);

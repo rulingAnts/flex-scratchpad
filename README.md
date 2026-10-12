@@ -95,9 +95,11 @@ The suffix **-mo** marks past tense:
 {table: striped; col 1: bold}
 ```
 
-Tables: columns resize by dragging, `Table ▾` sets stripes/borders/frozen panes (`freeze rows
-1; freeze cols 1`), `Cells ▾` merges a cell with its neighbour (kept as `span 2.1: 1x2` in the style
-line), and `Split above row N` / `Merge with table above/below` cut and join tables.
+Tables: right-click any cell for every command (insert/delete rows and columns, merge or unmerge
+cells, freeze panes, split or merge tables, styles). Shift-click or drag across cells to select a
+range and merge it. Columns resize by dragging; merged cells are kept as `span 2.1: 1x2` in the
+style line and survive a paste from Excel, Word or a browser; `freeze rows 1; freeze cols 1` pins
+panes. The bar under a table sticks to the bottom of the pane while the table is scrolled past it.
 
 The embed line is the whole contract: `{{flex:entry <guid>}}`, `{{flex:sense <guid>}}`,
 `{{flex:text <guid> seg=3-5 lines=txt,morph,mgls,gls,pos,ft hl=3.2 b=3.1-3.4 u="ka-"}}`. Targets

@@ -115,3 +115,21 @@ test('tables: merged cells live in the style line and split/merge keep them', ()
   assert.ok(!T.unmergeCell(T.parse('| a |\n|---|\n| 1 |'), 1, 0));
   assert.ok(T.unmergeCell(T.parse(out), 2, 1), 'unmerge from a covered cell');
 });
+
+test('tables: a range of cells merges into one span and unmerges again', () => {
+  const T = FS.tables;
+  const t = T.parse('| a | b | c |\n|---|---|---|\n| 1 | 2 | 3 |\n| 4 | 5 | 6 |\n| 7 | 8 | 9 |');
+  assert.ok(T.mergeRange(t, { r1: 1, c1: 1, r2: 2, c2: 2 }));
+  assert.deepEqual(t.style.spans, { '2.2': { rows: 2, cols: 2 } });
+  assert.equal(t.rows[1][1], '2<br>3<br>5<br>6');
+  // a range touching the merged cell grows to include it
+  assert.deepEqual(T.growToSpans(t, { r1: 2, c1: 0, r2: 2, c2: 1 }), { r1: 1, c1: 0, r2: 2, c2: 2 });
+  assert.ok(T.mergeRange(t, { r1: 2, c1: 0, r2: 2, c2: 1 }));
+  assert.deepEqual(t.style.spans, { '2.1': { rows: 2, cols: 3 } });
+  assert.equal(t.rows[1][0], '1<br>2<br>3<br>5<br>6<br>4');
+  assert.ok(!T.mergeRange(t, { r1: 0, c1: 0, r2: 1, c2: 0 }), 'header never merges down');
+  assert.ok(T.mergeRange(t, { r1: 0, c1: 0, r2: 0, c2: 1 }), 'header merges sideways');
+  assert.ok(T.unmergeRange(t, { r1: 1, c1: 1, r2: 1, c2: 1 }));
+  assert.deepEqual(t.style.spans, { '1.1': { rows: 1, cols: 2 } });
+  assert.ok(!T.unmergeRange(t, { r1: 2, c1: 2, r2: 2, c2: 2 }));
+});

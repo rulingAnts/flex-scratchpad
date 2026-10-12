@@ -59,6 +59,12 @@ def body_of(h):
     return h.api.get_note(notes[0]["id"])["body"]
 
 
+def tool(page, text, nth=0):
+    """Click a button in the bar under the nth table; the bar shows while the table is hovered."""
+    page.locator("table.md-table").nth(nth).hover()
+    page.locator(".tbl-tools").nth(nth).locator("button", has_text=text).click()
+
+
 def new_note(page, title):
     """Ctrl+N, then wait until the new (untitled) note is actually open before typing."""
     before = page.locator(".note-card").count()
@@ -166,7 +172,7 @@ def test_table_cell_edit_and_embed_in_cell(app):
     body = body_of(h)
     assert "{{flex:text %s seg=1}}<br>line two |" % T_STORY in body
     # column style popover
-    page.locator(".tbl-tools button", has_text="Table").click()
+    tool(page, "Table")
     page.locator(".popover .tog", has_text="Compact").click()
     page.wait_for_timeout(900)
     assert "{table: striped; compact; col 1: bold}" in body_of(h)
@@ -558,7 +564,7 @@ def test_paste_flex_link_into_table_cell(app):
 
 def test_freeze_panes(app):
     h, page, errors = app
-    page.locator(".tbl-tools button", has_text="Table").click()
+    tool(page, "Table")
     page.wait_for_selector(".popover input[type=number]")
     rows = page.locator(".popover input[type=number]").nth(0)
     rows.fill("1")
@@ -577,7 +583,7 @@ def test_merge_cells_split_and_merge_tables(app):
     cell.scroll_into_view_if_needed()
     cell.dispatch_event("mousedown")
     page.wait_for_selector(".cell-edit")
-    page.locator(".tbl-tools button", has_text="Cells").click()
+    tool(page, "Cells")
     page.locator(".popover .menu-item", has_text="to the right").click()
     page.wait_for_timeout(900)
     assert "span 2.1: 1x2" in body_of(h)
@@ -586,7 +592,7 @@ def test_merge_cells_split_and_merge_tables(app):
     last = page.locator("table.md-table tbody tr").last.locator(".cell-view").first
     last.dispatch_event("mousedown")
     page.wait_for_selector(".cell-edit")
-    page.locator(".tbl-tools button", has_text="Table").click()
+    tool(page, "Table")
     page.locator(".popover button", has_text="Split above row").click()
     page.wait_for_timeout(900)
     assert page.locator("table.md-table").count() == 2
@@ -596,7 +602,7 @@ def test_merge_cells_split_and_merge_tables(app):
     # and merge them back through the second table's Table menu
     page.locator("table.md-table").nth(1).locator("td .cell-view").first.dispatch_event("mousedown")
     page.wait_for_selector(".cell-edit")
-    page.locator(".tbl-tools button", has_text="Table").nth(1).click()
+    tool(page, "Table", 1)
     page.locator(".popover button", has_text="Merge with table above").click()
     page.wait_for_timeout(900)
     assert page.locator("table.md-table").count() == 1
@@ -641,14 +647,14 @@ def test_freeze_panes_menu(app):
     cell.scroll_into_view_if_needed()
     cell.dispatch_event("mousedown")
     page.wait_for_selector(".cell-edit")
-    page.locator(".tbl-tools button", has_text="Cells").click()
+    tool(page, "Cells")
     page.locator(".popover .menu-item", has_text="Freeze panes here").click()
     page.wait_for_timeout(900)
     assert "freeze rows 1; freeze cols 1" in body_of(h)
     assert page.locator(".tbl-wrap.frozen").count() == 1
     page.locator("table.md-table td .cell-view").nth(0).dispatch_event("mousedown")
     page.wait_for_selector(".cell-edit")
-    page.locator(".tbl-tools button", has_text="Table").click()
+    tool(page, "Table")
     page.locator(".popover button", has_text="Unfreeze").click()
     page.wait_for_timeout(900)
     assert "freeze" not in body_of(h)
@@ -682,7 +688,7 @@ def test_table_rerender_saves_the_open_cell(app):
     page.keyboard.press("End")
     page.keyboard.type(" MORE")
     page.wait_for_timeout(200)
-    page.locator(".tbl-tools button", has_text="+ Row").click()
+    tool(page, "+ Row")
     page.wait_for_timeout(900)
     body = body_of(h)
     assert "MORE" in body and "TYPED" in body
@@ -691,4 +697,76 @@ def test_table_rerender_saves_the_open_cell(app):
     page.locator("#btn-undo").click()
     page.wait_for_timeout(900)
     assert body_of(h).count("|") < body.count("|")
+    assert not errors
+
+
+def test_cell_range_selection_and_context_menu(app):
+    h, page, errors = app
+    cells = page.locator("table.md-table td .cell-view")
+    cells.nth(0).scroll_into_view_if_needed()
+    cells.nth(0).dispatch_event("mousedown")
+    page.wait_for_selector(".cell-edit")
+    # Shift+click another cell selects the rectangle
+    page.locator("table.md-table td[data-r='2'][data-c='1'] .cell-view").dispatch_event("mousedown", {"shiftKey": True, "bubbles": True})
+    page.wait_for_timeout(200)
+    assert page.locator("table.md-table td.sel").count() == 4
+    assert page.locator(".cell-edit").count() == 0
+    # right-click inside the selection → Merge cells
+    page.locator("table.md-table td.sel").first.click(button="right")
+    page.wait_for_selector(".popover.menu")
+    assert page.locator(".popover.menu .menu-item", has_text="Freeze panes here").count() == 1
+    assert page.locator(".popover.menu .menu-item", has_text="Split table above").count() == 1
+    page.locator(".popover.menu .menu-item", has_text="Merge cells").click()
+    page.wait_for_timeout(900)
+    assert "span 2.1: 2x2" in body_of(h)
+    assert page.locator("table.md-table td[colspan='2'][rowspan='2']").count() == 1
+    # right-click the merged cell → Unmerge
+    page.locator("table.md-table td.merged").click(button="right")
+    page.wait_for_selector(".popover.menu")
+    page.locator(".popover.menu .menu-item", has_text="Unmerge").click()
+    page.wait_for_timeout(900)
+    assert "span" not in body_of(h)
+    # insert a row above the last row from the menu
+    n = page.locator("table.md-table tbody tr").count()
+    page.locator("table.md-table tbody tr").last.locator("td").first.click(button="right")
+    page.wait_for_selector(".popover.menu")
+    page.locator(".popover.menu .menu-item", has_text="Insert row above").click()
+    page.wait_for_timeout(900)
+    assert page.locator("table.md-table tbody tr").count() == n + 1
+    assert not errors
+
+
+def test_table_tools_stick_to_the_pane_bottom(app):
+    h, page, errors = app
+    # a tall table: 40 rows, then scroll so its top is visible and its bottom is not
+    new_note(page, "Tall")
+    page.click(".blk-body")
+    paste(page, "| a | b |\n|---|---|\n" + "\n".join(f"| r{i} | x |" for i in range(40)))
+    page.wait_for_selector("table.md-table")
+    page.wait_for_timeout(600)
+    page.evaluate("() => { const ed = document.getElementById('editor'); const t = document.querySelector('table.md-table'); ed.scrollTop = t.getBoundingClientRect().top - ed.getBoundingClientRect().top + ed.scrollTop - 40; }")
+    page.wait_for_timeout(200)
+    pos = page.evaluate("() => { const ed = document.getElementById('editor').getBoundingClientRect(); const t = document.querySelector('table.md-table').getBoundingClientRect(); const b = document.querySelector('.tbl-tools').getBoundingClientRect(); return { tableBottom: t.bottom, paneBottom: ed.bottom, barBottom: b.bottom, barTop: b.top }; }")
+    assert pos["tableBottom"] > pos["paneBottom"], pos          # the table really is cut off
+    assert pos["barBottom"] <= pos["paneBottom"] + 1, pos        # the bar is pinned inside the pane
+    assert pos["barTop"] >= pos["paneBottom"] - 60, pos          # … at its bottom
+    assert not errors
+
+
+def test_pasted_html_table_keeps_merged_cells(app):
+    h, page, errors = app
+    new_note(page, "Merged paste")
+    page.click(".blk-body")
+    html = ("<table><tr><th colspan=2>Head</th><th>C</th></tr>"
+            "<tr><td rowspan=2>tall</td><td>b1</td><td>c1</td></tr>"
+            "<tr><td>b2</td><td>c2</td></tr></table>")
+    paste(page, "Head\t\tC\ntall\tb1\tc1\n\tb2\tc2", html)
+    page.wait_for_selector("table.md-table")
+    page.wait_for_timeout(900)
+    body = body_of(h)
+    assert "| Head |  | C |" in body
+    assert "| tall | b1 | c1 |" in body and "|  | b2 | c2 |" in body
+    assert "span 1.1: 1x2" in body and "span 2.1: 2x1" in body
+    assert page.locator("table.md-table th[colspan='2']").count() == 1
+    assert page.locator("table.md-table td[rowspan='2']").count() == 1
     assert not errors

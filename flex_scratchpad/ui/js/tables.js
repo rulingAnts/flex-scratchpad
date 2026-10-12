@@ -171,6 +171,42 @@
     t.style.spans[(r + 1) + '.' + (c + 1)] = next;
     return true;
   }
+  /* Merge a rectangle of cells (0-based, inclusive) into one. The rectangle is first grown to
+   * include any merged cell it touches, so a span is never cut in half; the header row only
+   * merges sideways. Non-empty texts are joined row by row with <br>. */
+  function growToSpans(t, sel) {
+    const { anchors } = spanMap(t);
+    let { r1, c1, r2, c2 } = sel;
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const [k, v] of Object.entries(anchors)) {
+        const [ar, ac] = k.split('.').map(Number);
+        const br = ar + v.rows - 1, bc = ac + v.cols - 1;
+        if (br < r1 || ar > r2 || bc < c1 || ac > c2) continue;
+        const n = { r1: Math.min(r1, ar), c1: Math.min(c1, ac), r2: Math.max(r2, br), c2: Math.max(c2, bc) };
+        if (n.r1 !== r1 || n.c1 !== c1 || n.r2 !== r2 || n.c2 !== c2) { ({ r1, c1, r2, c2 } = n); changed = true; }
+      }
+    }
+    return { r1, c1, r2, c2 };
+  }
+  function mergeRange(t, sel) {
+    const g = growToSpans(t, sel);
+    if (g.r1 === 0 && g.r2 > 0) return false;
+    if (g.r1 === g.r2 && g.c1 === g.c2) return false;
+    const texts = [];
+    for (let i = g.r1; i <= g.r2; i++) for (let j = g.c1; j <= g.c2; j++) { const v = t.rows[i][j]; if (v && v.trim()) texts.push(v); if (i !== g.r1 || j !== g.c1) t.rows[i][j] = ''; }
+    t.rows[g.r1][g.c1] = texts.join('<br>');
+    for (const k of Object.keys(t.style.spans)) { const [ar, ac] = k.split('.').map((x) => +x - 1); if (ar >= g.r1 && ar <= g.r2 && ac >= g.c1 && ac <= g.c2) delete t.style.spans[k]; }
+    t.style.spans[(g.r1 + 1) + '.' + (g.c1 + 1)] = { rows: g.r2 - g.r1 + 1, cols: g.c2 - g.c1 + 1 };
+    return true;
+  }
+  function unmergeRange(t, sel) {
+    const g = growToSpans(t, sel);
+    let n = 0;
+    for (const k of Object.keys(t.style.spans)) { const [ar, ac] = k.split('.').map((x) => +x - 1); if (ar >= g.r1 && ar <= g.r2 && ac >= g.c1 && ac <= g.c2) { delete t.style.spans[k]; n++; } }
+    return n > 0;
+  }
   function unmergeCell(t, r, c) {
     const { covered } = spanMap(t);
     const key = covered.get(r + '.' + c) || (r + '.' + c);
@@ -287,21 +323,110 @@
     if (t.style.freezeRows || t.style.freezeCols) wrap.style.maxHeight = t.style.maxHeight || '60vh';
     container.appendChild(wrap);
     if (t.style.freezeRows || t.style.freezeCols) requestAnimationFrame(() => applyFreeze(table, t));
-    // tools
+    // the structural operations, shared by the bar under the table and the right-click menu
+    const done = () => { commit(); widget.refresh(); };
+    const ops = widget.ops = {
+      insertRow: (i) => { i = Math.max(1, Math.min(i, t.rows.length)); t.rows.splice(i, 0, t.rows[0].map(() => '')); shiftRowStyles(t, i + 1, 1); done(); },
+      insertCol: (i) => { i = Math.max(0, Math.min(i, t.rows[0].length)); t.rows.forEach((row) => row.splice(i, 0, '')); t.aligns.splice(i, 0, null); shiftColStyles(t, i + 1, 1); done(); },
+      deleteRow: (r) => { if (t.rows.length <= 1 || r === 0) return; t.rows.splice(r, 1); delete t.style.rows[r + 1]; shiftRowStyles(t, r + 2, -1); done(); },
+      deleteCol: (c) => { if (t.rows[0].length <= 1) return; t.rows.forEach((row) => row.splice(c, 1)); t.aligns.splice(c, 1); delete t.style.cols[c + 1]; shiftColStyles(t, c + 2, -1); done(); },
+      mergeRight: (r, c) => { if (mergeCell(t, r, c, 'right')) done(); },
+      mergeDown: (r, c) => { if (mergeCell(t, r, c, 'down')) done(); },
+      mergeRange: (sel) => { if (mergeRange(t, sel)) done(); },
+      unmerge: (sel) => { if (unmergeRange(t, sel)) done(); },
+      freezeHere: (r, c) => { t.style.freezeRows = r; t.style.freezeCols = c; done(); },
+      freezeTop: () => { t.style.freezeRows = 1; done(); },
+      freezeFirst: () => { t.style.freezeCols = 1; done(); },
+      unfreeze: () => { t.style.freezeRows = 0; t.style.freezeCols = 0; done(); },
+    };
+    // a selected range of cells (Shift+click or drag across cells): {r1,c1,r2,c2}, 0-based
+    widget.sel = null;
+    widget.select = (a, b) => {
+      const raw = { r1: Math.min(a.r, b.r), c1: Math.min(a.c, b.c), r2: Math.max(a.r, b.r), c2: Math.max(a.c, b.c) };
+      widget.sel = growToSpans(t, raw);
+      table.querySelectorAll('.sel').forEach((x) => x.classList.remove('sel'));
+      table.querySelectorAll('td, th').forEach((cell) => { const r = +cell.dataset.r, c = +cell.dataset.c; if (r >= widget.sel.r1 && r <= widget.sel.r2 && c >= widget.sel.c1 && c <= widget.sel.c2) cell.classList.add('sel'); });
+    };
+    widget.clearSelection = () => { widget.sel = null; table.querySelectorAll('.sel').forEach((x) => x.classList.remove('sel')); };
+    table.addEventListener('contextmenu', (e) => {
+      const cell = e.target.closest('td, th');
+      if (!cell || !table.contains(cell)) return;
+      e.preventDefault();
+      const at = { r: +cell.dataset.r, c: +cell.dataset.c };
+      const inSel = widget.sel && at.r >= widget.sel.r1 && at.r <= widget.sel.r2 && at.c >= widget.sel.c1 && at.c <= widget.sel.c2;
+      if (!inSel) { widget.clearSelection(); widget.focus = at; }
+      contextMenu(e.clientX, e.clientY, t, at, commit, widget, opts);
+    });
+    // the bar under the table; sticks to the bottom of the pane while the table is partly
+    // scrolled past it (Seth, 2026-10-12: "reverse sticky")
     const tools = el('div', { class: 'tbl-tools' });
     const cur = () => widget.focus || { r: t.rows.length - 1, c: 0 };
     tools.append(
-      el('button', { title: 'Add a row below the current one', onclick: () => { const { r } = cur(); t.rows.splice(r + 1, 0, t.rows[0].map(() => '')); shiftRowStyles(t, r + 2, 1); commit(); widget.refresh(); } }, '+ Row'),
-      el('button', { title: 'Add a column after the current one', onclick: () => { const { c } = cur(); t.rows.forEach((row) => row.splice(c + 1, 0, '')); t.aligns.splice(c + 1, 0, null); shiftColStyles(t, c + 2, 1); commit(); widget.refresh(); } }, '+ Column'),
-      el('button', { title: 'Delete the current row', onclick: () => { const { r } = cur(); if (t.rows.length <= 1 || r === 0) return; t.rows.splice(r, 1); delete t.style.rows[r + 1]; shiftRowStyles(t, r + 2, -1); commit(); widget.refresh(); } }, '− Row'),
-      el('button', { title: 'Delete the current column', onclick: () => { const { c } = cur(); if (t.rows[0].length <= 1) return; t.rows.forEach((row) => row.splice(c, 1)); t.aligns.splice(c, 1); delete t.style.cols[c + 1]; shiftColStyles(t, c + 2, -1); commit(); widget.refresh(); } }, '− Column'),
+      el('button', { title: 'Add a row below the current one', onclick: () => ops.insertRow(cur().r + 1) }, '+ Row'),
+      el('button', { title: 'Add a column after the current one', onclick: () => ops.insertCol(cur().c + 1) }, '+ Column'),
+      el('button', { title: 'Delete the current row', onclick: () => ops.deleteRow(cur().r) }, '− Row'),
+      el('button', { title: 'Delete the current column', onclick: () => ops.deleteCol(cur().c) }, '− Column'),
       el('button', { onclick: (e) => colPopover(e.currentTarget, t, cur().c, commit, widget) }, 'Column ▾'),
       el('button', { onclick: (e) => rowPopover(e.currentTarget, t, cur().r, commit, widget) }, 'Row ▾'),
       el('button', { onclick: (e) => cellPopover(e.currentTarget, t, cur(), commit, widget) }, 'Cells ▾'),
       el('button', { onclick: (e) => tablePopover(e.currentTarget, t, commit, widget, opts) }, 'Table ▾'),
+      el('span', { class: 'small muted', style: { marginLeft: '6px' } }, 'right-click a cell for all commands'),
     );
     container.appendChild(tools);
     return widget;
+  }
+
+  /* Right-click menu on a cell: everything the bar and the popovers offer, in one place
+   * (Seth, 2026-10-12: "all the table commands on a context menu … split, merge, insert,
+   * delete (rows, columns, cells), or freeze panes"). Acts on the selected range when the
+   * click is inside one, else on the clicked cell. */
+  function contextMenu(x, y, t, at, commit, widget, opts) {
+    const ops = widget.ops;
+    const sel = widget.sel;
+    const range = sel || { r1: at.r, c1: at.c, r2: at.r, c2: at.c };
+    const multi = sel && (sel.r1 !== sel.r2 || sel.c1 !== sel.c2);
+    const { anchors, covered } = spanMap(t);
+    const key = at.r + '.' + at.c;
+    let mergedInRange = false;
+    for (const k of Object.keys(anchors)) { const [ar, ac] = k.split('.').map(Number); if (ar >= range.r1 && ar <= range.r2 && ac >= range.c1 && ac <= range.c2) mergedInRange = true; }
+    FS.popoverAt(x, y, (pop, close) => {
+      pop.classList.add('menu');
+      pop.appendChild(el('div', { class: 'row' }, el('b', {}, multi ? 'Cells ' + (sel.r1 + 1) + ',' + (sel.c1 + 1) + ' – ' + (sel.r2 + 1) + ',' + (sel.c2 + 1) : (at.r === 0 ? 'Header cell ' : 'Cell ') + (at.r + 1) + ',' + (at.c + 1))));
+      const item = (label, fn, disabled) => pop.appendChild(el('button', { class: 'menu-item', disabled: !!disabled, onclick: () => { close(); fn(); } }, label));
+      const sep = () => pop.appendChild(el('hr'));
+      item('Insert row above', () => ops.insertRow(range.r1), range.r1 === 0);
+      item('Insert row below', () => ops.insertRow(range.r2 + 1));
+      item('Insert column to the left', () => ops.insertCol(range.c1));
+      item('Insert column to the right', () => ops.insertCol(range.c2 + 1));
+      item(multi && range.r1 !== range.r2 ? 'Delete rows' : 'Delete row', () => { for (let r = range.r2; r >= range.r1; r--) ops.deleteRow(r); }, range.r1 === 0 && range.r2 === 0);
+      item(multi && range.c1 !== range.c2 ? 'Delete columns' : 'Delete column', () => { for (let c = range.c2; c >= range.c1; c--) ops.deleteCol(c); }, t.rows[0].length <= range.c2 - range.c1 + 1);
+      sep();
+      if (multi) item('Merge cells', () => ops.mergeRange(range), range.r1 === 0 && range.r2 > 0);
+      else {
+        item('Merge with the cell to the right', () => ops.mergeRight(at.r, at.c), covered.has(key));
+        item('Merge with the cell below', () => ops.mergeDown(at.r, at.c), covered.has(key) || at.r === 0);
+      }
+      item('Unmerge', () => ops.unmerge(range), !(mergedInRange || covered.has(key)));
+      sep();
+      const frozen = (t.style.freezeRows || 0) + (t.style.freezeCols || 0) > 0;
+      item('Freeze panes here (rows above, columns to the left)', () => ops.freezeHere(at.r, at.c), at.r === 0 && at.c === 0);
+      item('Freeze top row', () => ops.freezeTop());
+      item('Freeze first column', () => ops.freezeFirst());
+      item('Unfreeze panes', () => ops.unfreeze(), !frozen);
+      if (opts && (opts.onSplit || opts.onMerge)) {
+        sep();
+        if (opts.onSplit) item('Split table above this row', () => opts.onSplit(at.r), at.r === 0);
+        if (opts.onMerge && opts.canMerge) {
+          item('Merge with table above', () => opts.onMerge(-1), !opts.canMerge(-1));
+          item('Merge with table below', () => opts.onMerge(1), !opts.canMerge(1));
+        }
+      }
+      sep();
+      const anchorCell = () => widget.container.querySelector('[data-r="' + at.r + '"][data-c="' + at.c + '"]') || widget.container;
+      item('Column style…', () => colPopover(anchorCell(), t, at.c, commit, widget));
+      item('Row style…', () => rowPopover(anchorCell(), t, at.r, commit, widget));
+      item('Table style…', () => tablePopover(anchorCell(), t, commit, widget, opts));
+    });
   }
 
   /* Drag the right edge of a header cell to set that column's width (saved as `col N: width
@@ -468,8 +593,18 @@
     view.addEventListener('mousedown', (e) => {
       if (e.target.closest('a, button, .flex-obj, .seg-play, .flex-collapsed, .flex-inline')) return;   // chips/objects handle their own clicks
       if (e.ctrlKey || e.metaKey) return;
+      if (e.button === 2) { widget.anchor = widget.anchor || { r, c }; return; }      // right-click: the menu decides
       e.preventDefault();
+      if (e.shiftKey && widget.anchor) { if (widget.finishEdit) widget.finishEdit(); widget.select(widget.anchor, { r, c }); return; }
+      widget.clearSelection();
+      widget.anchor = { r, c };
       startEdit();
+    });
+    // dragging from one cell into another selects the rectangle between them (like a spreadsheet)
+    td.addEventListener('mouseenter', (e) => {
+      if (!(e.buttons & 1) || !widget.anchor || (widget.anchor.r === r && widget.anchor.c === c)) return;
+      if (widget.finishEdit) widget.finishEdit();
+      widget.select(widget.anchor, { r, c });
     });
     td.addEventListener('focusin', () => { widget.focus = { r, c }; });
   }
@@ -553,9 +688,10 @@
       const key = at.r + '.' + at.c;
       pop.appendChild(el('div', { class: 'row' }, el('b', {}, 'Cell ' + (at.r + 1) + ',' + (at.c + 1))));
       const item = (label, fn, disabled) => pop.appendChild(el('button', { class: 'menu-item', disabled: !!disabled, onclick: () => { close(); if (fn()) { commit(); widget.refresh(); } } }, label));
+      if (widget.sel && (widget.sel.r1 !== widget.sel.r2 || widget.sel.c1 !== widget.sel.c2)) item('Merge the selected cells', () => mergeRange(t, widget.sel), widget.sel.r1 === 0 && widget.sel.r2 > 0);
       item('Merge with the cell to the right', () => mergeCell(t, at.r, at.c, 'right'), covered.has(key));
       item('Merge with the cell below', () => mergeCell(t, at.r, at.c, 'down'), covered.has(key) || at.r === 0);
-      item('Unmerge', () => unmergeCell(t, at.r, at.c), !(anchors[key] || covered.has(key)));
+      item('Unmerge', () => (widget.sel ? unmergeRange(t, widget.sel) : unmergeCell(t, at.r, at.c)), !(anchors[key] || covered.has(key) || widget.sel));
       pop.appendChild(el('hr'));
       pop.appendChild(el('div', { class: 'row' }, el('b', {}, 'Freeze panes')));
       const frozen = (t.style.freezeRows || 0) + (t.style.freezeCols || 0) > 0;
@@ -636,28 +772,47 @@
     try { doc = new DOMParser().parseFromString(html, 'text/html'); } catch (e) { return null; }
     const table = doc.querySelector('table');
     if (!table) return null;
-    const rows = [];
+    // Lay the cells out on a grid honouring rowspan / colspan (Excel, Word and browsers all
+    // put them on the clipboard as attributes), so merged cells arrive as `span` entries.
+    const grid = [];                       // grid[r][c] = text | '' ; taken[r][c] = true when covered
+    const taken = [];
+    const spans = {};
+    const at = (r, c) => (taken[r] && taken[r][c]);
+    let r = 0;
     for (const tr of table.querySelectorAll('tr')) {
       if (tr.closest('table') !== table) continue;          // nested tables: keep only the outer grid
-      const cells = [];
+      grid[r] = grid[r] || [];
+      let c = 0;
       for (const td of tr.children) {
         if (!/^(td|th)$/i.test(td.tagName)) continue;
+        while (at(r, c)) c++;
         let text = cellMarkdown(td).replace(/\u00a0/g, ' ').split('\n').map((l) => l.trim()).join('\n').replace(/\n{2,}/g, '\n').trim();
         // Excel/Word style the CELL (font-weight on the td) rather than wrapping the text
         const fw = (td.style && td.style.fontWeight) || '';
         if (text && !text.includes('\n') && !/^\*\*/.test(text) && /^(bold|[6-9]00)$/.test(fw)) text = '**' + text + '**';
         if (text && !text.includes('\n') && td.style && td.style.fontStyle === 'italic' && !/^\*/.test(text)) text = '*' + text + '*';
-        cells.push(text);
-        const span = parseInt(td.getAttribute('colspan') || '1', 10);
-        for (let i = 1; i < span; i++) cells.push('');
+        const cs = Math.max(1, parseInt(td.getAttribute('colspan') || '1', 10) || 1);
+        const rs = Math.max(1, parseInt(td.getAttribute('rowspan') || '1', 10) || 1);
+        grid[r][c] = text;
+        for (let i = r; i < r + rs; i++) {
+          taken[i] = taken[i] || []; grid[i] = grid[i] || [];
+          for (let j = c; j < c + cs; j++) { taken[i][j] = true; if (i !== r || j !== c) grid[i][j] = ''; }
+        }
+        if (cs > 1 || rs > 1) spans[(r + 1) + '.' + (c + 1)] = { rows: rs, cols: cs };
+        c += cs;
       }
-      if (cells.some((c) => c !== '')) rows.push(cells);
+      r++;
     }
+    const rows = grid.map((row) => Array.from(row, (x) => x == null ? '' : x));
+    // drop empty rows at the end only (an empty row inside a span keeps its place)
+    while (rows.length && rows[rows.length - 1].every((x) => x === '') && !Object.keys(spans).some((k) => { const [ar] = k.split('.').map(Number); const v = spans[k]; return ar + v.rows - 1 >= rows.length; })) rows.pop();
     if (rows.length < 1) return null;
-    const w = Math.max(...rows.map((r) => r.length));
-    rows.forEach((r) => { while (r.length < w) r.push(''); });
+    const w = Math.max(...rows.map((x) => x.length));
+    rows.forEach((x) => { while (x.length < w) x.push(''); });
     if (rows.length === 1) rows.push(rows[0].map(() => ''));
-    return serialize({ rows, aligns: [], style: parseStyle('') });
+    const style = parseStyle('');
+    for (const [k, v] of Object.entries(spans)) { const [ar] = k.split('.').map(Number); if (ar === 1 && v.rows > 1) { v.rows = 1; if (v.cols < 2) continue; } style.spans[k] = v; }
+    return serialize({ rows, aligns: [], style });
   }
 
   function fromTsv(text) {
@@ -676,5 +831,5 @@
     return fromHtml(html) || fromTsv(dt.getData && dt.getData('text/plain'));
   }
 
-  FS.tables = { spanMap, mergeCell, unmergeCell, splitAt, mergeTables, parse, serialize, splitRow, parseStyle, serializeStyle, render, template, fromHtml, fromTsv, fromClipboard, cellMarkdown };
+  FS.tables = { spanMap, mergeCell, unmergeCell, mergeRange, unmergeRange, growToSpans, splitAt, mergeTables, parse, serialize, splitRow, parseStyle, serializeStyle, render, template, fromHtml, fromTsv, fromClipboard, cellMarkdown };
 })();
