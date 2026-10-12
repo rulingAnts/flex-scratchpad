@@ -229,8 +229,13 @@
         }
       });
       body.addEventListener('paste', (e) => {
+        const dt = e.clipboardData;
+        // A table copied from Excel / Word / a browser comes with a bitmap AND an HTML table on
+        // the clipboard: the table wins (Seth, 2026-10-12: "I'd like it to land as a table").
+        const table = FS.tables.fromClipboard(dt);
+        if (table) { e.preventDefault(); this.insertBlockSourceAtCaret(body, b, table); return; }
         // image paste (files) — beforeinput does not expose them
-        const files = e.clipboardData && e.clipboardData.files;
+        const files = dt && dt.files;
         if (files && files.length && this.opts.onPasteImage) { e.preventDefault(); this.opts.onPasteImage(files[0], (md) => this.insertTextAtCaret(body, b, md)); }
       });
     }

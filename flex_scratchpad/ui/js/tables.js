@@ -381,7 +381,11 @@
       const cells = [];
       for (const td of tr.children) {
         if (!/^(td|th)$/i.test(td.tagName)) continue;
-        const text = cellMarkdown(td).replace(/ /g, ' ').split('\n').map((l) => l.trim()).join('\n').replace(/\n{2,}/g, '\n').trim();
+        let text = cellMarkdown(td).replace(/\u00a0/g, ' ').split('\n').map((l) => l.trim()).join('\n').replace(/\n{2,}/g, '\n').trim();
+        // Excel/Word style the CELL (font-weight on the td) rather than wrapping the text
+        const fw = (td.style && td.style.fontWeight) || '';
+        if (text && !text.includes('\n') && !/^\*\*/.test(text) && /^(bold|[6-9]00)$/.test(fw)) text = '**' + text + '**';
+        if (text && !text.includes('\n') && td.style && td.style.fontStyle === 'italic' && !/^\*/.test(text)) text = '*' + text + '*';
         cells.push(text);
         const span = parseInt(td.getAttribute('colspan') || '1', 10);
         for (let i = 1; i < span; i++) cells.push('');
