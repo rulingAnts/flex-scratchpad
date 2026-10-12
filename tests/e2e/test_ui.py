@@ -311,6 +311,15 @@ def test_insert_flex_into_table_cell_and_overlay(app):
     assert page.evaluate("document.querySelector('table.md-table').getBoundingClientRect().height") == height_before
     page.keyboard.press("Escape")
     page.wait_for_selector(".flex-overlay", state="detached")
+    # ⤢ shows the full card in the cell; the compact header's ⤡ collapses it back to a chip
+    page.locator("table.md-table .flex-collapsed .cexp").click()
+    page.wait_for_selector("table.md-table .entry-card")
+    page.wait_for_timeout(700)
+    assert "{{flex:entry 6a5f3a2e-1b1e-4c2a-9f10-0d2c1a7e0001 expanded}}" in body_of(h)
+    page.locator("table.md-table .flex-head.compact button[title='Collapse to a chip']").click()
+    page.wait_for_selector("table.md-table .flex-collapsed")
+    page.wait_for_timeout(700)
+    assert "expanded" not in body_of(h)
     # Ctrl+Shift+L from inside a cell reaches the app too
     cell2 = page.locator("table.md-table td .cell-view").nth(3)
     cell2.dispatch_event("mousedown")

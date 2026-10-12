@@ -162,7 +162,7 @@
     const range = obj.range || [segs[0] && segs[0].n, segs.length && segs[segs.length - 1].n];
     const rangeLabel = segs.length ? (range[0] === range[1] ? 'segment ' + range[0] : 'segments ' + range[0] + '–' + range[1]) + ' of ' + obj.segmentCount : 'no segments';
 
-    const head = el('div', { class: 'flex-head' },
+    const head = el('div', { class: 'flex-head' + (opts.inCell ? ' compact' : '') },
       el('span', Object.assign({ class: 'ttl vern' }, wsAttrs(vern)), obj.title || '(untitled text)'),
       el('span', { class: 'badge' }, rangeLabel),
       obj.cached ? el('span', { class: 'badge warn', title: obj.liveError || 'Shown from the notebook cache' }, 'cached' + (obj.cachedAt ? ' ' + obj.cachedAt.slice(0, 10) : '')) : null,
@@ -466,7 +466,7 @@
     const box = el('div', { class: 'flex-obj entry-card' + (obj.cached ? ' cached' : '') });
     const hw = el('span', Object.assign({ class: 'headword' }, wsAttrs(vern)), obj.headword || obj.lexemeForm || '?');
     if (obj.homograph) hw.appendChild(el('sub', {}, String(obj.homograph)));
-    const head = el('div', { class: 'flex-head' }, hw);
+    const head = el('div', { class: 'flex-head' + (opts.inCell ? ' compact' : '') }, hw);
     if (obj.citationForm && obj.citationForm !== obj.headword && obj.citationForm !== obj.lexemeForm) head.appendChild(el('span', Object.assign({ class: 'ecf' }, wsAttrs(vern)), obj.citationForm));
     if (obj.morphType) head.appendChild(el('span', { class: 'mtype' }, obj.morphType));
     if (obj.cached) head.appendChild(el('span', { class: 'badge warn', title: obj.liveError || '' }, 'cached' + (obj.cachedAt ? ' ' + obj.cachedAt.slice(0, 10) : '')));

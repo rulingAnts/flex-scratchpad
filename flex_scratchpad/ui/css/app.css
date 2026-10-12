@@ -343,7 +343,13 @@ table.md-table.wide { max-width: none; }
 .cell-edit:focus { box-shadow: inset 0 0 0 2px var(--accent); border-radius: 2px; }
 .cell-view { white-space: pre-wrap; overflow-wrap: anywhere; cursor: text; }
 .cell-view .flex-obj { padding: 4px 6px 2px; border: 0; background: none; }
-.cell-view .flex-obj .flex-head { display: none; }
+/* inside a table cell the header keeps only its buttons (collapse, reload, open, ⋯) */
+.cell-view .flex-obj .flex-head.compact > :not(.spacer):not(button):not(a) { display: none; }
+.cell-view .flex-obj .flex-head.compact { margin: 0 0 2px; justify-content: flex-end; }
+.cell-view .flex-obj .flex-head.compact .lnk, .cell-view .flex-obj .flex-head.compact a { font-size: 12px; padding: 0 3px; }
+/* an example in a cell stays on one line; the table scrolls sideways rather than stacking words */
+.cell-view .word-row { flex-wrap: nowrap; }
+.cell-view .seg-free, .cell-view .seg-lit, .cell-view .seg-note { white-space: normal; }
 .cell-view .segment { padding: 2px 0; border: 0; }
 .cell-view .seg-gutter { width: 22px; }
 .cell-view .il-txt { font-size: 15.5px; }
