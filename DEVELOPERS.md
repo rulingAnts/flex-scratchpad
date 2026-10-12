@@ -1,0 +1,95 @@
+# FLEx Scratchpad — developer notes
+
+## Architecture
+
+```
+┌─────────────────────────── pywebview window (WebView2 on Windows) ───────────────────────────┐
+│  file:///…/flex_scratchpad/ui/index.html                                                      │
+│  app.js (shell) · editor.js (blocks) · interlinear.js (FLEx rendering, styling, audio)        │
+│  tables.js · charts.js · picker.js · markdown.js · flexref.js · api.js                        │
+│                 window.pywebview.api.<method>(...)  →  Promise                                │
+└──────────────────────────────────────────┬───────────────────────────────────────────────────┘
+                                           │ js_api (JSON; one Python thread per call)
+┌──────────────────────────────────────────▼───────────────────────────────────────────────────┐
+│ api.Api ── notebook.Notebook (files + index, RLock)                                           │
+│        └── flex.FlexService (RLock) ── backend: FlexiconBackend | FlextextBackend | DemoBackend│
+│                                     ── cache.SnapshotCache (.scratchpad/flex-cache/<project>/) │
+│                                     ── audio.cut_clip (wave → ffmpeg → UI capture)             │
+│ FlexiconBackend → LcmWorker thread → flexicon.FLExProject (read-only) → FieldWorks LCM DLLs    │
+└──────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+There is deliberately no network layer. The UI loads from the package's own files and every
+call to Python is a pywebview `js_api` call (see `ui/js/api.js`). `ui/js/api.js` falls back to a
+JavaScript mock with demo data when no bridge is present, so the page runs in any browser.
+
+## Data flow for an embed
+
+1. The note contains `{{flex:text <guid> seg=3-5 …}}` (a `flex` block, or inline in a table cell).
+2. `flexref.parse` → spec. `interlinear.render` asks `api.flex_get('text', guid, 3, 5)`.
+3. `FlexService.get_object` tries the live backend (pages ≤ 60 segments), snapshots the result
+   (`cache.merge_text` accumulates every range seen), and returns it with `cached: false`. If the
+   backend is closed or fails, the snapshot comes back with `cached: true, liveError`.
+4. `interlinear.renderText` lays out segments (word cells: txt / morph / mgls / cf / gls / pos;
+   then free / literal / notes), applying `flexref.resolveStyles(spec, obj)` — an index keyed
+   `segment|line|word` → `[{style, color, chars}]`, char ranges in grapheme clusters.
+5. A click opens the style popover; `flexref.toggleStyle` mutates the spec; the editor writes
+   `flexref.serialize(spec)` back into the block source (or the table cell) and autosaves.
+
+## Audio
+
+`FlexService.ensure_clip(text, media, begin, end)` resolves the media file (LinkedFiles + URI,
+then the remembered mapping for that media guid, then basename search in remembered folders),
+cuts the clip into `.scratchpad/flex-cache/<project>/audio/<text>_<begin>-<end>.wav` (stdlib
+`wave` for WAV, `ffmpeg` if present for anything else) and tells the UI where to play from. If
+neither cutter can do it, the UI records the range once with `MediaRecorder` and stores it
+through `audio_store_clip`. Playback is a plain `<audio src="file://…">` seeking to `begin` and
+pausing at `end` (requestAnimationFrame tick, ±15 ms).
+
+## Search
+
+`Notebook` keeps two normalised blobs per note (NFKC+casefold, and NFKD with marks stripped) built
+from title, body, tags, folder, tab and `extra_text(body)` — which `FlexService.searchable_text_for_body`
+fills with the headwords, glosses, baselines and free translations of every embedded object's
+snapshot. Query grammar: words (AND), `"phrases"`, `tag:x` / `#x`, `tab:x`, `folder:x`. Ranking:
+title 10, tag 5, body 0.5 per hit (capped). Snippets map normalised hit offsets back to the
+original text through a per-character index map so marks land on the real characters.
+
+## The flexicon backend, honestly
+
+`flex/lcm.py` was written from flexicon 4.12's source (`FLExProject.OpenProject`, the
+`Texts/Paragraphs/Segments/WfiAnalyses/WfiMorphBundles/Senses/Examples/WritingSystems` operation
+namespaces, `LexiconGet*`, `Object(guid)`, `BuildGotoURL`) and the LCM property names
+(`SegmentsOS`, `AnalysesRS`, `MediaFilesOA.MediaURIsOC`, `BeginTimeOffset`, `MorphTypeRA`…), on a
+machine without FieldWorks. Every access goes through `_t(fn, default)`, so a wrong property name
+yields an empty string rather than an exception, and `_friendly()` maps flexicon's exceptions to
+plain messages (`FP_FileLockedError` → the Sharing-tab remedy; `FP_MigrationRequired`; missing
+module). First contact checklist on Windows:
+
+```bat
+flex-scratchpad --check
+flex-scratchpad --list-projects
+python -c "from flex_scratchpad.flex.lcm import FlexiconBackend as B; b=B(); print(b.open('MyProject')); print(b.list_texts()[:3]); print(b.search_entries('a')[:3]); b.close()"
+```
+
+Then compare a rendered text with FLEx's interlinear view and fix property names in
+`_segment_dict` / `_word_dict` / `_entry_dict` as needed.
+
+## Packaging
+
+`build/flex-scratchpad.spec` is a PyInstaller `--onedir` build (onefile would make a bootloader
+parent + child pair that is easy to orphan). flexicon/pythonnet are not bundled: they depend on
+the installed FieldWorks. `python -m flex_scratchpad --check` tells a user what is missing.
+
+## Tests
+
+- `tests/test_*.py` — notebook, FLEx layer (model, flextext fixture, demo, cache, audio,
+  service), Api surface.
+- `tests/js/*.test.js` — the classic UI scripts loaded into a `vm` context (`tests/js/load.js`):
+  markdown blocks/decoration, embed grammar + style resolution, table parsing, chart DSL.
+- `tests/e2e/test_ui.py` — Playwright drives `index.html` as a `file://` page; a single exposed
+  binding routes `window.pywebview.api` calls into the real `Api` on a temp notebook with the demo
+  backend (exactly pywebview's contract, including `{message, name}` rejections). Covers picker
+  insert, click-to-highlight writing the embed attributes, pasted FLEx links, typing flows and
+  undo, table cell editing with an embed in a cell, charts, RTL rendering, audio seek/stop and
+  clip caching, search/tags/find, and the no-Python mock mode.

@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.egg-info/
+build/dist/
+build/work/
+dist/
+.pytest_cache/
+.venv/
+venv/
+node_modules/
+*.tmp
+.DS_Store
+Thumbs.db
+# a notebook accidentally created inside the repo while testing
+"FLEx Scratchpad"/
+notes/

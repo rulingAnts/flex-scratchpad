@@ -1,0 +1,174 @@
+/* picker.js — the "Insert FLEx object" dialog: search the lexicon or the texts of the open
+ * project, preview, pick a segment range (click first and last, or find by pasted text), and
+ * insert as a rendered embed or as a link chip. Also the chooser shown when a FLEx hyperlink
+ * (Edit → Copy Location as Hyperlink) is pasted into a note. */
+(function () {
+  'use strict';
+  const FS = (window.FS = window.FS || {});
+  const { el } = FS;
+
+  function embedFor(kind, guid, extra) {
+    const spec = { kind, guid, seg: null, lines: null, styles: [], label: '', extra: {} };
+    if (extra && extra.seg) spec.seg = extra.seg;
+    return FS.flexref.serialize(spec);
+  }
+  function linkFor(kind, guid, label) {
+    return '[' + (label || kind).replace(/[\[\]]/g, '') + '](flex:' + (kind === 'sense' ? 'entry' : kind) + '/' + guid + ')';
+  }
+
+  /* onInsert(markdown, asBlock) */
+  function open(onInsert, opts) {
+    opts = opts || {};
+    const m = FS.modal({ title: 'Insert from FieldWorks' });
+    const state = { mode: opts.mode || 'lexicon', sel: null, text: null, range: null, anchor: null, lines: null };
+    const left = el('div', { class: 'picker-left' });
+    const right = el('div', { class: 'picker-right' });
+    const tabs = el('div', { class: 'picker-tabs' });
+    const search = el('input', { type: 'text', placeholder: 'Search headword or gloss…', autofocus: true });
+    const results = el('div', { class: 'picker-results' });
+    const preview = el('div', { class: 'picker-preview' }, el('div', { class: 'muted small' }, 'Pick something on the left.'));
+    const optsRow = el('div', { class: 'picker-opts' });
+    const btnRow = el('div', { class: 'btn-row' });
+    left.append(tabs, search, results);
+    right.append(preview, optsRow, btnRow);
+    m.body.appendChild(el('div', { class: 'picker' }, left, right));
+    const modes = [['lexicon', 'Lexicon'], ['texts', 'Texts']];
+    const setMode = (mode) => {
+      state.mode = mode; state.sel = null; state.text = null; state.range = null;
+      tabs.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.mode === mode));
+      search.placeholder = mode === 'lexicon' ? 'Search headword or gloss…' : 'Search text titles…';
+      preview.innerHTML = '<div class="muted small">' + (mode === 'lexicon' ? 'Pick an entry on the left.' : 'Pick a text, then click the first and last segment of the range.') + '</div>';
+      optsRow.innerHTML = ''; btnRow.innerHTML = '';
+      doSearch();
+      search.focus();
+    };
+    for (const [mode, label] of modes) tabs.appendChild(el('button', { dataset: { mode }, onclick: () => setMode(mode) }, label));
+    const doSearch = FS.debounce(async () => {
+      results.innerHTML = '<div class="pick-item muted">Searching…</div>';
+      try {
+        if (state.mode === 'lexicon') {
+          const hits = await FS.api.flex_search_entries(search.value.trim(), 60);
+          results.innerHTML = '';
+          if (!hits.length) results.appendChild(el('div', { class: 'pick-item muted' }, search.value ? 'No entries match.' : 'Type to search the lexicon.'));
+          for (const h of hits) {
+            const it = el('div', { class: 'pick-item' }, el('span', { class: 'hw' }, h.headword || h.lexeme || '?'), h.pos ? el('span', { class: 'pos' }, h.pos) : null, el('span', { class: 'gl' }, h.gloss || ''), h.senses > 1 ? el('span', { class: 'n' }, h.senses + ' senses') : null);
+            it.addEventListener('click', () => { results.querySelectorAll('.on').forEach((x) => x.classList.remove('on')); it.classList.add('on'); pickEntry(h); });
+            results.appendChild(it);
+          }
+        } else {
+          const hits = await FS.api.flex_texts(search.value.trim());
+          results.innerHTML = '';
+          if (!hits.length) results.appendChild(el('div', { class: 'pick-item muted' }, 'No texts.'));
+          for (const h of hits) {
+            const it = el('div', { class: 'pick-item' }, el('span', { class: 'hw' }, h.title || '(untitled)'), h.abbrev ? el('span', { class: 'pos' }, h.abbrev) : null, el('span', { class: 'n' }, (h.segmentCount || 0) + ' seg' + (h.hasMedia ? ' ♫' : '')));
+            it.addEventListener('click', () => { results.querySelectorAll('.on').forEach((x) => x.classList.remove('on')); it.classList.add('on'); pickText(h); });
+            results.appendChild(it);
+          }
+        }
+      } catch (e) {
+        results.innerHTML = '';
+        results.appendChild(el('div', { class: 'pick-item', style: { color: 'var(--danger)' } }, e.message));
+      }
+    }, 180);
+    search.addEventListener('input', doSearch);
+
+    async function pickEntry(h) {
+      state.sel = { kind: 'entry', guid: h.guid, title: h.headword };
+      preview.innerHTML = '';
+      const host = el('div');
+      preview.appendChild(host);
+      await FS.interlinear.render(host, { kind: 'entry', guid: h.guid, styles: [], lines: null, seg: null, label: '', extra: {} }, { editable: false });
+      // allow choosing a sense
+      host.querySelectorAll('.sense').forEach((s, i) => {
+        s.classList.add('clickable');
+        s.title = 'Insert just this sense';
+        s.addEventListener('click', () => { host.querySelectorAll('.sense').forEach((x) => x.classList.remove('focus')); s.classList.add('focus'); state.sel.senseIndex = i; });
+      });
+      optsRow.innerHTML = '';
+      btnRow.innerHTML = '';
+      btnRow.append(
+        el('button', { class: 'btn', onclick: () => { onInsert(linkFor('entry', h.guid, h.headword), false); m.close(); } }, 'Insert link'),
+        el('button', { class: 'btn primary', onclick: async () => {
+          let guid = h.guid, kind = 'entry';
+          if (state.sel.senseIndex != null) { try { const e = await FS.api.flex_get('entry', h.guid); const s = e.senses[state.sel.senseIndex]; if (s && s.guid) { guid = s.guid; kind = 'sense'; } } catch (e) { /* fall back to the entry */ } }
+          onInsert(embedFor(kind, guid), true); m.close();
+        } }, 'Insert rendered'));
+    }
+
+    async function pickText(h) {
+      state.text = h; state.range = null; state.anchor = null;
+      preview.innerHTML = '<div class="flex-loading">Loading…</div>';
+      let obj;
+      try { obj = await FS.api.flex_get('text', h.guid, 1, Math.min(h.segmentCount || 60, 60)); }
+      catch (e) { preview.innerHTML = ''; preview.appendChild(el('div', { class: 'flex-err' }, e.message)); return; }
+      state.obj = obj;
+      renderPreview();
+      optsRow.innerHTML = '';
+      const from = el('input', { type: 'number', min: 1, max: obj.segmentCount, value: 1 });
+      const to = el('input', { type: 'number', min: 1, max: obj.segmentCount, value: Math.min(obj.segmentCount, 3) });
+      const find = el('input', { type: 'text', placeholder: 'find segment by text…', style: { width: '180px', border: '1px solid var(--border)', borderRadius: '6px', padding: '3px 6px', background: 'var(--bg)' } });
+      const findBtn = el('button', { class: 'btn', onclick: async () => {
+        if (!find.value.trim()) return;
+        try {
+          const hits = await FS.api.flex_find_in_text(h.guid, find.value.trim());
+          if (!hits.length) { FS.toast('No segment contains that text'); return; }
+          state.range = [hits[0], hits[0]]; from.value = hits[0]; to.value = hits[0];
+          if (hits[0] > (obj.range ? obj.range[1] : 60)) { obj = await FS.api.flex_get('text', h.guid, Math.max(1, hits[0] - 5), hits[0] + 30); state.obj = obj; }
+          renderPreview();
+          const seg = preview.querySelector('.segment[data-n="' + hits[0] + '"]');
+          if (seg) seg.scrollIntoView({ block: 'center' });
+          FS.toast(hits.length + ' segment' + (hits.length > 1 ? 's' : '') + ' match: ' + hits.slice(0, 8).join(', '));
+        } catch (e) { FS.toast(e.message, 'error'); }
+      } }, 'Find');
+      const applyRange = () => { const a = Math.max(1, +from.value || 1), b = Math.max(a, +to.value || a); state.range = [a, b]; renderPreview(); };
+      from.addEventListener('change', applyRange); to.addEventListener('change', applyRange);
+      state.setRange = (a, b) => { from.value = a; to.value = b; state.range = [a, b]; renderPreview(); };
+      find.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); findBtn.click(); } });
+      optsRow.append(el('label', {}, 'Segments ', from, ' – ', to), el('span', { class: 'muted' }, 'of ' + obj.segmentCount), find, findBtn);
+      btnRow.innerHTML = '';
+      btnRow.append(
+        el('button', { class: 'btn', onclick: () => { onInsert(linkFor('text', h.guid, h.title), false); m.close(); } }, 'Insert link'),
+        el('button', { class: 'btn', onclick: () => { onInsert(embedFor('text', h.guid), true); m.close(); } }, 'Whole text'),
+        el('button', { class: 'btn primary', onclick: () => { const r = state.range || [+from.value || 1, +to.value || 1]; onInsert(embedFor('text', h.guid, { seg: [Math.min(r[0], r[1]), Math.max(r[0], r[1])] }), true); m.close(); } }, 'Insert segments'));
+    }
+
+    function renderPreview() {
+      const obj = state.obj;
+      preview.innerHTML = '';
+      const node = FS.interlinear.renderText(obj, { kind: 'text', guid: obj.guid, seg: obj.range, lines: null, styles: [], label: '', extra: {} }, { editable: false });
+      node.querySelectorAll('.segment').forEach((segEl) => {
+        const n = +segEl.dataset.n;
+        segEl.classList.add('pick');
+        if (state.range && n >= state.range[0] && n <= state.range[1]) segEl.classList.add('in-range');
+        segEl.addEventListener('click', (e) => {
+          if (e.target.closest('.seg-play, a, button')) return;
+          if (state.anchor == null || e.shiftKey === false && state.range && state.range[0] !== state.range[1]) { state.anchor = n; state.setRange(n, n); }
+          else { const a = Math.min(state.anchor, n), b = Math.max(state.anchor, n); state.setRange(a, b); state.anchor = null; }
+        });
+      });
+      preview.appendChild(el('div', { class: 'muted small', style: { marginBottom: '6px' } }, 'Click the first and then the last segment of the range you want.'));
+      preview.appendChild(node);
+    }
+
+    setMode(state.mode);
+    return m;
+  }
+
+  /* A FLEx link was pasted: resolve it and ask how to insert it. insert(md, asBlock). */
+  async function pasteChooser(text, insert) {
+    let info = null;
+    try { info = await FS.api.flex_resolve_link(text); } catch (e) { info = null; }
+    if (!info) { insert(text, false); return; }
+    const m = FS.modal({ title: 'FieldWorks link', class: 'narrow' });
+    const what = info.kind === 'entry' ? 'Entry' : info.kind === 'text' ? 'Text' : info.kind === 'wordform' ? 'Wordform' : 'Object';
+    m.body.appendChild(el('p', {}, el('b', {}, what + ': '), info.title || info.guid, info.sense ? ' (sense ' + info.sense + ')' : '', info.seg ? ' — segment ' + info.seg + (info.segTo && info.segTo !== info.seg ? '–' + info.segTo : '') : ''));
+    if (info.database && info.unresolved) m.body.appendChild(el('p', { class: 'muted small' }, 'This link points at the project “' + info.database + '”, which is not the open project; the object will show once that project is open (it is inserted anyway).'));
+    const row = el('div', { class: 'btn-row' });
+    row.appendChild(el('button', { class: 'btn', onclick: () => { insert(text, false); m.close(); } }, 'Paste as text'));
+    row.appendChild(el('button', { class: 'btn', onclick: () => { insert(linkFor(info.kind === 'other' ? 'entry' : info.kind, info.guid, info.title || what), false); m.close(); } }, 'Insert link'));
+    if (info.kind !== 'other') row.appendChild(el('button', { class: 'btn primary', onclick: () => { const extra = info.seg ? { seg: [info.seg, info.segTo || info.seg] } : null; insert(embedFor(info.kind, info.guid, extra), true); m.close(); } }, 'Insert rendered'));
+    m.body.appendChild(row);
+  }
+
+  FS.picker = { open, pasteChooser, embedFor, linkFor };
+})();

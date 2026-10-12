@@ -1,0 +1,177 @@
+"""The FLEx layer without FieldWorks: model + links, the .flextext fallback, the demo backend,
+the snapshot cache, audio clips, and the service's live-then-cached behaviour."""
+import wave
+from pathlib import Path
+
+import pytest
+
+from conftest import FIXTURES
+from flex_scratchpad.flex import FlexService, model
+from flex_scratchpad.flex.audio import cut_clip
+from flex_scratchpad.flex.cache import SnapshotCache
+from flex_scratchpad.flex.demo import DemoBackend, T_STORY, T_ARAB, E, write_demo_wav
+from flex_scratchpad.flex.flextext import FlextextBackend, FlextextFile
+from flex_scratchpad.flex.lcm import FlexError, _friendly
+from flex_scratchpad.notebook import Notebook
+
+
+def test_goto_url_and_parse():
+    url = model.goto_url("My Project", "entry", "6a5f3a2e-1b1e-4c2a-9f10-0d2c1a7e0001")
+    assert url == "silfw://localhost/link?app=flex&server=&database=My%20Project&tool=lexiconEdit&guid=6a5f3a2e-1b1e-4c2a-9f10-0d2c1a7e0001"
+    assert model.goto_url("p", "text", "x").endswith("tool=interlinearEdit&guid=x")
+    info = model.parse_silfw("silfw://localhost/link?app=flex&server=&database=Kalu&tool=interlinearEdit&guid=9B1C2D3E-4F50-4A6B-8C7D-0E1F2A3B0001&tag=")
+    assert info == {"database": "Kalu", "tool": "interlinearEdit", "guid": "9b1c2d3e-4f50-4a6b-8c7d-0e1f2a3b0001", "tag": ""}
+    assert model.parse_silfw("https://example.org") is None
+    assert model.parse_silfw("silfw://localhost/link?app=flex&guid=nope") is None
+
+
+def test_tokenize_and_baseline():
+    toks = model.tokenize("“Ɲamú!” ka-sila lo.")
+    assert [t["txt"] for t in toks] == ["“", "Ɲamú", "!”", "ka-sila", "lo", "."]
+    assert [t["punct"] for t in toks] == [True, False, True, False, False, True]
+    assert model.baseline_from_words(toks) == "“Ɲamú!” ka-sila lo."
+
+
+def test_flextext_parse(tmp_path):
+    f = FlextextFile(FIXTURES / "sample.flextext")
+    assert f.vern_lang == "kal" and f.anal_lang == "en"
+    assert len(f.texts) == 1
+    t = f.texts[0]
+    assert t["title"] == "Kabir pemu" and t["abbrev"] == "KP" and t["segmentCount"] == 3
+    assert t["ws"]["vern"]["font"] == "Charis SIL"
+    s1 = t["segments"][0]
+    assert s1["n"] == 1 and s1["para"] == 1 and s1["baseline"] == "Kabir ka-nuwa-mo lo."
+    assert s1["free"] == "The dog slept." and s1["notes"] == ["First sentence."]
+    assert s1["begin"] == 0 and s1["end"] == 1200 and s1["media"] == "cccccccc-0000-4000-8000-000000000001"
+    w = s1["words"][1]
+    assert w["txt"] == "ka-nuwa-mo" and w["gls"] == "slept" and w["pos"] == "v"
+    assert [m["form"] for m in w["morphs"]] == ["ka-", "nuwa", "-mo"]
+    assert [m["gls"] for m in w["morphs"]] == ["3SG", "sleep", "PST"]
+    assert s1["words"][3]["punct"] is True
+    s2 = t["segments"][1]
+    assert s2["lit"] == "Child DECL." and s2["para"] == 1
+    s3 = t["segments"][2]
+    assert s3["para"] == 2 and s3["free"] == "Free translation before the words."
+    assert s3["baseline"] == "pemu lo"            # reconstructed: no txt item, morphemes-only word
+    assert t["media"][0]["found"] is False and t["media"][0]["uri"].endswith("sample.wav")
+
+
+def test_flextext_media_resolution_by_basename(tmp_path):
+    media = tmp_path / "audio" / "deep"
+    media.mkdir(parents=True)
+    write_demo_wav(media / "sample.wav", seconds=0.2)
+    f = FlextextFile(FIXTURES / "sample.flextext", media_folders=[str(tmp_path / "audio")])
+    m = f.texts[0]["media"][0]
+    assert m["found"] and m["path"].endswith("sample.wav") and m["fileUrl"].startswith("file://")
+
+
+def test_flextext_backend_pages_and_resolves():
+    be = FlextextBackend(str(FIXTURES / "sample.flextext"))
+    assert be.status()["texts"] == 1 and be.list_texts()[0]["segmentCount"] == 3
+    page = be.get_text("11111111-2222-4333-8444-555555555555", 2, 3)
+    assert [s["n"] for s in page["segments"]] == [2, 3] and page["range"] == [2, 3] and page["segmentCount"] == 3
+    assert be.resolve_guid("BBBBBBBB-0000-4000-8000-000000000002") == {"kind": "text", "guid": "11111111-2222-4333-8444-555555555555", "title": "Kabir pemu", "seg": 2}
+    assert be.search_entries("x") == []
+    with pytest.raises(KeyError):
+        be.get_entry("11111111-2222-4333-8444-555555555555")
+
+
+def test_demo_backend(tmp_path):
+    be = DemoBackend(media_dir=tmp_path)
+    assert (tmp_path / "AudioVisual" / "kalu-story.wav").exists()
+    assert be.get_text(T_STORY)["media"][0]["found"]
+    assert be.get_text(T_ARAB)["ws"]["vern"]["rtl"] is True
+    hits = be.search_entries("ka")
+    assert [h["headword"] for h in hits] == ["kabir", "ka-"]
+    e = be.get_entry(E["kabir"])
+    assert len(e["senses"]) == 2 and e["senses"][0]["examples"][0]["translation"] == "the dog is sleeping"
+    senses = {s["guid"] for en in [be.get_entry(g) for g in E.values()] for s in en["senses"]}
+    assert len(senses) == sum(len(be.get_entry(g)["senses"]) for g in E.values())   # sense guids are unique
+    assert be.resolve_guid(e["senses"][1]["guid"])["sense"] == "2"
+    assert be.get_text(T_STORY, 1, None, max_segments=2)["range"] == [1, 2]
+
+
+def test_cache_merges_text_pages(tmp_path):
+    c = SnapshotCache(tmp_path)
+    be = DemoBackend()
+    c.merge_text("P", T_STORY, be.get_text(T_STORY, 1, 2))
+    c.merge_text("P", T_STORY, be.get_text(T_STORY, 5, 6))
+    snap = c.get("P", "text", T_STORY)
+    assert [s["n"] for s in snap["segments"]] == [1, 2, 5, 6] and snap["cached"] is True and snap["cachedAt"]
+    assert c.find("text", T_STORY)["title"] == "The dog and the river"
+    assert c.get("P", "entry", "nope") is None
+
+
+def test_cut_wav_clip(tmp_path):
+    src = write_demo_wav(tmp_path / "a.wav", seconds=2.0, rate=8000)
+    dst = tmp_path / "clip.wav"
+    assert cut_clip(src, dst, 500, 1250) == dst
+    with wave.open(str(dst)) as w:
+        assert w.getnframes() == 6000 and w.getframerate() == 8000
+    assert cut_clip(src, tmp_path / "x.wav", 900, 900) is None
+
+
+def test_service_live_then_cached(tmp_path):
+    nb = Notebook(tmp_path)
+    svc = FlexService(nb)
+    svc.configure(source="demo", project="Kalu Demo")
+    st = svc.open()
+    assert st["open"] and st["backend"] == "demo"
+    live = svc.get_object("text", T_STORY, 1, 2)
+    assert live["cached"] is False and len(live["segments"]) == 2
+    entry = svc.get_object("sense", E["kabir"])
+    assert entry["kind"] == "entry" and entry["cached"] is False
+    # searchable text for the index comes from the snapshots
+    body = "x {{flex:text %s seg=1-2}} y [k](flex:entry/%s)" % (T_STORY, E["kabir"])
+    txt = svc.searchable_text_for_body(body)
+    assert "Kabir" in txt and "slept" in txt and "domestic dog" in txt
+    # link resolution
+    r = svc.resolve_link("silfw://localhost/link?app=flex&server=&database=Kalu%20Demo&tool=lexiconEdit&guid=" + E["tiket"] + "&tag=")
+    assert r["kind"] == "entry" and r["title"] == "tiket" and r["database"] == "Kalu Demo"
+    assert svc.resolve_link("not a link") is None
+    # find by text
+    assert svc.find_in_text(T_STORY, "kabir") == [1, 4, 6]
+    assert svc.find_in_text(T_STORY, "the child saw") == [2]
+    # audio clip is cut into the cache
+    clip = svc.ensure_clip(T_STORY, None, 1500, 3200)
+    assert clip["found"] and Path(clip["clipPath"]).exists() and clip["needsCapture"] is False
+    # close the source: snapshots keep the note readable
+    svc.close()
+    cached = svc.get_object("text", T_STORY, 2, 2)
+    assert cached["cached"] is True and [s["n"] for s in cached["segments"]] == [2] and cached["liveError"]
+    assert svc.get_object("entry", E["kabir"])["cached"] is True
+    with pytest.raises(FlexError):
+        svc.get_object("entry", E["pemu"])          # never fetched, never cached
+
+
+def test_media_browse_mapping_persists(tmp_path):
+    nb = Notebook(tmp_path)
+    svc = FlexService(nb)
+    svc.configure(source="demo")
+    svc.open()
+    wav = write_demo_wav(tmp_path / "elsewhere" / "real.wav", seconds=0.3)
+    svc.set_media_path("c0ffee00-0000-4000-8000-00000000a001", str(wav))
+    nb2 = Notebook(tmp_path)
+    assert nb2.config["media"]["byGuid"]["c0ffee00-0000-4000-8000-00000000a001"] == str(wav)
+    assert str(wav.parent) in nb2.config["media"]["folders"]
+    assert svc.get_object("text", T_STORY, 1, 1)["media"][0]["path"] == str(wav)
+
+
+def test_friendly_errors():
+    class FP_FileLockedError(Exception):
+        pass
+    e = _friendly(FP_FileLockedError("locked"), "Proj")
+    assert e.code == "locked" and "Sharing" in e.message
+    assert _friendly(ImportError("no module named clr")).code == "no-flexicon"
+
+
+def test_lcm_module_imports_without_flexicon():
+    """The LCM backend must be importable (and fail politely) on machines without FieldWorks."""
+    from flex_scratchpad.flex.lcm import FlexiconBackend
+    be = FlexiconBackend()
+    try:
+        with pytest.raises(FlexError) as ei:
+            be.list_projects()
+        assert ei.value.code in ("no-flexicon", "lcm")
+    finally:
+        be.close()
