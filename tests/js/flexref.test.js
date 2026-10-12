@@ -77,3 +77,11 @@ test('findAll is grapheme and diacritic aware', () => {
   assert.deepEqual(R.findAll('éá', 'a', false), [[2, 2]]);       // combining marks stay with their base
   assert.deepEqual(R.findEmbeds('x {{flex:entry 6a5f3a2e-1b1e-4c2a-9f10-0d2c1a7e0001}} y').map((e) => e.spec.kind), ['entry']);
 });
+
+test('ws= pins a writing system per line and round-trips', () => {
+  const src = '{{flex:text ' + G + ' seg=2 lines=txt,gls,ft ws=txt:fau-fonipa,gls:id,ft:id hl=2.1}}';
+  const spec = R.parse(src);
+  assert.deepEqual(spec.ws, { txt: 'fau-fonipa', gls: 'id', ft: 'id' });
+  assert.equal(R.serialize(spec), src);
+  assert.equal(R.parse('{{flex:text ' + G + ' ws=bogus:x}}').ws, null);
+});

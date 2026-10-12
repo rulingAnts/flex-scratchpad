@@ -150,10 +150,14 @@ class FlexService:
     # -- objects ----------------------------------------------------------------
 
     def get_object(self, kind: str, guid: str, seg_from: int | None = None, seg_to: int | None = None,
-                   prefer_cache: bool = False) -> dict:
-        """Live object (snapshotted on the way through) or the snapshot when live fails."""
+                   prefer_cache: bool = False, ws: dict | None = None) -> dict:
+        """Live object (snapshotted on the way through) or the snapshot when live fails.
+        `ws` pins a writing system per interlinear line ({"txt": "fau-fonipa", "gls": "id"});
+        such a selection is snapshotted under its own variant key."""
         kind = "entry" if kind == "sense" else kind
         guid = (guid or "").lower()
+        ws = {k: v for k, v in (ws or {}).items() if v} or None
+        variant = guid if not ws else guid + "~" + "-".join(k + "_" + v for k, v in sorted(ws.items())).lower()
         with self.lock:
             live_err = None
             if not prefer_cache:
@@ -163,8 +167,8 @@ class FlexService:
                         obj = be.get_entry(guid)
                         self.cache.put(self.project_name, "entry", guid, obj)
                     elif kind == "text":
-                        obj = be.get_text(guid, seg_from, seg_to)
-                        self.cache.merge_text(self.project_name, guid, obj)
+                        obj = be.get_text(guid, seg_from, seg_to, ws=ws)
+                        self.cache.merge_text(self.project_name, variant, obj)
                     elif kind == "wordform":
                         obj = be.get_wordform(guid)
                         self.cache.put(self.project_name, "wordform", guid, obj)
@@ -177,7 +181,8 @@ class FlexService:
                     live_err = e
                 except Exception as e:  # noqa: BLE001
                     live_err = FlexError(str(e), "", "lcm")
-            snap = self.cache.get(self.project_name, kind, guid) or self.cache.find(kind, guid)
+            snap = self.cache.get(self.project_name, kind, variant) or self.cache.find(kind, variant) \
+                or (self.cache.get(self.project_name, kind, guid) or self.cache.find(kind, guid) if ws else None)
             if snap:
                 if kind == "text":
                     from .flextext import slice_text

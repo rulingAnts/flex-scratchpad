@@ -11,7 +11,7 @@ import re
 import time
 from pathlib import Path
 
-_SAFE = re.compile(r"[^\w.\-]+", re.UNICODE)
+_SAFE = re.compile(r"[^\w.\-~]+", re.UNICODE)
 
 
 def _safe(s: str) -> str:
@@ -26,7 +26,7 @@ class SnapshotCache:
         return self.root / _safe(project)
 
     def _path(self, project: str, kind: str, guid: str) -> Path:
-        return self.project_dir(project) / f"{kind}-{(guid or '').lower()}.json"
+        return self.project_dir(project) / f"{kind}-{_SAFE.sub('_', (guid or '').lower())}.json"
 
     def put(self, project: str, kind: str, guid: str, obj: dict) -> None:
         p = self._path(project, kind, guid)

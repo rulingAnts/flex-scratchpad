@@ -482,11 +482,17 @@
       if (st[k + 'Collapsed']) { st[k + 'Collapsed'] = false; savePanes(st); applyPanes(); }
       const startX = e.clientX;
       const startW = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--' + k + '-w')) || PANES[k].dflt;
-      sp.classList.add('dragging'); document.body.classList.add('resizing');
-      const move = (ev) => { const w = Math.min(PANES[k].max, Math.max(PANES[k].min, startW + ev.clientX - startX)); document.documentElement.style.setProperty('--' + k + '-w', w + 'px'); };
+      // the drag styling (and the pointer-events lock) only once the mouse really moves, so a
+      // double-click on the splitter still reaches the splitter
+      let moved = false;
+      const move = (ev) => {
+        if (!moved) { if (Math.abs(ev.clientX - startX) < 3) return; moved = true; sp.classList.add('dragging'); document.body.classList.add('resizing'); }
+        const w = Math.min(PANES[k].max, Math.max(PANES[k].min, startW + ev.clientX - startX)); document.documentElement.style.setProperty('--' + k + '-w', w + 'px');
+      };
       const up = (ev) => {
         document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up);
         sp.classList.remove('dragging'); document.body.classList.remove('resizing');
+        if (!moved) return;
         const s2 = paneState(); s2[k + 'W'] = Math.min(PANES[k].max, Math.max(PANES[k].min, startW + ev.clientX - startX)); savePanes(s2);
       };
       document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);

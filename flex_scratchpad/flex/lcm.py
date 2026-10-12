@@ -279,11 +279,60 @@ class FlexiconBackend:
                 return s
         return ""
 
-    def _anal_text(self, multi) -> str:
+    def _anal_text(self, multi, ws_handle=None) -> str:
         if multi is None:
             return ""
+        if ws_handle is not None:
+            s = _s(_t(lambda: multi.get_String(ws_handle), ""))
+            if s:
+                return s
         s = _s(_t(lambda: multi.BestAnalysisAlternative, ""))
         return "" if s == "***" else s
+
+    def _ws_alternatives(self, multi) -> dict:
+        """Every alternative stored on a multilingual string: {tag: text}. This is what the
+        flextext export walks to write a `lang` on each item."""
+        out = {}
+        if multi is None:
+            return out
+        for h in _t(lambda: list(multi.AvailableWritingSystemIds), []):
+            txt = _s(_t(lambda: multi.get_String(h), ""))
+            if txt:
+                out[self._ws_tag_of_handle(h) or str(h)] = txt
+        return out
+
+    def _ws_lists(self) -> dict:
+        """The project's current vernacular and analysis writing systems, with font/direction."""
+        p = self.project
+        def infos(items):
+            out = []
+            for item in items:
+                tag = item[0] if isinstance(item, (tuple, list)) else item
+                name = item[1] if isinstance(item, (tuple, list)) and len(item) > 1 else ""
+                if tag and not any(x["tag"] == tag for x in out):
+                    out.append(self._ws_info(str(tag), str(name or "")))
+            return out
+        return {"vernacular": infos(_t(lambda: list(p.GetAllVernacularWSs()), [])),
+                "analysis": infos(_t(lambda: list(p.GetAllAnalysisWSs()), []))}
+
+    VERN_LINES = ("txt", "morph", "cf")
+    ANAL_LINES = ("gls", "mgls", "pos", "ft", "lit", "note")
+
+    def _selection(self, ws: dict | None, vern_handle) -> dict:
+        """line → WS handle for the lines the caller pinned (`ws=txt:fau-fonipa,gls:id`);
+        vernacular lines default to the text's own WS, analysis lines to the default analysis WS."""
+        p = self.project
+        sel = {}
+        for line in self.VERN_LINES:
+            sel[line] = vern_handle
+        for line in self.ANAL_LINES:
+            sel[line] = None
+        for line, tag in (ws or {}).items():
+            if line in sel and tag:
+                h = _t(lambda: p.WSHandle(tag), None)
+                if h is not None:
+                    sel[line] = h
+        return sel
 
     def _baseline_ws(self, text):
         """(handle, tag) of the writing system the text is actually written in. FLEx records it
@@ -481,14 +530,14 @@ class FlexiconBackend:
         return [t for t in self.list_texts() if ql in t["title"].casefold() or ql in t["abbrev"].casefold()]
 
     def get_text(self, guid: str, seg_from: int | None = None, seg_to: int | None = None,
-                 max_segments: int = 60) -> dict:
+                 max_segments: int = 60, ws: dict | None = None, diag: bool = False) -> dict:
         def go():
             self._need()
             obj = self.project.Object(guid)
             text = self._owning_text(obj)
             if text is None:
                 raise FlexError("That GUID is not an interlinear text.", "", "no-object")
-            return self._text_dict(text, seg_from, seg_to, max_segments)
+            return self._text_dict(text, seg_from, seg_to, max_segments, ws, diag)
         try:
             return self.worker.call(go, timeout=OPEN_TIMEOUT)
         except BaseException as e:
@@ -538,13 +587,23 @@ class FlexiconBackend:
                     return str(Path(dirpath) / base), True
         return uri, False
 
-    def _text_dict(self, text, seg_from, seg_to, max_segments: int = 60) -> dict:
+    def _text_dict(self, text, seg_from, seg_to, max_segments: int = 60, ws_sel: dict | None = None, diag: bool = False) -> dict:
         p = self.project
         ws = self._writing_systems()
         vern_handle, vern_tag = self._baseline_ws(text)
-        vern_ws = self._ws_info(vern_tag, "") if vern_tag else ws["vern"]
-        d = model.empty_text(_guid(text), self._text_title(text), vern_ws, ws["anal"])
+        sel = self._selection(ws_sel, vern_handle)
+        self._sel = sel
+        # the WS info the renderer uses for the word line (font, direction) follows the selection
+        txt_tag = (ws_sel or {}).get("txt") or vern_tag
+        vern_ws = self._ws_info(txt_tag, "") if txt_tag else ws["vern"]
+        anal_tag = (ws_sel or {}).get("gls") or (ws_sel or {}).get("ft") or ""
+        anal_ws = self._ws_info(anal_tag, "") if anal_tag else ws["anal"]
+        d = model.empty_text(_guid(text), self._text_title(text), vern_ws, anal_ws)
+        d["wsOptions"] = self._ws_lists()
+        d["wsDetected"] = {"tag": vern_tag, "handle": vern_handle}
+        d["wsSelection"] = dict(ws_sel or {})
         self._cur_vern_handle = vern_handle
+        self._diag = diag
         d["abbrev"] = _s(_t(lambda: p.Texts.GetAbbreviation(text), ""))
         d["url"] = self._goto(text, "text")
         d["media"] = self._media(text)
@@ -584,15 +643,50 @@ class FlexiconBackend:
             if s:
                 notes.append(s)
         media_guid = _guid(_t(lambda: seg.MediaURIRA, None)) or (next(iter(media_by_guid), None))
-        return model.make_segment(
+        sel = getattr(self, "_sel", {}) or {}
+        hf, hl = sel.get("ft"), sel.get("lit")
+        free = _s(_t(lambda: p.Segments.GetFreeTranslation(seg, hf) if hf is not None else p.Segments.GetFreeTranslation(seg), ""))
+        lit = _s(_t(lambda: p.Segments.GetLiteralTranslation(seg, hl) if hl is not None else p.Segments.GetLiteralTranslation(seg), ""))
+        out = model.make_segment(
             _guid(seg), n, para, baseline, words,
-            free=_s(_t(lambda: p.Segments.GetFreeTranslation(seg), "")),
-            lit=_s(_t(lambda: p.Segments.GetLiteralTranslation(seg), "")),
+            free=free,
+            lit=lit,
             notes=notes,
             begin=_ms(_t(lambda: seg.BeginTimeOffset, "")),
             end=_ms(_t(lambda: seg.EndTimeOffset, "")),
             media=media_guid or None,
         )
+        if getattr(self, "_diag", False) and n == 1:
+            out["diagnostics"] = self._diagnostics(seg)
+        return out
+
+    def _diagnostics(self, seg) -> dict:
+        """What is actually stored, for the first word of the first segment: every writing-
+        system alternative of the baseline run, the wordform, the first morph bundle, the
+        gloss, the free translation — the per-line `lang`s a flextext export would write."""
+        p = self.project
+        d = {"baselineRunWs": "", "wordformAlternatives": {}, "morphAlternatives": {}, "glossAlternatives": {}, "freeAlternatives": {}}
+        tss = _t(lambda: seg.BaselineText, None)
+        h = _t(lambda: tss.get_WritingSystemAt(0), None)
+        d["baselineRunWs"] = self._ws_tag_of_handle(h) if h else ""
+        toks = _t(lambda: list(p.Segments.GetAnalyses(seg)), [])
+        for tok in toks:
+            cls = _t(lambda: tok.ClassName, "")
+            if cls == "PunctuationForm":
+                continue
+            wf = tok if cls == "WfiWordform" else _t(lambda: tok.Wordform, None)
+            d["wordformAlternatives"] = self._ws_alternatives(_t(lambda: wf.Form, None))
+            an = _t(lambda: tok.Analysis, None)
+            b = next(iter(_t(lambda: list(p.WfiMorphBundles.GetAll(an)), [])), None) if an is not None else None
+            if b is not None:
+                d["morphAlternatives"] = self._ws_alternatives(_t(lambda: b.Form, None))
+                sense = _t(lambda: b.SenseRA, None)
+                d["morphGlossAlternatives"] = self._ws_alternatives(_t(lambda: sense.Gloss, None)) if sense is not None else {}
+            if cls == "WfiGloss":
+                d["glossAlternatives"] = self._ws_alternatives(_t(lambda: tok.Form, None))
+            break
+        d["freeAlternatives"] = self._ws_alternatives(_t(lambda: seg.FreeTranslation, None))
+        return d
 
     def _word_dict(self, tok) -> dict:
         p = self.project
@@ -607,18 +701,21 @@ class FlexiconBackend:
             wf = _t(lambda: tok.Owner.Owner, None)
         elif wf is None and cls == "WfiAnalysis":
             wf = _t(lambda: tok.Owner, None)
+        sel = getattr(self, "_sel", {}) or {}
+        vh = sel.get("txt", vh)
         txt = self._vern_text(_t(lambda: wf.Form, None), vh) if wf is not None else ""
         if not txt and wf is not None:
             txt = _s(_t(lambda: p.Wordforms.GetForm(wf, vh) if vh is not None else p.Wordforms.GetForm(wf), ""))
         if not txt and cls == "WfiWordform":
             txt = self._vern_text(_t(lambda: tok.Form, None), vh)
         # ⚠ never fall back to tok.Form for a WfiGloss: that is the GLOSS, not the word
-        gls = _s(_t(lambda: p.Segments.GetGloss(tok), ""))
+        hg, hp, hm, hmg, hcf = sel.get("gls"), sel.get("pos"), sel.get("morph", vh), sel.get("mgls"), sel.get("cf", vh)
+        gls = _s(_t(lambda: p.Segments.GetGloss(tok, hg) if hg is not None else p.Segments.GetGloss(tok), ""))
         analysis = _t(lambda: tok.Analysis, None)
         pos = ""
         morphs: list[dict] = []
         if analysis is not None:
-            pos = _s(_t(lambda: p.WfiAnalyses.GetCategoryAbbrev(analysis), ""))
+            pos = _s(_t(lambda: p.WfiAnalyses.GetCategoryAbbrev(analysis, hp) if hp is not None else p.WfiAnalyses.GetCategoryAbbrev(analysis), ""))
             for b in _t(lambda: list(p.WfiMorphBundles.GetAll(analysis)), []):
                 msa = _t(lambda: p.WfiMorphBundles.GetMSA(b), None)
                 sense = _t(lambda: p.WfiMorphBundles.GetSense(b), None)
@@ -626,15 +723,19 @@ class FlexiconBackend:
                 if sense is not None:
                     ent = self._owning_entry(sense)
                     if ent is not None:
-                        cf = _s(_t(lambda: p.LexiconGetHeadword(ent), ""))
-                form = self._vern_text(_t(lambda: b.Form, None), vh)
+                        cf = (self._vern_text(_t(lambda: ent.HeadWordForWs(hcf), None), None) if hcf is not None else "") \
+                            or _s(_t(lambda: p.LexiconGetHeadword(ent), ""))
+                form = self._vern_text(_t(lambda: b.Form, None), hm)
                 if not form:
-                    form = _s(_t(lambda: p.WfiMorphBundles.GetForm(b, vh) if vh is not None else p.WfiMorphBundles.GetForm(b), ""))
+                    form = _s(_t(lambda: p.WfiMorphBundles.GetForm(b, hm) if hm is not None else p.WfiMorphBundles.GetForm(b), ""))
                 if not form:   # a bundle with no form of its own shows its allomorph's
-                    form = self._vern_text(_t(lambda: b.MorphRA.Form, None), vh)
+                    form = self._vern_text(_t(lambda: b.MorphRA.Form, None), hm)
+                mgls = self._anal_text(_t(lambda: sense.Gloss, None), hmg) if (sense is not None and hmg is not None) else ""
+                if not mgls:
+                    mgls = _s(_t(lambda: p.WfiMorphBundles.GetGloss(b), "")) or self._anal_text(_t(lambda: sense.Gloss, None))
                 morphs.append(model.make_morph(
                     form,
-                    _s(_t(lambda: p.WfiMorphBundles.GetGloss(b), "")) or self._anal_text(_t(lambda: sense.Gloss, None)),
+                    mgls,
                     _s(_t(lambda: msa.InterlinearAbbr, "")) if msa is not None else "",
                     cf,
                 ))

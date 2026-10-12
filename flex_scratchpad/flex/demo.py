@@ -72,6 +72,7 @@ def W(txt, gls="", pos="", morphs=None, punct=False):
 def _story() -> dict:
     t = model.empty_text(T_STORY, "The dog and the river", WS_VERN, WS_ANAL)
     t["abbrev"] = "DOG"
+    t["wsOptions"] = {"vernacular": [WS_VERN, WS_ARAB], "analysis": [WS_ANAL]}
     t["url"] = model.goto_url(PROJECT, "text", T_STORY)
     t["media"] = [{"guid": MEDIA_STORY, "uri": "AudioVisual/kalu-story.wav", "path": "", "fileUrl": "", "found": False}]
     segs = [
@@ -215,7 +216,7 @@ class DemoBackend:
         ql = (q or "").casefold()
         return [t for t in self.list_texts() if ql in t["title"].casefold()]
 
-    def get_text(self, guid: str, seg_from=None, seg_to=None, max_segments: int = 60) -> dict:
+    def get_text(self, guid: str, seg_from=None, seg_to=None, max_segments: int = 60, ws=None, diag=False) -> dict:
         from .flextext import slice_text
         t = self.texts.get((guid or "").lower())
         if not t:

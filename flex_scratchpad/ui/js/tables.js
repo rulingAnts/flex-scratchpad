@@ -293,7 +293,7 @@
       };
     };
     view.addEventListener('mousedown', (e) => {
-      if (e.target.closest('a, button, .flex-obj, .seg-play')) return;
+      if (e.target.closest('a, button, .flex-obj, .seg-play, .flex-collapsed, .flex-inline')) return;   // chips/objects handle their own clicks
       if (e.ctrlKey || e.metaKey) return;
       e.preventDefault();
       startEdit();

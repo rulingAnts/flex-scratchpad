@@ -161,7 +161,7 @@ def test_table_cell_edit_and_embed_in_cell(app):
     page.keyboard.press("Shift+Enter")
     page.keyboard.type("line two")
     page.keyboard.press("Escape")
-    page.wait_for_selector("table.md-table .flex-inline .text-obj")
+    page.wait_for_selector("table.md-table .flex-inline .flex-collapsed")
     page.wait_for_timeout(900)
     body = body_of(h)
     assert "{{flex:text %s seg=1}}<br>line two |" % T_STORY in body

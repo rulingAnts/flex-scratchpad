@@ -67,7 +67,7 @@ def dump(project: str | None, which: str) -> int:
                 print("No text title contains " + repr(which) + ". Texts: " + ", ".join(t["title"] for t in be.list_texts()[:30]), file=sys.stderr)
                 return 2
             guid = hits[0]["guid"]
-        page = be.get_text(guid, 1, 3)
+        page = be.get_text(guid, 1, 3, diag=True)
         print(json.dumps(page, ensure_ascii=False, indent=1))
         return 0
     except FlexError as e:

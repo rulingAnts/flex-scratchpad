@@ -86,6 +86,9 @@ class FlextextFile:
         text = model.empty_text(guid, title, self._ws(self.vern_lang), self._ws(self.anal_lang))
         text["abbrev"] = _text(_pick(_items(it, "title-abbreviation"), self.vern_lang))
         text["source"] = "flextext"
+        langs = [self._ws(lg.get("lang") or "") for lg in self.root.iter("language")]
+        text["wsOptions"] = {"vernacular": [w for w, lg in zip(langs, self.root.iter("language")) if lg.get("vernacular") == "true"],
+                             "analysis": [w for w, lg in zip(langs, self.root.iter("language")) if lg.get("vernacular") != "true"]}
         text["media"] = self._media(it)
         n = 0
         pi = 0
@@ -214,7 +217,7 @@ class FlextextBackend:
                 for t in self.texts.values()]
 
     def get_text(self, guid: str, seg_from: int | None = None, seg_to: int | None = None,
-                 max_segments: int = 60) -> dict:
+                 max_segments: int = 60, ws=None, diag=False) -> dict:
         t = self.texts.get((guid or "").lower())
         if not t:
             raise KeyError(f"No text with guid {guid} in the .flextext file(s).")
@@ -244,7 +247,7 @@ class FlextextBackend:
         pass
 
 
-def slice_text(text: dict, seg_from: int | None, seg_to: int | None, max_segments: int = 60) -> dict:
+def slice_text(text: dict, seg_from: int | None, seg_to: int | None, max_segments: int = 60, ws=None, diag=False) -> dict:
     """A copy of the text carrying only segments seg_from..seg_to (1-based, inclusive), capped."""
     segs = text["segments"]
     total = len(segs)

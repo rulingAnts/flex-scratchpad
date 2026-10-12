@@ -12,11 +12,11 @@
 
   /* ------------------------------------------------------------------ fetch cache */
   const mem = new Map();
-  const keyOf = (kind, guid, a, b) => kind + '|' + guid + '|' + (a || '') + '|' + (b || '');
-  const flexGet = async (kind, guid, a, b, refresh) => {
-    const k = keyOf(kind, guid, a, b);
+  const keyOf = (kind, guid, a, b, ws) => kind + '|' + guid + '|' + (a || '') + '|' + (b || '') + '|' + (ws ? JSON.stringify(ws) : '');
+  const flexGet = async (kind, guid, a, b, refresh, ws) => {
+    const k = keyOf(kind, guid, a, b, ws);
     if (!refresh && mem.has(k)) return mem.get(k);
-    const p = FS.api.flex_get(kind, guid, a || null, b || null, false).then((obj) => { mem.set(k, obj); return obj; }, (e) => { mem.delete(k); throw e; });
+    const p = FS.api.flex_get(kind, guid, a || null, b || null, false, ws || null).then((obj) => { mem.set(k, obj); return obj; }, (e) => { mem.delete(k); throw e; });
     mem.set(k, p);
     return p;
   };
@@ -408,6 +408,30 @@
         pop.appendChild(el('label', { class: 'row', style: { gap: '8px' } }, cb, names[l]));
       }
       pop.appendChild(el('hr'));
+      if (spec.kind === 'text' && obj && obj.wsOptions) {
+        // Which writing system each line shows. FLEx keeps every alternative on each string;
+        // the text's own vernacular WS and the default analysis WS are the defaults.
+        pop.appendChild(el('div', { class: 'row' }, el('b', {}, 'Writing systems')));
+        const vern = obj.wsOptions.vernacular || [], anal = obj.wsOptions.analysis || [];
+        const detected = (obj.wsDetected && obj.wsDetected.tag) || '';
+        const wsNames = { txt: 'Word', morph: 'Morphemes', cf: 'Lex. entries', gls: 'Word gloss', mgls: 'Morph gloss', pos: 'Category', ft: 'Free', lit: 'Literal', note: 'Notes' };
+        for (const line of ['txt', 'morph', 'cf', 'gls', 'mgls', 'pos', 'ft', 'lit', 'note']) {
+          const isVern = ['txt', 'morph', 'cf'].includes(line);
+          const options = isVern ? vern : anal;
+          if (!options.length) continue;
+          const sel = el('select', { style: { width: '150px' } });
+          sel.appendChild(el('option', { value: '' }, isVern ? ('text’s own' + (detected ? ' (' + detected + ')' : '')) : 'default'));
+          for (const w of options) sel.appendChild(el('option', { value: w.tag, selected: !!(spec.ws && spec.ws[line] === w.tag) }, (w.name || w.tag) + (w.name && w.name !== w.tag ? '  ' + w.tag : '')));
+          sel.addEventListener('change', () => {
+            spec.ws = spec.ws || {};
+            if (sel.value) spec.ws[line] = sel.value; else delete spec.ws[line];
+            if (!Object.keys(spec.ws).length) spec.ws = null;
+            opts.onSpecChange && opts.onSpecChange(spec);
+          });
+          pop.appendChild(el('div', { class: 'row' }, el('span', { class: 'lbl' }, wsNames[line]), sel));
+        }
+        pop.appendChild(el('hr'));
+      }
       if (spec.kind === 'text') {
         const a = el('input', { type: 'number', min: 1, value: spec.seg ? spec.seg[0] : 1, style: { width: '60px' } });
         const b = el('input', { type: 'number', min: 1, value: spec.seg ? spec.seg[1] : (obj && obj.segmentCount) || 1, style: { width: '60px' } });
@@ -597,7 +621,7 @@
     const doRender = async (refresh) => {
       try {
         const kind = spec.kind === 'sense' ? 'entry' : spec.kind;
-        const obj = await flexGet(kind, spec.guid, spec.kind === 'text' && spec.seg ? spec.seg[0] : null, spec.kind === 'text' && spec.seg ? spec.seg[1] : null, refresh);
+        const obj = await flexGet(kind, spec.guid, spec.kind === 'text' && spec.seg ? spec.seg[0] : null, spec.kind === 'text' && spec.seg ? spec.seg[1] : null, refresh, spec.kind === 'text' ? spec.ws : null);
         const o = Object.assign({}, opts, { refresh: () => { invalidate(kind, spec.guid); doRender(true); } });
         const node = kind === 'text' ? renderText(obj, spec, o) : kind === 'wordform' ? renderWordform(obj, spec, o) : renderEntry(obj, spec, o);
         container.innerHTML = '';
