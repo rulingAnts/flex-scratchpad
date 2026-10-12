@@ -727,6 +727,55 @@ class Notebook:
                 out.append(hit)
             return out
 
+    # -- sync awareness ------------------------------------------------------------
+
+    def fingerprint(self) -> str:
+        """A cheap stamp of the notebook on disk (file count + newest mtime of notes and
+        config), so the UI can notice a cloud-sync client changing files underneath it."""
+        newest = 0.0
+        count = 0
+        try:
+            for root, dirs, files in os.walk(self.root):
+                dirs[:] = [d for d in dirs if not d.startswith(".")]
+                for fn in files:
+                    if fn.endswith(NOTE_SUFFIX) or fn == CONFIG_NAME:
+                        count += 1
+                        try:
+                            newest = max(newest, os.stat(os.path.join(root, fn)).st_mtime)
+                        except OSError:
+                            pass
+        except OSError:
+            pass
+        return f"{count}:{int(newest * 1000)}"
+
+    def note_mtime(self, note_id: str) -> float:
+        n = self.notes.get(note_id)
+        try:
+            return n.path.stat().st_mtime if n and n.path else 0.0
+        except OSError:
+            return 0.0
+
+    def export_zip(self, target: str | Path, include_cache: bool = True) -> Path:
+        """The whole notebook as a zip: notes, notebook.json and (optionally) the FLEx
+        snapshots and audio clips, so it can be moved to another computer and opened there."""
+        import zipfile
+        target = Path(target)
+        with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as z:
+            for root, dirs, files in os.walk(self.root):
+                rel_root = Path(root).relative_to(self.root)
+                if rel_root.parts and rel_root.parts[0] == PRIVATE_DIR:
+                    if not include_cache or (len(rel_root.parts) > 1 and rel_root.parts[1] == "trash"):
+                        dirs[:] = []
+                        continue
+                for fn in files:
+                    if fn.endswith(".tmp"):
+                        continue
+                    full = Path(root) / fn
+                    if full == target:
+                        continue
+                    z.write(full, str(rel_root / fn))
+        return target
+
     # -- attachments -------------------------------------------------------------
 
     def save_attachment(self, name: str, data: bytes) -> Path:

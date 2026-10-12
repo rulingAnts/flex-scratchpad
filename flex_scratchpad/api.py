@@ -186,6 +186,80 @@ class Api:
             self._nb.reindex_all()
         return s
 
+    # -- sync awareness / export ---------------------------------------------------------
+
+    def notebook_stamp(self) -> dict:
+        """For the UI's poll: has anything changed on disk (cloud sync, another machine)?"""
+        return {"stamp": self._nb.fingerprint()}
+
+    def note_changed_on_disk(self, note_id: str, known_updated: str) -> dict | None:
+        """If the note's file carries a newer `updated` than the UI holds, return the fresh
+        note (after a rescan); None when nothing changed."""
+        self._nb.scan()
+        self._nb.reindex_all()
+        try:
+            n = self._nb.get_note(note_id)
+        except KeyError:
+            return {"deleted": True}
+        if n.updated != known_updated:
+            d = n.meta()
+            d["body"] = n.body
+            d["inlineTags"] = inline_tags(n.body)
+            return d
+        return None
+
+    def export_note_html(self, note_id: str, html: str, path: str | None = None) -> str | None:
+        """Save a self-contained HTML export (built by the page) through a save dialog."""
+        n = self._nb.get_note(note_id)
+        target = path or self._save_dialog((n.title or "note") + ".html")
+        if not target:
+            return None
+        Path(target).write_text(html, encoding="utf-8", newline="\n")
+        return target
+
+    def export_note_markdown(self, note_id: str, path: str | None = None) -> str | None:
+        n = self._nb.get_note(note_id)
+        target = path or self._save_dialog((n.title or "note") + ".md")
+        if not target:
+            return None
+        import shutil
+        shutil.copyfile(n.path, target)
+        return target
+
+    def export_note_docx(self, note_id: str, doc: dict, path: str | None = None) -> str | None:
+        """Word document from the page's export model (zero-dependency writer)."""
+        from .docx_writer import build_docx
+        n = self._nb.get_note(note_id)
+        target = path or self._save_dialog((n.title or "note") + ".docx")
+        if not target:
+            return None
+        Path(target).write_bytes(build_docx(doc))
+        return target
+
+    def export_notebook_zip(self, path: str | None = None, include_cache: bool = True) -> str | None:
+        target = path or self._save_dialog(self._nb.root.name + ".zip")
+        if not target:
+            return None
+        return str(self._nb.export_zip(target, include_cache))
+
+    def import_notebook_zip(self, zip_path: str | None = None, folder: str | None = None) -> dict | None:
+        """Unpack a notebook zip into a (new) folder and open it."""
+        import zipfile
+        zp = zip_path or self._file_dialog(("Notebook archive (*.zip)", "*.zip"))
+        if not zp:
+            return None
+        dest = folder or self._folder_dialog()
+        if not dest:
+            return None
+        with zipfile.ZipFile(zp) as z:
+            for info in z.infolist():
+                # never let an archive write outside the chosen folder
+                target = (Path(dest) / info.filename).resolve()
+                if not str(target).startswith(str(Path(dest).resolve())):
+                    continue
+                z.extract(info, dest)
+        return self.open_notebook(dest)
+
     # -- attachments ------------------------------------------------------------------
 
     def save_attachment(self, name: str, data_base64: str) -> dict:

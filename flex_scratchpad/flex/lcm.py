@@ -295,11 +295,41 @@ class FlexiconBackend:
         out = {}
         if multi is None:
             return out
-        for h in _t(lambda: list(multi.AvailableWritingSystemIds), []):
+        handles = _t(lambda: list(multi.AvailableWritingSystemIds), [])
+        if not handles:
+            # ITsMultiString's index walk; pythonnet returns the `out ws` as a second value
+            n = int(_t(lambda: multi.StringCount, 0) or 0)
+            for i in range(n):
+                res = _t(lambda: multi.GetStringFromIndex(i), None)
+                if isinstance(res, tuple) and len(res) == 2:
+                    tss, h = res
+                    txt = _s(_t(lambda: tss.Text, ""))
+                    if txt:
+                        out[self._ws_tag_of_handle(h) or str(h)] = txt
+            return out
+        for h in handles:
             txt = _s(_t(lambda: multi.get_String(h), ""))
             if txt:
                 out[self._ws_tag_of_handle(h) or str(h)] = txt
         return out
+
+    def _run_ws(self, tss):
+        """Writing system of the first run of an ITsString, by whichever route works."""
+        if tss is None:
+            return None
+        for fn in (lambda: tss.get_WritingSystemAt(0),
+                   lambda: tss.get_WritingSystem(0),
+                   lambda: tss.get_PropertiesAt(0).GetIntPropValues(6),   # FwTextPropType.ktptWs
+                   lambda: tss.get_Properties(0).GetIntPropValues(6)):
+            h = _t(fn, None)
+            if isinstance(h, tuple):
+                h = h[0]
+            try:
+                if h is not None and int(h) > 0:
+                    return int(h)
+            except (TypeError, ValueError):
+                pass
+        return None
 
     def _ws_lists(self) -> dict:
         """The project's current vernacular and analysis writing systems, with font/direction."""
@@ -343,8 +373,10 @@ class FlexiconBackend:
         `deja` rendered as the orthographic `deia`)."""
         p = self.project
         h = _t(lambda: int(text.ContentsOA.MainWritingSystem), None)
-        if h:
-            return h, self._ws_tag_of_handle(h)
+        if h and h > 0:
+            tag = self._ws_tag_of_handle(h)
+            if tag:
+                return h, tag
         cast = None
         try:
             from SIL.LCModel import IStTxtPara  # type: ignore
@@ -356,11 +388,30 @@ class FlexiconBackend:
             tss = _t(lambda: (tp or para).Contents, None)
             if tss is None or not _s(_t(lambda: tss.Text, "")):
                 continue
-            h = _t(lambda: tss.get_WritingSystemAt(0), None)
-            if h is None:
-                h = _t(lambda: tss.get_WritingSystem(0), None)
+            h = self._run_ws(tss)
             if h:
-                return h, self._ws_tag_of_handle(h)
+                tag = self._ws_tag_of_handle(h)
+                if tag:
+                    return h, tag
+        # Last resort, and the one that cannot miss: the writing systems the text's own
+        # wordforms are stored in (a wordform is created in the baseline's WS). Seth's dump
+        # (2026-10-12): wordformAlternatives = {"fau-fonipa-x-etic": …} while both routes
+        # above came back empty.
+        votes: dict = {}
+        for para in _t(lambda: list(p.Paragraphs.GetAll(text)), [])[:2]:
+            for seg in _t(lambda: list(p.Segments.GetAll(para)), [])[:3]:
+                for tok in _t(lambda: list(p.Segments.GetAnalyses(seg)), []):
+                    cls = _t(lambda: tok.ClassName, "")
+                    if cls == "PunctuationForm":
+                        continue
+                    wf = tok if cls == "WfiWordform" else _t(lambda: tok.Wordform, None)
+                    for h in _t(lambda: list(wf.Form.AvailableWritingSystemIds), []):
+                        votes[h] = votes.get(h, 0) + 1
+        if votes:
+            best = max(votes, key=votes.get)
+            tag = self._ws_tag_of_handle(best)
+            if tag:
+                return best, tag
         return None, ""
 
     def _writing_systems(self) -> dict:
@@ -686,8 +737,11 @@ class FlexiconBackend:
         p = self.project
         d = {"baselineRunWs": "", "wordformAlternatives": {}, "morphAlternatives": {}, "glossAlternatives": {}, "freeAlternatives": {}}
         tss = _t(lambda: seg.BaselineText, None)
-        h = _t(lambda: tss.get_WritingSystemAt(0), None)
+        h = self._run_ws(tss)
         d["baselineRunWs"] = self._ws_tag_of_handle(h) if h else ""
+        text = self._owning_text(seg)
+        d["mainWritingSystem"] = _t(lambda: int(text.ContentsOA.MainWritingSystem), None) if text is not None else None
+        d["titleAlternativesRaw"] = {"stringCount": _t(lambda: int(text.Name.StringCount), None), "available": _t(lambda: list(text.Name.AvailableWritingSystemIds), None)} if text is not None else {}
         toks = _t(lambda: list(p.Segments.GetAnalyses(seg)), [])
         for tok in toks:
             cls = _t(lambda: tok.ClassName, "")

@@ -299,6 +299,13 @@
       item(n.pinned ? 'Unpin' : 'Pin to top', async () => { await FS.api.save_note(n.id, { pinned: !n.pinned }); if (S.note && S.note.id === n.id) S.note.pinned = !n.pinned; await refreshLists(); renderNoteMeta(); });
       item('Move to…', () => moveDialog(n));
       item('Copy markdown', async () => { const full = await FS.api.get_note(n.id); FS.copyText(full.body); FS.toast('Copied'); });
+      pop.appendChild(el('hr'));
+      pop.appendChild(el('div', { class: 'row', style: { padding: '0 8px' } }, el('b', {}, 'Export')));
+      const doExport = async (fmt) => { if (!S.note || S.note.id !== n.id) await openNote(n.id); await flushSave(); try { await FS.exporter.exportNote(S.note, ensureEditor(), fmt); } catch (e) { FS.toast('Export failed: ' + e.message, 'error'); } };
+      item('Markdown (.md)', () => doExport('md'));
+      item('Web page (.html)', () => doExport('html'));
+      item('Word (.docx)', () => doExport('docx'));
+      item('PDF (print…)', () => doExport('pdf'));
       if (S.init.canBrowse) item('Show file', () => FS.api.reveal_note(n.id));
       pop.appendChild(el('hr'));
       item('Delete (to trash)', async () => { if (!confirm('Move “' + (n.title || 'Untitled') + '” to the trash?')) return; await FS.api.delete_note(n.id); if (S.note && S.note.id === n.id) { S.note = null; $('editor-pane').classList.add('no-note'); } await refreshLists(); }, 'danger');
@@ -383,6 +390,11 @@
     if (S.init.canBrowse) row.appendChild(el('button', { class: 'btn', onclick: () => FS.api.reveal_notebook() }, 'Show in Explorer'));
     row.appendChild(el('button', { class: 'btn', onclick: async () => { applyInit(await FS.api.rescan()); FS.toast('Rescanned'); } }, 'Rescan files'));
     nb.appendChild(row);
+    const move = el('div', { class: 'btn-row', style: { justifyContent: 'flex-start', marginTop: '8px' } });
+    if (S.init.canBrowse) move.appendChild(el('button', { class: 'btn', onclick: async () => { try { const p = await FS.api.export_notebook_zip(); if (p) FS.toast('Saved ' + p, 'ok'); } catch (e) { FS.toast(e.message, 'error'); } } }, 'Export notebook (.zip)…'));
+    if (S.init.canBrowse) move.appendChild(el('button', { class: 'btn', onclick: async () => { try { const r = await FS.api.import_notebook_zip(); if (r) { m.close(); S.note = null; $('editor-pane').classList.add('no-note'); applyInit(r); } } catch (e) { FS.toast(e.message, 'error'); } } }, 'Import notebook from .zip…'));
+    nb.appendChild(move);
+    nb.appendChild(el('p', { class: 'muted small' }, 'The notebook is a plain folder of markdown files (the FLEx snapshots and audio clips live in its .scratchpad folder). To move it to another computer, copy the folder or export it as a zip and import it there. To sync it, put the folder inside a cloud-synced folder (Google Drive, OneDrive, Dropbox) and choose it here on each machine: the app watches the folder and picks up changes made elsewhere. If two machines edit the same note at once the sync client keeps a conflicted copy, which shows up as a second note.'));
     const dia = el('input', { type: 'checkbox', checked: !!(S.config.settings || {}).diacriticsInsensitive });
     dia.addEventListener('change', async () => { S.config.settings = await FS.api.set_setting('diacriticsInsensitive', dia.checked); });
     nb.appendChild(el('label', { class: 'small', style: { display: 'flex', gap: '6px', marginTop: '8px' } }, dia, 'Search ignores diacritics (ā = a)'));
@@ -569,6 +581,26 @@
       else if (mod && (e.key === '\\' || e.code === 'Backslash')) { e.preventDefault(); toggleNav(); }
     });
     window.addEventListener('beforeunload', () => { scheduleSave.flush(); });
+    // Cloud-sync awareness: when files change on disk (another machine, a sync client), refresh
+    // the lists, and reload the open note if it changed and has no unsaved edits here.
+    let stamp = null;
+    const checkDisk = async () => {
+      if (document.hidden) return;
+      try {
+        const r = await FS.api.notebook_stamp();
+        if (stamp === null) { stamp = r.stamp; return; }
+        if (r.stamp === stamp) return;
+        stamp = r.stamp;
+        if (S.note && !S.dirty) {
+          const fresh = await FS.api.note_changed_on_disk(S.note.id, S.note.updated);
+          if (fresh && fresh.deleted) { S.note = null; $('editor-pane').classList.add('no-note'); FS.toast('This note was removed on disk'); }
+          else if (fresh) { S.note = fresh; $('note-title').value = fresh.title || ''; ensureEditor().load(fresh.body || ''); renderNoteMeta(); FS.toast('Note updated from disk'); }
+        } else if (S.note && S.dirty) { await flushSave(); }
+        await refreshLists();
+      } catch (e) { /* offline folder or a transient read error: try again next tick */ }
+    };
+    setInterval(checkDisk, 20000);
+    window.addEventListener('focus', () => setTimeout(checkDisk, 300));
     FS.on('py:progress', (d) => { const pill = $('flex-pill'); pill.querySelector('.label').textContent = d.message || '…'; });
     document.addEventListener('click', (e) => { const a = e.target.closest('a[data-href], a.flex-chip, a.wikilink, a.ext-link'); if (a && !e.target.closest('.blk-body')) { e.preventDefault(); openLink(a.dataset.href || a.getAttribute('href')); } });
   }

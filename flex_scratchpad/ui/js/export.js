@@ -1,0 +1,268 @@
+/* export.js — one document model of a note, serialised four ways:
+ *   Markdown  the note file itself
+ *   HTML      self-contained, examples rendered and styled (opens in a browser or Word)
+ *   DOCX      the model is handed to Python's docx_writer
+ *   PDF       the HTML rendering through the print dialog ("Save as PDF")
+ *
+ * Model: {title, blocks:[...]} — see flex_scratchpad/docx_writer.py for the block shapes.
+ * A run is {text, b, i, u, s, hl, color, code, font, rtl}. */
+(function () {
+  'use strict';
+  const FS = (window.FS = window.FS || {});
+  const { esc } = FS;
+  const MD = FS.markdown;
+  const R = FS.flexref;
+
+  /* ------------------------------------------------------------------ inline → runs */
+  function runsOf(text) {
+    text = String(text || '');
+    const out = { marks: [], embeds: [], links: [], tags: [] };
+    for (let i = 0; i < text.length; i++) out.marks.push(new Set());
+    MD.markInline(text, out, 0);
+    const runs = [];
+    let cur = null;
+    for (let i = 0; i < text.length; i++) {
+      const set = out.marks[i];
+      if (set.has('mk')) continue;
+      if (set.has('embed')) continue;      // embeds are handled by the caller (cells)
+      if (set.has('br')) { push({ text: '\n' }); continue; }
+      const r = { text: text[i] };
+      if (set.has('b')) r.b = true;
+      if (set.has('i')) r.i = true;
+      if (set.has('s')) r.s = true;
+      if (set.has('mark')) r.hl = true;
+      if (set.has('code')) r.code = true;
+      if (set.has('link') || set.has('wiki')) r.color = '#1f4f8f';
+      if (set.has('tag')) r.color = '#2a6e2a';
+      push(r);
+    }
+    function push(r) {
+      const sig = (x) => [x.b, x.i, x.s, x.hl, x.code, x.color].join('|');
+      if (cur && sig(cur) === sig(r)) cur.text += r.text; else { cur = Object.assign({}, r); runs.push(cur); }
+    }
+    return runs;
+  }
+
+  /* ------------------------------------------------------------------ FLEx objects → model */
+  const STYLE_KEYS = { hl: 'hl', b: 'b', u: 'u', i: 'i', s: 's', color: 'color' };
+  function styledRuns(text, styles, base) {
+    const gs = FS.graphemes(text || '');
+    const runs = [];
+    let cur = null;
+    gs.forEach((g, i) => {
+      const r = Object.assign({ text: g }, base || {});
+      for (const st of styles || []) {
+        const a = st.chars ? st.chars[0] : 1, b = st.chars ? st.chars[1] : gs.length;
+        if (i + 1 < a || i + 1 > b) continue;
+        if (st.style === 'hl') r.hl = st.color || true;
+        else if (st.style === 'color') r.color = st.color || '#c0392b';
+        else r[STYLE_KEYS[st.style]] = true;
+      }
+      const sig = (x) => [x.b, x.i, x.u, x.s, x.hl, x.color, x.font].join('|');
+      if (cur && sig(cur) === sig(r)) cur.text += g; else { cur = r; runs.push(cur); }
+    });
+    return runs;
+  }
+
+  async function flexBlock(spec) {
+    const kind = spec.kind === 'sense' ? 'entry' : spec.kind;
+    const obj = await FS.interlinear.flexGet(kind, spec.guid, spec.kind === 'text' && spec.seg ? spec.seg[0] : null, spec.kind === 'text' && spec.seg ? spec.seg[1] : null, false, spec.kind === 'text' ? spec.ws : null);
+    if (kind === 'entry') {
+      return { type: 'entry', headword: obj.headword || obj.lexemeForm, pos: obj.pos, font: obj.ws && obj.ws.vern && obj.ws.vern.font, label: spec.label,
+        senses: (obj.senses || []).filter((s) => spec.kind !== 'sense' || s.guid === spec.guid || true).map((s) => ({ number: s.number, pos: s.pos, gloss: s.gloss, definition: s.definition, examples: s.examples || [] })) };
+    }
+    if (kind === 'wordform') return { type: 'wordform', form: obj.form, glosses: obj.glosses || [], font: obj.ws && obj.ws.vern && obj.ws.vern.font };
+    const lines = spec.lines && spec.lines.length ? spec.lines : R.DEFAULT_LINES;
+    const index = R.resolveStyles(spec, obj);
+    const vern = obj.ws && obj.ws.vern || {};
+    const vbase = { color: '#00379c', font: vern.font || undefined, rtl: !!vern.rtl };
+    const segs = (obj.segments || []).map((seg) => {
+      const words = (seg.words || []).filter((w) => !w.punct);
+      const lineModels = [];
+      const add = (name, cellsFn) => { const cells = words.map((w, i) => cellsFn(w, i + 1)); if (cells.some((c) => c.some((r) => r.text))) lineModels.push({ name, cells }); };
+      for (const line of lines) {
+        if (line === 'txt') add('txt', (w, i) => styledRuns(w.txt, R.stylesFor(index, seg.n, 'txt', i), vbase));
+        else if (line === 'morph') add('morph', (w, i) => styledRuns((w.morphs || []).map((m) => m.form).join(' '), R.stylesFor(index, seg.n, 'morph', i), { font: vern.font || undefined, color: '#4a4f57' }));
+        else if (line === 'mgls') add('mgls', (w, i) => styledRuns((w.morphs || []).map((m) => m.gls).join(' '), R.stylesFor(index, seg.n, 'mgls', i), { color: '#2a6e2a' }));
+        else if (line === 'cf') add('cf', (w, i) => styledRuns((w.morphs || []).map((m) => m.cf || '').join(' '), R.stylesFor(index, seg.n, 'cf', i), { color: '#68717d' }));
+        else if (line === 'gls') add('gls', (w, i) => styledRuns(w.gls || '', R.stylesFor(index, seg.n, 'gls', i), { color: '#2a6e2a' }));
+        else if (line === 'pos') add('pos', (w, i) => styledRuns(w.pos || '', R.stylesFor(index, seg.n, 'pos', i), { color: '#7a3e9d', size: 9 }));
+      }
+      const out = { n: seg.n, lines: lineModels };
+      if (lines.includes('ft') && seg.free) out.free = styledRuns(seg.free, R.stylesFor(index, seg.n, 'ft', 0), {});
+      if (lines.includes('lit') && seg.lit) out.lit = styledRuns(seg.lit, R.stylesFor(index, seg.n, 'lit', 0), { color: '#68717d' });
+      if (lines.includes('note') && (seg.notes || []).length) out.notes = seg.notes.map((n) => styledRuns(n, R.stylesFor(index, seg.n, 'note', 0), { i: true, color: '#68717d' }));
+      return out;
+    });
+    return { type: 'interlinear', title: obj.title, label: spec.label, segments: segs, ws: vern, segmentCount: obj.segmentCount, range: obj.range };
+  }
+
+  /* ------------------------------------------------------------------ note → model */
+  async function buildDoc(note, editor) {
+    const blocks = [];
+    for (const b of editor.blocks) {
+      if (b.type === 'p' || b.type === 'quote') {
+        const parts = await textWithEmbeds(b.src);
+        for (const part of parts) blocks.push(part.type ? part : { type: b.type, runs: part.runs });
+      } else if (b.type === 'h') {
+        const m = /^(#{1,6})\s+(.*)$/.exec(b.src);
+        blocks.push({ type: 'h', level: m ? m[1].length : 1, runs: runsOf(m ? m[2] : b.src) });
+      } else if (b.type === 'code') {
+        blocks.push({ type: 'code', text: b.src.replace(/^\s*```[^\n]*\n?/, '').replace(/\n?\s*```\s*$/, '') });
+      } else if (b.type === 'list') {
+        const items = [];
+        let n = 0;
+        for (const line of b.src.split('\n')) {
+          const m = /^(\s*)([-*+]|(\d+)[.)])\s+(\[([ xX])\]\s+)?(.*)$/.exec(line);
+          if (!m) { if (items.length) items[items.length - 1].runs.push({ text: '\n' + line.trim() }); continue; }
+          const ordered = !!m[3];
+          n = ordered ? ++n : n;
+          items.push({ runs: runsOf(m[6]), ordered, n: ordered ? parseInt(m[3], 10) : 0, level: Math.floor(m[1].length / 2), task: !!m[4], checked: m[5] ? m[5] !== ' ' : false });
+        }
+        blocks.push({ type: 'list', items });
+      } else if (b.type === 'hr') {
+        blocks.push({ type: 'hr' });
+      } else if (b.type === 'flex') {
+        const spec = R.parse(b.src);
+        if (spec) { try { blocks.push(await flexBlock(spec)); } catch (e) { blocks.push({ type: 'p', runs: [{ text: '[FLEx object unavailable: ' + (e.message || e) + ']', color: '#c0392b' }] }); } }
+      } else if (b.type === 'table') {
+        const t = FS.tables.parse(b.src);
+        const rows = [];
+        for (const row of t.rows) {
+          const cells = [];
+          for (const cell of row) {
+            const parts = await textWithEmbeds(cell);
+            if (parts.length === 1 && !parts[0].type) cells.push({ runs: parts[0].runs });
+            else cells.push({ runs: null, blocks: parts.map((p) => (p.type ? p : { type: 'p', runs: p.runs })) });
+          }
+          rows.push(cells);
+        }
+        blocks.push({ type: 'table', rows, aligns: t.aligns, header: true, style: { flags: [...t.style.flags], cols: t.style.cols, rows: t.style.rows } });
+      } else if (b.type === 'chart') {
+        const canvas = b.el && b.el.querySelector('canvas');
+        if (canvas) blocks.push({ type: 'image', png: canvas.toDataURL('image/png'), width: canvas.clientWidth, height: canvas.clientHeight, alt: 'chart' });
+      } else if (b.type === 'image') {
+        const m = /^!\[([^\]]*)\]\(([^)\s]+)/.exec(b.src.trim());
+        if (m) blocks.push({ type: 'imageref', src: m[2], alt: m[1] });
+      }
+    }
+    return { title: note.title || 'Untitled', blocks };
+  }
+
+  /* Text that may contain {{flex …}} embeds: split into runs parts and object blocks. */
+  async function textWithEmbeds(text) {
+    const parts = [];
+    let pos = 0;
+    for (const e of R.findEmbeds(text)) {
+      if (e.start > pos) parts.push({ runs: runsOf(text.slice(pos, e.start)) });
+      try { parts.push(await flexBlock(e.spec)); } catch (err) { parts.push({ runs: [{ text: '[FLEx object unavailable]', color: '#c0392b' }] }); }
+      pos = e.end;
+    }
+    if (pos < text.length || !parts.length) parts.push({ runs: runsOf(text.slice(pos)) });
+    return parts.filter((p) => p.type || p.runs.some((r) => r.text.trim()) || parts.length === 1);
+  }
+
+  /* ------------------------------------------------------------------ model → HTML */
+  const CSS = `
+  body { font: 15px/1.5 -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif; color: #1a1d21; max-width: 860px; margin: 32px auto; padding: 0 24px; }
+  h1 { font-size: 26px; } h2 { font-size: 20px; } h3 { font-size: 17px; }
+  blockquote { border-left: 3px solid #d9dde3; margin: 8px 0; padding-left: 12px; color: #68717d; font-style: italic; }
+  pre { background: #f3f4f6; padding: 10px 12px; border-radius: 8px; font: 13px/1.5 Consolas, Menlo, monospace; }
+  code { background: #e9ebef; border-radius: 3px; padding: 0 3px; font-family: Consolas, Menlo, monospace; font-size: 0.92em; }
+  mark { background: #fff2a8; }
+  table.note { border-collapse: collapse; margin: 8px 0 14px; } table.note th, table.note td { border: 1px solid #d9dde3; padding: 6px 10px; vertical-align: top; } table.note th { background: #f3f4f6; text-align: left; }
+  table.note.striped tbody tr:nth-child(even) td { background: #f7f8fa; } table.note.borders-light th, table.note.borders-light td { border-color: #e8ebef; } table.note.borders-none th, table.note.borders-none td { border-color: transparent; }
+  .obj { border: 1px solid #e8ebef; border-radius: 10px; padding: 10px 12px; margin: 8px 0 14px; background: #fff; }
+  .obj .ttl { font-weight: 700; color: #00379c; font-family: "Charis SIL", "Doulos SIL", serif; font-size: 15px; } .obj .lbl { color: #68717d; font-size: 13px; margin-left: 10px; }
+  .seg { display: flex; gap: 10px; padding: 5px 0; border-top: 1px dotted #e8ebef; } .seg:first-of-type { border-top: 0; } .n { color: #a8b0ba; font-size: 12px; width: 26px; text-align: right; flex: none; }
+  .il { display: flex; flex-wrap: wrap; gap: 0 14px; } .w { display: flex; flex-direction: column; } .l { white-space: nowrap; line-height: 1.35; }
+  .txt { color: #00379c; font-family: "Charis SIL", "Doulos SIL", serif; font-size: 17px; } .morph { color: #4a4f57; font-family: "Charis SIL", serif; font-size: 14px; } .mgls, .gls { color: #2a6e2a; font-size: 13.5px; } .cf { color: #68717d; font-size: 12.5px; } .pos { color: #7a3e9d; font-size: 12px; }
+  .ft { margin-top: 6px; } .ft b, .lit b, .note b { font-size: 11px; color: #a8b0ba; text-transform: uppercase; margin-right: 8px; font-weight: 400; } .lit { color: #68717d; font-size: 13.5px; } .note { color: #68717d; font-style: italic; font-size: 13px; }
+  .hw { font-size: 20px; font-weight: 700; color: #00379c; font-family: "Charis SIL", serif; } .sense { display: flex; gap: 8px; padding: 3px 0; } .sense .sn { color: #a8b0ba; min-width: 20px; text-align: right; } .sense .pos { font-style: italic; } .sense .gl { color: #2a6e2a; font-weight: 600; } .ex { color: #68717d; margin-left: 6px; border-left: 2px solid #e8ebef; padding-left: 8px; font-size: 13.5px; } .ex .v { color: #00379c; font-family: "Charis SIL", serif; font-size: 14.5px; }
+  ul.task { list-style: none; padding-left: 8px; } hr { border: 0; border-top: 1px solid #d9dde3; margin: 16px 0; } img { max-width: 100%; }
+  [dir=rtl] .il { flex-direction: row-reverse; justify-content: flex-end; }
+  @media print { body { margin: 0; max-width: none; } .obj { break-inside: avoid; } }`;
+
+  function runHtml(r) {
+    let s = esc(r.text).replace(/\n/g, '<br>');
+    const css = [];
+    if (r.font) css.push('font-family:"' + esc(r.font) + '",serif');
+    if (r.color) css.push('color:' + esc(r.color));
+    if (r.hl) css.push('background:' + (typeof r.hl === 'string' ? esc(r.hl) : '#fff2a8'));
+    if (r.size) css.push('font-size:' + r.size + 'pt');
+    if (r.code) s = '<code>' + s + '</code>';
+    if (r.b) s = '<b>' + s + '</b>';
+    if (r.i) s = '<i>' + s + '</i>';
+    if (r.u) s = '<u>' + s + '</u>';
+    if (r.s) s = '<s>' + s + '</s>';
+    return css.length ? '<span style="' + css.join(';') + '">' + s + '</span>' : s;
+  }
+  const runsHtml = (runs) => (runs || []).map(runHtml).join('');
+
+  function blockHtml(b) {
+    switch (b.type) {
+      case 'h': return '<h' + b.level + '>' + runsHtml(b.runs) + '</h' + b.level + '>';
+      case 'p': return '<p' + (b.rtl ? ' dir="rtl"' : '') + '>' + runsHtml(b.runs) + '</p>';
+      case 'quote': return '<blockquote>' + runsHtml(b.runs) + '</blockquote>';
+      case 'code': return '<pre>' + esc(b.text) + '</pre>';
+      case 'hr': return '<hr>';
+      case 'list': {
+        const task = b.items.some((i) => i.task);
+        const ordered = b.items.length && b.items[0].ordered;
+        return '<' + (ordered ? 'ol' : 'ul') + (task ? ' class="task"' : '') + '>' + b.items.map((i) => '<li style="margin-left:' + (i.level * 18) + 'px">' + (i.task ? (i.checked ? '☑ ' : '☐ ') : '') + runsHtml(i.runs) + '</li>').join('') + '</' + (ordered ? 'ol' : 'ul') + '>';
+      }
+      case 'table': {
+        const flags = (b.style && b.style.flags) || [];
+        const cols = (b.style && b.style.cols) || {}, rows = (b.style && b.style.rows) || {};
+        const cellStyle = (ri, ci) => { const c = cols[ci + 1] || {}, r = rows[ri + 1] || {}; const css = []; const a = r.align || c.align || (b.aligns || [])[ci]; if (a) css.push('text-align:' + a); if (c.width) css.push('width:' + c.width); if (r.bg || c.bg) css.push('background:' + (r.bg || c.bg)); if (r.color || c.color) css.push('color:' + (r.color || c.color)); if (r.bold || c.bold) css.push('font-weight:700'); if (r.italic || c.italic) css.push('font-style:italic'); if (r.nowrap || c.nowrap) css.push('white-space:nowrap'); if (r.vern || c.vern) css.push('font-family:"Charis SIL",serif;color:#00379c'); return css.length ? ' style="' + css.join(';') + '"' : ''; };
+        const cellHtml = (c) => c.blocks ? c.blocks.map(blockHtml).join('') : runsHtml(c.runs);
+        return '<table class="note ' + flags.join(' ') + '">' + b.rows.map((row, ri) => '<tr>' + row.map((c, ci) => (ri === 0 ? '<th' : '<td') + cellStyle(ri, ci) + '>' + cellHtml(c) + (ri === 0 ? '</th>' : '</td>')).join('') + '</tr>').join('') + '</table>';
+      }
+      case 'interlinear': {
+        const rtl = b.ws && b.ws.rtl;
+        return '<div class="obj"' + (rtl ? ' dir="rtl"' : '') + '><div><span class="ttl">' + esc(b.title || '') + '</span>' + (b.label ? '<span class="lbl">' + esc(b.label) + '</span>' : '') + '</div>'
+          + b.segments.map((seg) => {
+            const ncols = Math.max(0, ...seg.lines.map((l) => l.cells.length));
+            const words = [];
+            for (let i = 0; i < ncols; i++) words.push('<div class="w">' + seg.lines.map((l) => '<div class="l ' + l.name + '">' + runsHtml(l.cells[i] || []) + '</div>').join('') + '</div>');
+            return '<div class="seg"><span class="n">' + seg.n + '</span><div><div class="il">' + words.join('') + '</div>'
+              + (seg.free ? '<div class="ft"><b>Free</b>' + runsHtml(seg.free) + '</div>' : '') + (seg.lit ? '<div class="lit"><b>Lit</b>' + runsHtml(seg.lit) + '</div>' : '')
+              + (seg.notes || []).map((n) => '<div class="note"><b>Note</b>' + runsHtml(n) + '</div>').join('') + '</div></div>';
+          }).join('') + '</div>';
+      }
+      case 'entry': return '<div class="obj"><div><span class="hw">' + esc(b.headword || '') + '</span>' + (b.pos ? ' <span class="pos">' + esc(b.pos) + '</span>' : '') + (b.label ? '<span class="lbl">' + esc(b.label) + '</span>' : '') + '</div>'
+        + (b.senses || []).map((s) => '<div class="sense"><span class="sn">' + esc(s.number || '') + '</span><div>' + (s.pos ? '<span class="pos">' + esc(s.pos) + '</span> ' : '') + '<span class="gl">' + esc(s.gloss || '') + '</span>' + (s.definition && s.definition !== s.gloss ? ' — ' + esc(s.definition) : '') + (s.examples || []).map((ex) => '<div class="ex"><span class="v">' + esc(ex.text || '') + '</span>' + (ex.translation ? ' ‘' + esc(ex.translation) + '’' : '') + '</div>').join('') + '</div></div>').join('') + '</div>';
+      case 'wordform': return '<div class="obj"><span class="hw">' + esc(b.form || '') + '</span> <span class="gls">' + esc((b.glosses || []).join('; ')) + '</span></div>';
+      case 'image': return '<p><img src="' + b.png + '" alt="' + esc(b.alt || '') + '"></p>';
+      case 'imageref': return '<p><img src="' + esc(b.src) + '" alt="' + esc(b.alt || '') + '"></p>';
+      default: return '';
+    }
+  }
+
+  function toHtml(doc) {
+    return '<!doctype html><html><head><meta charset="utf-8"><title>' + esc(doc.title) + '</title><style>' + CSS + '</style></head><body><h1>' + esc(doc.title) + '</h1>'
+      + doc.blocks.map(blockHtml).join('\n') + '\n<p style="color:#a8b0ba;font-size:11px;margin-top:40px">Exported from FLEx Scratchpad</p></body></html>';
+  }
+
+  /* ------------------------------------------------------------------ actions */
+  async function exportNote(note, editor, format) {
+    if (format === 'md') { const p = await FS.api.export_note_markdown(note.id); if (p) FS.toast('Saved ' + p, 'ok'); return p; }
+    const doc = await buildDoc(note, editor);
+    if (format === 'html') { const p = await FS.api.export_note_html(note.id, toHtml(doc)); if (p) FS.toast('Saved ' + p, 'ok'); return p; }
+    if (format === 'docx') { const p = await FS.api.export_note_docx(note.id, doc); if (p) FS.toast('Saved ' + p, 'ok'); return p; }
+    if (format === 'pdf') {
+      // the HTML rendering in a hidden frame, printed: the print dialog offers "Save as PDF"
+      const frame = document.createElement('iframe');
+      frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
+      document.body.appendChild(frame);
+      frame.srcdoc = toHtml(doc);
+      await new Promise((res) => { frame.onload = res; setTimeout(res, 1500); });
+      try { frame.contentWindow.focus(); frame.contentWindow.print(); } catch (e) { FS.toast('Print failed: ' + e.message, 'error'); }
+      setTimeout(() => frame.remove(), 60000);
+      return true;
+    }
+    return null;
+  }
+
+  FS.exporter = { buildDoc, toHtml, exportNote, runsOf };
+})();

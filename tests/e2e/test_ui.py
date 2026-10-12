@@ -470,3 +470,34 @@ def test_undo_redo_from_anywhere(app):
     page.wait_for_timeout(700)
     assert "b=1.1" not in body_of(h)
     assert not errors
+
+
+def test_export_html_and_docx(app):
+    h, page, errors = app
+    new_note(page, "Export me")
+    page.keyboard.type("Intro with **bold** and #tag")
+    page.keyboard.press("Enter")
+    page.keyboard.type('{{flex:text %s seg=1-2 u=morph:"-mo" hl=ft:1 "ex. A"}}' % T_STORY)
+    page.keyboard.press("Enter")
+    page.keyboard.type("| Form | Example |\n|---|---|\n| kabir | {{flex:entry 6a5f3a2e-1b1e-4c2a-9f10-0d2c1a7e0001}} |")
+    page.wait_for_selector("#editor .text-obj")
+    page.wait_for_timeout(900)
+    html_path = str(h.tmp / "note.html")
+    docx_path = str(h.tmp / "note.docx")
+    html = page.evaluate("""async ([hp, dp]) => {
+      const ed = window.__fsEditor || null;
+      const api = window.pywebview.api;
+      const notes = await api.list_notes(); const note = await api.get_note(notes[0].id);
+      const editor = new FS.Editor(document.createElement('div'), {}); editor.load(note.body);
+      const doc = await FS.exporter.buildDoc(note, editor);
+      await api.export_note_html(note.id, FS.exporter.toHtml(doc), hp);
+      await api.export_note_docx(note.id, doc, dp);
+      return FS.exporter.toHtml(doc);
+    }""", [html_path, docx_path])
+    assert "<b>bold</b>" in html and 'class="obj"' in html and "ka-nuwa-mo" in html and "<u>-mo</u>" in html
+    assert "The dog slept." in html and "kabir" in html and "a domestic dog" in html
+    assert (h.tmp / "note.html").read_text(encoding="utf-8").startswith("<!doctype html>")
+    import zipfile
+    xml = zipfile.ZipFile(docx_path).read("word/document.xml").decode("utf-8")
+    assert "ka-nuwa-mo" in xml and "The dog slept." in xml and "a domestic dog" in xml and '<w:u w:val="single"/>' in xml
+    assert not errors
