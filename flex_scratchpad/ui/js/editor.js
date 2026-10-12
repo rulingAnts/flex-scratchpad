@@ -244,6 +244,8 @@
       if (it === 'insertFromPaste' || it === 'insertFromDrop') {
         e.preventDefault();
         const dt = e.dataTransfer;
+        const table = FS.tables.fromClipboard(dt);          // a table copied from Excel / Word / a browser
+        if (table) { this.insertBlockSourceAtCaret(body, b, table); return; }
         const text = (dt && dt.getData('text/plain')) || '';
         if (!text) return;
         this.pasteText(body, b, text.replace(/\r\n?/g, '\n'));

@@ -346,5 +346,70 @@
     });
   }
 
-  FS.tables = { parse, serialize, splitRow, parseStyle, serializeStyle, render, template };
+  /* ------------------------------------------------------------------ clipboard import
+   * Excel, Word and browsers put an HTML <table> on the clipboard next to tab-separated text.
+   * Either becomes a table block; inline bold/italic and line breaks inside cells survive. */
+  function cellMarkdown(node) {
+    let out = '';
+    for (const c of node.childNodes) {
+      if (c.nodeType === 3) { out += c.nodeValue.replace(/\s+/g, ' '); continue; }
+      if (c.nodeType !== 1) continue;
+      const tag = c.tagName.toLowerCase();
+      if (tag === 'br') { out += '\n'; continue; }
+      if (tag === 'script' || tag === 'style') continue;
+      const inner = cellMarkdown(c);
+      if (!inner.trim()) { out += inner; continue; }
+      const fw = (c.style && c.style.fontWeight) || '';
+      if (tag === 'b' || tag === 'strong' || /^(bold|[6-9]00)$/.test(fw)) out += '**' + inner.trim() + '**';
+      else if (tag === 'i' || tag === 'em' || (c.style && c.style.fontStyle === 'italic')) out += '*' + inner.trim() + '*';
+      else if (tag === 'a' && c.getAttribute('href')) out += '[' + inner.trim() + '](' + c.getAttribute('href') + ')';
+      else if (tag === 'p' || tag === 'div' || tag === 'li') out += (out && !out.endsWith('\n') ? '\n' : '') + inner;
+      else out += inner;
+    }
+    return out;
+  }
+
+  function fromHtml(html) {
+    if (!html || !/<table[\s>]/i.test(html)) return null;
+    let doc;
+    try { doc = new DOMParser().parseFromString(html, 'text/html'); } catch (e) { return null; }
+    const table = doc.querySelector('table');
+    if (!table) return null;
+    const rows = [];
+    for (const tr of table.querySelectorAll('tr')) {
+      if (tr.closest('table') !== table) continue;          // nested tables: keep only the outer grid
+      const cells = [];
+      for (const td of tr.children) {
+        if (!/^(td|th)$/i.test(td.tagName)) continue;
+        const text = cellMarkdown(td).replace(/ /g, ' ').split('\n').map((l) => l.trim()).join('\n').replace(/\n{2,}/g, '\n').trim();
+        cells.push(text);
+        const span = parseInt(td.getAttribute('colspan') || '1', 10);
+        for (let i = 1; i < span; i++) cells.push('');
+      }
+      if (cells.some((c) => c !== '')) rows.push(cells);
+    }
+    if (rows.length < 1) return null;
+    const w = Math.max(...rows.map((r) => r.length));
+    rows.forEach((r) => { while (r.length < w) r.push(''); });
+    if (rows.length === 1) rows.push(rows[0].map(() => ''));
+    return serialize({ rows, aligns: [], style: parseStyle('') });
+  }
+
+  function fromTsv(text) {
+    const lines = String(text || '').replace(/\r\n?/g, '\n').replace(/\n+$/, '').split('\n');
+    if (lines.length < 2 || !lines.every((l) => l.includes('\t'))) return null;
+    const rows = lines.map((l) => l.split('\t').map((c) => c.trim()));
+    const w = Math.max(...rows.map((r) => r.length));
+    rows.forEach((r) => { while (r.length < w) r.push(''); });
+    return serialize({ rows, aligns: [], style: parseStyle('') });
+  }
+
+  /* Markdown for a pasted table, or null when the clipboard holds no table. */
+  function fromClipboard(dt) {
+    if (!dt) return null;
+    const html = dt.getData && dt.getData('text/html');
+    return fromHtml(html) || fromTsv(dt.getData && dt.getData('text/plain'));
+  }
+
+  FS.tables = { parse, serialize, splitRow, parseStyle, serializeStyle, render, template, fromHtml, fromTsv, fromClipboard, cellMarkdown };
 })();

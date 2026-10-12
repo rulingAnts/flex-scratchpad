@@ -256,3 +256,30 @@ def test_mock_mode_without_python(browser):
     page.wait_for_selector("#editor .entry-card")
     page.wait_for_selector("#editor .text-obj .st-u")
     ctx.close()
+
+
+def paste(page, plain, html=None):
+    page.evaluate("""([plain, html]) => {
+      const dt = new DataTransfer(); dt.setData('text/plain', plain); if (html) dt.setData('text/html', html);
+      document.activeElement.dispatchEvent(new InputEvent('beforeinput', { inputType: 'insertFromPaste', dataTransfer: dt, bubbles: true, cancelable: true }));
+    }""", [plain, html])
+
+
+def test_paste_table_from_excel_and_html(app):
+    h, page, errors = app
+    new_note(page, "Pasted tables")
+    # Excel / Word / browser: tab-separated text plus an HTML table on the clipboard
+    html = ('<html><body><table><tr><td style="font-weight:700">Form</td><th>Gloss</th></tr>'
+            '<tr><td>kabir</td><td>dog<br>canid</td></tr><tr><td><b>ka-</b></td><td>3SG &amp; co</td></tr></table></body></html>')
+    paste(page, "Form\tGloss\r\nkabir\tdog\r\nka-\t3SG", html)
+    page.wait_for_selector("table.md-table")
+    page.wait_for_timeout(900)
+    body = body_of(h)
+    assert "| **Form** | Gloss |" in body and "| kabir | dog<br>canid |" in body and "| **ka-** | 3SG & co |" in body
+    # plain tab-separated text alone (no HTML) also becomes a table
+    page.locator(".blk").last.locator(".blk-body").click()
+    paste(page, "a\tb\n1\t2\n")
+    page.wait_for_timeout(900)
+    assert "| a | b |\n|---|---|\n| 1 | 2 |" in body_of(h)
+    assert page.locator("table.md-table").count() == 2
+    assert not errors
