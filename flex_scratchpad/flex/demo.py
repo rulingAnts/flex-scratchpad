@@ -224,6 +224,10 @@ class DemoBackend:
             raise KeyError(f"No text with guid {guid}")
         return slice_text(t, seg_from, seg_to, max_segments)
 
+    def all_baselines(self) -> dict:
+        return {g: {"title": t["title"], "segments": [(sg["n"], sg["baseline"], sg.get("free", "")) for sg in t["segments"]]}
+                for g, t in self.texts.items()}
+
     def resolve_guid(self, guid: str) -> dict | None:
         g = (guid or "").lower()
         if g in ENTRY_BY_GUID:

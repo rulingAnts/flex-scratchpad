@@ -73,3 +73,9 @@ test('charts: DSL parses and serialises', () => {
   assert.ok(FS.charts.parse('```chart\nnonsense\n```').errors.length);
   assert.equal(FS.charts.parse('```chart\n{"type":"pie","labels":["x"],"series":[{"name":"s","values":[1]}]}\n```').type, 'pie');
 });
+
+test('tables: freeze panes and height round-trip through the style line', () => {
+  const t = FS.tables.parse('| a | b |\n|---|---|\n| 1 | 2 |\n{table: striped; freeze rows 1; freeze cols 2; max-height 300px}');
+  assert.equal(t.style.freezeRows, 1); assert.equal(t.style.freezeCols, 2); assert.equal(t.style.maxHeight, '300px');
+  assert.equal(FS.tables.serialize(t).split('\n').pop(), '{table: striped; freeze rows 1; freeze cols 2; max-height 300px}');
+});

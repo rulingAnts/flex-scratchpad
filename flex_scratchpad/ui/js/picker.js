@@ -170,5 +170,30 @@
     m.body.appendChild(row);
   }
 
-  FS.picker = { open, pasteChooser, embedFor, linkFor };
+  /* Interlinear lines were pasted: ask Python where they come from; offer the embed, or
+   * fall back to a plain paste (fallback()) when nothing matches well enough. */
+  async function locateChooser(text, insert, fallback) {
+    let hits = [];
+    try { hits = await FS.api.flex_locate(text); } catch (e) { hits = []; }
+    const best = hits[0];
+    if (!best || best.score < 2) { fallback(); return; }
+    const m = FS.modal({ title: 'Found in FieldWorks', class: 'narrow' });
+    const lines = text.trim().split('\n').filter((l) => l.trim()).length;
+    const pick = { hit: best };
+    m.body.appendChild(el('p', {}, 'These lines match ', el('b', {}, best.title), ', segment' + (best.segTo !== best.seg ? 's ' + best.seg + '\u2013' + best.segTo : ' ' + best.seg) + (best.matched < best.of ? ' (' + best.matched + ' of ' + best.of + ' lines matched)' : '') + '.'));
+    if (hits.length > 1) {
+      const sel = el('select', { style: { width: '100%' } });
+      hits.forEach((h, i) => sel.appendChild(el('option', { value: i }, h.title + ' \u2014 ' + (h.segTo !== h.seg ? h.seg + '\u2013' + h.segTo : h.seg) + (h.matched < h.of ? ' (' + h.matched + '/' + h.of + ')' : ''))));
+      sel.addEventListener('change', () => { pick.hit = hits[+sel.value]; });
+      m.body.appendChild(el('div', { class: 'form-row' }, el('label', {}, 'Other matches'), sel));
+    }
+    const row = el('div', { class: 'btn-row' });
+    row.appendChild(el('button', { class: 'btn', onclick: () => { m.close(); fallback(); } }, 'Paste as text'));
+    row.appendChild(el('button', { class: 'btn', onclick: () => { insert(linkFor('text', pick.hit.guid, pick.hit.title), false); m.close(); } }, 'Insert link'));
+    row.appendChild(el('button', { class: 'btn primary', onclick: () => { insert(embedFor('text', pick.hit.guid, { seg: [pick.hit.seg, pick.hit.segTo] }), true); m.close(); } }, 'Insert rendered'));
+    m.body.appendChild(row);
+    void lines;
+  }
+
+  FS.picker = { open, pasteChooser, locateChooser, embedFor, linkFor };
 })();

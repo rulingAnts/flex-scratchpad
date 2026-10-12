@@ -316,6 +316,13 @@ class Api:
         except FlexError as e:
             raise RuntimeError(e.message)
 
+    def flex_locate(self, pasted: str) -> list[dict]:
+        """Pasted interlinear lines → where they come from (text + segment range)."""
+        try:
+            return self._flex.locate(pasted)
+        except FlexError:
+            return []
+
     def flex_resolve_link(self, text: str) -> dict | None:
         return self._flex.resolve_link(text)
 

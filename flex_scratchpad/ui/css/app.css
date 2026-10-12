@@ -336,6 +336,14 @@ table.md-table.header-col tbody td:first-child { font-weight: 650; background: v
 table.md-table.full { width: 100%; }
 table.md-table.wide { max-width: none; }
 .tbl-wrap { overflow-x: auto; overflow-y: hidden; padding-bottom: 2px; }
+.tbl-wrap.frozen { overflow: auto; border: 1px solid var(--border-soft); border-radius: 6px; }
+.tbl-wrap.frozen table.md-table { border-collapse: separate; border-spacing: 0; }
+.tbl-wrap.frozen th, .tbl-wrap.frozen td { border-width: 0 1px 1px 0; }
+.tbl-wrap.frozen tr > :first-child { border-left-width: 1px; }
+.tbl-wrap.frozen thead th { border-top-width: 1px; }
+table.md-table .frozen { background: var(--bg); }
+table.md-table th.frozen { background: var(--panel); }
+table.md-table.striped tbody tr:nth-child(even) td.frozen { background: var(--panel); }
 .col-resizer { position: absolute; top: 0; bottom: 0; right: -4px; width: 8px; cursor: col-resize; z-index: 2; }
 .col-resizer::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; background: var(--accent); opacity: 0; }
 .col-resizer:hover::after, .col-resizer.dragging::after { opacity: 1; }

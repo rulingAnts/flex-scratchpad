@@ -19,6 +19,35 @@ EMBED_RE = re.compile(r"\{\{\s*flex:(entry|sense|text|wordform)\s+([0-9a-fA-F-]{
 LINK_RE = re.compile(r"\(flex:(entry|sense|text|wordform)/([0-9a-fA-F-]{36})", re.I)
 
 
+import unicodedata as _ud
+
+
+def _depunct(s: str) -> str:
+    return " ".join("".join(c for c in s if not _ud.category(c).startswith("P")).split())
+
+
+def _text_score(q: str, hay: str) -> int:
+    """3 = equal, 2 = one contains the other (and the query is substantial), else 0."""
+    if not q or not hay:
+        return 0
+    if q == hay:
+        return 3
+    substantial = len(q) >= 6 or " " in q
+    if substantial and (q in hay or (hay in q and len(hay) >= 6)):
+        return 2
+    return 0
+
+
+def _query_score(q: dict, baseline: str, free: str) -> int:
+    """A segment query {base, free} against a segment: the baseline match (or, for a
+    translation-only query, the free match) plus a bonus when the free translation agrees."""
+    base = _text_score(q.get("base", ""), baseline) if q.get("base") else 0
+    fr = _text_score(q.get("free", ""), free) if q.get("free") else 0
+    if q.get("base"):
+        return base + (1 if fr else 0) if base else 0
+    return 1 if fr else 0
+
+
 class FlexService:
     def __init__(self, notebook, progress=None):
         self.nb = notebook
@@ -223,6 +252,71 @@ class FlexService:
             page = self._live().get_text(guid, 1, None, max_segments=100000)
         return [s["n"] for s in page["segments"]
                 if needle in normalize(s["baseline"], strip) or needle in normalize(s.get("free", ""), strip)]
+
+    # Row labels FLEx writes when interlinear lines are copied; lines so labelled are either
+    # vernacular (kept for matching) or something else (dropped).
+    _ROW_KEEP = ("word", "free", "baseline", "words")
+    _ROW_DROP = ("morphemes", "lex. entries", "lex entries", "lex. gloss", "lex gloss", "lex. gram. info",
+                 "word gloss", "word cat.", "word cat", "literal", "note", "notes", "gloss", "category")
+
+    def locate(self, pasted: str, limit: int = 5) -> list[dict]:
+        """Where in the project do these pasted interlinear lines come from?
+        FLEx's labelled rows (Word / Morphemes / Free …) all describe ONE segment: the Word row
+        is its baseline, the Free row its translation; unlabelled lines are taken as one
+        segment each, in order. Matching is normalised and diacritics-insensitive, with
+        punctuation ignored. Returns candidates [{guid, title, seg, segTo, score, matched, of}]."""
+        from ..notebook import normalize
+        strip = bool(self.nb.config.get("settings", {}).get("diacriticsInsensitive", True))
+        norm = lambda t: _depunct(normalize(" ".join((t or "").split()), strip))  # noqa: E731
+        queries: list[dict] = []
+        for raw in (pasted or "").replace("\r\n", "\n").split("\n"):
+            line = raw.strip()
+            if not line:
+                continue
+            cells = [c.strip() for c in line.split("\t")]
+            label = cells[0].rstrip(":").casefold() if len(cells) > 1 else ""
+            if label and (label in self._ROW_DROP or any(label.startswith(d) for d in self._ROW_DROP)):
+                continue
+            is_free = label.startswith("free")
+            labelled = bool(label) and (is_free or label in self._ROW_KEEP or any(label.startswith(k + " ") for k in self._ROW_KEEP))
+            words = [c for c in (cells[1:] if labelled else cells) if c]
+            if not words:
+                continue
+            text = " ".join(words)
+            if len(text) > 400:
+                return []
+            if is_free:
+                if queries and not queries[-1].get("free"):
+                    queries[-1]["free"] = norm(text)
+                else:
+                    queries.append({"base": "", "free": norm(text)})
+            else:
+                queries.append({"base": norm(text), "free": ""})
+        queries = [q for q in queries if q["base"] or q["free"]]
+        if not queries:
+            return []
+        with self.lock:
+            be = self._live()
+            index = be.all_baselines()
+        hits = []
+        for guid, t in index.items():
+            segs = [(n, norm(b), norm(f)) for n, b, f in t["segments"]]
+            for i, (n, nb, nf) in enumerate(segs):
+                sc = _query_score(queries[0], nb, nf)
+                if sc <= 0:
+                    continue
+                score, last, k, j = sc, n, 1, i + 1
+                while k < len(queries) and j < len(segs):
+                    s2 = _query_score(queries[k], segs[j][1], segs[j][2])
+                    if s2 <= 0:
+                        break
+                    score += s2
+                    last = segs[j][0]
+                    k += 1
+                    j += 1
+                hits.append({"guid": guid, "title": t["title"], "seg": n, "segTo": last, "score": score, "matched": k, "of": len(queries)})
+        hits.sort(key=lambda h: (-h["score"], -h["matched"], h["title"]))
+        return hits[:limit]
 
     def resolve_link(self, text: str) -> dict | None:
         """A pasted FLEx hyperlink or bare GUID → {kind, guid, title, seg?, sense?, database?}."""

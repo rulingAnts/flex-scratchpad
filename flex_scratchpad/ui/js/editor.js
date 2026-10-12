@@ -166,6 +166,7 @@
           onChange: (src) => { b.src = src; this.changed(); },
           openLink: (href) => this.openLink(href),
           onPasteLink: (text, insert) => this.opts.onPasteLink && this.opts.onPasteLink(text, insert),
+          onPasteLocate: (text, insert, fallback) => this.opts.onPasteLocate ? this.opts.onPasteLocate(text, insert, fallback) : fallback(),
         });
       } else if (b.type === 'flex') {
         const spec = FS.flexref.parse(b.src);
@@ -232,7 +233,7 @@
         const dt = e.clipboardData;
         // A table copied from Excel / Word / a browser comes with a bitmap AND an HTML table on
         // the clipboard: the table wins (Seth, 2026-10-12: "I'd like it to land as a table").
-        const table = FS.tables.fromClipboard(dt);
+        const table = FS.tables.fromHtml(dt && dt.getData('text/html'));
         if (table) { e.preventDefault(); this.insertBlockSourceAtCaret(body, b, table); return; }
         // image paste (files) — beforeinput does not expose them
         const files = dt && dt.files;
@@ -249,8 +250,11 @@
       if (it === 'insertFromPaste' || it === 'insertFromDrop') {
         e.preventDefault();
         const dt = e.dataTransfer;
-        const table = FS.tables.fromClipboard(dt);          // a table copied from Excel / Word / a browser
-        if (table) { this.insertBlockSourceAtCaret(body, b, table); return; }
+        // An HTML table (Excel / Word / a browser) becomes a table block. Tab-separated TEXT is
+        // first offered to the FLEx locator (lines copied from the interlinear view) and only
+        // becomes a table when nothing in the project matches — see pasteText.
+        const htmlTable = FS.tables.fromHtml(dt && dt.getData && dt.getData('text/html'));
+        if (htmlTable) { this.insertBlockSourceAtCaret(body, b, htmlTable); return; }
         const text = (dt && dt.getData('text/plain')) || '';
         if (!text) return;
         this.pasteText(body, b, text.replace(/\r\n?/g, '\n'));
@@ -314,10 +318,29 @@
     }
     pasteText(body, b, text) {
       const trimmed = text.trim();
+      // A chooser dialog may open first; its focus change can blur and re-render this block, so
+      // the insert re-finds the block's live element and uses the caret captured now.
+      const a = getCaret(body), z = getCaretEnd(body);
+      const live = () => (b.el && b.el.isConnected && b.el.querySelector('.blk-body')) || body;
+      const insert = (md, asBlock) => {
+        const el2 = live();
+        if (!this.blocks.includes(b)) { this.insertMarkdown(md, asBlock); return; }
+        if (document.activeElement !== el2) { el2.focus(); setCaret(el2, a, z); }
+        if (asBlock) this.insertBlockSourceAtCaret(el2, b, md); else this.insertTextAtCaret(el2, b, md);
+      };
       if (this.opts.onPasteLink && (/^silfw:\/\//i.test(trimmed) || FS.flexref.GUID.test(trimmed))) {
-        this.opts.onPasteLink(trimmed, (md, asBlock) => { if (asBlock) this.insertBlockSourceAtCaret(body, b, md); else this.insertTextAtCaret(body, b, md); });
+        this.opts.onPasteLink(trimmed, insert);
         return;
       }
+      const plain = () => { const el2 = live(); if (document.activeElement !== el2) { el2.focus(); setCaret(el2, a, z); } const tsv = FS.tables.fromTsv(text); if (tsv) this.insertBlockSourceAtCaret(el2, b, tsv); else this.pastePlain(el2, b, text); };
+      if (this.opts.onPasteLocate && looksInterlinear(text)) {
+        // lines copied out of FLEx's interlinear view: locate the segment(s) and offer the embed
+        this.opts.onPasteLocate(text, insert, plain);
+        return;
+      }
+      plain();
+    }
+    pastePlain(body, b, text) {
       if (/\n\s*\n/.test(text) || MD.splitBlocks(text).some((x) => !TEXT_TYPES.has(x.type) || x.type !== 'p')) {
         this.insertBlockSourceAtCaret(body, b, text);
         return;
@@ -776,6 +799,18 @@
     if (allWrapped) { na = Math.max(0, na); nz = Math.max(na, nz); }
     else if (segs[0].la === a) { /* markers were inserted at the selection start: keep them inside it */ nz = Math.min(out.length, nz); }
     return { text: out, a: na, z: Math.min(out.length, nz) };
+  }
+
+  /* Could this be text copied from FLEx's interlinear view? Tabs between cells, or a few
+   * short lines, and no markdown structure of its own. */
+  function looksInterlinear(text) {
+    const t = text.trim();
+    if (!t || t.length > 2000 || /^(https?:|silfw:)/i.test(t)) return false;
+    if (/\t/.test(t)) return true;
+    const lines = t.split('\n').filter((l) => l.trim());
+    if (lines.length > 12) return false;
+    if (lines.some((l) => /^(#{1,6}\s|[-*+]\s|\d+[.)]\s|>|\||```|\{\{)/.test(l.trim()))) return false;
+    return lines.every((l) => l.length <= 200) && t.length >= 6;
   }
 
   function wrapRange(textNode, a, b) {

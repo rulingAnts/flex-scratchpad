@@ -105,15 +105,32 @@ def _t(fn, default=""):
 
 
 def _s(v) -> str:
-    """A Python str out of str / ITsString / anything with .Text."""
+    """A Python str out of str / ITsString / anything with .Text. Total: never raises, and
+    never calls str() on a .NET object — an ITsString with no text has Text == null, and
+    pythonnet cannot make a Python string out of a null ToString() (Seth's run, 2026-10-12:
+    "Object reference not set to an instance of an object … PyString_FromString")."""
     if v is None:
         return ""
     if isinstance(v, str):
         return v
-    t = getattr(v, "Text", None)
+    try:
+        t = getattr(v, "Text", None)
+    except Exception:  # noqa: BLE001
+        t = None
     if isinstance(t, str):
         return t
-    return str(v)
+    try:
+        if hasattr(v, "Text"):
+            return ""
+    except Exception:  # noqa: BLE001
+        return ""
+    if isinstance(v, (int, float, bool)):
+        return str(v)
+    try:
+        r = v.ToString() if hasattr(v, "ToString") else str(v)
+        return r if isinstance(r, str) else ""
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 def _guid(obj) -> str:
@@ -218,6 +235,7 @@ class FlexiconBackend:
                 _t(lambda: self.project.RefreshFromDisk(), None)
             self._entry_index = None
             self._text_index = None
+            self._baseline_index = None
             return self._status()
         try:
             return self.worker.call(go)
@@ -606,6 +624,34 @@ class FlexiconBackend:
             if self._text_index is None:
                 self._text_index = self._build_text_index()
             return list(self._text_index)
+        try:
+            return self.worker.call(go, timeout=OPEN_TIMEOUT)
+        except BaseException as e:
+            raise _friendly(e, self.project_name)
+
+    def all_baselines(self) -> dict:
+        """{text guid: {title, segments: [(n, baseline, free), …]}} for every text — one walk,
+        kept for the session, so pasted interlinear lines can be located without knowing the
+        text. Reset by refresh()."""
+        def go():
+            self._need()
+            if getattr(self, "_baseline_index", None) is None:
+                p = self.project
+                index = {}
+                texts = list(p.Texts.GetAll())
+                for i, t in enumerate(texts):
+                    if i % 10 == 0:
+                        self.progress(f"Indexing texts\u2026 {i}/{len(texts)}")
+                    segs = []
+                    n = 0
+                    for para in _t(lambda: list(p.Paragraphs.GetAll(t)), []):
+                        for seg in _t(lambda: list(p.Segments.GetAll(para)), []):
+                            n += 1
+                            segs.append((n, _s(_t(lambda: p.Segments.GetBaselineText(seg), "")),
+                                         _s(_t(lambda: p.Segments.GetFreeTranslation(seg), ""))))
+                    index[_guid(t)] = {"title": self._text_title(t), "segments": segs}
+                self._baseline_index = index
+            return self._baseline_index
         try:
             return self.worker.call(go, timeout=OPEN_TIMEOUT)
         except BaseException as e:

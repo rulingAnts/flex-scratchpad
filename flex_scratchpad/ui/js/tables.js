@@ -49,7 +49,11 @@
         target[+cm[2]] = Object.assign(target[+cm[2]] || {}, parseProps(cm[3]));
       } else {
         const fm = /^borders?\s+(\w+)$/i.exec(p);
+        const fr = /^freeze\s+(rows?|cols?|columns?)\s+(\d+)$/i.exec(p);
+        const mh = /^(?:max-?height|height)\s+(\S+)$/i.exec(p);
         if (fm) st.flags.add('borders-' + fm[1].toLowerCase());
+        else if (fr) st[fr[1].toLowerCase().startsWith('r') ? 'freezeRows' : 'freezeCols'] = +fr[2];
+        else if (mh) st.maxHeight = mh[1];
         else st.flags.add(p.toLowerCase().replace(/\s+/g, '-'));
       }
     }
@@ -81,6 +85,9 @@
 
   function serializeStyle(st) {
     const parts = [...st.flags].map((f) => f.startsWith('borders-') ? 'borders ' + f.slice(8) : f);
+    if (st.freezeRows) parts.push('freeze rows ' + st.freezeRows);
+    if (st.freezeCols) parts.push('freeze cols ' + st.freezeCols);
+    if (st.maxHeight) parts.push('max-height ' + st.maxHeight);
     for (const [i, o] of Object.entries(st.cols)) { const s = serializeProps(o); if (s) parts.push('col ' + i + ': ' + s); }
     for (const [i, o] of Object.entries(st.rows)) { const s = serializeProps(o); if (s) parts.push('row ' + i + ': ' + s); }
     return parts.length ? '{table: ' + parts.join('; ') + '}' : '';
@@ -171,7 +178,10 @@
       (r === 0 ? thead : tbody).appendChild(tr);
     });
     table.append(thead, tbody);
-    container.appendChild(el('div', { class: 'tbl-wrap' }, table));
+    const wrap = el('div', { class: 'tbl-wrap' + ((t.style.freezeRows || t.style.freezeCols) ? ' frozen' : '') }, table);
+    if (t.style.freezeRows || t.style.freezeCols) wrap.style.maxHeight = t.style.maxHeight || '60vh';
+    container.appendChild(wrap);
+    if (t.style.freezeRows || t.style.freezeCols) requestAnimationFrame(() => applyFreeze(table, t));
     // tools
     const tools = el('div', { class: 'tbl-tools' });
     const cur = () => widget.focus || { r: t.rows.length - 1, c: 0 };
@@ -218,6 +228,32 @@
     return h;
   }
 
+  /* Excel-style frozen panes: the first N rows stick to the top and the first M columns to
+   * the left while the table scrolls inside its box (`freeze rows 1; freeze cols 1` in the
+   * style line). Offsets are measured, so resized columns and tall header rows still work. */
+  function applyFreeze(table, t) {
+    const rows = [...table.querySelectorAll('tr')];
+    const nr = Math.min(t.style.freezeRows || 0, rows.length), nc = t.style.freezeCols || 0;
+    let top = 0;
+    rows.forEach((tr, ri) => {
+      const h = tr.getBoundingClientRect().height;
+      [...tr.children].forEach((cell, ci) => {
+        const sticky = ri < nr || ci < nc;
+        if (!sticky) return;
+        cell.classList.add('frozen');
+        cell.style.position = 'sticky';
+        if (ri < nr) cell.style.top = top + 'px';
+        if (ci < nc) {
+          let left = 0;
+          for (let k = 0; k < ci; k++) left += (tr.children[k] ? tr.children[k].getBoundingClientRect().width : 0);
+          cell.style.left = left + 'px';
+        }
+        cell.style.zIndex = (ri < nr && ci < nc) ? 4 : (ri < nr ? 3 : 2);
+      });
+      if (ri < nr) top += h;
+    });
+  }
+
   function shiftRowStyles(t, from, by) { const o = {}; for (const [k, v] of Object.entries(t.style.rows)) o[+k >= from ? +k + by : +k] = v; t.style.rows = o; }
   function shiftColStyles(t, from, by) { const o = {}; for (const [k, v] of Object.entries(t.style.cols)) o[+k >= from ? +k + by : +k] = v; t.style.cols = o; }
 
@@ -255,7 +291,17 @@
         if (it === 'insertFromPaste' || it === 'insertFromDrop') {
           e.preventDefault();
           const text = (e.dataTransfer && e.dataTransfer.getData('text/plain')) || '';
-          if (opts.onPasteLink && /silfw:|^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(text.trim())) { opts.onPasteLink(text.trim(), (embed) => { insertAtCaret(ed, embed); refresh(); }); return; }
+          // A dialog may open before the insert happens; by then this cell editor has been
+          // closed by the focus change. So insert through the cell's coordinates + the caret
+          // captured now, whether the editor is still live or not.
+          const caretNow = FS.editor.getCaret(ed);
+          const put = (t) => {
+            if (!ed.isConnected) { widget.insertInto(r, c, t, caretNow); return; }
+            const before = ed.textContent.slice(0, FS.editor.getCaret(ed));
+            insertAtCaret(ed, (before && !/\s$/.test(before) && !/^\s/.test(t) ? ' ' : '') + t); refresh();   // a chooser result is a token: keep it off the preceding word
+          };
+          if (opts.onPasteLink && /silfw:|^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(text.trim())) { opts.onPasteLink(text.trim(), (embed) => put(String(embed).replace(/\n/g, ' '))); return; }
+          if (opts.onPasteLocate && /\t/.test(text)) { const plain = () => put(text.replace(/\r\n?/g, '\n').replace(/\n/g, ' ')); opts.onPasteLocate(text, (embed) => put(String(embed).replace(/\n/g, ' ')), plain); return; }
           insertAtCaret(ed, text.replace(/\r\n?/g, '\n')); refresh(); return;
         }
         if (it === 'formatBold') { e.preventDefault(); wrapSel(ed, '**'); refresh(); return; }
@@ -381,6 +427,13 @@
         pop.appendChild(el('div', { class: 'row' }, el('b', {}, 'Table')));
         const flag = (f, label) => el('button', { class: 'tog' + (t.style.flags.has(f) ? ' on' : ''), onclick: () => { t.style.flags.has(f) ? t.style.flags.delete(f) : t.style.flags.add(f); commit(); widget.refresh(); render(); } }, label);
         pop.appendChild(el('div', { class: 'row' }, flag('striped', 'Striped'), flag('header-col', 'Header column'), flag('compact', 'Compact'), flag('full', 'Full width'), flag('wide', 'Wide (scroll sideways)')));
+        const fr = el('input', { type: 'number', min: 0, max: 10, value: t.style.freezeRows || 0, style: { width: '56px' } });
+        const fc = el('input', { type: 'number', min: 0, max: 10, value: t.style.freezeCols || 0, style: { width: '56px' } });
+        const mh = el('input', { type: 'text', value: t.style.maxHeight || '', placeholder: '60vh', style: { width: '70px' } });
+        const setFreeze = () => { t.style.freezeRows = +fr.value || 0; t.style.freezeCols = +fc.value || 0; t.style.maxHeight = mh.value.trim(); commit(); widget.refresh(); };
+        fr.addEventListener('change', setFreeze); fc.addEventListener('change', setFreeze); mh.addEventListener('change', setFreeze);
+        pop.appendChild(el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Freeze'), el('span', { class: 'small muted' }, 'rows'), fr, el('span', { class: 'small muted' }, 'cols'), fc, el('span', { class: 'small muted' }, 'height'), mh));
+        pop.appendChild(el('div', { class: 'hint' }, 'Frozen rows and columns stay put while the table scrolls inside its box (set height to e.g. 300px or 60vh).'));
         const b = el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Borders'));
         for (const [v, l] of [['', 'Normal'], ['borders-light', 'Light'], ['borders-none', 'None']]) b.appendChild(el('button', { class: 'tog' + ((v ? t.style.flags.has(v) : !t.style.flags.has('borders-light') && !t.style.flags.has('borders-none')) ? ' on' : ''), onclick: () => { t.style.flags.delete('borders-light'); t.style.flags.delete('borders-none'); if (v) t.style.flags.add(v); commit(); widget.refresh(); render(); } }, l));
         pop.appendChild(b);

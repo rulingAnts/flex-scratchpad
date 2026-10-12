@@ -178,3 +178,23 @@ def test_lcm_module_imports_without_flexicon():
         assert ei.value.code in ("no-flexicon", "lcm")
     finally:
         be.close()
+
+
+def test_locate_pasted_interlinear_lines(tmp_path):
+    nb = Notebook(tmp_path)
+    svc = FlexService(nb)
+    svc.configure(source="demo")
+    svc.open()
+    # FLEx-style rows with labels and tabs: only the Word / Free rows are used for matching
+    pasted = "Word\tHaŋa\ttiket\tka-sila-mo\tpemu\nMorphemes\thaŋa\ttiket\tka- sila -mo\tpemu\nLex. Gloss\tyesterday\tchild\t3SG see PST\triver\nFree\tYesterday the child saw the river."
+    hits = svc.locate(pasted)
+    assert hits and hits[0]["guid"] == T_STORY and hits[0]["seg"] == 2 and hits[0]["segTo"] == 2 and hits[0]["score"] >= 3
+    # two bare baseline lines → consecutive segments; diacritics-insensitive, case-insensitive
+    hits = svc.locate("HAŊA tiket ka-sila-mo pemu.\n\u201cɲamu!\u201d ka-sila lo.")   # case, marks and punctuation ignored (ŋ/ɲ are letters)
+    assert hits[0]["seg"] == 2 and hits[0]["segTo"] == 3 and hits[0]["matched"] == 2
+    # a fragment inside a baseline, and the Arabic-script text
+    assert svc.locate("tiket ka-sila")[0]["seg"] == 2
+    assert svc.locate("\u0631\u0623\u0649 \u0627\u0644\u0648\u0644\u062f")[0]["guid"] == T_ARAB
+    # prose that is nowhere in the project
+    assert svc.locate("completely unrelated sentence here") == []
+    assert svc.locate("") == []

@@ -501,3 +501,70 @@ def test_export_html_and_docx(app):
     xml = zipfile.ZipFile(docx_path).read("word/document.xml").decode("utf-8")
     assert "ka-nuwa-mo" in xml and "The dog slept." in xml and "a domestic dog" in xml and '<w:u w:val="single"/>' in xml
     assert not errors
+
+
+def test_paste_interlinear_lines_locates_the_segment(app):
+    h, page, errors = app
+    new_note(page, "Located")
+    paste(page, "Word\tHaŋa\ttiket\tka-sila-mo\tpemu\nWord Gloss\tyesterday\tchild\tsaw\triver\nFree\tYesterday the child saw the river.")
+    page.wait_for_selector(".modal")
+    assert "The dog and the river" in page.locator(".modal-body").inner_text() and "segment 2" in page.locator(".modal-body").inner_text()
+    page.locator(".modal .btn.primary", has_text="Insert rendered").click()
+    page.wait_for_selector("#editor .text-obj .segment[data-n='2']")
+    page.wait_for_timeout(900)
+    assert "{{flex:text %s seg=2}}" % T_STORY in body_of(h)
+    # ordinary prose pastes as text
+    paste(page, "just some ordinary prose that is nowhere in the project")
+    page.wait_for_timeout(600)
+    assert page.locator(".modal").count() == 0
+    page.wait_for_timeout(900)
+    assert "ordinary prose" in body_of(h)
+    assert not errors
+
+
+def test_paste_flex_link_into_table_cell(app):
+    h, page, errors = app
+    cell = page.locator("table.md-table td .cell-view").nth(3)
+    cell.scroll_into_view_if_needed()
+    cell.dispatch_event("mousedown")
+    page.wait_for_selector(".cell-edit")
+    page.keyboard.press("End")
+    url = "silfw://localhost/link?database%3dKalu%2520Demo%26tool%3dlexiconEdit%26guid%3d6a5f3a2e-1b1e-4c2a-9f10-0d2c1a7e0002%26tag%3d"
+    page.evaluate("""(url) => {
+      const dt = new DataTransfer(); dt.setData('text/plain', url);
+      document.activeElement.dispatchEvent(new InputEvent('beforeinput', { inputType: 'insertFromPaste', dataTransfer: dt, bubbles: true, cancelable: true }));
+    }""", url)
+    page.wait_for_selector(".modal")
+    assert "tiket" in page.locator(".modal-body").inner_text()
+    page.locator(".modal .btn.primary", has_text="Insert rendered").click()
+    page.wait_for_selector("table.md-table .flex-collapsed")
+    page.wait_for_timeout(900)
+    assert "with Ctrl+Shift+L {{flex:entry 6a5f3a2e-1b1e-4c2a-9f10-0d2c1a7e0002}} |" in body_of(h), body_of(h).split("\n")[-3:]
+    # and "Paste as text" really pastes
+    cell = page.locator("table.md-table td .cell-view").nth(1)
+    cell.dispatch_event("mousedown")
+    page.wait_for_selector(".cell-edit")
+    page.keyboard.press("End")
+    page.evaluate("""(url) => {
+      const dt = new DataTransfer(); dt.setData('text/plain', url);
+      document.activeElement.dispatchEvent(new InputEvent('beforeinput', { inputType: 'insertFromPaste', dataTransfer: dt, bubbles: true, cancelable: true }));
+    }""", url)
+    page.wait_for_selector(".modal")
+    page.locator(".modal .btn", has_text="Paste as text").click()
+    page.wait_for_timeout(900)
+    assert "A vernacular form silfw://localhost/link?database%3dKalu" in body_of(h)
+    assert not errors
+
+
+def test_freeze_panes(app):
+    h, page, errors = app
+    page.locator(".tbl-tools button", has_text="Table").click()
+    page.wait_for_selector(".popover input[type=number]")
+    rows = page.locator(".popover input[type=number]").nth(0)
+    rows.fill("1")
+    rows.dispatch_event("change")
+    page.wait_for_timeout(900)
+    assert "freeze rows 1" in body_of(h)
+    th = page.locator("table.md-table thead th").first
+    assert page.evaluate("(el) => getComputedStyle(el).position", th.element_handle()) == "sticky"
+    assert page.locator(".tbl-wrap.frozen").count() == 1
