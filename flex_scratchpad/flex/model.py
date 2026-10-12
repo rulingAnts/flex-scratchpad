@@ -15,7 +15,7 @@ directions, and the plain-text form of an object for the notebook's search index
 from __future__ import annotations
 
 import re
-from urllib.parse import parse_qs, quote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 GUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 
@@ -48,7 +48,15 @@ def parse_silfw(url: str) -> dict | None:
         return None
     try:
         u = urlparse(s)
-        qs = parse_qs(u.query)
+        query = u.query
+        # FLEx's own "Copy Location as Hyperlink" percent-encodes the whole query
+        # (`database%3dfau-iya-flex%26tool%3dinterlinearEdit%26guid%3d…`), so decode until stable
+        for _ in range(3):
+            dec = unquote(query)
+            if dec == query:
+                break
+            query = dec
+        qs = parse_qs(query)
     except ValueError:
         return None
     guid = (qs.get("guid") or [""])[0]

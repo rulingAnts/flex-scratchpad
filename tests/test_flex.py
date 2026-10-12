@@ -21,6 +21,9 @@ def test_goto_url_and_parse():
     assert model.goto_url("p", "text", "x").endswith("tool=interlinearEdit&guid=x")
     info = model.parse_silfw("silfw://localhost/link?app=flex&server=&database=Kalu&tool=interlinearEdit&guid=9B1C2D3E-4F50-4A6B-8C7D-0E1F2A3B0001&tag=")
     assert info == {"database": "Kalu", "tool": "interlinearEdit", "guid": "9b1c2d3e-4f50-4a6b-8c7d-0e1f2a3b0001", "tag": ""}
+    # the form FLEx itself puts on the clipboard: the query percent-encoded as a whole
+    enc = model.parse_silfw("silfw://localhost/link?database%3dfau-iya-flex%26tool%3dinterlinearEdit%26guid%3d59be473f-e42a-4fb6-9b57-a866a66ae7dc%26tag%3d")
+    assert enc == {"database": "fau-iya-flex", "tool": "interlinearEdit", "guid": "59be473f-e42a-4fb6-9b57-a866a66ae7dc", "tag": ""}
     assert model.parse_silfw("https://example.org") is None
     assert model.parse_silfw("silfw://localhost/link?app=flex&guid=nope") is None
 
