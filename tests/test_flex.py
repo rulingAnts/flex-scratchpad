@@ -293,6 +293,28 @@ def test_locate_numbered_blocks_from_flex_print_view(tmp_path):
     assert hits and hits[0]["seg"] == 1 and hits[0]["segTo"] == 3 and hits[0]["matched"] == 3 and hits[0]["of"] == 3, hits
 
 
+def test_locate_rows_without_a_word_row(tmp_path):
+    """Seth, 2026-10-13: Morphemes + Lex. Gloss + Free copied from FLEx pasted as plain TSV.
+    The Lex. Gloss row leads with an EMPTY cell, the Free line is "Free" + space with bidi
+    marks (U+200E) instead of a tab, and there is no Word row — the joined morphemes have to
+    stand in for the baseline."""
+    nb = Notebook(tmp_path)
+    svc = FlexService(nb)
+    svc.configure(source="demo")
+    svc.open()
+    pasted = ("1.1\tMorphemes\tKabir\tka-\tnuwa\t-mo\tlo\t\t\n"
+              "\tLex. Gloss\tdog\t3SG-\tsleep\t-PST\tDECL\n"
+              "\u200eFree \u200e\u200eThe dog slept.\n")
+    hits = svc.locate(pasted)
+    assert hits and hits[0]["guid"] == T_STORY and hits[0]["seg"] == 1 and hits[0]["segTo"] == 1 and hits[0]["score"] >= 4, hits
+    # two such blocks in a row locate as a range; the free line alone never starts a new block
+    two = pasted + "1.2\tMorphemes\tHaŋa\ttiket\tka-\tsila\t-mo\tpemu\n\tLex. Gloss\tyesterday\tchild\t3SG-\tsee\t-PST\triver\nFree Yesterday the child saw the river.\n"
+    hits = svc.locate(two)
+    assert hits and hits[0]["seg"] == 1 and hits[0]["segTo"] == 2 and hits[0]["matched"] == 2 and hits[0]["of"] == 2, hits
+    # a Morphemes row under a Word row changes nothing
+    assert svc.locate("Word\tKabir\tka-nuwa-mo\tlo\nMorphemes\tKabir\tka-\tnuwa\t-mo\tlo\nFree\tThe dog slept.")[0]["seg"] == 1
+
+
 def test_clip_prefers_flac_when_ffmpeg_exists(tmp_path, monkeypatch):
     import shutil
     from flex_scratchpad.flex import audio

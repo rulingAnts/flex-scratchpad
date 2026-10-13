@@ -41,11 +41,14 @@ def _text_score(q: str, hay: str) -> int:
 
 
 def _query_score(q: dict, baseline: str, free: str) -> int:
-    """A segment query {base, free} against a segment: the baseline match (or, for a
-    translation-only query, the free match) plus a bonus when the free translation agrees."""
+    """A segment query {base, morph, free} against a segment: the baseline match (joined
+    morphemes when only a Morphemes row was copied; or, for a translation-only query, the free
+    match) plus a bonus when the free translation agrees."""
     base = _text_score(q.get("base", ""), baseline) if q.get("base") else 0
+    if not q.get("base") and q.get("morph"):
+        base = _text_score(q["morph"], baseline.replace(" ", ""))   # morphemes vs the baseline, spaces and breaks gone
     fr = _text_score(q.get("free", ""), free) if q.get("free") else 0
-    if q.get("base"):
+    if q.get("base") or q.get("morph"):
         return base + (1 if fr else 0) if base else 0
     return 1 if fr else 0
 
@@ -315,29 +318,48 @@ class FlexService:
         strip = bool(self.nb.config.get("settings", {}).get("diacriticsInsensitive", True))
         norm = lambda t: _depunct(normalize(" ".join((t or "").split()), strip))  # noqa: E731
         queries: list[dict] = []
-        for raw in (pasted or "").replace("\r\n", "\n").split("\n"):
+        cur: dict | None = None
+
+        def block() -> dict:
+            nonlocal cur
+            cur = {"base": "", "morph": "", "free": ""}
+            queries.append(cur)
+            return cur
+
+        # bidi format marks (U+200E/F and friends) ride along in FLEx's clipboard text
+        pasted = "".join(c for c in (pasted or "") if _ud.category(c) != "Cf")
+        for raw in pasted.replace("\r\n", "\n").split("\n"):
             line = raw.strip()
             if not line:
                 continue
             cells = [c.strip() for c in line.split("\t")]
+            while cells and not cells[0]:          # a row whose number cell is empty
+                cells = cells[1:]
             # FLEx's Gloss / Print views lead each block with the segment number ("4.1") — as
             # its own cell or glued to the label ("4.1 Word") — and end the Word row with the
             # paragraph mark "§"; neither is text to match (Seth, 2026-10-13: a pasted range
             # only found its first segment)
+            numbered = False
             if cells and re.fullmatch(r"\d+(\.\d+)?", cells[0]) and len(cells) > 1:
-                cells = cells[1:]
+                cells, numbered = cells[1:], True
             elif cells:
                 m = re.match(r"^\d+(?:\.\d+)?\s+(\S.*)$", cells[0])
                 if m and len(cells) > 1:
-                    cells[0] = m.group(1)
+                    cells[0], numbered = m.group(1), True
+            # a label followed by a space instead of a tab ("Free she caught it.")
+            if len(cells) == 1:
+                m = re.match(r"^(" + "|".join(re.escape(k) for k in self._ROW_KEEP + self._ROW_DROP) + r")\s+(\S.*)$", cells[0], re.I)
+                if m:
+                    cells = [m.group(1), m.group(2)]
             cells = [c for c in cells if c not in ("§", "¶")]
             if not cells:
                 continue
             label = cells[0].rstrip(":").casefold() if len(cells) > 1 else ""
-            if label and (label in self._ROW_DROP or any(label.startswith(d) for d in self._ROW_DROP)):
+            is_morph = label.startswith("morphemes")
+            if label and not is_morph and (label in self._ROW_DROP or any(label.startswith(d) for d in self._ROW_DROP)):
                 continue
             is_free = label.startswith("free")
-            labelled = bool(label) and (is_free or label in self._ROW_KEEP or any(label.startswith(k + " ") for k in self._ROW_KEEP))
+            labelled = bool(label) and (is_free or is_morph or label in self._ROW_KEEP or any(label.startswith(k + " ") for k in self._ROW_KEEP))
             words = [c for c in (cells[1:] if labelled else cells) if c]
             if not words:
                 continue
@@ -345,13 +367,18 @@ class FlexService:
             if len(text) > 400:
                 return []
             if is_free:
-                if queries and not queries[-1].get("free"):
-                    queries[-1]["free"] = norm(text)
+                if cur is not None and not cur["free"] and not numbered:
+                    cur["free"] = norm(text)
                 else:
-                    queries.append({"base": "", "free": norm(text)})
+                    block()["free"] = norm(text)
+            elif is_morph:
+                # no Word row copied: the morpheme forms, joined, stand in for the baseline
+                if cur is None or numbered or cur["morph"] or cur["free"]:
+                    block()
+                cur["morph"] = norm(text).replace(" ", "")
             else:
-                queries.append({"base": norm(text), "free": ""})
-        queries = [q for q in queries if q["base"] or q["free"]]
+                block()["base"] = norm(text)
+        queries = [q for q in queries if q["base"] or q["morph"] or q["free"]]
         if not queries:
             return []
         with self.lock:
