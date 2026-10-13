@@ -1055,3 +1055,52 @@ def test_styles_update_in_cells_and_overlays(app):
     assert abs(after - before) < 4, (before, after)
     assert "hl[#caffbf]=1.1" in body_of(h)
     assert not errors
+
+
+def test_example_settings_redraw_at_once(app):
+    """Seth, 2026-10-13: a change in the ⋯ settings (the segment range above all) must redraw
+    the example right there — in a note block, in a table cell, and in an overlay."""
+    h, page, errors = app
+    new_note(page, "Redraw")
+    page.click(".blk-body")
+    insert_text_segments(page, 0, 0)
+    assert page.locator("#editor .text-obj .segment").count() == 1
+    # block: widen the range to 1.1–2.1 from the menu → three segments, no refresh needed
+    page.locator("#editor .text-obj .flex-head .lnk[title='Options']").click()
+    page.wait_for_selector(".popover input[title*='FLEx number']")
+    ins = page.locator(".popover input[title*='FLEx number']")
+    ins.nth(1).fill("2.1")
+    ins.nth(1).dispatch_event("change")
+    page.wait_for_function("() => document.querySelectorAll('#editor .text-obj .segment').length === 3")
+    # and a line toggle redraws too
+    page.locator(".popover input[type=checkbox]").nth(0).click()        # Word line off
+    page.wait_for_function("() => document.querySelectorAll('#editor .text-obj .word-cell:not(.punct-cell) .il-txt').length === 0")
+    page.keyboard.press("Escape")
+    # overlay: collapse, open, change the range in the overlay's menu → the overlay redraws
+    page.locator("#editor .flex-obj .lnk[title='Collapse to a chip']").click()
+    page.wait_for_selector("#editor .flex-collapsed")
+    page.locator("#editor .flex-collapsed").click()
+    page.wait_for_selector(".flex-overlay .segment")
+    assert page.locator(".flex-overlay .segment").count() == 3
+    page.locator(".flex-overlay .flex-head .lnk[title='Options']").click()
+    page.wait_for_selector(".popover input[title*='FLEx number']")
+    ins = page.locator(".popover input[title*='FLEx number']")
+    ins.nth(1).fill("1.2")
+    ins.nth(1).dispatch_event("change")
+    page.wait_for_function("() => document.querySelectorAll('.flex-overlay .segment').length === 2")
+    page.keyboard.press("Escape")
+    page.keyboard.press("Escape")
+    # a table cell with an expanded example
+    page.locator("#editor .blk-body").last.click()
+    page.keyboard.press("End")
+    page.keyboard.press("Enter")
+    paste(page, "| a |\n|---|\n| {{flex:text %s seg=1 expanded}} |" % T_STORY)
+    page.wait_for_selector("table.md-table .text-obj .segment")
+    assert page.locator("table.md-table .text-obj .segment").count() == 1
+    page.locator("table.md-table .text-obj .flex-head .lnk[title='Options']").click()
+    page.wait_for_selector(".popover input[title*='FLEx number']")
+    ins = page.locator(".popover input[title*='FLEx number']")
+    ins.nth(1).fill("2.2")
+    ins.nth(1).dispatch_event("change")
+    page.wait_for_function("() => document.querySelectorAll('table.md-table .text-obj .segment').length === 4")
+    assert not errors

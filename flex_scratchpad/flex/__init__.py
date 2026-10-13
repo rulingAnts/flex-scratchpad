@@ -279,6 +279,19 @@ class FlexService:
             if not line:
                 continue
             cells = [c.strip() for c in line.split("\t")]
+            # FLEx's Gloss / Print views lead each block with the segment number ("4.1") — as
+            # its own cell or glued to the label ("4.1 Word") — and end the Word row with the
+            # paragraph mark "§"; neither is text to match (Seth, 2026-10-13: a pasted range
+            # only found its first segment)
+            if cells and re.fullmatch(r"\d+(\.\d+)?", cells[0]) and len(cells) > 1:
+                cells = cells[1:]
+            elif cells:
+                m = re.match(r"^\d+(?:\.\d+)?\s+(\S.*)$", cells[0])
+                if m and len(cells) > 1:
+                    cells[0] = m.group(1)
+            cells = [c for c in cells if c not in ("§", "¶")]
+            if not cells:
+                continue
             label = cells[0].rstrip(":").casefold() if len(cells) > 1 else ""
             if label and (label in self._ROW_DROP or any(label.startswith(d) for d in self._ROW_DROP)):
                 continue

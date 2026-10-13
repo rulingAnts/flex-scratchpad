@@ -257,3 +257,22 @@ def test_anchored_ranges_follow_renumbered_segments(tmp_path):
     api._flex.close()
     cached = api._flex.get_object("text", g, 3, 4, prefer_cache=True, at=anchors)
     assert cached["cached"] is True and cached["range"] == [4, 5]
+
+
+def test_locate_numbered_blocks_from_flex_print_view(tmp_path):
+    """Copied from FLEx's Gloss / Print view: each segment leads with its number, rows are
+    labelled, the Word row ends with §. A range must match as a range."""
+    from flex_scratchpad.api import Api
+    from flex_scratchpad.config import AppConfig
+    api = Api(AppConfig(tmp_path / "cfg.json"), notebook_dir=tmp_path / "nb", demo=True)
+    svc = api._flex
+    pasted = ("1.1\tWord\tKabir\tka-nuwa-mo\tlo\t§\n"
+              "\tLex. Gloss\tdog\t3SG- sleep -PST\tDECL\n"
+              "Free\tThe dog slept.\n"
+              "1.2\tWord\tHaŋa\ttiket\tka-sila-mo\tpemu\t§\n"
+              "\tLex. Gloss\tyesterday\tchild\t3SG- see -PST\triver\n"
+              "Free\tYesterday the child saw the river.\n"
+              "2.1 Word\tƝamú\tka-sila\tlo\n"
+              "Free\t“Mother!” he sees.\n")
+    hits = svc.locate(pasted)
+    assert hits and hits[0]["seg"] == 1 and hits[0]["segTo"] == 3 and hits[0]["matched"] == 3 and hits[0]["of"] == 3, hits
