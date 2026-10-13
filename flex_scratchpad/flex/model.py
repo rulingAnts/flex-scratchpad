@@ -84,9 +84,14 @@ def empty_text(guid: str, title: str = "", ws_vern: dict | None = None, ws_anal:
 
 def make_segment(guid: str, n: int, para: int, baseline: str, words: list[dict], free: str = "",
                  lit: str = "", notes: list[str] | None = None, begin: int | None = None,
-                 end: int | None = None, media: str | None = None) -> dict:
+                 end: int | None = None, media: str | None = None, k: int | None = None) -> dict:
+    """`n` counts segments through the whole text (what `seg=` in an embed means); `k` counts
+    them within their paragraph, and `label` is FLEx's own number for the segment — the
+    `4.1` of its Gloss / Analyze / Print views (paragraph 4, segment 1). Seth, 2026-10-13:
+    "we need to actually capture FLEx's numbering"."""
     return {
-        "guid": guid, "n": n, "para": para, "baseline": baseline, "words": words,
+        "guid": guid, "n": n, "para": para, "k": k, "label": (f"{para}.{k}" if k else str(n)),
+        "baseline": baseline, "words": words,
         "free": free, "lit": lit, "notes": list(notes or []),
         "begin": begin, "end": end, "media": media,
     }
@@ -98,8 +103,48 @@ def make_word(txt: str, punct: bool = False, gls: str = "", pos: str = "",
             "morphs": list(morphs or []), "guid": guid}
 
 
-def make_morph(form: str, gls: str = "", msa: str = "", cf: str = "") -> dict:
-    return {"form": form, "gls": gls, "msa": msa, "cf": cf}
+# Morpheme break characters, as FLEx's morph types write them around a form: `-mo` (suffix),
+# `ka-` (prefix), `=lo` / `lo=` (clitics), `<in>` (infix), `~` (reduplication). FLEx shows them
+# on the Morphemes and Lex. Entries lines; the glosses must carry the same marks so that
+# `ka- nuwa -mo` reads `3SG- sleep -PST` (Seth, 2026-10-13: "glosses need to match them").
+_LEAD = re.compile(r"^([-=~<]+)")
+_TRAIL = re.compile(r"([-=~>]+)$")
+
+
+def morph_markers(form: str) -> tuple[str, str]:
+    """(prefix, postfix) break characters already on a morph form, '' when none."""
+    f = form or ""
+    lead = _LEAD.match(f)
+    trail = _TRAIL.search(f)
+    if lead and lead.end() == len(f):
+        return f, ""
+    return (lead.group(1) if lead else ""), (trail.group(1) if trail else "")
+
+
+def with_markers(text: str, prefix: str, postfix: str) -> str:
+    """`text` wearing the break characters, never doubled (a gloss FLEx already hyphenated)."""
+    t = text or ""
+    if not t:
+        return t
+    if prefix and not t.startswith(prefix):
+        t = prefix + t
+    if postfix and not t.endswith(postfix):
+        t = t + postfix
+    return t
+
+
+def make_morph(form: str, gls: str = "", msa: str = "", cf: str = "", prefix: str | None = None,
+               postfix: str | None = None) -> dict:
+    """A morph with its break characters on form, citation form AND gloss. The markers come
+    from the morph type when the backend knows it; otherwise from whichever of form / cf
+    already carries them."""
+    if prefix is None and postfix is None:
+        prefix, postfix = morph_markers(form)
+        if not prefix and not postfix:
+            prefix, postfix = morph_markers(cf)
+    prefix, postfix = prefix or "", postfix or ""
+    return {"form": with_markers(form, prefix, postfix), "gls": with_markers(gls, prefix, postfix),
+            "msa": msa, "cf": with_markers(cf, prefix, postfix)}
 
 
 def empty_entry(guid: str, headword: str = "") -> dict:

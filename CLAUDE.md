@@ -67,6 +67,10 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
 - Run `python -m pytest tests --ignore=tests/e2e`, `node --test tests/js/*.test.js`, and
   `python -m pytest tests/e2e` (needs Playwright's Chromium) before pushing. CI runs all three.
 - After editing `flex/demo.py` run `python tools/gen_demo_js.py` (the in-browser mock data).
+- Segment numbers: `n` counts through the text (what `seg=` addresses), `label` is FLEx's own
+  `paragraph.segment` (what people read, shown everywhere). Morph glosses wear the morph type's
+  break characters (`-PST`, `3SG-`, `=lo`), from `IMoMorphType.Prefix/Postfix` with a fallback
+  to the markers already on the form or headword — unverified against a real project yet.
 - `flex/lcm.py` has never met a real FieldWorks: it was written from flexicon 4.12's source and
   the LCM model. The first run on Windows will need adjustments — keep every access behind the
   `_t()` guard so one odd object degrades a rendering instead of failing it, and record what you

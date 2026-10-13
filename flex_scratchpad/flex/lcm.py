@@ -750,20 +750,22 @@ class FlexiconBackend:
         pi = 0
         for para in _t(lambda: list(p.Paragraphs.GetAll(text)), []):
             pi += 1
+            k = 0
             for seg in _t(lambda: list(p.Segments.GetAll(para)), []):
                 n += 1
+                k += 1
                 if n < a or (b is not None and n > b) or (n - a) >= max_segments:
                     continue
                 try:
-                    d["segments"].append(self._segment_dict(seg, n, pi, media_by_guid))
+                    d["segments"].append(self._segment_dict(seg, n, pi, media_by_guid, k))
                 except Exception as exc:  # noqa: BLE001 — one odd segment must not take the text down
-                    d["segments"].append(model.make_segment(_guid(seg), n, pi, "", [], notes=[f"⚠ could not read this segment: {exc}"]))
+                    d["segments"].append(model.make_segment(_guid(seg), n, pi, "", [], notes=[f"⚠ could not read this segment: {exc}"], k=k))
                     d.setdefault("errors", []).append({"segment": n, "error": str(exc)})
         d["segmentCount"] = n
         d["range"] = [a, min(n, b or n)] if n else [0, 0]
         return d
 
-    def _segment_dict(self, seg, n: int, para: int, media_by_guid: dict) -> dict:
+    def _segment_dict(self, seg, n: int, para: int, media_by_guid: dict, k: int | None = None) -> dict:
         p = self.project
         seg = self._c(seg)
         words = []
@@ -795,7 +797,7 @@ class FlexiconBackend:
         free = _s(_t(lambda: p.Segments.GetFreeTranslation(seg, hf) if hf is not None else p.Segments.GetFreeTranslation(seg), ""))
         lit = _s(_t(lambda: p.Segments.GetLiteralTranslation(seg, hl) if hl is not None else p.Segments.GetLiteralTranslation(seg), ""))
         out = model.make_segment(
-            _guid(seg), n, para, baseline, words,
+            _guid(seg), n, para, baseline, words, k=k,
             free=free,
             lit=lit,
             notes=notes,
@@ -888,11 +890,22 @@ class FlexiconBackend:
                 mgls = self._anal_text(_t(lambda: sense.Gloss, None), hmg) if (sense is not None and hmg is not None) else ""
                 if not mgls:
                     mgls = _s(_t(lambda: p.WfiMorphBundles.GetGloss(b), "")) or self._anal_text(_t(lambda: sense.Gloss, None))
+                # break characters from the morph type (IMoMorphType.Prefix / Postfix: "-" for
+                # affixes, "=" for clitics, "<"/">" for infixes), as FLEx's Morphemes line shows
+                # them; falls back to the characters already on the form or the headword
+                mt = self._c(_t(lambda: self._c(b.MorphRA).MorphTypeRA, None))
+                pre = _s(_t(lambda: mt.Prefix, "")) if mt is not None else ""
+                post = _s(_t(lambda: mt.Postfix, "")) if mt is not None else ""
+                if not pre and not post:
+                    pre, post = model.morph_markers(form)
+                    if not pre and not post:
+                        pre, post = model.morph_markers(cf)
                 morphs.append(model.make_morph(
                     form,
                     mgls,
                     _s(_t(lambda: msa.InterlinearAbbr, "")) if msa is not None else "",
                     cf,
+                    prefix=pre, postfix=post,
                 ))
         return model.make_word(txt, gls=gls, pos=pos, morphs=morphs, guid=_guid(tok))
 

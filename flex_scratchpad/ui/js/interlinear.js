@@ -160,7 +160,12 @@
     const mediaByGuid = new Map((obj.media || []).map((m) => [m.guid, m]));
     const box = el('div', { class: 'flex-obj text-obj' + (obj.cached ? ' cached' : '') });
     const range = obj.range || [segs[0] && segs[0].n, segs.length && segs[segs.length - 1].n];
-    const rangeLabel = segs.length ? (range[0] === range[1] ? 'segment ' + range[0] : 'segments ' + range[0] + '–' + range[1]) + ' of ' + obj.segmentCount : 'no segments';
+    // FLEx's own numbers (paragraph.segment, as its Gloss / Print views show them) are what a
+    // reader knows the segments by; the running count is what `seg=` addresses.
+    const lab = (seg) => (seg && seg.label) || (seg && String(seg.n)) || '';
+    const first = segs.find((x) => x.n === range[0]) || segs[0], last = segs.find((x) => x.n === range[1]) || segs[segs.length - 1];
+    const flexRange = segs.length ? (range[0] === range[1] ? lab(first) : lab(first) + '–' + lab(last)) : '';
+    const rangeLabel = segs.length ? (range[0] === range[1] ? 'segment ' + flexRange : 'segments ' + flexRange) + (first && first.label && first.label !== String(first.n) ? ' (' + range[0] + (range[0] === range[1] ? '' : '–' + range[1]) + ' of ' + obj.segmentCount + ')' : ' of ' + obj.segmentCount) : 'no segments';
 
     const head = el('div', { class: 'flex-head' + (opts.inCell ? ' compact' : '') },
       el('span', Object.assign({ class: 'ttl vern' }, wsAttrs(vern)), obj.title || '(untitled text)'),
@@ -171,7 +176,7 @@
     );
     const anyTimed = segs.some((s) => s.begin != null && s.end != null);
     if (anyTimed && segs.length > 1) {
-      head.appendChild(el('button', { class: 'lnk', title: 'Play this range', onclick: () => playRange(box, obj, segs, mediaByGuid, opts) }, '▶ Play ' + range[0] + '–' + range[1]));
+      head.appendChild(el('button', { class: 'lnk', title: 'Play this range', onclick: () => playRange(box, obj, segs, mediaByGuid, opts) }, '▶ Play ' + flexRange));
     }
     head.appendChild(el('button', { class: 'lnk', title: 'Reload from FLEx', onclick: () => opts.refresh && opts.refresh() }, '↻'));
     if (opts.editable && !opts.overlay) head.appendChild(el('button', { class: 'lnk', title: 'Collapse to a chip', onclick: () => setCollapsed(spec, opts, true) }, '⤡'));
@@ -189,7 +194,7 @@
 
   function renderSegment(seg, obj, spec, lines, index, vern, anal, mediaByGuid, opts, box, sel) {
     const row = el('div', { class: 'segment', dataset: { n: seg.n } });
-    const gutter = el('div', { class: 'seg-gutter' }, el('span', { class: 'segnum' }, String(seg.n)));
+    const gutter = el('div', { class: 'seg-gutter' }, el('span', { class: 'segnum', title: 'FLEx segment ' + (seg.label || seg.n) + (seg.label && seg.label !== String(seg.n) ? ' (segment ' + seg.n + ' of the text, as seg= counts them)' : '') }, seg.label || String(seg.n)));
     const timed = seg.begin != null && seg.end != null && seg.end > seg.begin;
     if (timed) {
       const btn = el('button', { class: 'seg-play', title: 'Play ' + FS.fmtTime(seg.begin) + '–' + FS.fmtTime(seg.end) }, '▶');
@@ -565,6 +570,7 @@
     if (!o) return;
     overlay.current = null;
     clearTimeout(overlay.closeTimer);
+    if (o.cleanup) o.cleanup();
     o.node.remove();
     document.removeEventListener('mousedown', o.onDown, true);
     document.removeEventListener('keydown', o.onKey, true);
@@ -606,17 +612,38 @@
     node.addEventListener('mousedown', () => { o.pinned = true; node.classList.add('pinned'); });
     overlay.current = o;
     render(inner, spec, Object.assign({}, opts, { force: true, overlay: true, editable: !!opts.editable }));
-    // position: below the chip, flipped above when there is no room; clamp to the viewport
-    const r = anchor.getBoundingClientRect();
-    const w = Math.min(760, window.innerWidth - 24);
-    node.style.width = w + 'px';
-    let left = Math.max(12, Math.min(r.left, window.innerWidth - w - 12));
-    node.style.left = left + 'px';
-    const h = Math.min(node.offsetHeight, window.innerHeight * 0.7);
-    let top = r.bottom + 8;
-    if (top + h > window.innerHeight - 12) top = Math.max(12, r.top - h - 8);
-    node.style.top = top + 'px';
-    node.style.maxHeight = (window.innerHeight * 0.7) + 'px';
+    /* Placement: below the chip when it fits, else above, else on whichever side has more
+     * room with the overlay capped to that room (its body scrolls). Re-run whenever the
+     * content changes size (the object arrives after "Loading…"), the window resizes or the
+     * note scrolls, so the overlay never runs off the viewport (Seth, 2026-10-13). */
+    const M = 12, GAP = 8;
+    const place = () => {
+      if (!node.isConnected) return;
+      const r = anchor.getBoundingClientRect();
+      const vw = window.innerWidth, vh = window.innerHeight;
+      const w = Math.min(760, vw - 2 * M);
+      node.style.width = w + 'px';
+      node.style.left = Math.max(M, Math.min(r.left, vw - w - M)) + 'px';
+      node.style.maxHeight = '';
+      const want = node.offsetHeight;                      // natural height of bar + content
+      const below = vh - M - (r.bottom + GAP), above = r.top - GAP - M;
+      let top, room;
+      if (want <= below) { top = r.bottom + GAP; room = below; }
+      else if (want <= above) { top = r.top - GAP - want; room = above; }
+      else if (below >= above) { top = r.bottom + GAP; room = below; }
+      else { room = above; top = M; }
+      room = Math.max(120, Math.min(room, vh - 2 * M));
+      const h = Math.min(want, room);
+      if (top + h > vh - M) top = Math.max(M, vh - M - h);
+      node.style.top = top + 'px';
+      node.style.maxHeight = room + 'px';
+    };
+    place();
+    const ro = new ResizeObserver(() => place());
+    ro.observe(inner);
+    window.addEventListener('resize', place);
+    document.addEventListener('scroll', place, true);
+    o.cleanup = () => { ro.disconnect(); window.removeEventListener('resize', place); document.removeEventListener('scroll', place, true); };
     return node;
   }
 

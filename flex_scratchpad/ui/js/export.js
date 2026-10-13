@@ -88,7 +88,7 @@
         else if (line === 'gls') add('gls', (w, i) => styledRuns(w.gls || '', R.stylesFor(index, seg.n, 'gls', i), { color: '#2a6e2a' }));
         else if (line === 'pos') add('pos', (w, i) => styledRuns(w.pos || '', R.stylesFor(index, seg.n, 'pos', i), { color: '#7a3e9d', size: 9 }));
       }
-      const out = { n: seg.n, lines: lineModels };
+      const out = { n: seg.n, label: seg.label || String(seg.n), lines: lineModels };
       if (lines.includes('ft') && seg.free) out.free = styledRuns(seg.free, R.stylesFor(index, seg.n, 'ft', 0), {});
       if (lines.includes('lit') && seg.lit) out.lit = styledRuns(seg.lit, R.stylesFor(index, seg.n, 'lit', 0), { color: '#68717d' });
       if (lines.includes('note') && (seg.notes || []).length) out.notes = seg.notes.map((n) => styledRuns(n, R.stylesFor(index, seg.n, 'note', 0), { i: true, color: '#68717d' }));
@@ -230,7 +230,7 @@
             const ncols = Math.max(0, ...seg.lines.map((l) => l.cells.length));
             const words = [];
             for (let i = 0; i < ncols; i++) words.push('<div class="w">' + seg.lines.map((l) => '<div class="l ' + l.name + '">' + runsHtml(l.cells[i] || []) + '</div>').join('') + '</div>');
-            return '<div class="seg"><span class="n">' + seg.n + '</span><div><div class="il">' + words.join('') + '</div>'
+            return '<div class="seg"><span class="n">' + esc(seg.label || seg.n) + '</span><div><div class="il">' + words.join('') + '</div>'
               + (seg.free ? '<div class="ft"><b>Free</b>' + runsHtml(seg.free) + '</div>' : '') + (seg.lit ? '<div class="lit"><b>Lit</b>' + runsHtml(seg.lit) + '</div>' : '')
               + (seg.notes || []).map((n) => '<div class="note"><b>Note</b>' + runsHtml(n) + '</div>').join('') + '</div></div>';
           }).join('') + '</div>';

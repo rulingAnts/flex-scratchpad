@@ -44,12 +44,14 @@ def test_flextext_parse(tmp_path):
     assert t["ws"]["vern"]["font"] == "Charis SIL"
     s1 = t["segments"][0]
     assert s1["n"] == 1 and s1["para"] == 1 and s1["baseline"] == "Kabir ka-nuwa-mo lo."
+    # FLEx's own numbering: paragraph.segment, as the Gloss / Print views show it
+    assert [(s["n"], s["label"]) for s in t["segments"]] == [(1, "1.1"), (2, "1.2"), (3, "2.1")]
     assert s1["free"] == "The dog slept." and s1["notes"] == ["First sentence."]
     assert s1["begin"] == 0 and s1["end"] == 1200 and s1["media"] == "cccccccc-0000-4000-8000-000000000001"
     w = s1["words"][1]
     assert w["txt"] == "ka-nuwa-mo" and w["gls"] == "slept" and w["pos"] == "v"
     assert [m["form"] for m in w["morphs"]] == ["ka-", "nuwa", "-mo"]
-    assert [m["gls"] for m in w["morphs"]] == ["3SG", "sleep", "PST"]
+    assert [m["gls"] for m in w["morphs"]] == ["3SG-", "sleep", "-PST"]      # glosses wear the break characters
     assert s1["words"][3]["punct"] is True
     s2 = t["segments"][1]
     assert s2["lit"] == "Child DECL." and s2["para"] == 1
@@ -198,3 +200,28 @@ def test_locate_pasted_interlinear_lines(tmp_path):
     # prose that is nowhere in the project
     assert svc.locate("completely unrelated sentence here") == []
     assert svc.locate("") == []
+
+
+def test_flex_numbering_is_paragraph_dot_segment(tmp_path):
+    from flex_scratchpad.api import Api
+    from flex_scratchpad.config import AppConfig
+    api = Api(AppConfig(tmp_path / "cfg.json"), notebook_dir=tmp_path / "nb", demo=True)
+    t = api.flex_get("text", "9b1c2d3e-4f50-4a6b-8c7d-0e1f2a3b0001")
+    labels = [(s["n"], s["para"], s["label"]) for s in t["segments"]]
+    assert labels[0] == (1, 1, "1.1") and all(lab == f"{p}.{k}" for (_, p, lab), k in zip(labels, [1, 2, 1, 2, 1, 2]))
+    page = api.flex_get("text", "9b1c2d3e-4f50-4a6b-8c7d-0e1f2a3b0001", 3, 4)
+    assert [s["label"] for s in page["segments"]] == ["2.1", "2.2"]      # a range keeps FLEx's numbers
+
+
+def test_morph_break_characters_follow_the_form():
+    assert model.morph_markers("-mo") == ("-", "") and model.morph_markers("ka-") == ("", "-")
+    assert model.morph_markers("=lo") == ("=", "") and model.morph_markers("<in>") == ("<", ">") and model.morph_markers("nuwa") == ("", "")
+    assert model.morph_markers("-") == ("-", "")                      # a bare hyphen is not a postfix too
+    m = model.make_morph("-mo", "PST", "suffix", "-mo")
+    assert (m["form"], m["gls"], m["cf"]) == ("-mo", "-PST", "-mo")
+    m = model.make_morph("mo", "PST", "suffix", "-mo")                 # markers only on the headword → still applied
+    assert (m["form"], m["gls"]) == ("-mo", "-PST")
+    m = model.make_morph("a", "lnk", "", "", prefix="-", postfix="")   # markers from the morph type
+    assert (m["form"], m["gls"]) == ("-a", "-lnk")
+    m = model.make_morph("ka-", "3SG-", "", "ka-")                     # never doubled
+    assert m["gls"] == "3SG-"

@@ -103,9 +103,11 @@ def _story() -> dict:
         (3, "Kabir lo.", [W("Kabir", "dog", "n", [("kabir", "dog", "n")]), W("lo", "DECL", "part", [("lo", "DECL", "part")]), W(".", punct=True)],
          "The dog.", 7000, 8000),
     ]
+    kk: dict = {}
     for i, (para, base, words, free, b, e) in enumerate(segs, 1):
+        kk[para] = kk.get(para, 0) + 1
         t["segments"].append(model.make_segment(
-            f"9b1c2d3e-4f50-4a6b-8c7d-0e1f2a3b1{i:03d}", i, para, base, words, free=free,
+            f"9b1c2d3e-4f50-4a6b-8c7d-0e1f2a3b1{i:03d}", i, para, base, words, free=free, k=kk[para],
             begin=b, end=e, media=MEDIA_STORY, notes=["Segment one has a note."] if i == 1 else []))
     t["segmentCount"] = len(t["segments"])
     return t
@@ -128,8 +130,10 @@ def _arabic() -> dict:
             W("أمس", "yesterday", "adv", [("أمس", "yesterday", "adv")]), W(".", punct=True)],
          "The child saw the river yesterday."),
     ]
+    kk: dict = {}
     for i, (para, base, words, free) in enumerate(segs, 1):
-        t["segments"].append(model.make_segment(f"9b1c2d3e-4f50-4a6b-8c7d-0e1f2a3b2{i:03d}", i, para, base, words, free=free))
+        kk[para] = kk.get(para, 0) + 1
+        t["segments"].append(model.make_segment(f"9b1c2d3e-4f50-4a6b-8c7d-0e1f2a3b2{i:03d}", i, para, base, words, free=free, k=kk[para]))
     t["segmentCount"] = len(t["segments"])
     return t
 

@@ -95,10 +95,12 @@ class FlextextFile:
         for paragraphs in it.findall("paragraphs"):
             for para in paragraphs.findall("paragraph"):
                 pi += 1
+                k = 0
                 for phrases in para.findall("phrases"):
                     for ph in phrases.findall("phrase"):
                         n += 1
-                        text["segments"].append(self._parse_phrase(ph, n, pi))
+                        k += 1
+                        text["segments"].append(self._parse_phrase(ph, n, pi, k))
         text["segmentCount"] = n
         return text
 
@@ -139,7 +141,7 @@ class FlextextFile:
                     return str(Path(dirpath) / base), True
         return uri, False
 
-    def _parse_phrase(self, ph: ET.Element, n: int, para: int) -> dict:
+    def _parse_phrase(self, ph: ET.Element, n: int, para: int, k: int | None = None) -> dict:
         guid = (ph.get("guid") or str(uuid.uuid4())).lower()
         kids = list(ph)
         words_el = next((k for k in kids if k.tag == "words"), None)
@@ -159,7 +161,7 @@ class FlextextFile:
         if not baseline:
             baseline = model.baseline_from_words(words)
         return model.make_segment(
-            guid, n, para, baseline, words, free=free, lit=lit, notes=notes,
+            guid, n, para, baseline, words, k=k, free=free, lit=lit, notes=notes,
             begin=_ms(ph.get("begin-time-offset")), end=_ms(ph.get("end-time-offset")),
             media=(ph.get("media-file") or None),
         )

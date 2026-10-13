@@ -257,7 +257,7 @@ class Docx:
                 rows = []
                 for li, line in enumerate(lines):
                     cells = []
-                    num = {"runs": [{"text": str(seg.get("n", "")) if li == 0 else "", "color": "#a8b0ba", "size": 9}]}
+                    num = {"runs": [{"text": str(seg.get("label") or seg.get("n", "")) if li == 0 else "", "color": "#a8b0ba", "size": 9}]}
                     cells.append(self.cell(num, 500, borders=False))
                     for ci in range(ncols):
                         runs = line["cells"][ci] if ci < len(line["cells"]) else []

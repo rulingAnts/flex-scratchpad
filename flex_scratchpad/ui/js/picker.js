@@ -104,32 +104,43 @@
       state.obj = obj;
       renderPreview();
       optsRow.innerHTML = '';
-      const from = el('input', { type: 'number', min: 1, max: obj.segmentCount, value: 1 });
-      const to = el('input', { type: 'number', min: 1, max: obj.segmentCount, value: Math.min(obj.segmentCount, 3) });
+      // The range fields take either numbering: FLEx's paragraph.segment ("4.1") or the running
+      // count; they display FLEx's, and `seg=` in the embed always gets the running count.
+      const segByN = (n) => (state.obj.segments || []).find((x) => x.n === n);
+      const show = (n) => { const sg = segByN(n); return sg && sg.label ? sg.label : String(n); };
+      const read = (v, fallback) => {
+        v = String(v || '').trim();
+        if (/^\d+\.\d+$/.test(v)) { const sg = (state.obj.segments || []).find((x) => x.label === v); if (sg) return sg.n; FS.toast('Segment ' + v + ' is not in the loaded part of the text — use the running number'); return fallback; }
+        const n = parseInt(v, 10);
+        return n > 0 ? Math.min(n, obj.segmentCount) : fallback;
+      };
+      const from = el('input', { type: 'text', value: show(1), style: { width: '56px' }, title: 'First segment — FLEx number (4.1) or running count' });
+      const to = el('input', { type: 'text', value: show(Math.min(obj.segmentCount, 3)), style: { width: '56px' }, title: 'Last segment — FLEx number (4.1) or running count' });
       const find = el('input', { type: 'text', placeholder: 'find segment by text…', style: { width: '180px', border: '1px solid var(--border)', borderRadius: '6px', padding: '3px 6px', background: 'var(--bg)' } });
       const findBtn = el('button', { class: 'btn', onclick: async () => {
         if (!find.value.trim()) return;
         try {
           const hits = await FS.api.flex_find_in_text(h.guid, find.value.trim());
           if (!hits.length) { FS.toast('No segment contains that text'); return; }
-          state.range = [hits[0], hits[0]]; from.value = hits[0]; to.value = hits[0];
+          state.range = [hits[0], hits[0]];
           if (hits[0] > (obj.range ? obj.range[1] : 60)) { obj = await FS.api.flex_get('text', h.guid, Math.max(1, hits[0] - 5), hits[0] + 30); state.obj = obj; }
+          from.value = show(hits[0]); to.value = show(hits[0]);
           renderPreview();
           const seg = preview.querySelector('.segment[data-n="' + hits[0] + '"]');
           if (seg) seg.scrollIntoView({ block: 'center' });
-          FS.toast(hits.length + ' segment' + (hits.length > 1 ? 's' : '') + ' match: ' + hits.slice(0, 8).join(', '));
+          FS.toast(hits.length + ' segment' + (hits.length > 1 ? 's' : '') + ' match: ' + hits.slice(0, 8).map(show).join(', '));
         } catch (e) { FS.toast(e.message, 'error'); }
       } }, 'Find');
-      const applyRange = () => { const a = Math.max(1, +from.value || 1), b = Math.max(a, +to.value || a); state.range = [a, b]; renderPreview(); };
+      const applyRange = () => { const a = Math.max(1, read(from.value, 1)), b = Math.max(a, read(to.value, a)); state.range = [a, b]; from.value = show(a); to.value = show(b); renderPreview(); };
       from.addEventListener('change', applyRange); to.addEventListener('change', applyRange);
-      state.setRange = (a, b) => { from.value = a; to.value = b; state.range = [a, b]; renderPreview(); };
+      state.setRange = (a, b) => { from.value = show(a); to.value = show(b); state.range = [a, b]; renderPreview(); };
       find.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); findBtn.click(); } });
       optsRow.append(el('label', {}, 'Segments ', from, ' – ', to), el('span', { class: 'muted' }, 'of ' + obj.segmentCount), find, findBtn);
       btnRow.innerHTML = '';
       btnRow.append(
         el('button', { class: 'btn', onclick: () => { onInsert(linkFor('text', h.guid, h.title), false); m.close(); } }, 'Insert link'),
         el('button', { class: 'btn', onclick: () => { onInsert(embedFor('text', h.guid), true); m.close(); } }, 'Whole text'),
-        el('button', { class: 'btn primary', onclick: () => { const r = state.range || [+from.value || 1, +to.value || 1]; onInsert(embedFor('text', h.guid, { seg: [Math.min(r[0], r[1]), Math.max(r[0], r[1])] }), true); m.close(); } }, 'Insert segments'));
+        el('button', { class: 'btn primary', onclick: () => { const r = state.range || [read(from.value, 1), read(to.value, 1)]; onInsert(embedFor('text', h.guid, { seg: [Math.min(r[0], r[1]), Math.max(r[0], r[1])] }), true); m.close(); } }, 'Insert segments'));
     }
 
     function renderPreview() {

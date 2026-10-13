@@ -869,3 +869,74 @@ def test_copy_paste_rows_columns_and_cells(app):
     assert page.locator(".popover.menu .menu-item", has_text="Paste rows above").count() == 1
     page.keyboard.press("Escape")
     assert not errors
+
+
+def insert_text_segments(page, first, last):
+    """Open the picker on the demo story and insert segments first..last (0-based clicks)."""
+    page.keyboard.press("Control+Shift+L")
+    page.locator(".picker-tabs button", has_text="Texts").click()
+    page.wait_for_selector(".pick-item .hw")
+    page.locator(".pick-item").first.click()
+    page.wait_for_selector(".picker-preview .segment")
+    segs = page.locator(".picker-preview .segment")
+    segs.nth(first).click()
+    segs.nth(last).click()
+    page.locator(".btn.primary", has_text="Insert segments").click()
+    page.wait_for_selector("#editor .text-obj .segment")
+
+
+def test_flex_numbering_shown_and_accepted(app):
+    h, page, errors = app
+    new_note(page, "Numbering")
+    page.click(".blk-body")
+    insert_text_segments(page, 0, 2)
+    # the gutters show FLEx's numbers (paragraph.segment); the badge shows both numberings
+    nums = page.locator("#editor .text-obj .segnum").all_inner_texts()
+    assert nums == ["1.1", "1.2", "2.1"], nums
+    badge = page.locator("#editor .text-obj .flex-head .badge").first.inner_text()
+    assert "segments 1.1–2.1" in badge and "(1–3 of" in badge, badge
+    # glosses carry the morpheme break characters of their forms
+    seg = page.locator("#editor .text-obj .segment").first.inner_text()
+    assert "3SG-" in seg and "-PST" in seg, seg
+    # the picker's range fields accept "2.1" and insert the running count
+    page.keyboard.press("Control+Shift+L")
+    page.locator(".picker-tabs button", has_text="Texts").click()
+    page.wait_for_selector(".pick-item .hw")
+    page.locator(".pick-item").first.click()
+    page.wait_for_selector(".picker-preview .segment")
+    inputs = page.locator(".modal input[title*='FLEx number']")
+    inputs.nth(0).fill("2.1")
+    inputs.nth(0).dispatch_event("change")
+    inputs.nth(1).fill("2.2")
+    inputs.nth(1).dispatch_event("change")
+    page.wait_for_timeout(200)
+    assert page.locator(".picker-preview .segment.in-range").count() == 2
+    assert inputs.nth(0).input_value() == "2.1"
+    page.locator(".btn.primary", has_text="Insert segments").click()
+    page.wait_for_timeout(900)
+    assert "seg=3-4" in body_of(h)
+    assert not errors
+
+
+def test_overlay_stays_in_the_viewport(app):
+    h, page, errors = app
+    new_note(page, "Overlay")
+    page.click(".blk-body")
+    insert_text_segments(page, 0, 3)
+    page.locator("#editor .flex-obj .lnk[title='Collapse to a chip']").first.click()
+    page.wait_for_selector(".flex-collapsed")
+    # put the chip near the bottom edge of the window, then open its overlay
+    page.evaluate("() => { const ed = document.getElementById('editor'); const chip = document.querySelector('.flex-collapsed'); const r = chip.getBoundingClientRect(); ed.scrollTop += r.top - window.innerHeight + 60; }")
+    page.wait_for_timeout(200)
+    page.locator(".flex-collapsed").first.click()
+    page.wait_for_selector(".flex-overlay .segment")
+    page.wait_for_timeout(300)
+    box = page.evaluate("() => { const r = document.querySelector('.flex-overlay').getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right, vh: window.innerHeight, vw: window.innerWidth }; }")
+    assert box["top"] >= 0 and box["bottom"] <= box["vh"] and box["left"] >= 0 and box["right"] <= box["vw"], box
+    # scrolling the note keeps it inside too
+    page.evaluate("() => { document.getElementById('editor').scrollTop -= 200; }")
+    page.wait_for_timeout(200)
+    box = page.evaluate("() => { const r = document.querySelector('.flex-overlay').getBoundingClientRect(); return { top: r.top, bottom: r.bottom, vh: window.innerHeight }; }")
+    assert box["top"] >= 0 and box["bottom"] <= box["vh"], box
+    assert not errors
+
