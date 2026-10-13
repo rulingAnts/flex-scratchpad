@@ -169,3 +169,18 @@ with times, word/gloss tiers → words; writing systems matched by the tier's la
 import. Embeds keep working through `{{flex:text <guid> …}}`; "Open in FLEx" is hidden for them.
 SFM / UFM (standard-format interlinear, Toolbox-style `\\tx \\mb \\gl \\ft`) later, by the same
 route (Seth, 2026-10-13: "Or SFM/UFM eventually. Later.").
+
+## Edit a table in Excel, round-trip in place (Seth, 2026-10-13, "a later feature")
+
+> *"open a table in Excel and then when they save it the results update in place (and using an
+> Excel template that has a macro that can paste FLEx TSV and render it in a code that lets our
+> app know when the table is repainted in our app that they need to be processed just as if they
+> had been pasted in the app directly)"*
+
+Shape: "Open in Excel" on a table writes `.scratchpad/excel/<note>-<table>.xlsx` from the grid
+(cells as text, embeds as their `{{flex:…}}` source, merged cells as merges) and opens it with
+the OS; the app watches the file (the sync poller already watches the notebook) and on save reads
+the sheet back into the table block, keeping the style line. The template's macro pastes FLEx TSV
+into a cell as a marked block (e.g. a cell starting `⟦flex-tsv⟧` + the rows), and the read-back
+hands such cells to `locate()` exactly as a paste in the app does, replacing them with the embed
+it finds. Needs openpyxl or a minimal xlsx writer/reader (zip + XML — like `docx_writer.py`).

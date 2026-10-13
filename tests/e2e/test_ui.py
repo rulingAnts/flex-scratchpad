@@ -1303,7 +1303,7 @@ def test_table_frame_grip_and_scroll_chaining(app):
     h, page, errors = app
     new_note(page, "Frame")
     page.locator("#editor .blk-body").first.click()
-    paste(page, "intro\n\n" + "| a | b |\n|---|---|\n" + "\n".join(f"| r{i} | x{i} |" for i in range(40)) + "\n\n" + "\n\n".join(f"para {i}" for i in range(60)))
+    paste(page, "\n\n".join(f"intro {i}" for i in range(14)) + "\n\n" + "| a | b |\n|---|---|\n" + "\n".join(f"| r{i} | x{i} |" for i in range(40)) + "\n\n" + "\n\n".join(f"para {i}" for i in range(60)))
     page.wait_for_selector("table.md-table")
     # drag the grip up: the frame gets a height and scrolls inside
     grip = page.locator(".tbl-grip")
@@ -1320,28 +1320,63 @@ def test_table_frame_grip_and_scroll_chaining(app):
     wrap = page.locator(".tbl-wrap.framed")
     assert wrap.count() == 1
     assert page.evaluate("() => { const w = document.querySelector('.tbl-wrap.framed'); return w.scrollHeight > w.clientHeight; }")
-    # a fast scroll through the document is not trapped by the frame: wheel while the document
-    # was just scrolling → the document moves, the frame does not
+    # a gesture under way when the pointer reaches the frame stays with the document
     page.evaluate("() => { document.getElementById('editor').scrollTop = 0; }")
     wrap.scroll_into_view_if_needed()
-    page.evaluate("() => { const ed = document.getElementById('editor'); const w = document.querySelector('.tbl-wrap.framed'); ed.scrollTop += w.getBoundingClientRect().top - ed.getBoundingClientRect().top - 40; ed._lastScroll = performance.now(); }")
+    page.evaluate("() => { const ed = document.getElementById('editor'); const w = document.querySelector('.tbl-wrap.framed'); ed.scrollTop += w.getBoundingClientRect().top - ed.getBoundingClientRect().top - 160; }")
+    page.wait_for_timeout(300)
     b2 = wrap.bounding_box()
-    page.mouse.move(b2["x"] + 60, b2["y"] + b2["height"] - 60)      # low in the frame: clear of the sticky toolbar
+    page.mouse.move(b2["x"] + 60, b2["y"] - 80)                          # above the frame, in the note
+    assert page.evaluate("([x, y]) => !!document.elementFromPoint(x, y).closest('#editor')", [b2["x"] + 60, b2["y"] - 80])
+    page.wait_for_timeout(300)
     before = page.evaluate("() => [document.getElementById('editor').scrollTop, document.querySelector('.tbl-wrap.framed').scrollTop]")
-    page.mouse.wheel(0, 120)
-    page.wait_for_timeout(100)
+    page.mouse.wheel(0, 60)                                               # gesture starts in the note…
+    page.mouse.move(b2["x"] + 60, b2["y"] + b2["height"] - 60)            # …pointer now over the frame…
+    page.mouse.wheel(0, 60)                                               # …same gesture (no gap): the note keeps moving
+    page.mouse.wheel(0, 60)
+    page.wait_for_timeout(400)
     after = page.evaluate("() => [document.getElementById('editor').scrollTop, document.querySelector('.tbl-wrap.framed').scrollTop]")
-    assert after[0] > before[0] and after[1] == before[1], (before, after)
-    # after a pause over the frame, the wheel scrolls the frame
-    page.wait_for_timeout(500)
+    assert after[0] >= before[0] + 150 and after[1] == before[1], (before, after)
+    # after a pause over the frame, a new gesture scrolls the frame
+    page.wait_for_timeout(600)
     b3 = wrap.bounding_box()
     page.mouse.move(b3["x"] + 60, b3["y"] + b3["height"] - 60)
-    page.wait_for_timeout(500)
+    page.wait_for_timeout(400)
     before = page.evaluate("() => [document.getElementById('editor').scrollTop, document.querySelector('.tbl-wrap.framed').scrollTop]")
     page.mouse.wheel(0, 120)
     page.wait_for_timeout(200)
     after = page.evaluate("() => [document.getElementById('editor').scrollTop, document.querySelector('.tbl-wrap.framed').scrollTop]")
     assert after[1] > before[1] and after[0] == before[0], (before, after)
+    # at the frame's end: the rest of the gesture is absorbed…
+    page.evaluate("() => { const w = document.querySelector('.tbl-wrap.framed'); w.scrollTop = w.scrollHeight - w.clientHeight - 30; }")
+    page.wait_for_timeout(600)
+    before = page.evaluate("() => document.getElementById('editor').scrollTop")
+    page.mouse.wheel(0, 40)                  # carries the frame to its end
+    page.mouse.wheel(0, 30)                  # straight on (a decaying tail): absorbed
+    page.wait_for_timeout(60)
+    page.mouse.wheel(0, 20)
+    page.wait_for_timeout(150)
+    assert page.evaluate("() => document.getElementById('editor').scrollTop") == before
+    assert page.evaluate("() => { const w = document.querySelector('.tbl-wrap.framed'); return w.scrollTop + w.clientHeight >= w.scrollHeight - 1; }")
+    # a fresh push (a clear jump in delta) releases to the document at once, no pause needed
+    page.mouse.wheel(0, 120)
+    page.wait_for_timeout(400)
+    assert page.evaluate("() => document.getElementById('editor').scrollTop") > before
+    page.wait_for_timeout(300)
+    page.evaluate("() => { const w = document.querySelector('.tbl-wrap.framed'); w.scrollTop = w.scrollHeight; }")
+    before = page.evaluate("() => document.getElementById('editor').scrollTop")
+    # …and a new gesture after half a second moves the document, and keeps moving it
+    page.wait_for_timeout(600)
+    page.mouse.wheel(0, 120)
+    page.wait_for_timeout(50)
+    page.mouse.wheel(0, 120)
+    page.wait_for_timeout(400)
+    mid = page.evaluate("() => document.getElementById('editor').scrollTop")
+    assert mid >= before + 200, (before, mid)
+    page.mouse.wheel(0, 120)
+    page.wait_for_timeout(400)
+    assert page.evaluate("() => document.getElementById('editor').scrollTop") > mid
+    assert page.evaluate("() => { const w = document.querySelector('.tbl-wrap.framed'); return w.scrollTop + w.clientHeight >= w.scrollHeight - 1; }")
     # double-click the grip resets the frame
     grip = page.locator(".tbl-grip")
     grip.scroll_into_view_if_needed()

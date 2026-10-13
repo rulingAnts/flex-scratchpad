@@ -679,23 +679,68 @@
    * DOCUMENT while the document was just scrolling or the pointer just arrived (a fast
    * scroll through the note is never trapped by a table), and scrolls the FRAME once the
    * reader has paused on it; at the frame's end the browser chains into the document. */
-  const PAUSE_MS = 280;
-  document.addEventListener('scroll', (e) => { const el2 = e.target; if (el2 && el2.id === 'editor') el2._lastScroll = performance.now(); }, true);
+  /* Wheel gestures over a framed table (Seth, 2026-10-13: "easy and intuitive for the user to
+   * scroll where they want to scroll with two fingers, without having to think 'oh, I'm in a
+   * frame'"). A GESTURE is a run of wheel events with no gap of GAP_MS; its target — the frame
+   * or the document — is decided when it starts and kept until it ends, which is what makes a
+   * trackpad's momentum tail and a fast scroll through the note behave:
+   *   · a gesture already under way when the pointer enters the frame → the document
+   *   · a gesture starting right after the pointer arrived (< PAUSE_MS) → the document
+   *   · a gesture starting after a pause on the frame → the frame; at the frame's end the rest
+   *     of that gesture is absorbed (no overshoot into the note)
+   *   · a gesture starting at the frame's end after END_PAUSE_MS of quiet → the document, and
+   *     it keeps going without any click outside the frame
+   * "The document" is done by letting the events FALL THROUGH the frame (pointer-events: none
+   * for the rest of the gesture) so the browser scrolls the note natively — a programmatic
+   * scroll would fight the browser's own smooth-scroll animation. */
+  // A trackpad keeps sending decaying momentum deltas for a second or more after the fingers
+  // lift; waiting for that tail to end is what felt like "2 seconds before it surrenders
+  // focus" (Seth). So a gesture also starts on a clear JUMP in delta (a fresh push) — not only
+  // on a gap — and the pauses are short.
+  const PAUSE_MS = 250, END_PAUSE_MS = 300, GAP_MS = 120;
+  const isJump = (d, prev) => Math.abs(d) >= 12 && Math.abs(d) > Math.abs(prev) * 1.8 + 4;
+  let lastWheelAnywhere = 0;
+  document.addEventListener('wheel', () => { lastWheelAnywhere = performance.now(); }, { capture: true, passive: true });
   function wheelGate(wrap, container) {
-    let entered = 0;
-    wrap.addEventListener('mouseenter', () => { entered = performance.now(); });
+    let entered = 0, last = 0, lastDelta = 0, target = null, timer = 0;
+    const passThrough = () => {
+      wrap.style.pointerEvents = 'none';
+      wrap.classList.add('pass');
+      clearTimeout(timer);
+      const check = () => {
+        if (performance.now() - lastWheelAnywhere >= GAP_MS) { wrap.style.pointerEvents = ''; wrap.classList.remove('pass'); target = null; last = 0; lastDelta = 0; }
+        else timer = setTimeout(check, GAP_MS);
+      };
+      timer = setTimeout(check, GAP_MS);
+    };
+    wrap.addEventListener('mouseenter', () => { entered = performance.now(); if (entered - lastWheelAnywhere < GAP_MS) passThrough(); });
     wrap.addEventListener('wheel', (e) => {
       const pane = container.closest('#editor');
       if (!pane || e.ctrlKey) return;
+      const now = performance.now();
+      const sinceLast = now - last;
+      last = now;
       const dy = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? pane.clientHeight : 1);
       const dx = e.deltaX * (e.deltaMode === 1 ? 16 : 1);
       const frameCanY = (dy < 0 && wrap.scrollTop > 0) || (dy > 0 && wrap.scrollTop + wrap.clientHeight < wrap.scrollHeight - 1);
       const frameCanX = (dx < 0 && wrap.scrollLeft > 0) || (dx > 0 && wrap.scrollLeft + wrap.clientWidth < wrap.scrollWidth - 1);
-      if (!frameCanY && !frameCanX) return;                         // the frame is at its end: native chaining to the document
       const paneCanY = (dy < 0 && pane.scrollTop > 0) || (dy > 0 && pane.scrollTop + pane.clientHeight < pane.scrollHeight - 1);
-      const now = performance.now();
-      const passing = (now - (pane._lastScroll || 0)) < PAUSE_MS || (now - entered) < PAUSE_MS;
-      if (passing && dy && paneCanY) { e.preventDefault(); pane.scrollBy({ top: dy, left: 0 }); pane._lastScroll = now; }
+      const jump = isJump(dy || dx, lastDelta);
+      lastDelta = dy || dx;
+      if (sinceLast >= GAP_MS || jump || target === null) {       // a new gesture: pick its target
+        if (now - entered < PAUSE_MS) target = 'pane';
+        else if (frameCanY || frameCanX) target = 'frame';
+        else target = (sinceLast >= END_PAUSE_MS || jump) ? 'pane' : 'frame';   // at the end: a pause or a fresh push → the document
+      }
+      if (target === 'pane') {
+        if (!dy || !paneCanY) return;
+        e.preventDefault();
+        pane.scrollBy({ top: dy, left: 0 });                       // this event; the rest of the gesture falls through
+        passThrough();
+        return;
+      }
+      if (frameCanY || frameCanX) return;                        // the frame scrolls, natively
+      if (dy) e.preventDefault();                                // at the frame's end: absorbed for the rest of this gesture
     }, { passive: false });
   }
 
