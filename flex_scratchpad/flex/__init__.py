@@ -41,14 +41,16 @@ def _text_score(q: str, hay: str) -> int:
 
 
 def _query_score(q: dict, baseline: str, free: str) -> int:
-    """A segment query {base, morph, free} against a segment: the baseline match (joined
-    morphemes when only a Morphemes row was copied; or, for a translation-only query, the free
-    match) plus a bonus when the free translation agrees."""
-    base = _text_score(q.get("base", ""), baseline) if q.get("base") else 0
-    if not q.get("base") and q.get("morph"):
-        base = _text_score(q["morph"], baseline.replace(" ", ""))   # morphemes vs the baseline, spaces and breaks gone
+    """A segment query {bases, morphs, free} against a segment: the best baseline match over
+    the Word rows (joined morphemes when only Morphemes rows were copied; or, for a
+    translation-only query, the free match) plus a bonus when the free translation agrees."""
+    bases, morphs = q.get("bases") or [], q.get("morphs") or []
+    base = max((_text_score(b, baseline) for b in bases), default=0)
+    if not bases and morphs:
+        joined = baseline.replace(" ", "")                      # morphemes vs the baseline, spaces and breaks gone
+        base = max((_text_score(m, joined) for m in morphs), default=0)
     fr = _text_score(q.get("free", ""), free) if q.get("free") else 0
-    if q.get("base") or q.get("morph"):
+    if bases or morphs:
         return base + (1 if fr else 0) if base else 0
     return 1 if fr else 0
 
@@ -322,7 +324,7 @@ class FlexService:
 
         def block() -> dict:
             nonlocal cur
-            cur = {"base": "", "morph": "", "free": ""}
+            cur = {"bases": [], "morphs": [], "free": ""}
             queries.append(cur)
             return cur
 
@@ -352,6 +354,8 @@ class FlexService:
                 if cells[0].rstrip(":").casefold() in labels:
                     continue                                                                 # an empty labelled row
                 m = re.match(r"^(" + "|".join(re.escape(k) for k in labels) + r")\s+(\S.*)$", cells[0], re.I)
+                if m and re.fullmatch(r"[A-Za-z]{2,3}(-[\w-]+)*", m.group(2)):
+                    continue                                                                 # "Word fau-ose" with every cell empty
                 if m:
                     cells = [m.group(1), m.group(2)]
             cells = [c for c in cells if c not in ("§", "¶")]
@@ -361,11 +365,17 @@ class FlexService:
             if len(cells) == 1 and cur is not None and cur["free"] and re.fullmatch(r"[A-Za-z]{2,3}", cells[0]):
                 continue
             label = cells[0].rstrip(":").casefold() if len(cells) > 1 else ""
-            is_morph = label.startswith("morphemes")
-            if label and not is_morph and (label in self._ROW_DROP or any(label.startswith(d) for d in self._ROW_DROP)):
+            # the Gloss / Analyze tabs suffix a label with the writing system when more than
+            # one shows ("Word base", "Word fau-ose", "Morphemes fau-ose", "Word Gloss Eng"):
+            # the same row in another writing system is an ALTERNATIVE of the segment, never
+            # a new segment (Seth, 2026-10-13)
+            key = next((k for k in sorted(self._ROW_KEEP + self._ROW_DROP, key=len, reverse=True) if label == k or label.startswith(k + " ") or label.startswith(k + ".")), "") if label else ""
+            suffix = label[len(key):].lstrip(".").strip() if key else ""
+            is_morph = key == "morphemes"
+            if key and not is_morph and key in self._ROW_DROP:
                 continue
-            is_free = label.startswith("free")
-            labelled = bool(label) and (is_free or is_morph or label in self._ROW_KEEP or any(label.startswith(k + " ") for k in self._ROW_KEEP))
+            is_free = key == "free"
+            labelled = bool(key)
             words = [c for c in (cells[1:] if labelled else cells) if c]
             if not words:
                 continue
@@ -379,12 +389,14 @@ class FlexService:
                     block()["free"] = norm(text)
             elif is_morph:
                 # no Word row copied: the morpheme forms, joined, stand in for the baseline
-                if cur is None or numbered or cur["morph"] or cur["free"]:
+                if cur is None or numbered or cur["free"] or (cur["morphs"] and not suffix):
                     block()
-                cur["morph"] = norm(text).replace(" ", "")
+                cur["morphs"].append(norm(text).replace(" ", ""))
             else:
-                block()["base"] = norm(text)
-        queries = [q for q in queries if q["base"] or q["morph"] or q["free"]]
+                if cur is None or numbered or cur["free"] or not labelled or not (suffix and cur["bases"]):
+                    block()
+                cur["bases"].append(norm(text))
+        queries = [q for q in queries if q["bases"] or q["morphs"] or q["free"]]
         if not queries:
             return []
         with self.lock:

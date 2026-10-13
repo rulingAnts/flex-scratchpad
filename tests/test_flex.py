@@ -322,6 +322,36 @@ def test_locate_rows_without_a_word_row(tmp_path):
     assert hits and hits[0]["seg"] == 1 and hits[0]["segTo"] == 1 and hits[0]["of"] == 1, hits
     hits = svc.locate(print_tab + print_tab.replace("1.1", "1.2").replace("Kabir\tka-nuwa-mo\tlo", "Haŋa\ttiket\tka-sila-mo\tpemu").replace("The dog slept.", "Yesterday the child saw the river."))
     assert hits and hits[0]["seg"] == 1 and hits[0]["segTo"] == 2 and hits[0]["matched"] == 2 and hits[0]["of"] == 2, hits
+    # the Gloss tab with several analysis / vernacular writing systems showing: labels carry
+    # the writing system ("Word base" / "Word fau-ose"), the second Word row is the SAME
+    # segment in another spelling, and Lex. Entries / Lex. Gram. Info. / Word Gloss rows ride along
+    gloss_tab = ("1.1\tWord base\tKabir\tka-nuwa-mo\tlo\t\t\n"
+                 "\tWord fau-ose\tQabir\tqa-nuwa-mo\tlo\t\t\n"
+                 "\tMorphemes base\tKabir\tka-\tnuwa\t-mo\tlo\n"
+                 "\tMorphemes fau-ose\tQabir\tqa-\tnuwa\t-mo\tlo\n"
+                 "\tLex. Entries base\tkabir\tka-\tnuwa\t-mo\tlo\n"
+                 "\tLex. Entries fau-ose\tqabir\tqa-\tnuwa\t-mo\tlo\n"
+                 "\tLex. Gloss\tdog\t3SG-\tsleep\t-PST\tDECL\n"
+                 "\tLex. Gram. Info.\tn\tv\tv\t\t\n"
+                 "\tWord Gloss Eng\tdog\tsleeps\t\t\n"
+                 "\tWord Gloss Ind\t\t\t\t\t\n"
+                 "\u200eFree \u200e\u200eThe dog slept.\n")
+    hits = svc.locate(gloss_tab)
+    assert hits and hits[0]["seg"] == 1 and hits[0]["segTo"] == 1 and hits[0]["of"] == 1 and hits[0]["score"] >= 4, hits
+    # the Analyze tab: Word, Morphemes, Lex. Gloss, Word Gloss per language, Word Cat., Free per language
+    analyze = ("1.1\tWord\tKabir\tka-nuwa-mo\tlo\t\t\n"
+               "\tMorphemes\tKabir\tka-\tnuwa\t-mo\tlo\n"
+               "\tLex. Gloss\tdog\t3SG-\tsleep\t-PST\tDECL\n"
+               "\tWord Gloss Eng\tdog\tsleeps\t\t\n"
+               "\tWord Gloss Ind\t\t\t\t\t\n"
+               "\tWord Cat.\tn\tv\t\t\t\n"
+               "\u200eFree \u200eEng\u200e \u200e\u200eThe dog slept.\n"
+               "\u200e \u200eInd\u200e \u200e\u200e\n")
+    assert svc.locate(analyze)[0]["seg"] == 1 and svc.locate(analyze)[0]["of"] == 1
+    # the writing-system alternate under the SAME number, in a two-segment range
+    two = gloss_tab + gloss_tab.replace("1.1", "1.2").replace("Kabir\tka-nuwa-mo\tlo", "Haŋa\ttiket\tka-sila-mo\tpemu").replace("The dog slept.", "Yesterday the child saw the river.")
+    hits = svc.locate(two)
+    assert hits and hits[0]["seg"] == 1 and hits[0]["segTo"] == 2 and hits[0]["matched"] == 2 and hits[0]["of"] == 2, hits
     # a Morphemes row under a Word row changes nothing
     assert svc.locate("Word\tKabir\tka-nuwa-mo\tlo\nMorphemes\tKabir\tka-\tnuwa\t-mo\tlo\nFree\tThe dog slept.")[0]["seg"] == 1
 
