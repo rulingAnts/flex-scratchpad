@@ -1191,3 +1191,52 @@ def test_entry_fields_and_senses_menu(app):
     body = body_of(h)
     assert "fields=cf,mt,hn,sn,spos,gl,ex,tr senses=2" in body, body
     assert not errors
+
+
+def test_overlay_scrolls_inside_and_duplicate_remove(app):
+    h, page, errors = app
+    new_note(page, "Overlay scroll")
+    page.keyboard.type("{{flex:text %s seg=1-6 collapsed}}" % T_STORY)
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#editor .flex-collapsed")
+    page.set_viewport_size({"width": 1100, "height": 420})
+    page.locator("#editor .flex-collapsed").click()
+    page.wait_for_selector(".flex-overlay .segment")
+    page.wait_for_timeout(300)
+    box = page.evaluate("() => { const o = document.querySelector('.flex-overlay').getBoundingClientRect(); const i = document.querySelector('.flex-overlay-inner'); return { bottom: o.bottom, vh: window.innerHeight, scrollable: i.scrollHeight > i.clientHeight }; }")
+    assert box["bottom"] <= box["vh"] and box["scrollable"], box
+    # the overlay's own scrolling works and is not reset by the re-placement
+    page.evaluate("() => { document.querySelector('.flex-overlay-inner').scrollTop = 150; }")
+    page.wait_for_timeout(250)
+    assert page.evaluate("() => document.querySelector('.flex-overlay-inner').scrollTop") >= 140
+    page.mouse.wheel(0, 80)
+    page.wait_for_timeout(250)
+    assert page.evaluate("() => document.querySelector('.flex-overlay-inner').scrollTop") >= 140
+    # duplicate from the overlay bar → two blocks; remove one after confirming
+    page.locator(".flex-overlay .lnk", has_text="Duplicate").click()
+    page.wait_for_function("() => document.querySelectorAll('#editor .flex-collapsed').length === 2")
+    page.set_viewport_size({"width": 1100, "height": 860})
+    page.locator("#editor .flex-collapsed").first.click()
+    page.wait_for_selector(".flex-overlay .lnk")
+    page.locator(".flex-overlay .lnk", has_text="Remove").click()
+    page.wait_for_selector(".popover .btn.danger")
+    page.locator(".popover .btn", has_text="Cancel").click()
+    page.wait_for_timeout(300)
+    assert page.locator("#editor .flex-collapsed").count() == 2
+    page.locator(".flex-overlay .lnk", has_text="Remove").click()
+    page.wait_for_selector(".popover .btn.danger")
+    page.locator(".popover .btn.danger").click()
+    page.wait_for_function("() => document.querySelectorAll('#editor .flex-collapsed').length === 1")
+    page.wait_for_timeout(900)
+    assert body_of(h).count("{{flex:text") == 1
+    # in a cell: the ⋯ menu offers both
+    page.locator("#editor .blk-body").last.click()
+    paste(page, "| a |\n|---|\n| {{flex:entry 6a5f3a2e-1b1e-4c2a-9f10-0d2c1a7e0001 expanded}} |")
+    page.wait_for_selector("table.md-table .entry-card")
+    page.locator("table.md-table .entry-card .flex-head .lnk[title='Duplicate this object']").click()
+    page.wait_for_function("() => document.querySelectorAll('table.md-table .entry-card').length === 2")
+    page.locator("table.md-table .entry-card .flex-head .lnk[title='Remove this object…']").first.click()
+    page.wait_for_selector(".popover .btn.danger")
+    page.locator(".popover .btn.danger").click()
+    page.wait_for_function("() => document.querySelectorAll('table.md-table .entry-card').length === 1")
+    assert not errors

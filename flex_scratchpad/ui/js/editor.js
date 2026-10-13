@@ -205,11 +205,7 @@
       } else if (b.type === 'flex') {
         const spec = FS.flexref.parse(b.src);
         if (!spec) { host.appendChild(el('div', { class: 'flex-err' }, 'Unreadable FLEx embed: ' + b.src)); return; }
-        FS.interlinear.render(host, spec, {
-          editable: true,
-          onSpecChange: (s) => { b.src = FS.flexref.serialize(s); this.changed(); FS.interlinear.render(host, s, this._flexOpts(b, host)); },
-          editSource: () => this.editSource(b),
-        });
+        FS.interlinear.render(host, spec, this._flexOpts(b, host));
       } else if (b.type === 'chart') {
         bar.insertBefore(el('button', { onclick: () => FS.charts.editDialog(b.src, (src) => { b.src = src; this.changed(); this.rerender(b); }) }, '✎ Edit chart'), edit);
         FS.charts.render(host, b.src, { onEdit: () => FS.charts.editDialog(b.src, (src) => { b.src = src; this.changed(); this.rerender(b); }) });
@@ -224,7 +220,13 @@
       }
     }
     _flexOpts(b, host) {
-      return { editable: true, onSpecChange: (s) => { b.src = FS.flexref.serialize(s); this.changed(); FS.interlinear.render(host, s, this._flexOpts(b, host)); }, editSource: () => this.editSource(b) };
+      return {
+        editable: true,
+        onSpecChange: (s) => { b.src = FS.flexref.serialize(s); this.changed(); FS.interlinear.render(host, s, this._flexOpts(b, host)); },
+        editSource: () => this.editSource(b),
+        duplicate: () => { this.insertBlockAfter(b, { type: 'flex', src: b.src }, false); FS.toast('Duplicated'); },
+        remove: () => this.deleteBlock(b),
+      };
     }
 
     /* -- text block wiring ---------------------------------------------------------- */

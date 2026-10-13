@@ -369,6 +369,8 @@ table.md-table td.sel, table.md-table th.sel { background: var(--accent-soft) !i
 .popover.menu hr { border: 0; border-top: 1px solid var(--border-soft); margin: 3px 0; }
 .popover.menu .row { padding: 4px 8px 2px; }
 .popover .menu-item[disabled] { opacity: 0.45; pointer-events: none; }
+.popover .menu-item.danger, .lnk.danger { color: #c0392b; }
+.btn.danger { background: #c0392b; color: #fff; border-color: #c0392b; }
 table.md-table.wide { max-width: none; }
 .tbl-wrap { overflow-x: auto; overflow-y: hidden; padding-bottom: 2px; }
 .tbl-wrap.frozen { overflow: auto; border: 1px solid var(--border-soft); border-radius: 6px; }

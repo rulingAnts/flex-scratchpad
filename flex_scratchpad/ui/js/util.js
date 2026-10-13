@@ -151,6 +151,19 @@
     return FS.popover(anchor, build, Object.assign({}, opts || {}, { onClose: () => { anchor.remove(); if (opts && opts.onClose) opts.onClose(); } }));
   };
 
+  /* A small in-page confirmation anchored at the control (no native dialog): resolves true/false. */
+  FS.confirmAt = function (anchor, message, yesLabel) {
+    return new Promise((resolve) => {
+      let done = false;
+      FS.popover(anchor, (pop, close) => {
+        pop.appendChild(FS.el('div', { class: 'row' }, message));
+        pop.appendChild(FS.el('div', { class: 'row', style: { justifyContent: 'flex-end', marginTop: '6px' } },
+          FS.el('button', { class: 'btn', onclick: () => { done = true; close(); resolve(false); } }, 'Cancel'),
+          FS.el('button', { class: 'btn danger', onclick: () => { done = true; close(); resolve(true); } }, yesLabel || 'Remove')));
+      }, { onClose: () => { if (!done) resolve(false); } });
+    });
+  };
+
   FS.copyText = async function (text) {
     try { await navigator.clipboard.writeText(text); return true; } catch (e) { /* fall through */ }
     const ta = FS.el('textarea', { style: { position: 'fixed', left: '-1000px' } }, text);

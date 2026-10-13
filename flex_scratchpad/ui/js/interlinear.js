@@ -203,6 +203,8 @@
     head.appendChild(el('button', { class: 'lnk', title: 'Reload from FLEx', onclick: () => opts.refresh && opts.refresh() }, '↻'));
     if (opts.editable && !opts.overlay) head.appendChild(el('button', { class: 'lnk', title: 'Collapse to a chip', onclick: () => setCollapsed(spec, opts, true) }, '⤡'));
     if (opts.editable && opts.inCell && opts.editCell && !opts.overlay) head.appendChild(el('button', { class: 'lnk', title: 'Edit the cell\u2019s text (type before or after this example, add another)', onclick: () => opts.editCell() }, '✎'));
+    if (opts.editable && !opts.overlay && opts.duplicate) head.appendChild(el('button', { class: 'lnk', title: 'Duplicate this object', onclick: () => opts.duplicate() }, '⧉'));
+    if (opts.editable && !opts.overlay && opts.remove) head.appendChild(el('button', { class: 'lnk danger', title: 'Remove this object…', onclick: (e) => removeObject(e.currentTarget, spec, opts) }, '🗑'));
     if (obj.url) head.appendChild(el('a', { href: obj.url, title: 'Open in FieldWorks', onclick: (e) => { e.preventDefault(); openInFlex(obj.url); } }, 'Open in FLEx ↗'));
     if (opts.editable) head.appendChild(el('button', { class: 'lnk', title: 'Options', onclick: (e) => embedMenu(e.currentTarget, spec, opts, obj) }, '⋯'));
     box.appendChild(head);
@@ -549,7 +551,15 @@
       if (obj && obj.url) pop.appendChild(el('button', { class: 'menu-item', onclick: () => { FS.copyText(obj.url); FS.toast('FLEx link copied'); close(); } }, 'Copy FLEx link'));
       pop.appendChild(el('button', { class: 'menu-item', onclick: () => { FS.copyText(R.serialize(spec)); FS.toast('Embed code copied'); close(); } }, 'Copy embed code'));
       if (opts.editSource) pop.appendChild(el('button', { class: 'menu-item', onclick: () => { close(); opts.editSource(); } }, 'Edit source'));
+      if (opts.duplicate || opts.remove) pop.appendChild(el('hr'));
+      if (opts.duplicate) pop.appendChild(el('button', { class: 'menu-item', onclick: () => { close(); opts.duplicate(); } }, 'Duplicate this object'));
+      if (opts.remove) pop.appendChild(el('button', { class: 'menu-item danger', onclick: () => { close(); removeObject(anchor, spec, opts); } }, 'Remove this object…'));
     });
+  }
+  /* Remove, after an in-place confirmation (Seth, 2026-10-13: "for delete, it should ask"). */
+  async function removeObject(anchor, spec, opts) {
+    const what = spec.label || (spec.kind === 'text' ? 'this example' : spec.kind === 'entry' || spec.kind === 'sense' ? 'this entry' : 'this object');
+    if (await FS.confirmAt(anchor, 'Remove ' + what + ' from the note? (Undo brings it back.)', 'Remove')) { closeOverlay(); opts.remove(); }
   }
 
   /* ------------------------------------------------------------------ rendering: entry */
@@ -569,8 +579,11 @@
     head.appendChild(el('span', { class: 'spacer' }));
     head.appendChild(el('button', { class: 'lnk', title: 'Reload from FLEx', onclick: () => opts.refresh && opts.refresh() }, '↻'));
     if (opts.editable && !opts.overlay) head.appendChild(el('button', { class: 'lnk', title: 'Collapse to a chip', onclick: () => setCollapsed(spec, opts, true) }, '⤡'));
+    if (opts.editable && opts.inCell && opts.editCell && !opts.overlay) head.appendChild(el('button', { class: 'lnk', title: 'Edit the cell\u2019s text', onclick: () => opts.editCell() }, '✎'));
+    if (opts.editable && !opts.overlay && opts.duplicate) head.appendChild(el('button', { class: 'lnk', title: 'Duplicate this object', onclick: () => opts.duplicate() }, '⧉'));
+    if (opts.editable && !opts.overlay && opts.remove) head.appendChild(el('button', { class: 'lnk danger', title: 'Remove this object…', onclick: (e) => removeObject(e.currentTarget, spec, opts) }, '🗑'));
     if (obj.url) head.appendChild(el('a', { href: obj.url, onclick: (e) => { e.preventDefault(); openInFlex(obj.url); } }, 'Open in FLEx ↗'));
-    if (opts.editable) head.appendChild(el('button', { class: 'lnk', onclick: (e) => embedMenu(e.currentTarget, spec, opts, obj) }, '⋯'));
+    if (opts.editable) head.appendChild(el('button', { class: 'lnk', title: 'Options', onclick: (e) => embedMenu(e.currentTarget, spec, opts, obj) }, '⋯'));
     box.appendChild(head);
     if (F.has('note') && obj.note) box.appendChild(el('div', { class: 'enote' }, obj.note));
     const shown = R.visibleSenses(spec, obj.senses);
@@ -698,6 +711,8 @@
       el('span', { class: 'muted small' }, mode.pinned ? 'Preview' : 'Preview — click the chip to keep it open'),
       el('span', { class: 'spacer' }),
       opts.editable && opts.editCell ? el('button', { class: 'lnk', title: 'Edit the cell\u2019s text (type before or after this example, add another)', onclick: () => { closeOverlay(); opts.editCell(); } }, '✎ Edit cell') : null,
+      opts.editable && opts.duplicate ? el('button', { class: 'lnk', title: 'Duplicate this object', onclick: () => { closeOverlay(); opts.duplicate(); } }, '⧉ Duplicate') : null,
+      opts.editable && opts.remove ? el('button', { class: 'lnk danger', title: 'Remove this object…', onclick: (e) => removeObject(e.currentTarget, spec, opts) }, '🗑 Remove') : null,
       opts.editable ? el('button', { class: 'lnk', onclick: () => { closeOverlay(); setCollapsed(spec, opts, false); } }, opts.inCell ? '⤢ Show in cell' : '⤢ Expand in note') : null,
       el('button', { class: 'lnk', onclick: () => closeOverlay() }, '✕'));
     node.append(bar, inner);
@@ -727,7 +742,7 @@
       if (!node.isConnected) return;
       if (!anchor.isConnected) {                      // the chip was re-drawn: follow its replacement
         const again = home && home.isConnected ? home.querySelector('.flex-collapsed') : null;
-        if (!again) return;
+        if (!again) { if (overlay.current === o) closeOverlay(); return; }   // the object is gone: so is its preview
         anchor = again; o.anchor = again;
       }
       const r = anchor.getBoundingClientRect();
@@ -735,8 +750,10 @@
       const w = Math.min(760, vw - 2 * M);
       node.style.width = w + 'px';
       node.style.left = Math.max(M, Math.min(r.left, vw - w - M)) + 'px';
-      node.style.maxHeight = '';
-      const want = node.offsetHeight;                      // natural height of bar + content
+      // natural height from the content's scroll height — never by clearing max-height, which
+      // would reset the overlay's own scroll position (Seth, 2026-10-13: "scrolling within the
+      // overlay pane is locked")
+      const want = bar.offsetHeight + inner.scrollHeight + 2;
       const below = vh - M - (r.bottom + GAP), above = r.top - GAP - M;
       let top, room;
       if (want <= below) { top = r.bottom + GAP; room = below; }
@@ -752,9 +769,10 @@
     place();
     const ro = new ResizeObserver(() => place());
     ro.observe(inner);
+    const onScroll = (e) => { if (!node.contains(e.target)) place(); };   // the overlay's own scrolling is its own business
     window.addEventListener('resize', place);
-    document.addEventListener('scroll', place, true);
-    o.cleanup = () => { ro.disconnect(); window.removeEventListener('resize', place); document.removeEventListener('scroll', place, true); };
+    document.addEventListener('scroll', onScroll, true);
+    o.cleanup = () => { ro.disconnect(); window.removeEventListener('resize', place); document.removeEventListener('scroll', onScroll, true); };
     return node;
   }
 

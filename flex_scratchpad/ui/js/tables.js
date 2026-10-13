@@ -675,7 +675,7 @@
   function mountCell(td, t, r, c, widget, commit, opts) {
     const src = () => t.rows[r][c];
     const view = el('div', { class: 'cell-view', html: FS.markdown.renderInline(src()) || '<span class="muted">&nbsp;</span>' });
-    hydrate(view, t, r, c, commit, opts);
+    hydrate(view, t, r, c, commit, opts, widget);
     td.appendChild(view);
     const startEdit = (offset) => {
       if (td.querySelector('.cell-edit')) return;
@@ -745,7 +745,7 @@
         widget.insertText = (text) => widget.insertInto(r, c, text, caret);
         if (val !== t.rows[r][c]) { t.rows[r][c] = val; commit(); }
         view.innerHTML = FS.markdown.renderInline(t.rows[r][c]) || '<span class="muted">&nbsp;</span>';
-        hydrate(view, t, r, c, commit, opts);
+        hydrate(view, t, r, c, commit, opts, widget);
         td.appendChild(view);
       };
       if (widget.finishEdit && widget.finishEdit !== finish) widget.finishEdit();   // one open cell at a time
@@ -798,11 +798,13 @@
   }
 
   /* Hydrate `{{flex …}}` placeholders inside a rendered cell. */
-  function hydrate(view, t, r, c, commit, opts) {
+  function hydrate(view, t, r, c, commit, opts, widget) {
     view.querySelectorAll('.flex-inline[data-src]').forEach((ph) => {
       const mount = (spec) => FS.interlinear.render(ph, spec, {
         editable: true, compact: true, inCell: true,
         editCell: () => { const cell = ph.closest('td, th'); if (cell) cell.dispatchEvent(new CustomEvent('cell-edit', { detail: { after: ph } })); },
+        duplicate: () => { const src = ph.dataset.src; const i = t.rows[r][c].indexOf(src); t.rows[r][c] = i >= 0 ? t.rows[r][c].slice(0, i + src.length) + ' ' + src + t.rows[r][c].slice(i + src.length) : t.rows[r][c] + ' ' + src; commit(); widget.refresh(); },
+        remove: () => { const src = ph.dataset.src; t.rows[r][c] = t.rows[r][c].replace(src, '').replace(/\s{2,}/g, ' ').trim(); commit(); widget.refresh(); },
         onSpecChange: (s) => {
           const ns = FS.flexref.serialize(s);
           const cur = t.rows[r][c];
