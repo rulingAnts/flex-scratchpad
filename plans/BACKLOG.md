@@ -111,3 +111,26 @@ and getting the exact item from there"). Design, to build when it comes up:**
 4. Nothing is installed into FLEx; FLEx versions and keyboard layouts are the risk, so every
    step degrades to the next weaker one and the worst case is "copy it by hand", which works
    today.
+
+## The ONE write to a FLEx project: correcting a text's media source (Seth, 2026-10-13)
+
+> *"Eventually, I'd like correcting the media source for a text (on the info tab) to be the ONE
+> write operation our app can perform on the FLEx project. (At least until we figure out if and
+> how to do the note link insertion, which we should do eventually.)"*
+
+Today the app only remaps the file for itself (`media.byGuid` in `notebook.json`); FLEx keeps
+pointing at the wrong path. The write would set `ICmMediaURI.MediaURI` on the text's
+`MediaFilesOA` entry — the field FLEx shows on the text's *Info* tab — to the chosen file,
+relative to the project's LinkedFiles folder when it is inside it (copying it there first is
+FLEx's own convention), absolute otherwise. Constraints that make it safe to allow this single
+exception to the read-only rule:
+
+- `OpenProject(name, writeEnabled=True)` for that one call only, inside a `NonUndoableUnitOfWork`
+  (flexicon's `UndoableUnitOfWork` helper), then back to read-only; refuse while FLEx holds the
+  project unshared (the same lock that blocks reading).
+- A confirmation that shows old → new path and the text's title; nothing else is ever written.
+- Keep the notebook-side mapping as the fallback for projects the user cannot or does not want
+  to change (another person's project, a read-only share).
+
+**Note links (FLEx → note), later:** inserting a `flexscratchpad://note/<id>` link into a FLEx
+note or field would be a second write and needs the reverse-link scheme (see above) first.

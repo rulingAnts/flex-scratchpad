@@ -225,3 +225,35 @@ def test_morph_break_characters_follow_the_form():
     assert (m["form"], m["gls"]) == ("-a", "-lnk")
     m = model.make_morph("ka-", "3SG-", "", "ka-")                     # never doubled
     assert m["gls"] == "3SG-"
+
+
+def test_anchored_ranges_follow_renumbered_segments(tmp_path):
+    """An embed's seg= is a running count; its at= anchors are segment GUIDs. When a segment
+    is inserted above, the range moves with the anchors and the text says so."""
+    from flex_scratchpad.flex import FlexService
+    from flex_scratchpad.flex.demo import DemoBackend
+    from flex_scratchpad.api import Api
+    from flex_scratchpad.config import AppConfig
+    api = Api(AppConfig(tmp_path / "cfg.json"), notebook_dir=tmp_path / "nb", demo=True)
+    g = "9b1c2d3e-4f50-4a6b-8c7d-0e1f2a3b0001"
+    page = api.flex_get("text", g, 3, 4)
+    assert [s["label"] for s in page["segments"]] == ["2.1", "2.2"] and page["rangeMoved"] is False
+    anchors = page["anchors"]
+    assert len(anchors) == 2 and all(len(a) == 12 for a in anchors)
+    assert [e["n"] for e in page["index"]][:3] == [1, 2, 3] and page["index"][2]["label"] == "2.1"
+    # FLEx inserts a new segment at the top of the text: everything is renumbered
+    t = api._flex._live().texts[g]
+    new = dict(t["segments"][0]); new["guid"] = "9b1c2d3e-4f50-4a6b-8c7d-0e1f2a3bffff"; new["baseline"] = "Inserted."
+    t["segments"].insert(0, new)
+    for i, s in enumerate(t["segments"], 1):
+        s["n"] = i
+    page2 = api.flex_get("text", g, 3, 4, False, None, anchors)
+    assert page2["rangeMoved"] is True and page2["range"] == [4, 5]
+    assert [s["baseline"] for s in page2["segments"]] == [s["baseline"] for s in page["segments"]]
+    # a lost anchor keeps the numbers and says so
+    page3 = api.flex_get("text", g, 3, 4, False, None, ["00000000", "00000000"])
+    assert page3["anchorsLost"] is True and page3["range"] == [3, 4]
+    # the snapshot resolves anchors offline too
+    api._flex.close()
+    cached = api._flex.get_object("text", g, 3, 4, prefer_cache=True, at=anchors)
+    assert cached["cached"] is True and cached["range"] == [4, 5]

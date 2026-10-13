@@ -12,15 +12,36 @@
 
   /* ------------------------------------------------------------------ fetch cache */
   const mem = new Map();
-  const keyOf = (kind, guid, a, b, ws) => kind + '|' + guid + '|' + (a || '') + '|' + (b || '') + '|' + (ws ? JSON.stringify(ws) : '');
-  const flexGet = async (kind, guid, a, b, refresh, ws) => {
-    const k = keyOf(kind, guid, a, b, ws);
+  const keyOf = (kind, guid, a, b, ws, at) => kind + '|' + guid + '|' + (a || '') + '|' + (b || '') + '|' + (ws ? JSON.stringify(ws) : '') + '|' + (at ? at.join('-') : '');
+  const flexGet = async (kind, guid, a, b, refresh, ws, at) => {
+    const k = keyOf(kind, guid, a, b, ws, at);
     if (!refresh && mem.has(k)) return mem.get(k);
-    const p = FS.api.flex_get(kind, guid, a || null, b || null, false, ws || null).then((obj) => { mem.set(k, obj); return obj; }, (e) => { mem.delete(k); throw e; });
+    const p = FS.api.flex_get(kind, guid, a || null, b || null, false, ws || null, at || null).then((obj) => { mem.set(k, obj); return obj; }, (e) => { mem.delete(k); throw e; });
     mem.set(k, p);
     return p;
   };
   const invalidate = (kind, guid) => { for (const k of [...mem.keys()]) if (!kind || k.startsWith((kind === 'sense' ? 'entry' : kind) + '|' + (guid || ''))) mem.delete(k); };
+
+  /* FLEx's number for a segment (paragraph.segment) from the text's index; the running count
+   * when the index does not have it. And the reverse, for inputs that take either form. */
+  const labelOf = (obj, n) => { const e = obj && obj.index && obj.index.find((x) => x.n === n); return e ? e.label : String(n); };
+  const numberFor = (obj, v, fallback) => {
+    v = String(v == null ? '' : v).trim();
+    if (/^\d+\.\d+$/.test(v)) { const e = obj && obj.index && obj.index.find((x) => x.label === v); return e ? e.n : fallback; }
+    const n = parseInt(v, 10);
+    return n > 0 ? n : fallback;
+  };
+  /* After a fetch: a text embed records its anchors the first time, and follows them when
+   * FLEx has renumbered its segments — rewriting `seg=` in the note (silently, via onSpecChange). */
+  function syncAnchors(spec, obj, opts) {
+    if (spec.kind !== 'text' || !obj || obj.kind !== 'text' || !opts.onSpecChange || !spec.seg) return false;
+    const anchors = obj.anchors && obj.anchors[0] ? obj.anchors : null;
+    let changed = false;
+    if (obj.rangeMoved && obj.range && obj.range[0]) { spec.seg = [obj.range[0], obj.range[1]]; changed = true; }
+    if (anchors && (!spec.at || (obj.rangeMoved && (spec.at[0] !== anchors[0] || spec.at[1] !== anchors[1])))) { spec.at = anchors; changed = true; }
+    if (changed) { opts.onSpecChange(spec); if (obj.rangeMoved) FS.toast('Segments renumbered in FLEx — the example now reads ' + labelOf(obj, spec.seg[0]) + '–' + labelOf(obj, spec.seg[1])); }
+    return changed;
+  }
 
   /* ------------------------------------------------------------------ styled text */
   const STYLE_CLASS = { hl: 'st-hl', b: 'st-b', u: 'st-u', i: 'st-i', s: 'st-s', color: 'st-color' };
@@ -99,6 +120,7 @@
     async play(src, begin, end, handlers) {
       this.stop();
       const a = this.get(src);
+      if (a.error && a.error.code) throw new Error(a.error.message || 'The element has no supported sources.');
       const c = { src, begin, end, el: a, raf: 0, loop: false, ...handlers };
       this.current = c;
       a.currentTime = Math.max(0, begin / 1000);
@@ -180,6 +202,7 @@
     }
     head.appendChild(el('button', { class: 'lnk', title: 'Reload from FLEx', onclick: () => opts.refresh && opts.refresh() }, '↻'));
     if (opts.editable && !opts.overlay) head.appendChild(el('button', { class: 'lnk', title: 'Collapse to a chip', onclick: () => setCollapsed(spec, opts, true) }, '⤡'));
+    if (opts.editable && opts.inCell && opts.editCell && !opts.overlay) head.appendChild(el('button', { class: 'lnk', title: 'Edit the cell\u2019s text (type before or after this example, add another)', onclick: () => opts.editCell() }, '✎'));
     if (obj.url) head.appendChild(el('a', { href: obj.url, title: 'Open in FieldWorks', onclick: (e) => { e.preventDefault(); openInFlex(obj.url); } }, 'Open in FLEx ↗'));
     if (opts.editable) head.appendChild(el('button', { class: 'lnk', title: 'Options', onclick: (e) => embedMenu(e.currentTarget, spec, opts, obj) }, '⋯'));
     box.appendChild(head);
@@ -238,7 +261,26 @@
           sel.anchor = { seg: seg.n, word: wi };
           box.querySelectorAll('.word-cell.sel').forEach((c) => c.classList.remove('sel'));
           cell.classList.add('sel');
-          stylePopover(cell, spec, target, word, opts, { box });
+          // clicked ON a particular line: start the popover there; on one morpheme of a morph
+          // line: with that morpheme's characters preselected, so one click styles just it
+          const lineEl = e.target.closest('.il-line');
+          const extra = { box };
+          if (lineEl) {
+            const m = /il-(txt|morph|mgls|cf|gls|pos)\b/.exec(lineEl.className);
+            if (m) target.line = m[1];
+            const part = e.target.closest('.il-line > span');
+            if (part && /^(morph|mgls|cf)$/.test(target.line)) {
+              const parts = [...lineEl.children];
+              const idx = parts.indexOf(part);
+              if (idx >= 0) {
+                let start = 1;
+                for (let i = 0; i < idx; i++) start += FS.graphemes(parts[i].textContent).length + 1;   // + the joining space
+                const len = FS.graphemes(part.textContent).length;
+                if (len && parts.length > 1) extra.chars = [start, start + len - 1];
+              }
+            }
+          }
+          stylePopover(cell, spec, target, word, opts, extra);
         });
       }
       wordRow.appendChild(cell);
@@ -287,7 +329,13 @@
       box.querySelectorAll('.seg-play.playing').forEach((b) => { if (b !== btn) b.classList.remove('playing'); });
     } catch (e) {
       transport.remove();
-      FS.toast('Could not play the audio: ' + (e.message || e), 'error');
+      // the file exists but WebView2 cannot decode it (a format it has no codec for, a broken
+      // file): offer a playable copy, keeping FLEx's segment times (Seth, 2026-10-13)
+      const m = mediaByGuid.get(mediaGuid) || (obj.media && obj.media[0]) || {};
+      mediaMissingPopover(btn || box.querySelector('.flex-head'), m, info, opts, {
+        title: 'Could not play this audio',
+        hint: (e.message || String(e)) + ' — the file FLEx names (' + (m.uri || info.path || 'unknown') + ') is there but will not play here. Point the Scratchpad at a playable copy (e.g. a WAV or MP3 export of the same recording): the segment times stay exactly as FLEx has them.',
+      });
     }
     if (capture) capture.then((r) => { if (r && r.clipUrl) FS.toast('Clip cached in the notebook', 'ok'); });
   }
@@ -317,13 +365,14 @@
     };
   }
 
-  function mediaMissingPopover(anchor, m, info, opts) {
+  function mediaMissingPopover(anchor, m, info, opts, how) {
+    how = how || {};
     FS.popover(anchor, (pop, close) => {
-      pop.appendChild(el('div', { class: 'row' }, el('b', {}, 'Media file not found')));
-      pop.appendChild(el('div', { class: 'hint' }, 'FLEx names it ' + (m.uri || '(no file)') + '. Point the Scratchpad at the real file; the choice is remembered for this notebook.'));
+      pop.appendChild(el('div', { class: 'row' }, el('b', {}, how.title || 'Media file not found')));
+      pop.appendChild(el('div', { class: 'hint' }, how.hint || ('FLEx names it ' + (m.uri || '(no file)') + '. Point the Scratchpad at the real file; the choice is remembered for this notebook.')));
       if (info && info.clipUrl) pop.appendChild(el('div', { class: 'hint' }, 'A cached clip exists and will be used.'));
       pop.appendChild(el('hr'));
-      pop.appendChild(el('button', { class: 'menu-item', onclick: async () => { close(); try { const r = await FS.api.audio_browse_media(m.guid || ''); if (r) { invalidate(); FS.toast('Media file set', 'ok'); opts.refresh && opts.refresh(); } } catch (e) { FS.toast(e.message, 'error'); } } }, 'Browse for the audio file…'));
+      pop.appendChild(el('button', { class: 'menu-item', onclick: async () => { close(); try { const r = await FS.api.audio_browse_media(m.guid || ''); if (r) { audio.stop(); audio.elForSrc.clear(); invalidate(); FS.toast('Media file set', 'ok'); opts.refresh && opts.refresh(); } } catch (e) { FS.toast(e.message, 'error'); } } }, how.title ? 'Browse for a playable copy…' : 'Browse for the audio file…'));
     });
   }
 
@@ -338,7 +387,7 @@
   function stylePopover(anchor, spec, target, word, opts, extra) {
     extra = extra || {};
     FS.popover(anchor, (pop, close) => {
-      const state = { line: target.line || 'txt', chars: null, color: '' };
+      const state = { line: target.line || 'txt', chars: extra.chars || null, color: '' };
       const apply = (style, color) => {
         const t = Object.assign({}, target, { line: state.line });
         if (state.chars) t.chars = state.chars;
@@ -452,11 +501,19 @@
         pop.appendChild(el('hr'));
       }
       if (spec.kind === 'text') {
-        const a = el('input', { type: 'number', min: 1, value: spec.seg ? spec.seg[0] : 1, style: { width: '60px' } });
-        const b = el('input', { type: 'number', min: 1, value: spec.seg ? spec.seg[1] : (obj && obj.segmentCount) || 1, style: { width: '60px' } });
-        const set = () => { spec.seg = [Math.min(+a.value, +b.value), Math.max(+a.value, +b.value)]; opts.onSpecChange && opts.onSpecChange(spec); };
+        // FLEx's numbers (4.1), as in its Gloss / Print views; the running count is accepted too
+        const cur = spec.seg || (obj && obj.range) || [1, (obj && obj.segmentCount) || 1];
+        const a = el('input', { type: 'text', value: labelOf(obj, cur[0]), style: { width: '60px' }, title: 'First segment — FLEx number (4.1) or running count' });
+        const b = el('input', { type: 'text', value: labelOf(obj, cur[1]), style: { width: '60px' }, title: 'Last segment — FLEx number (4.1) or running count' });
+        const set = () => {
+          const x = numberFor(obj, a.value, cur[0]), y = numberFor(obj, b.value, cur[1]);
+          spec.seg = [Math.min(x, y), Math.max(x, y)];
+          const at = (n) => { const e = obj && obj.index && obj.index.find((i) => i.n === n); return e ? e.guid.replace(/-/g, '').slice(-12) : ''; };
+          spec.at = at(spec.seg[0]) ? [at(spec.seg[0]), at(spec.seg[1]) || at(spec.seg[0])] : null;
+          opts.onSpecChange && opts.onSpecChange(spec);
+        };
         a.addEventListener('change', set); b.addEventListener('change', set);
-        pop.appendChild(el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Segments'), a, el('span', { class: 'muted' }, '–'), b));
+        pop.appendChild(el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Segments'), a, el('span', { class: 'muted' }, '–'), b, el('span', { class: 'small muted' }, 'FLEx numbers')));
         pop.appendChild(el('hr'));
       }
       if (obj && obj.url) pop.appendChild(el('button', { class: 'menu-item', onclick: () => { FS.copyText(obj.url); FS.toast('FLEx link copied'); close(); } }, 'Copy FLEx link'));
@@ -535,7 +592,7 @@
     if (spec.kind !== 'text') return '';
     const r = spec.seg || (obj && obj.range) || null;
     if (!r) return 'all';
-    return r[0] === r[1] ? String(r[0]) : r[0] + '–' + r[1];
+    return r[0] === r[1] ? labelOf(obj, r[0]) : labelOf(obj, r[0]) + '–' + labelOf(obj, r[1]);
   }
 
   function renderChip(container, spec, opts) {
@@ -552,8 +609,8 @@
     container.appendChild(chip);
     // fill the title from the (cached) object without blocking the chip
     const kind = spec.kind === 'sense' ? 'entry' : spec.kind;
-    flexGet(kind, spec.guid, spec.kind === 'text' && spec.seg ? spec.seg[0] : null, spec.kind === 'text' && spec.seg ? spec.seg[1] : null, false)
-      .then((obj) => { ttl.textContent = chipTitle(spec, obj); rangeEl.textContent = chipRange(spec, obj); const ws = obj.ws && obj.ws.vern; if (ws && obj.kind !== 'wordform') { if (ws.rtl) ttl.dir = 'rtl'; if (ws.tag) ttl.lang = ws.tag; } if (obj.cached) chip.classList.add('cached'); })
+    flexGet(kind, spec.guid, spec.kind === 'text' && spec.seg ? spec.seg[0] : null, spec.kind === 'text' && spec.seg ? spec.seg[1] : null, false, null, spec.kind === 'text' ? spec.at : null)
+      .then((obj) => { if (syncAnchors(spec, obj, opts)) return; ttl.textContent = chipTitle(spec, obj); rangeEl.textContent = chipRange(spec, obj); const ws = obj.ws && obj.ws.vern; if (ws && obj.kind !== 'wordform') { if (ws.rtl) ttl.dir = 'rtl'; if (ws.tag) ttl.lang = ws.tag; } if (obj.cached) chip.classList.add('cached'); })
       .catch((e) => { chip.classList.add('err'); chip.title = e.message || String(e); });
     // click → pinned overlay; hover → temporary overlay
     chip.addEventListener('click', (e) => { if (e.target.closest('.cexp')) return; openOverlay(chip, spec, opts, { pinned: true }); });
@@ -588,7 +645,7 @@
   /* The floating preview of a collapsed embed: full rendering, editable (styles save back),
    * positioned near the chip, never changing the note's layout. */
   function openOverlay(anchor, spec, opts, mode) {
-    if (overlay.current && overlay.current.anchor === anchor) {
+    if (overlay.current && (overlay.current.anchor === anchor || overlay.current.home === anchor.parentElement)) {
       if (mode.pinned) overlay.current.pinned = true;
       return overlay.current.node;
     }
@@ -598,12 +655,13 @@
     const bar = el('div', { class: 'flex-overlay-bar' },
       el('span', { class: 'muted small' }, mode.pinned ? 'Preview' : 'Preview — click the chip to keep it open'),
       el('span', { class: 'spacer' }),
+      opts.editable && opts.editCell ? el('button', { class: 'lnk', title: 'Edit the cell\u2019s text (type before or after this example, add another)', onclick: () => { closeOverlay(); opts.editCell(); } }, '✎ Edit cell') : null,
       opts.editable ? el('button', { class: 'lnk', onclick: () => { closeOverlay(); setCollapsed(spec, opts, false); } }, opts.inCell ? '⤢ Show in cell' : '⤢ Expand in note') : null,
       el('button', { class: 'lnk', onclick: () => closeOverlay() }, '✕'));
     node.append(bar, inner);
     document.body.appendChild(node);
-    const o = { node, anchor, pinned: !!mode.pinned, hovering: false };
-    o.onDown = (e) => { if (!node.contains(e.target) && !anchor.contains(e.target) && !e.target.closest('.popover, .modal')) closeOverlay(); };
+    const o = { node, anchor, home: anchor.parentElement, pinned: !!mode.pinned, hovering: false };
+    o.onDown = (e) => { if (!node.contains(e.target) && !(o.anchor && o.anchor.contains(e.target)) && !e.target.closest('.popover, .modal')) closeOverlay(); };
     o.onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); closeOverlay(); } };
     document.addEventListener('mousedown', o.onDown, true);
     document.addEventListener('keydown', o.onKey, true);
@@ -611,14 +669,25 @@
     node.addEventListener('mouseleave', () => { o.hovering = false; scheduleHoverClose(); });
     node.addEventListener('mousedown', () => { o.pinned = true; node.classList.add('pinned'); });
     overlay.current = o;
-    render(inner, spec, Object.assign({}, opts, { force: true, overlay: true, editable: !!opts.editable }));
+    // A style, label or range change saves through the owner's onSpecChange (which re-draws
+    // the chip underneath) AND re-draws this overlay, so what was clicked shows at once
+    // (Seth, 2026-10-13: "I can click them, but the styling doesn't show afterward").
+    const oo = Object.assign({}, opts, { force: true, overlay: true, editable: !!opts.editable });
+    oo.onSpecChange = (s) => { if (opts.onSpecChange) opts.onSpecChange(s); if (node.isConnected) render(inner, s, oo); };
+    render(inner, spec, oo);
     /* Placement: below the chip when it fits, else above, else on whichever side has more
      * room with the overlay capped to that room (its body scrolls). Re-run whenever the
      * content changes size (the object arrives after "Loading…"), the window resizes or the
      * note scrolls, so the overlay never runs off the viewport (Seth, 2026-10-13). */
     const M = 12, GAP = 8;
+    const home = anchor.parentElement;
     const place = () => {
       if (!node.isConnected) return;
+      if (!anchor.isConnected) {                      // the chip was re-drawn: follow its replacement
+        const again = home && home.isConnected ? home.querySelector('.flex-collapsed') : null;
+        if (!again) return;
+        anchor = again; o.anchor = again;
+      }
       const r = anchor.getBoundingClientRect();
       const vw = window.innerWidth, vh = window.innerHeight;
       const w = Math.min(760, vw - 2 * M);
@@ -662,7 +731,8 @@
     const doRender = async (refresh) => {
       try {
         const kind = spec.kind === 'sense' ? 'entry' : spec.kind;
-        const obj = await flexGet(kind, spec.guid, spec.kind === 'text' && spec.seg ? spec.seg[0] : null, spec.kind === 'text' && spec.seg ? spec.seg[1] : null, refresh, spec.kind === 'text' ? spec.ws : null);
+        const obj = await flexGet(kind, spec.guid, spec.kind === 'text' && spec.seg ? spec.seg[0] : null, spec.kind === 'text' && spec.seg ? spec.seg[1] : null, refresh, spec.kind === 'text' ? spec.ws : null, spec.kind === 'text' ? spec.at : null);
+        if (syncAnchors(spec, obj, opts)) return;          // the spec changed: the owner re-renders
         const o = Object.assign({}, opts, { refresh: () => { invalidate(kind, spec.guid); doRender(true); } });
         const node = kind === 'text' ? renderText(obj, spec, o) : kind === 'wordform' ? renderWordform(obj, spec, o) : renderEntry(obj, spec, o);
         container.innerHTML = '';
@@ -680,5 +750,5 @@
     await doRender(false);
   }
 
-  FS.interlinear = { render, renderText, renderEntry, renderWordform, renderChip, openOverlay, closeOverlay, isCollapsed, setCollapsed, styled, styledParts, invalidate, flexGet, openInFlex, HL_COLORS };
+  FS.interlinear = { render, renderText, renderEntry, renderWordform, renderChip, openOverlay, closeOverlay, isCollapsed, setCollapsed, styled, styledParts, invalidate, flexGet, openInFlex, labelOf, numberFor, HL_COLORS };
 })();

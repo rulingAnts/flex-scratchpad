@@ -15,7 +15,8 @@ Built 2026-10-12 with Seth; the decisions below are his.
   Consequences: classic `<script>` files only (no ES modules, no `fetch`, no workers on file://),
   `url=` never `html=` on `create_window`, media and images loaded as `file://` URLs.
 - **FLEx is read directly, read-only.** `OpenProject(name, writeEnabled=False)`. The app never
-  writes to a project. The `.flextext` file source is a *fallback* (texts only), the demo is for
+  writes to a project. (Seth, 2026-10-13: the ONE write planned for later is correcting a
+  text's media source — `plans/BACKLOG.md`; nothing else, ever.) The `.flextext` file source is a *fallback* (texts only), the demo is for
   tests; LCM is the product.
 - **One LCM thread.** pywebview calls `js_api` methods on arbitrary threads and LCM is not
   thread-safe, so `flex/lcm.py` runs every flexicon call on its single `LcmWorker` and returns

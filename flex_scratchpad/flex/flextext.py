@@ -219,11 +219,11 @@ class FlextextBackend:
                 for t in self.texts.values()]
 
     def get_text(self, guid: str, seg_from: int | None = None, seg_to: int | None = None,
-                 max_segments: int = 60, ws=None, diag=False) -> dict:
+                 max_segments: int = 60, ws=None, diag=False, at=None) -> dict:
         t = self.texts.get((guid or "").lower())
         if not t:
             raise KeyError(f"No text with guid {guid} in the .flextext file(s).")
-        return slice_text(t, seg_from, seg_to, max_segments)
+        return slice_text(t, seg_from, seg_to, max_segments, at=at)
 
     def search_texts(self, q: str) -> list[dict]:
         ql = (q or "").casefold()
@@ -253,16 +253,24 @@ class FlextextBackend:
         pass
 
 
-def slice_text(text: dict, seg_from: int | None, seg_to: int | None, max_segments: int = 60, ws=None, diag=False) -> dict:
-    """A copy of the text carrying only segments seg_from..seg_to (1-based, inclusive), capped."""
+def slice_text(text: dict, seg_from: int | None, seg_to: int | None, max_segments: int = 60, ws=None, diag=False,
+               at: list | None = None) -> dict:
+    """A copy of the text carrying only segments seg_from..seg_to (1-based, inclusive), capped;
+    with `at` anchors the range follows the anchored segments (see model.resolve_range)."""
     segs = text["segments"]
     total = len(segs)
-    a = max(1, int(seg_from or 1))
-    b = min(total, int(seg_to or total))
+    index = model.index_of_segments(segs)
+    r = model.resolve_range(index, seg_from, seg_to, at)
+    a = max(1, r["from"])
+    b = min(total, r["to"] if seg_to or at else total)
     if b - a + 1 > max_segments:
         b = a + max_segments - 1
     out = dict(text)
     out["segments"] = [dict(s) for s in segs[a - 1:b]]
     out["segmentCount"] = total
     out["range"] = [a, b] if total else [0, 0]
+    out["index"] = index
+    out["anchors"] = model.anchors_for(out["segments"])
+    out["rangeMoved"] = bool(r["moved"])
+    out["anchorsLost"] = bool(r["lost"])
     return out

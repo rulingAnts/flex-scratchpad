@@ -99,13 +99,18 @@
     const s = String(src || '').trim().replace(/^\{\{\s*/, '').replace(/\s*\}\}$/, '');
     const m = /^flex:(entry|sense|text|wordform)\s+([0-9a-fA-F-]{36})\s*([\s\S]*)$/i.exec(s);
     if (!m || !GUID.test(m[2])) return null;
-    const spec = { kind: m[1].toLowerCase(), guid: m[2].toLowerCase(), seg: null, lines: null, ws: null, styles: [], label: '', extra: {} };
+    const spec = { kind: m[1].toLowerCase(), guid: m[2].toLowerCase(), seg: null, at: null, lines: null, ws: null, styles: [], label: '', extra: {} };
     for (const tok of tokenize(m[3])) {
       if (tok.label != null) { spec.label = tok.label; continue; }
       if (tok.flag) { spec.extra[tok.flag] = true; continue; }
       if (tok.key === 'seg') {
         const r = /^(\d+)(?:-(\d+))?$/.exec(tok.val);
         if (r) spec.seg = [+r[1], r[2] ? +r[2] : +r[1]];
+      } else if (tok.key === 'at') {
+        // at=<first>-<last>: the last 12 hex of the first and last segment's GUIDs, so the range
+        // follows its segments when FLEx renumbers them (see model.resolve_range)
+        const r = /^([0-9a-f]{4,32})(?:-([0-9a-f]{4,32}))?$/i.exec(tok.val);
+        if (r) spec.at = [r[1].toLowerCase(), (r[2] || r[1]).toLowerCase()];
       } else if (tok.key === 'ws') {
         // ws=txt:fau-fonipa,gls:id — which writing system each interlinear line shows
         spec.ws = {};
@@ -126,6 +131,7 @@
   function serialize(spec) {
     const parts = ['flex:' + spec.kind + ' ' + spec.guid];
     if (spec.seg) parts.push('seg=' + spec.seg[0] + (spec.seg[1] !== spec.seg[0] ? '-' + spec.seg[1] : ''));
+    if (spec.at && spec.at[0]) parts.push('at=' + spec.at[0] + (spec.at[1] && spec.at[1] !== spec.at[0] ? '-' + spec.at[1] : ''));
     if (spec.lines && spec.lines.length) parts.push('lines=' + spec.lines.join(','));
     if (spec.ws && Object.keys(spec.ws).length) parts.push('ws=' + Object.keys(spec.ws).filter((k) => spec.ws[k]).map((k) => k + ':' + spec.ws[k]).join(','));
     for (const g of spec.styles) {

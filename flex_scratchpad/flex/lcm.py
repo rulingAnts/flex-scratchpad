@@ -662,14 +662,14 @@ class FlexiconBackend:
         return [t for t in self.list_texts() if ql in t["title"].casefold() or ql in t["abbrev"].casefold()]
 
     def get_text(self, guid: str, seg_from: int | None = None, seg_to: int | None = None,
-                 max_segments: int = 60, ws: dict | None = None, diag: bool = False) -> dict:
+                 max_segments: int = 60, ws: dict | None = None, diag: bool = False, at=None) -> dict:
         def go():
             self._need()
             obj = self._c(self.project.Object(guid))
             text = self._owning_text(obj)
             if text is None:
                 raise FlexError("That GUID is not an interlinear text.", "", "no-object")
-            return self._text_dict(text, seg_from, seg_to, max_segments, ws, diag)
+            return self._text_dict(text, seg_from, seg_to, max_segments, ws, diag, at)
         try:
             return self.worker.call(go, timeout=OPEN_TIMEOUT)
         except BaseException as e:
@@ -722,7 +722,23 @@ class FlexiconBackend:
                     return str(Path(dirpath) / base), True
         return uri, False
 
-    def _text_dict(self, text, seg_from, seg_to, max_segments: int = 60, ws_sel: dict | None = None, diag: bool = False) -> dict:
+    def _segment_index(self, text) -> list[dict]:
+        """[{n, label, guid}] for every segment of the text — guids only, no strings read, so
+        it is cheap enough to build on every fetch (anchors, labels, the picker)."""
+        p = self.project
+        out = []
+        n = 0
+        pi = 0
+        for para in _t(lambda: list(p.Paragraphs.GetAll(text)), []):
+            pi += 1
+            k = 0
+            for seg in _t(lambda: list(p.Segments.GetAll(para)), []):
+                n += 1
+                k += 1
+                out.append({"n": n, "label": f"{pi}.{k}", "guid": _guid(seg)})
+        return out
+
+    def _text_dict(self, text, seg_from, seg_to, max_segments: int = 60, ws_sel: dict | None = None, diag: bool = False, at=None) -> dict:
         p = self.project
         ws = self._writing_systems()
         vern_handle, vern_tag = self._baseline_ws(text)
@@ -744,8 +760,13 @@ class FlexiconBackend:
         d["url"] = self._goto(text, "text")
         d["media"] = self._media(text)
         media_by_guid = {m["guid"]: m for m in d["media"]}
-        a = max(1, int(seg_from or 1))
-        b = int(seg_to) if seg_to else None
+        index = self._segment_index(text)
+        r = model.resolve_range(index, seg_from, seg_to, at)
+        a = max(1, r["from"])
+        b = r["to"] if (seg_to or at) else None
+        d["index"] = index
+        d["rangeMoved"] = bool(r["moved"])
+        d["anchorsLost"] = bool(r["lost"])
         n = 0
         pi = 0
         for para in _t(lambda: list(p.Paragraphs.GetAll(text)), []):
@@ -763,6 +784,7 @@ class FlexiconBackend:
                     d.setdefault("errors", []).append({"segment": n, "error": str(exc)})
         d["segmentCount"] = n
         d["range"] = [a, min(n, b or n)] if n else [0, 0]
+        d["anchors"] = model.anchors_for(d["segments"])
         return d
 
     def _segment_dict(self, seg, n: int, para: int, media_by_guid: dict, k: int | None = None) -> dict:

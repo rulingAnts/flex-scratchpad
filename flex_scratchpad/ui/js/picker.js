@@ -8,8 +8,12 @@
   const { el } = FS;
 
   function embedFor(kind, guid, extra) {
-    const spec = { kind, guid, seg: null, lines: null, styles: [], label: '', extra: {} };
+    const spec = { kind, guid, seg: null, at: null, lines: null, styles: [], label: '', extra: {} };
     if (extra && extra.seg) spec.seg = extra.seg;
+    if (extra && extra.index && spec.seg) {          // anchor the range to its segments' GUIDs
+      const at = (n) => { const e = extra.index.find((i) => i.n === n); return e ? e.guid.replace(/-/g, '').slice(-12) : ''; };
+      if (at(spec.seg[0])) spec.at = [at(spec.seg[0]), at(spec.seg[1]) || at(spec.seg[0])];
+    }
     return FS.flexref.serialize(spec);
   }
   function linkFor(kind, guid, label) {
@@ -106,13 +110,11 @@
       optsRow.innerHTML = '';
       // The range fields take either numbering: FLEx's paragraph.segment ("4.1") or the running
       // count; they display FLEx's, and `seg=` in the embed always gets the running count.
-      const segByN = (n) => (state.obj.segments || []).find((x) => x.n === n);
-      const show = (n) => { const sg = segByN(n); return sg && sg.label ? sg.label : String(n); };
+      const show = (n) => FS.interlinear.labelOf(state.obj, n);
       const read = (v, fallback) => {
-        v = String(v || '').trim();
-        if (/^\d+\.\d+$/.test(v)) { const sg = (state.obj.segments || []).find((x) => x.label === v); if (sg) return sg.n; FS.toast('Segment ' + v + ' is not in the loaded part of the text — use the running number'); return fallback; }
-        const n = parseInt(v, 10);
-        return n > 0 ? Math.min(n, obj.segmentCount) : fallback;
+        const n = FS.interlinear.numberFor(state.obj, v, 0);
+        if (!n) { if (/^\d+\.\d+$/.test(String(v).trim())) FS.toast('No segment ' + String(v).trim() + ' in this text'); return fallback; }
+        return Math.min(n, obj.segmentCount);
       };
       const from = el('input', { type: 'text', value: show(1), style: { width: '56px' }, title: 'First segment — FLEx number (4.1) or running count' });
       const to = el('input', { type: 'text', value: show(Math.min(obj.segmentCount, 3)), style: { width: '56px' }, title: 'Last segment — FLEx number (4.1) or running count' });
@@ -140,7 +142,7 @@
       btnRow.append(
         el('button', { class: 'btn', onclick: () => { onInsert(linkFor('text', h.guid, h.title), false); m.close(); } }, 'Insert link'),
         el('button', { class: 'btn', onclick: () => { onInsert(embedFor('text', h.guid), true); m.close(); } }, 'Whole text'),
-        el('button', { class: 'btn primary', onclick: () => { const r = state.range || [read(from.value, 1), read(to.value, 1)]; onInsert(embedFor('text', h.guid, { seg: [Math.min(r[0], r[1]), Math.max(r[0], r[1])] }), true); m.close(); } }, 'Insert segments'));
+        el('button', { class: 'btn primary', onclick: () => { const r = state.range || [read(from.value, 1), read(to.value, 1)]; onInsert(embedFor('text', h.guid, { seg: [Math.min(r[0], r[1]), Math.max(r[0], r[1])], index: state.obj && state.obj.index }), true); m.close(); } }, 'Insert segments'));
     }
 
     function renderPreview() {

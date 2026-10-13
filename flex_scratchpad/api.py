@@ -292,9 +292,9 @@ class Api:
         return self._flex.refresh()
 
     def flex_get(self, kind: str, guid: str, seg_from: int | None = None, seg_to: int | None = None,
-                 prefer_cache: bool = False, ws: dict | None = None) -> dict:
+                 prefer_cache: bool = False, ws: dict | None = None, at: list | None = None) -> dict:
         try:
-            return self._flex.get_object(kind, guid, seg_from, seg_to, prefer_cache, ws or None)
+            return self._flex.get_object(kind, guid, seg_from, seg_to, prefer_cache, ws or None, at or None)
         except FlexError as e:
             raise RuntimeError(e.message)
 

@@ -210,6 +210,73 @@ def baseline_from_words(words: list[dict]) -> str:
     return out
 
 
+# --------------------------------------------------------------------------- segment index + anchors
+# An embed addresses segments by running count (`seg=6-11`), which FLEx renumbers the moment a
+# line is added or removed above them. So the embed also carries the GUIDs of the first and last
+# segment (`at=4ad2c1f0-9f0c33ab`, 8 hex each), and every text comes with a compact index
+# [{n, label, guid}] of ALL its segments: the anchors are resolved against it, the range is
+# moved to follow them, and the note's `seg=` is rewritten (Seth, 2026-10-13: "GUIDs mean
+# those numbers will adjust automatically").
+
+ANCHOR_LEN = 12
+
+
+def anchor_of(guid: str) -> str:
+    """The LAST 12 hex digits of a GUID: the random tail, unlike the head, which the demo's
+    hand-made GUIDs (and some generators) share."""
+    return (guid or "").lower().replace("-", "")[-ANCHOR_LEN:]
+
+
+def _find_anchor(index: list[dict], want: str, near: int) -> int | None:
+    """n of the segment whose anchor ends with `want` (shorter anchors from older notes still
+    match); with several, the one nearest the numeric hint."""
+    w = (want or "").lower().replace("-", "")
+    if not w:
+        return None
+    hits = [int(e["n"]) for e in index if anchor_of(e.get("guid", "")).endswith(w)]
+    if not hits:
+        return None
+    return min(hits, key=lambda n: (abs(n - near), n))
+
+
+def resolve_range(index: list[dict], seg_from: int | None, seg_to: int | None,
+                  at: list | None) -> dict:
+    """Where does the embed's range sit now? {from, to, moved, lost}. `at` = [first, last]
+    anchors (either may be missing); a found anchor wins over the number, a lost anchor keeps
+    the number (or the range's length from the other anchor)."""
+    total = len(index)
+    a = max(1, int(seg_from or 1))
+    b = int(seg_to) if seg_to else (total or a)
+    if not at or not index:
+        return {"from": a, "to": b, "moved": False, "lost": False}
+    want = [str(x or "") for x in list(at)[:2]]
+    while len(want) < 2:
+        want.append("")
+    fa = _find_anchor(index, want[0], a)
+    fb = _find_anchor(index, want[1], b)
+    length = b - a
+    na, nb = a, b
+    if fa is not None and fb is not None:
+        na, nb = min(fa, fb), max(fa, fb)
+    elif fa is not None:
+        na, nb = fa, fa + length
+    elif fb is not None:
+        na, nb = max(1, fb - length), fb
+    nb = max(na, nb)
+    return {"from": na, "to": nb, "moved": (na, nb) != (a, b), "lost": (fa is None and bool(want[0])) or (fb is None and bool(want[1]))}
+
+
+def index_of_segments(segments: list[dict]) -> list[dict]:
+    return [{"n": int(s["n"]), "label": s.get("label") or str(s["n"]), "guid": s.get("guid", "")} for s in segments]
+
+
+def anchors_for(segments: list[dict]) -> list[str]:
+    """[first, last] anchors of the segments actually returned ('' when none)."""
+    if not segments:
+        return ["", ""]
+    return [anchor_of(segments[0].get("guid", "")), anchor_of(segments[-1].get("guid", ""))]
+
+
 # --------------------------------------------------------------------------- search text
 
 def searchable_text(obj: dict) -> str:

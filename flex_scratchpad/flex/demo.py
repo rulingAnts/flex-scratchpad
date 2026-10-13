@@ -221,12 +221,12 @@ class DemoBackend:
         ql = (q or "").casefold()
         return [t for t in self.list_texts() if ql in t["title"].casefold()]
 
-    def get_text(self, guid: str, seg_from=None, seg_to=None, max_segments: int = 60, ws=None, diag=False) -> dict:
+    def get_text(self, guid: str, seg_from=None, seg_to=None, max_segments: int = 60, ws=None, diag=False, at=None) -> dict:
         from .flextext import slice_text
         t = self.texts.get((guid or "").lower())
         if not t:
             raise KeyError(f"No text with guid {guid}")
-        return slice_text(t, seg_from, seg_to, max_segments)
+        return slice_text(t, seg_from, seg_to, max_segments, at=at)
 
     def all_baselines(self) -> dict:
         return {g: {"title": t["title"], "segments": [(sg["n"], sg["baseline"], sg.get("free", "")) for sg in t["segments"]]}

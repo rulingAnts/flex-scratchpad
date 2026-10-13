@@ -179,7 +179,7 @@ class FlexService:
     # -- objects ----------------------------------------------------------------
 
     def get_object(self, kind: str, guid: str, seg_from: int | None = None, seg_to: int | None = None,
-                   prefer_cache: bool = False, ws: dict | None = None) -> dict:
+                   prefer_cache: bool = False, ws: dict | None = None, at: list | None = None) -> dict:
         """Live object (snapshotted on the way through) or the snapshot when live fails.
         `ws` pins a writing system per interlinear line ({"txt": "fau-fonipa", "gls": "id"});
         such a selection is snapshotted under its own variant key."""
@@ -196,7 +196,7 @@ class FlexService:
                         obj = be.get_entry(guid)
                         self.cache.put(self.project_name, "entry", guid, obj)
                     elif kind == "text":
-                        obj = be.get_text(guid, seg_from, seg_to, ws=ws)
+                        obj = be.get_text(guid, seg_from, seg_to, ws=ws, at=at)
                         self.cache.merge_text(self.project_name, variant, obj)
                     elif kind == "wordform":
                         obj = be.get_wordform(guid)
@@ -214,13 +214,18 @@ class FlexService:
                 or (self.cache.get(self.project_name, kind, guid) or self.cache.find(kind, guid) if ws else None)
             if snap:
                 if kind == "text":
-                    from .flextext import slice_text
                     segs = snap.get("segments", [])
-                    want = [s for s in segs if (seg_from is None or s["n"] >= seg_from) and (seg_to is None or s["n"] <= seg_to)]
+                    # the snapshot keeps the text's segment index, so anchors resolve offline too
+                    r = model.resolve_range(snap.get("index") or model.index_of_segments(segs), seg_from, seg_to, at)
+                    sf, st = (r["from"], r["to"]) if (seg_to or at) else (seg_from, seg_to)
+                    want = [s for s in segs if (sf is None or s["n"] >= sf) and (st is None or s["n"] <= st)]
                     out = dict(snap)
                     out["segments"] = want[:60]
                     out["range"] = [want[0]["n"], want[-1]["n"]] if want else [0, 0]
-                    out["partial"] = len(want) != ((seg_to or (segs[-1]["n"] if segs else 0)) - (seg_from or 1) + 1)
+                    out["partial"] = len(want) != ((st or (segs[-1]["n"] if segs else 0)) - (sf or 1) + 1)
+                    out["anchors"] = model.anchors_for(out["segments"])
+                    out["rangeMoved"] = bool(r["moved"])
+                    out["anchorsLost"] = bool(r["lost"])
                     snap = out
                 snap["cached"] = True
                 snap["liveError"] = live_err.message if live_err else ""

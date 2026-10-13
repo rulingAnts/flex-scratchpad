@@ -739,6 +739,26 @@
       if (widget.finishEdit) widget.finishEdit();
       widget.select(widget.anchor, { r, c });
     });
+    /* Typing before / after a FLEx object, or adding a second one (Seth, 2026-10-13: "we
+     * can't … without using keyboard shortcuts"): a click on the cell's own padding, a
+     * double-click on the chip / example, the ✎ button, or the overlay's "Edit cell" open the
+     * cell's source with the caret after the object. */
+    td.addEventListener('mousedown', (e) => { if (e.target === td && e.button === 0) { e.preventDefault(); widget.clearSelection(); widget.anchor = { r, c }; startEdit(); } });
+    view.addEventListener('dblclick', (e) => {
+      const obj = e.target.closest('.flex-collapsed, .flex-inline, .flex-obj');
+      if (!obj) return;
+      e.preventDefault(); e.stopPropagation();
+      FS.interlinear.closeOverlay();
+      const srcTxt = obj.closest('.flex-inline') ? obj.closest('.flex-inline').dataset.src : '';
+      const at = srcTxt ? t.rows[r][c].indexOf(srcTxt) : -1;
+      startEdit(at >= 0 ? at + srcTxt.length : undefined);
+    });
+    td.addEventListener('cell-edit', (e) => {
+      const ph = e.detail && e.detail.after;
+      const srcTxt = ph && ph.dataset ? ph.dataset.src : '';
+      const at = srcTxt ? t.rows[r][c].indexOf(srcTxt) : -1;
+      startEdit(at >= 0 ? at + srcTxt.length : undefined);
+    });
     td.addEventListener('focusin', () => { widget.focus = { r, c }; });
   }
 
@@ -747,9 +767,17 @@
     view.querySelectorAll('.flex-inline[data-src]').forEach((ph) => {
       const mount = (spec) => FS.interlinear.render(ph, spec, {
         editable: true, compact: true, inCell: true,
+        editCell: () => { const cell = ph.closest('td, th'); if (cell) cell.dispatchEvent(new CustomEvent('cell-edit', { detail: { after: ph } })); },
         onSpecChange: (s) => {
           const ns = FS.flexref.serialize(s);
-          t.rows[r][c] = t.rows[r][c].replace(ph.dataset.src, ns);
+          const cur = t.rows[r][c];
+          if (cur.includes(ph.dataset.src)) t.rows[r][c] = cur.replace(ph.dataset.src, ns);
+          else {
+            // the placeholder's copy and the cell's source drifted (another edit in between):
+            // replace the embed for this GUID, so the change is never silently dropped
+            const re = new RegExp('\\{\\{flex:' + s.kind + '\\s+' + s.guid + '[^}]*\\}\\}', 'i');
+            t.rows[r][c] = re.test(cur) ? cur.replace(re, ns) : cur + ' ' + ns;
+          }
           ph.dataset.src = ns;
           commit();
           mount(s);

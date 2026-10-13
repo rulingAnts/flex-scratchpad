@@ -1,3 +1,4 @@
+import re
 """End-to-end through the real UI and the real Api, with no server: Chromium opens index.html
 as a file:// page and `window.pywebview.api` is bridged to Python (see bridge.py).
 
@@ -107,14 +108,14 @@ def test_insert_entry_and_segments_then_style(app):
     page.wait_for_selector("#editor .text-obj")
     assert page.locator("#editor .text-obj .segment").count() == 2
     # click a word → highlight it from the popover
-    page.locator("#editor .text-obj .word-cell").nth(1).click()
+    page.locator("#editor .text-obj .word-cell").nth(1).locator(".il-txt").click()
     page.wait_for_selector(".popover")
     page.locator(".popover .sw").nth(1).click()
     page.wait_for_selector("#editor .text-obj .st-hl")
     page.wait_for_timeout(900)
     body = body_of(h)
     assert "{{flex:entry 6a5f3a2e-1b1e-4c2a-9f10-0d2c1a7e0001}}" in body
-    assert "{{flex:text %s seg=1-2 hl[#ffd6a5]=1.2}}" % T_STORY in body
+    assert re.search(r"\{\{flex:text %s seg=1-2( at=[0-9a-f-]+)? hl\[#ffd6a5\]=1\.2\}\}" % T_STORY, body), body
     assert not errors
 
 
@@ -170,7 +171,7 @@ def test_table_cell_edit_and_embed_in_cell(app):
     page.wait_for_selector("table.md-table .flex-inline .flex-collapsed")
     page.wait_for_timeout(900)
     body = body_of(h)
-    assert "{{flex:text %s seg=1}}<br>line two |" % T_STORY in body
+    assert re.search(r"\{\{flex:text %s seg=1( at=[0-9a-f-]+)?\}\}<br>line two \|" % T_STORY, body), body
     # column style popover
     tool(page, "Table")
     page.locator(".popover .tog", has_text="Compact").click()
@@ -346,8 +347,8 @@ def test_collapse_expand_and_hover_overlay(app):
     page.locator("#editor .text-obj .flex-head button[title='Collapse to a chip']").click()
     page.wait_for_selector("#editor .flex-collapsed")
     page.wait_for_timeout(900)
-    assert "{{flex:text %s seg=1-2 collapsed}}" % T_STORY in body_of(h)
-    assert page.locator("#editor .flex-collapsed .crange").inner_text() == "1–2"
+    assert re.search(r"\{\{flex:text %s seg=1-2( at=[0-9a-f-]+)? collapsed\}\}" % T_STORY, body_of(h)), body_of(h)
+    assert page.locator("#editor .flex-collapsed .crange").inner_text() == "1.1–1.2"
     # hover → temporary overlay with the interlinear; moving away closes it
     page.hover("#editor .flex-collapsed")
     page.wait_for_selector(".flex-overlay .text-obj .segment")
@@ -442,7 +443,7 @@ def test_label_and_title_ws_from_menu(app):
     page.fill(".popover input[type=text]", "causative ex. 3")
     page.keyboard.press("Enter")
     page.wait_for_timeout(900)
-    assert '{{flex:text %s seg=1 "causative ex. 3"}}' % T_STORY in body_of(h)
+    assert re.search(r'\{\{flex:text %s seg=1( at=[0-9a-f-]+)? "causative ex\. 3"\}\}' % T_STORY, body_of(h)), body_of(h)
     assert page.locator("#editor .text-obj .flex-head .badge", has_text="causative ex. 3").count() == 1
     # collapse: the chip shows the label
     page.locator("#editor .text-obj .flex-head button[title='Collapse to a chip']").click()
@@ -458,7 +459,7 @@ def test_undo_redo_from_anywhere(app):
     page.keyboard.press("Enter")
     page.wait_for_selector("#editor .text-obj")
     # a styling change made through the popover (focus is not in a text block afterwards)
-    page.locator("#editor .text-obj .word-cell").first.click()
+    page.locator("#editor .text-obj .word-cell").first.locator(".il-txt").click()
     page.wait_for_selector(".popover")
     page.locator(".popover .tog", has_text="Bold").click()
     page.wait_for_selector("#editor .text-obj .st-b")
@@ -518,7 +519,7 @@ def test_paste_interlinear_lines_locates_the_segment(app):
     page.locator(".modal .btn.primary", has_text="Insert rendered").click()
     page.wait_for_selector("#editor .text-obj .segment[data-n='2']")
     page.wait_for_timeout(900)
-    assert "{{flex:text %s seg=2}}" % T_STORY in body_of(h)
+    assert re.search(r"\{\{flex:text %s seg=2( at=[0-9a-f-]+)?\}\}" % T_STORY, body_of(h)), body_of(h)
     # ordinary prose pastes as text
     paste(page, "just some ordinary prose that is nowhere in the project")
     page.wait_for_timeout(600)
@@ -914,7 +915,24 @@ def test_flex_numbering_shown_and_accepted(app):
     assert inputs.nth(0).input_value() == "2.1"
     page.locator(".btn.primary", has_text="Insert segments").click()
     page.wait_for_timeout(900)
-    assert "seg=3-4" in body_of(h)
+    body = body_of(h)
+    assert "seg=3-4 at=" in body, body            # anchored to the segments' GUIDs on insert
+    # the ⋯ menu shows FLEx numbers for the range and accepts them
+    page.locator("#editor .text-obj .flex-head .lnk[title='Options']").last.click()
+    page.wait_for_selector(".popover input[title*='FLEx number']")
+    ins = page.locator(".popover input[title*='FLEx number']")
+    assert ins.nth(0).input_value() == "2.1" and ins.nth(1).input_value() == "2.2"
+    ins.nth(1).fill("3.1")
+    ins.nth(1).dispatch_event("change")
+    page.wait_for_timeout(900)
+    assert "seg=3-5 at=" in body_of(h)
+    page.keyboard.press("Escape")                      # close the ⋯ popover
+    page.wait_for_timeout(200)
+    # the collapsed chip shows FLEx numbers too
+    page.locator("#editor .flex-obj .lnk[title='Collapse to a chip']").last.click()
+    page.wait_for_selector("#editor .flex-collapsed .crange")
+    page.wait_for_timeout(400)
+    assert page.locator("#editor .flex-collapsed .crange").last.inner_text() == "2.1–3.1"
     assert not errors
 
 
@@ -940,3 +958,100 @@ def test_overlay_stays_in_the_viewport(app):
     assert box["top"] >= 0 and box["bottom"] <= box["vh"], box
     assert not errors
 
+
+
+def test_type_around_a_flex_chip_in_a_cell(app):
+    h, page, errors = app
+    # put an embed alone in a cell
+    cell = page.locator("table.md-table td[data-r='1'][data-c='1'] .cell-view")
+    cell.scroll_into_view_if_needed()
+    cell.dispatch_event("mousedown")
+    page.wait_for_selector(".cell-edit")
+    page.keyboard.press("Control+a")
+    page.keyboard.type("{{flex:text %s seg=1}}" % T_STORY)
+    page.keyboard.press("Escape")
+    page.wait_for_selector("table.md-table td[data-r='1'][data-c='1'] .flex-collapsed")
+    page.wait_for_timeout(900)
+    # a click on the cell's padding (the td itself) opens the source with the caret at the end
+    td = page.locator("table.md-table td[data-r='1'][data-c='1']")
+    td.dispatch_event("mousedown", {"button": 0, "bubbles": True})
+    page.wait_for_selector(".cell-edit")
+    page.keyboard.type(" after")
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(900)
+    assert re.search(r"\| Form \| \{\{flex:text %s seg=1( at=[0-9a-f-]+)?\}\} after \|" % T_STORY, body_of(h)), body_of(h)
+    # the overlay's "Edit cell" does the same, with the caret right after the object
+    page.locator("table.md-table td[data-r='1'][data-c='1'] .flex-collapsed").click()
+    page.wait_for_selector(".flex-overlay .lnk", state="visible")
+    page.locator(".flex-overlay .lnk", has_text="Edit cell").click()
+    page.wait_for_selector(".cell-edit")
+    page.keyboard.type(" and")
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(900)
+    assert re.search(r"seg=1( at=[0-9a-f-]+)?\}\} and after \|", body_of(h)), body_of(h)
+    # a second object can be inserted into the same cell with the picker
+    td.dispatch_event("mousedown", {"button": 0, "bubbles": True})
+    page.wait_for_selector(".cell-edit")
+    page.keyboard.press("End")
+    page.keyboard.type(" ")
+    page.keyboard.press("Control+Shift+L")
+    page.wait_for_selector(".pick-item .hw")
+    page.locator(".pick-item").first.click()
+    page.wait_for_selector(".picker-preview .entry-card")
+    page.locator(".btn.primary", has_text="Insert rendered").click()
+    page.wait_for_timeout(900)
+    assert page.locator("table.md-table td[data-r='1'][data-c='1'] .flex-collapsed").count() == 2
+    assert not errors
+
+
+
+def test_styles_update_in_cells_and_overlays(app):
+    """Seth, 2026-10-13: highlights set from an overlay or an expanded in-cell example were
+    saved but not drawn until the next open."""
+    h, page, errors = app
+    cell = page.locator("table.md-table td[data-r='1'][data-c='1'] .cell-view")
+    cell.scroll_into_view_if_needed()
+    cell.dispatch_event("mousedown")
+    page.wait_for_selector(".cell-edit")
+    page.keyboard.press("Control+a")
+    page.keyboard.type("{{flex:text %s seg=1 expanded}}" % T_STORY)
+    page.keyboard.press("Escape")
+    page.wait_for_selector("table.md-table td[data-r='1'][data-c='1'] .text-obj .word-cell")
+    page.wait_for_timeout(600)
+    # expanded in the cell: highlight word 2, then underline its second morpheme
+    page.locator("table.md-table td[data-r='1'][data-c='1'] .word-cell").nth(1).locator(".il-txt").click()
+    page.wait_for_selector(".popover .sw")
+    page.locator(".popover .sw").nth(1).click()
+    page.wait_for_timeout(700)
+    assert page.locator("table.md-table td[data-r='1'][data-c='1'] .il-txt .st-hl").count() == 1
+    page.keyboard.press("Escape")
+    # click the third morpheme (-mo) of word 2 on the Morphemes line: the popover opens on that
+    # line with its characters preselected; Underline marks just that morpheme
+    page.locator("table.md-table td[data-r='1'][data-c='1'] .word-cell").nth(1).locator(".il-morph > span").nth(2).click()
+    page.wait_for_selector(".popover select")
+    assert page.locator(".popover select").first.input_value() == "morph"
+    page.locator(".popover .tog", has_text="Underline").click()
+    page.wait_for_timeout(700)
+    assert page.locator("table.md-table td[data-r='1'][data-c='1'] .il-morph .st-u").count() == 1
+    assert page.locator("table.md-table td[data-r='1'][data-c='1'] .il-morph .st-u").inner_text() == "-mo"
+    assert re.search(r"u=morph:1\.2:\d+-\d+", body_of(h)), body_of(h)
+    # clicking it again turns it off (the drawing follows the file)
+    page.locator(".popover .tog", has_text="Underline").click()
+    page.wait_for_timeout(700)
+    assert page.locator("table.md-table td[data-r='1'][data-c='1'] .st-u").count() == 0
+    page.keyboard.press("Escape")
+    # in the overlay of the collapsed chip: a new highlight is drawn at once, the overlay stays put
+    page.locator("table.md-table td[data-r='1'][data-c='1'] .lnk[title='Collapse to a chip']").click()
+    page.wait_for_selector("table.md-table td[data-r='1'][data-c='1'] .flex-collapsed")
+    page.locator("table.md-table td[data-r='1'][data-c='1'] .flex-collapsed").click()
+    page.wait_for_selector(".flex-overlay .word-cell")
+    before = page.evaluate("() => document.querySelector('.flex-overlay').getBoundingClientRect().top")
+    page.locator(".flex-overlay .word-cell").nth(0).locator(".il-txt").click()
+    page.wait_for_selector(".popover .sw")
+    page.locator(".popover .sw").nth(2).click()
+    page.wait_for_timeout(900)
+    assert page.locator(".flex-overlay .st-hl").count() == 2
+    after = page.evaluate("() => { const o = document.querySelector('.flex-overlay'); return o ? o.getBoundingClientRect().top : -1; }")
+    assert abs(after - before) < 4, (before, after)
+    assert "hl[#caffbf]=1.1" in body_of(h)
+    assert not errors

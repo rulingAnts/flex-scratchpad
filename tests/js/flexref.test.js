@@ -92,3 +92,13 @@ test('ws=title picks the title writing system; label survives', () => {
   assert.equal(spec.label, 'causative ex. 3');
   assert.equal(R.serialize(spec), '{{flex:text ' + G + ' ws=title:kal "causative ex. 3"}}');
 });
+
+test('at= anchors round-trip and sit next to seg=', () => {
+  const spec = FS.flexref.parse('{{flex:text ' + G + ' seg=6-11 at=4ad2c1f0-9f0c33ab lines=txt,ft}}');
+  assert.deepEqual(spec.seg, [6, 11]);
+  assert.deepEqual(spec.at, ['4ad2c1f0', '9f0c33ab']);
+  assert.equal(FS.flexref.serialize(spec), '{{flex:text ' + G + ' seg=6-11 at=4ad2c1f0-9f0c33ab lines=txt,ft}}');
+  const one = FS.flexref.parse('{{flex:text ' + G + ' seg=3 at=4ad2c1f0}}');
+  assert.deepEqual(one.at, ['4ad2c1f0', '4ad2c1f0']);
+  assert.equal(FS.flexref.serialize(one), '{{flex:text ' + G + ' seg=3 at=4ad2c1f0}}');
+});
