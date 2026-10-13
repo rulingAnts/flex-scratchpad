@@ -198,7 +198,11 @@ body.resizing * { pointer-events: none; }
 .md-bullet::before { content: "\2022"; color: var(--muted); font-weight: 700; margin-right: 6px; }
 .md-line-task .md-bullet::before { content: ""; margin: 0; }
 .md-line-task .md-bullet { width: 4px; }
-.md-num { color: var(--muted); display: inline-block; min-width: 26px; text-indent: 0; }
+.md-num { color: var(--muted); display: inline-block; min-width: 26px; text-indent: 0; position: relative; }
+/* the typed number is kept in the text but shown as the computed outline number */
+.md-line[data-num] .md-num { color: transparent; }
+.md-line[data-num] .md-num::before { content: attr(data-num); position: absolute; left: 0; top: 0; color: var(--muted); white-space: nowrap; }
+.md-line[data-num] .md-num::selection { color: transparent; }
 .md-task { display: inline-block; width: 20px; text-indent: 0; color: transparent; position: relative; cursor: pointer; vertical-align: -1px; }
 .md-task::before { content: ""; position: absolute; left: 1px; top: 3px; width: 13px; height: 13px; border: 1.5px solid var(--muted); border-radius: 4px; background: var(--bg); }
 .md-task-on::before { background: var(--accent); border-color: var(--accent); }

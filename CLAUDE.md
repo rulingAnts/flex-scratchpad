@@ -58,6 +58,8 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
 
 - A text block's `textContent` **is** the markdown. `decorate()` only wraps characters in spans;
   it must never add or remove text (the node tests check this). Empty lines render a `<br>`.
+  Outline numbers are COMPUTED (`markdown.numberLines`, per level, carried across blocks by the
+  editor's `numCtx`) and shown over the typed number via `data-num`; the typed digits stay.
 - `beforeinput` is whitelisted; Enter/paste/bold/undo are ours. Chromium must never inject HTML.
 - Undo is our own snapshot stack (innerHTML rebuilds break native undo).
 

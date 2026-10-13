@@ -157,7 +157,36 @@
     /* -- rendering --------------------------------------------------------------- */
     renderAll() {
       this.root.innerHTML = '';
+      this.assignNumCtx();
       this.blocks.forEach((b, i) => this.root.appendChild(this.renderBlock(b, i)));
+    }
+    /* -- outline numbering across blocks ------------------------------------------------
+     * Each text block remembers the numbering state BEFORE it (b.numCtx); decorating with a
+     * copy advances it for the next block. After an edit the blocks that follow are
+     * re-decorated when their state changed (an item added above renumbers the ones below). */
+    numCtxFor(b) { return { counters: (b && b.numCtx && b.numCtx.counters ? b.numCtx.counters : []).slice() }; }
+    assignNumCtx(from) {
+      let i = Math.max(0, from || 0);
+      let ctx = i > 0 ? this.numCtxFor(this.blocks[i]) : { counters: [] };
+      const changed = [];
+      for (; i < this.blocks.length; i++) {
+        const b = this.blocks[i];
+        const before = JSON.stringify(ctx.counters);
+        if (JSON.stringify((b.numCtx && b.numCtx.counters) || []) !== before) changed.push(b);
+        b.numCtx = { counters: ctx.counters.slice() };
+        if (b.type === 'list' || b.type === 'p') MD.numberLines(b.src.split('\n'), b.type, ctx);
+        else ctx = { counters: [] };
+      }
+      return changed;
+    }
+    renumberAfter(b) {
+      const i = this.blocks.indexOf(b);
+      if (i < 0) return;
+      for (const other of this.assignNumCtx(i)) {
+        if (other === b || !other.el || !TEXT_TYPES.has(other.type)) continue;
+        const body = other.el.querySelector('.blk-body');
+        if (body && document.activeElement !== body) body.innerHTML = MD.decorate(other.src, other.type, this.numCtxFor(other));
+      }
     }
     renderBlock(b, i) {
       const wrap = el('div', { class: 'blk blk-' + b.type, dataset: { id: b.id } });
@@ -166,7 +195,7 @@
       wrap.appendChild(handle);
       if (TEXT_TYPES.has(b.type)) {
         const body = el('div', { class: 'blk-body', contenteditable: 'true', spellcheck: b.type === 'code' ? 'false' : 'true', dir: 'auto', 'data-ph': b.type === 'p' && i === 0 && this.blocks.length === 1 ? PLACEHOLDER : '' });
-        body.innerHTML = MD.decorate(b.src, b.type);
+        body.innerHTML = MD.decorate(b.src, b.type, this.numCtxFor(b));
         this.wireText(body, b);
         wrap.appendChild(body);
         this.applyFind(body);
@@ -245,9 +274,10 @@
           return;
         }
         const caret = getCaret(body), caretEnd = getCaretEnd(body);
-        const html = MD.decorate(text, b.type);
+        const html = MD.decorate(text, b.type, this.numCtxFor(b));
         if (html !== body.innerHTML) { body.innerHTML = html; setCaret(body, caret, caretEnd); }
         this.applyFind(body);
+        this.renumberAfter(b);
       };
       body.addEventListener('compositionstart', () => { this.composing = true; });
       body.addEventListener('compositionend', () => { this.composing = false; refresh(); });
@@ -354,10 +384,11 @@
     /* -- editing primitives ----------------------------------------------------------- */
     setText(body, b, text, caret, caretEnd) {
       b.src = text;
-      body.innerHTML = MD.decorate(text, b.type);
+      body.innerHTML = MD.decorate(text, b.type, this.numCtxFor(b));
       if (caret != null) setCaret(body, caret, caretEnd);
       this.changed();
       this.applyFind(body);
+      this.renumberAfter(b);
     }
     insertTextAtCaret(body, b, text) {
       const a = getCaret(body), z = getCaretEnd(body);
@@ -522,8 +553,16 @@
         }
         let marker;
         if (b.type === 'quote') marker = m ? m[1] : '> ';
-        else if (m) marker = m[1] + (m[3] ? (parseInt(m[3], 10) + 1) + m[2].slice(-1) : m[2]) + ' ' + (m[4] ? '[ ] ' : '');
-        else marker = '- ';
+        else if (m) {
+          let next = parseInt(m[3], 10) + 1;
+          if (m[3]) {
+            // the displayed (computed) number of this line, + 1 — the typed number may be stale
+            const nums = MD.numberLines(before.split('\n'), b.type, this.numCtxFor(b));
+            const shown = nums[nums.length - 1];
+            if (shown != null) next = shown + 1;
+          }
+          marker = m[1] + (m[3] ? next + m[2].slice(-1) : m[2]) + ' ' + (m[4] ? '[ ] ' : '');
+        } else marker = '- ';
         this.setText(body, b, before + '\n' + marker + after, a + 1 + marker.length);
         return;
       }

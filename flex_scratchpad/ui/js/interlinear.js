@@ -205,6 +205,7 @@
     if (opts.editable && opts.inCell && opts.editCell && !opts.overlay) head.appendChild(el('button', { class: 'lnk', title: 'Edit the cell\u2019s text (type before or after this example, add another)', onclick: () => opts.editCell() }, '✎'));
     if (opts.editable && !opts.overlay && opts.duplicate) head.appendChild(el('button', { class: 'lnk', title: 'Duplicate this object', onclick: () => opts.duplicate() }, '⧉'));
     if (opts.editable && !opts.overlay && opts.remove) head.appendChild(el('button', { class: 'lnk danger', title: 'Remove this object…', onclick: (e) => removeObject(e.currentTarget, spec, opts) }, '🗑'));
+    if (!opts.inCell) head.appendChild(el('button', { class: 'lnk', title: 'Copy as FLEx TSV (the rows FLEx itself copies)', onclick: () => { FS.copyText(flexTsv(spec, obj)); FS.toast('Copied as FLEx TSV'); } }, '⎘ TSV'));
     if (obj.url) head.appendChild(el('a', { href: obj.url, title: 'Open in FieldWorks', onclick: (e) => { e.preventDefault(); openInFlex(obj.url); } }, 'Open in FLEx ↗'));
     if (opts.editable) head.appendChild(el('button', { class: 'lnk', title: 'Options', onclick: (e) => embedMenu(e.currentTarget, spec, opts, obj) }, '⋯'));
     box.appendChild(head);
@@ -552,6 +553,7 @@
         pop.appendChild(el('hr'));
       }
       if (obj && obj.url) pop.appendChild(el('button', { class: 'menu-item', onclick: () => { FS.copyText(obj.url); FS.toast('FLEx link copied'); close(); } }, 'Copy FLEx link'));
+      if (spec.kind === 'text' && obj && obj.kind === 'text') pop.appendChild(el('button', { class: 'menu-item', title: 'The rows FLEx itself puts on the clipboard (Word / Morphemes / Lex. Gloss / Free …), one block per segment, the lines this example shows', onclick: () => { FS.copyText(flexTsv(spec, obj)); FS.toast('Copied as FLEx TSV'); close(); } }, 'Copy as FLEx TSV'));
       pop.appendChild(el('button', { class: 'menu-item', onclick: () => { FS.copyText(R.serialize(spec)); FS.toast('Embed code copied'); close(); } }, 'Copy embed code'));
       if (opts.editSource) pop.appendChild(el('button', { class: 'menu-item', onclick: () => { close(); opts.editSource(); } }, 'Edit source'));
       if (opts.duplicate || opts.remove) pop.appendChild(el('hr'));
@@ -559,6 +561,42 @@
       if (opts.remove) pop.appendChild(el('button', { class: 'menu-item danger', onclick: () => { close(); removeObject(anchor, spec, opts); } }, 'Remove this object…'));
     });
   }
+  /* The example as FLEx copies it from its interlinear view (Seth, 2026-10-13: "As FLEx TSV.
+   * Just like if I copied it directly from FLEx"): per segment one row per interlinear line,
+   * FLEx's row label first, one cell per word (a word's morphemes space-separated in its
+   * cell, punctuation as its own cell on the Word row), the free translation as a Free row;
+   * segments separated by a blank line. Only the lines this example shows, in its order. */
+  const TSV_LABELS = { txt: 'Word', morph: 'Morphemes', cf: 'Lex. Entries', mgls: 'Lex. Gloss', gls: 'Word Gloss', pos: 'Word Cat.', ft: 'Free', lit: 'Literal', note: 'Note' };
+  function flexTsv(spec, obj) {
+    const lines = spec.lines && spec.lines.length ? spec.lines : R.DEFAULT_LINES;
+    const cell = (v) => String(v == null ? '' : v).replace(/[\t\r\n]+/g, ' ');
+    const out = [];
+    for (const seg of obj.segments || []) {
+      const words = seg.words || [];
+      const block = [];
+      for (const line of lines) {
+        if (line === 'ft' || line === 'lit' || line === 'note') continue;
+        const cells = words.map((w) => {
+          if (w.punct) return line === 'txt' ? w.txt : '';
+          if (line === 'txt') return w.txt || '';
+          if (line === 'morph') return (w.morphs || []).map((m) => m.form || '').join(' ');
+          if (line === 'mgls') return (w.morphs || []).map((m) => m.gls || '').join(' ');
+          if (line === 'cf') return (w.morphs || []).map((m) => m.cf || '').join(' ');
+          if (line === 'gls') return w.gls || '';
+          if (line === 'pos') return w.pos || '';
+          return '';
+        });
+        if (line !== 'txt' && !cells.some((c) => c)) continue;
+        block.push([TSV_LABELS[line] || line, ...cells.map(cell)].join('\t'));
+      }
+      if (lines.includes('ft') && seg.free) block.push('Free\t' + cell(seg.free));
+      if (lines.includes('lit') && seg.lit) block.push('Literal\t' + cell(seg.lit));
+      if (lines.includes('note')) for (const n of seg.notes || []) block.push('Note\t' + cell(n));
+      out.push(block.join('\n'));
+    }
+    return out.join('\n\n') + '\n';
+  }
+
   /* Remove, after an in-place confirmation (Seth, 2026-10-13: "for delete, it should ask"). */
   async function removeObject(anchor, spec, opts) {
     const what = spec.label || (spec.kind === 'text' ? 'this example' : spec.kind === 'entry' || spec.kind === 'sense' ? 'this entry' : 'this object');
@@ -714,6 +752,7 @@
       el('span', { class: 'muted small' }, mode.pinned ? 'Preview' : 'Preview — click the chip to keep it open'),
       el('span', { class: 'spacer' }),
       opts.editable && opts.editCell ? el('button', { class: 'lnk', title: 'Edit the cell\u2019s text (type before or after this example, add another)', onclick: () => { closeOverlay(); opts.editCell(); } }, '✎ Edit cell') : null,
+      spec.kind === 'text' ? el('button', { class: 'lnk', title: 'Copy as FLEx TSV', onclick: () => { const o = inner._obj; if (o) { FS.copyText(flexTsv(spec, o)); FS.toast('Copied as FLEx TSV'); } } }, '⎘ TSV') : null,
       opts.editable && opts.duplicate ? el('button', { class: 'lnk', title: 'Duplicate this object', onclick: () => { closeOverlay(); opts.duplicate(); } }, '⧉ Duplicate') : null,
       opts.editable && opts.remove ? el('button', { class: 'lnk danger', title: 'Remove this object…', onclick: (e) => removeObject(e.currentTarget, spec, opts) }, '🗑 Remove') : null,
       opts.editable ? el('button', { class: 'lnk', onclick: () => { closeOverlay(); setCollapsed(spec, opts, false); } }, opts.inCell ? '⤢ Show in cell' : '⤢ Expand in note') : null,
@@ -800,6 +839,7 @@
         const node = kind === 'text' ? renderText(obj, spec, o) : kind === 'wordform' ? renderWordform(obj, spec, o) : renderEntry(obj, spec, o);
         container.innerHTML = '';
         container.appendChild(node);
+        container._obj = obj;
       } catch (e) {
         container.innerHTML = '';
         const err = el('div', { class: 'flex-obj' },
@@ -813,5 +853,5 @@
     await doRender(false);
   }
 
-  FS.interlinear = { render, renderText, renderEntry, renderWordform, renderChip, openOverlay, closeOverlay, isCollapsed, setCollapsed, styled, styledParts, invalidate, flexGet, openInFlex, labelOf, numberFor, HL_COLORS };
+  FS.interlinear = { render, renderText, renderEntry, renderWordform, renderChip, openOverlay, closeOverlay, isCollapsed, setCollapsed, styled, styledParts, invalidate, flexGet, openInFlex, labelOf, numberFor, flexTsv, HL_COLORS };
 })();

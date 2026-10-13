@@ -105,7 +105,9 @@
   /* ------------------------------------------------------------------ note → model */
   async function buildDoc(note, editor) {
     const blocks = [];
+    const numCtx = { counters: [] };                        // outline numbering carried across blocks
     for (const b of editor.blocks) {
+      if (b.type !== 'list' && b.type !== 'p') numCtx.counters = [];
       if (b.type === 'p' || b.type === 'quote') {
         const parts = await textWithEmbeds(b.src);
         for (const part of parts) blocks.push(part.type ? part : { type: b.type, runs: part.runs });
@@ -116,14 +118,14 @@
         blocks.push({ type: 'code', text: b.src.replace(/^\s*```[^\n]*\n?/, '').replace(/\n?\s*```\s*$/, '') });
       } else if (b.type === 'list') {
         const items = [];
-        let n = 0;
-        for (const line of b.src.split('\n')) {
+        const srcLines = b.src.split('\n');
+        const nums = FS.markdown.numberLines(srcLines, 'list', numCtx);      // the outline numbers as shown
+        srcLines.forEach((line, li) => {
           const m = /^(\s*)([-*+]|(\d+)[.)])\s+(\[([ xX])\]\s+)?(.*)$/.exec(line);
-          if (!m) { if (items.length) items[items.length - 1].runs.push({ text: '\n' + line.trim() }); continue; }
+          if (!m) { if (items.length) items[items.length - 1].runs.push({ text: '\n' + line.trim() }); return; }
           const ordered = !!m[3];
-          n = ordered ? ++n : n;
-          items.push({ runs: runsOf(m[6]), ordered, n: ordered ? parseInt(m[3], 10) : 0, level: Math.floor(m[1].length / 2), task: !!m[4], checked: m[5] ? m[5] !== ' ' : false });
-        }
+          items.push({ runs: runsOf(m[6]), ordered, n: ordered ? (nums[li] || parseInt(m[3], 10)) : 0, level: FS.markdown.listLevel({ indent: m[1].length }), task: !!m[4], checked: m[5] ? m[5] !== ' ' : false });
+        });
         blocks.push({ type: 'list', items });
       } else if (b.type === 'hr') {
         blocks.push({ type: 'hr' });

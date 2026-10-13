@@ -1386,3 +1386,60 @@ def test_table_frame_grip_and_scroll_chaining(app):
     page.wait_for_timeout(900)
     assert "max-height" not in body_of(h)
     assert not errors
+
+
+def test_outline_numbering_and_enter(app):
+    h, page, errors = app
+    new_note(page, "Outline")
+    page.locator("#editor .blk-body").first.click()
+    paste(page, "1. Symmetrical\n  2. Examples:\n\n2. One-word\n  3. Examples:\n\n3. Argument sharing\n  4. All\n  5. Shared subject")
+    page.wait_for_timeout(400)
+    shown = page.evaluate("() => [...document.querySelectorAll('#editor .md-line[data-num]')].map((l) => l.dataset.num + ' ' + l.textContent.trim().replace(/^\\d+\\.\\s*/, ''))")
+    assert shown == ["1. Symmetrical", "1. Examples:", "2. One-word", "1. Examples:", "3. Argument sharing", "1. All", "2. Shared subject"], shown
+    # Enter after the last sub-item continues ITS level with the shown number + 1
+    last = page.locator("#editor .blk-list .blk-body").last
+    last.click()
+    page.keyboard.press("Control+End")
+    page.keyboard.press("Enter")
+    page.keyboard.type("Shared object")
+    page.wait_for_timeout(600)
+    assert "  3. Shared object" in body_of(h)
+    shown = page.evaluate("() => [...document.querySelectorAll('#editor .md-line[data-num]')].map((l) => l.dataset.num)")
+    assert shown[-1] == "3."
+    # inserting an item at the top renumbers the blocks below
+    first = page.locator("#editor .blk-list .blk-body").first
+    first.click()
+    page.keyboard.press("Control+Home")
+    page.keyboard.type("1. New first")
+    page.keyboard.press("Enter")
+    page.wait_for_timeout(600)
+    shown = page.evaluate("() => [...document.querySelectorAll('#editor .md-line[data-num]')].map((l) => l.dataset.num)")
+    assert shown[0] == "1." and "4." in shown, shown
+    assert not errors
+
+
+def test_copy_example_as_flex_tsv(app):
+    h, page, errors = app
+    new_note(page, "TSV")
+    page.keyboard.type("{{flex:text %s seg=1-2 lines=txt,morph,mgls,gls,pos,ft}}" % T_STORY)
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#editor .text-obj .segment")
+    tsv = page.evaluate("() => FS.interlinear.flexTsv(FS.flexref.parse('{{flex:text %s seg=1-2 lines=txt,morph,mgls,gls,pos,ft}}'), document.querySelector('#editor .blk-flex .widget-host')._obj)" % T_STORY)
+    blocks = tsv.strip().split("\n\n")
+    assert len(blocks) == 2
+    rows = blocks[0].split("\n")
+    assert rows[0] == "Word\tKabir\tka-nuwa-mo\tlo\t.", rows
+    assert rows[1] == "Morphemes\tkabir\tka- nuwa -mo\tlo\t", rows
+    assert rows[2] == "Lex. Gloss\tdog\t3SG- sleep -PST\tDECL\t", rows
+    assert any(r.startswith("Word Gloss\t") for r in rows) and any(r.startswith("Word Cat.\t") for r in rows)
+    assert rows[-1] == "Free\tThe dog slept."
+    # the pasted rows find their way back: locate() resolves them to the same segments
+    hits = h.api.flex_locate(tsv)
+    assert hits and hits[0]["seg"] == 1 and hits[0]["segTo"] == 2, hits
+    # the menu and the header offer it
+    assert page.locator("#editor .text-obj .flex-head .lnk[title^='Copy as FLEx TSV']").count() == 1
+    page.locator("#editor .text-obj .flex-head .lnk[title='Options']").click()
+    page.wait_for_selector(".popover .menu-item")
+    assert page.locator(".popover .menu-item", has_text="Copy as FLEx TSV").count() == 1
+    page.keyboard.press("Escape")
+    assert not errors

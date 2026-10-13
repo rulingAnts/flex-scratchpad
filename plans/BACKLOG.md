@@ -5,6 +5,9 @@ not lost between sessions. Tracked in git, never served.
 
 ## Copy an example as FLEx TSV or langsci-gb4e LaTeX (Seth, 2026-10-12)
 
+**FLEx TSV: done 2026-10-13** (⋯ → Copy as FLEx TSV, the ⎘ TSV button on the header and the
+overlay; `interlinear.flexTsv`; what it writes is what `locate()` reads). LaTeX remains.
+
 > *"I'd also like to be able to copy FLEx TSV or langsci-gb4e latex from a flex object without
 > having to open FLEx. We'll have to fine tune how to work that exactly later. But I will want
 > that feature for when my notes turn into paper details."*

@@ -141,3 +141,19 @@ test('tables: the frame size round-trips', () => {
   const [top] = FS.tables.splitAt(t, 1) || [null];
   assert.ok(top === null || top.style.frameWidth === '640px');
 });
+
+test('outline numbers are computed per level and carry across loose-list blocks', () => {
+  const MD = FS.markdown;
+  const ctx = { counters: [] };
+  assert.deepEqual(MD.numberLines(['1. one', '  2. sub a', '  3. sub b', '9. two'], 'list', ctx), [1, 1, 2, 2]);
+  // a blank line between items (a separate block) continues the count; a bullet resets deeper levels
+  assert.deepEqual(MD.numberLines(['5. three', '  - bullet', '  1. sub'], 'list', ctx), [3, null, 1]);
+  // a paragraph resets
+  MD.numberLines(['prose'], 'p', ctx);
+  assert.deepEqual(MD.numberLines(['7. again'], 'list', ctx), [1]);
+  // decorate shows the computed number and keeps the typed text intact
+  const html = MD.decorate('1. one\n  2. sub', 'list', { counters: [] });
+  assert.equal((html.match(/data-num="1\."/g) || []).length, 2);
+  assert.match(html, /md-num">\s*2\. <\/span>/);
+  assert.equal(html.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&'), '1. one\n  2. sub');
+});

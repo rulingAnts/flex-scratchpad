@@ -211,9 +211,34 @@
     return null;
   }
 
-  /* Decorate a text block for in-place editing: HTML whose textContent === src. */
-  function decorate(src, blockType) {
+  /* Outline numbers (Seth, 2026-10-13: "our outline numbering is a bit wonky"). The typed
+   * number stays in the file; what is SHOWN is computed like Markdown renders it: a counter per
+   * nesting level (2 spaces = a level), continuing across blank lines (a loose list is one
+   * list), deeper levels restarting under each item, everything restarting after a line that
+   * is not part of the list. `ctx.counters` carries the state from block to block. */
+  function listLevel(pre) { return Math.min(4, Math.round((pre.indent || 0) / 2)); }
+  function numberLines(lines, blockType, ctx) {
+    ctx = ctx || { counters: [] };
+    if (!ctx.counters) ctx.counters = [];
+    return lines.map((line) => {
+      const pre = linePrefix(line, blockType);
+      if (!pre || (pre.cls !== 'md-num' && pre.cls !== 'md-bullet')) {
+        if (line.trim() !== '' && !/^\s{2,}/.test(line)) ctx.counters = [];   // continuation text keeps the list alive
+        return null;
+      }
+      const level = listLevel(pre);
+      ctx.counters.length = level + 1;
+      if (pre.cls !== 'md-num') return null;
+      ctx.counters[level] = (ctx.counters[level] || 0) + 1;
+      return ctx.counters[level];
+    });
+  }
+
+  /* Decorate a text block for in-place editing: HTML whose textContent === src.
+   * `ctx` (optional) is the outline-numbering state before this block; it is advanced. */
+  function decorate(src, blockType, ctx) {
     const lines = src.split('\n');
+    const nums = numberLines(lines, blockType, ctx || { counters: [] });
     const html = [];
     let offset = 0;
     lines.forEach((line, li) => {
@@ -239,7 +264,8 @@
       // an empty line needs a <br> to have height and to count as a real line for Chromium
       // (a bare trailing "\n" text node gets collapsed away when typing after it); <br> adds
       // nothing to textContent, so the text-is-the-markdown invariant holds.
-      html.push('<span class="md-line ' + lineCls + '">' + (line.length ? emit(line, out) : '<br>') + '</span>');
+      const numAttr = nums[li] != null ? ' data-num="' + nums[li] + '."' : '';
+      html.push('<span class="md-line ' + lineCls + '"' + numAttr + '>' + (line.length ? emit(line, out) : '<br>') + '</span>');
       offset += line.length + 1;
     });
     return html.join('\n');
@@ -310,5 +336,5 @@
       .replace(/^\s*([-*+]|\d+[.)])\s+(\[[ xX]\]\s*)?/gm, '').replace(/[*_~=]{1,2}/g, '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').trim();
   }
 
-  FS.markdown = { RE, splitBlocks, joinBlocks, classify, decorate, renderInline, plainText, linePrefix, markInline };
+  FS.markdown = { RE, splitBlocks, joinBlocks, classify, decorate, renderInline, plainText, linePrefix, markInline, numberLines, listLevel };
 })();
