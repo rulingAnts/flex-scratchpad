@@ -40,17 +40,20 @@ def _entry(key, headword, pos, senses, morph_type="stem", lexeme=None, citation=
               "morphType": morph_type, "homograph": homograph, "pos": pos,
               "ws": {"vern": WS_VERN, "anal": WS_ANAL}})
     for i, s in enumerate(senses, 1):
+        number = s[4] if len(s) > 4 else str(i)                       # a sub-sense carries its own number ("2.1")
         e["senses"].append(model.make_sense(
-            E[key][:-4] + E[key][-2:] + f"a{i}", str(i), s[0], s[1], s[2] if len(s) > 2 else pos,
+            E[key][:-4] + E[key][-2:] + f"a{i}", number, s[0], s[1], s[2] if len(s) > 2 else pos,
             examples=[{"guid": "", "text": ex[0], "translation": ex[1]} for ex in (s[3] if len(s) > 3 else [])],
+            note=s[5] if len(s) > 5 else "", domains=s[6] if len(s) > 6 else [],
         ))
     e["url"] = model.goto_url(PROJECT, "entry", e["guid"])
     return e
 
 
 ENTRIES = [
-    _entry("kabir", "kabir", "n", [("dog", "a domestic dog", "n", [("kabir ka-nuwa lo", "the dog is sleeping")]),
-                                   ("wild dog", "any wild canid")]),
+    _entry("kabir", "kabir", "n", [("dog", "a domestic dog", "n", [("kabir ka-nuwa lo", "the dog is sleeping")], "1", "Also used of puppies.", ["1.6.1.1.2 Carnivore"]),
+                                   ("wild dog", "any wild canid", "n", [], "2"),
+                                   ("dingo", "the wild dog of the plains", "n", [], "2.1")]),
     _entry("tiket", "tiket", "n", [("child", "a child, boy or girl")]),
     _entry("ka", "ka-", "prefix", [("3SG", "third person singular subject")], morph_type="prefix"),
     _entry("mo", "-mo", "suffix", [("PST", "past tense")], morph_type="suffix"),

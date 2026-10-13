@@ -18,6 +18,13 @@
   const LINES = ['txt', 'morph', 'mgls', 'gls', 'pos', 'ft', 'lit', 'note', 'cf'];
   const STYLES = ['hl', 'b', 'u', 'i', 's', 'color'];
   const DEFAULT_LINES = ['txt', 'morph', 'mgls', 'gls', 'pos', 'ft'];
+  // Entry embeds choose their FIELDS instead of lines (`fields=cf,mt,gl,def,ex,tr,sub`):
+  // entry-level cf (citation form), lf (lexeme form), mt (morph type), hn (homograph number),
+  // note; per sense sn (number), spos (category), gl (gloss), def (definition), ex (examples),
+  // tr (example translations), sub (sub-senses), snote (sense note), sem (semantic domains).
+  // `senses=1,2.1` keeps only those senses (a parent keeps its sub-senses while `sub` is on).
+  const ENTRY_FIELDS = ['cf', 'lf', 'mt', 'hn', 'note', 'sn', 'spos', 'gl', 'def', 'ex', 'tr', 'sub', 'snote', 'sem'];
+  const DEFAULT_FIELDS = ['cf', 'mt', 'hn', 'sn', 'spos', 'gl', 'def', 'ex', 'tr', 'sub'];
   const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const EMBED_RE = /\{\{\s*flex:[^{}]*\}\}/g;
 
@@ -99,7 +106,7 @@
     const s = String(src || '').trim().replace(/^\{\{\s*/, '').replace(/\s*\}\}$/, '');
     const m = /^flex:(entry|sense|text|wordform)\s+([0-9a-fA-F-]{36})\s*([\s\S]*)$/i.exec(s);
     if (!m || !GUID.test(m[2])) return null;
-    const spec = { kind: m[1].toLowerCase(), guid: m[2].toLowerCase(), seg: null, at: null, lines: null, ws: null, styles: [], label: '', extra: {} };
+    const spec = { kind: m[1].toLowerCase(), guid: m[2].toLowerCase(), seg: null, at: null, lines: null, fields: null, senses: null, ws: null, styles: [], label: '', extra: {} };
     for (const tok of tokenize(m[3])) {
       if (tok.label != null) { spec.label = tok.label; continue; }
       if (tok.flag) { spec.extra[tok.flag] = true; continue; }
@@ -118,6 +125,11 @@
         if (!Object.keys(spec.ws).length) spec.ws = null;
       } else if (tok.key === 'lines') {
         spec.lines = splitItems(tok.val).map((x) => x.toLowerCase()).filter((x) => LINES.includes(x));
+      } else if (tok.key === 'fields') {
+        spec.fields = tok.val.trim().toLowerCase() === 'none' ? [] : splitItems(tok.val).map((x) => x.toLowerCase()).filter((x) => ENTRY_FIELDS.includes(x));
+      } else if (tok.key === 'senses') {
+        spec.senses = splitItems(tok.val).map((x) => x.trim()).filter((x) => /^\d+(\.\d+)*$/.test(x));
+        if (!spec.senses.length) spec.senses = null;
       } else if (STYLES.includes(tok.key)) {
         const targets = splitItems(tok.val).map(parseTarget).filter(Boolean);
         if (targets.length) spec.styles.push({ style: tok.key, color: tok.color || '', targets });
@@ -133,6 +145,8 @@
     if (spec.seg) parts.push('seg=' + spec.seg[0] + (spec.seg[1] !== spec.seg[0] ? '-' + spec.seg[1] : ''));
     if (spec.at && spec.at[0]) parts.push('at=' + spec.at[0] + (spec.at[1] && spec.at[1] !== spec.at[0] ? '-' + spec.at[1] : ''));
     if (spec.lines && spec.lines.length) parts.push('lines=' + spec.lines.join(','));
+    if (spec.fields) parts.push('fields=' + (spec.fields.length ? spec.fields.join(',') : 'none'));
+    if (spec.senses && spec.senses.length) parts.push('senses=' + spec.senses.join(','));
     if (spec.ws && Object.keys(spec.ws).length) parts.push('ws=' + Object.keys(spec.ws).filter((k) => spec.ws[k]).map((k) => k + ':' + spec.ws[k]).join(','));
     for (const g of spec.styles) {
       if (!g.targets.length) continue;
@@ -297,7 +311,21 @@
     return out;
   }
 
+  /* The senses an entry embed shows, in order: all, or those listed in `senses=` (a listed
+   * parent brings its sub-senses while `sub` is on); sub-senses drop out when `sub` is off. */
+  function entryFields(spec) { return spec.fields == null ? DEFAULT_FIELDS.slice() : spec.fields; }
+  function visibleSenses(spec, senses) {
+    const f = entryFields(spec);
+    const want = spec.senses && spec.senses.length ? spec.senses : null;
+    return (senses || []).filter((s) => {
+      if (!f.includes('sub') && (s.level || 0) > 0) return false;
+      if (!want) return true;
+      const num = s.number || '';
+      return want.some((w) => num === w || num.startsWith(w + '.'));
+    });
+  }
   FS.flexref = {
+    ENTRY_FIELDS, DEFAULT_FIELDS, entryFields, visibleSenses,
     LINES, STYLES, DEFAULT_LINES, GUID, EMBED_RE,
     parse, serialize, parseTarget, serializeTarget, sameTarget,
     hasStyle, toggleStyle, clearStyles, resolveStyles, stylesFor, findAll,

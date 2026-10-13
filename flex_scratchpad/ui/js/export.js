@@ -68,8 +68,13 @@
     const kind = spec.kind === 'sense' ? 'entry' : spec.kind;
     const obj = await FS.interlinear.flexGet(kind, spec.guid, spec.kind === 'text' && spec.seg ? spec.seg[0] : null, spec.kind === 'text' && spec.seg ? spec.seg[1] : null, false, spec.kind === 'text' ? spec.ws : null);
     if (kind === 'entry') {
+      const F = new Set(R.entryFields(spec));
       return { type: 'entry', headword: obj.headword || obj.lexemeForm, pos: obj.pos, font: obj.ws && obj.ws.vern && obj.ws.vern.font, label: spec.label,
-        senses: (obj.senses || []).filter((s) => spec.kind !== 'sense' || s.guid === spec.guid || true).map((s) => ({ number: s.number, pos: s.pos, gloss: s.gloss, definition: s.definition, examples: s.examples || [] })) };
+        citationForm: F.has('cf') && obj.citationForm !== obj.headword ? obj.citationForm : '', lexemeForm: F.has('lf') && obj.lexemeForm !== obj.headword ? obj.lexemeForm : '',
+        morphType: F.has('mt') ? obj.morphType : '', note: F.has('note') ? obj.note : '',
+        senses: R.visibleSenses(spec, obj.senses).map((s) => ({ number: F.has('sn') ? s.number : '', level: s.level || 0, pos: F.has('spos') ? s.pos : '', gloss: F.has('gl') ? s.gloss : '', definition: F.has('def') ? s.definition : '',
+          examples: F.has('ex') ? (s.examples || []).map((ex) => ({ text: ex.text, translation: F.has('tr') ? ex.translation : '' })) : [],
+          note: F.has('snote') ? s.note : '', domains: F.has('sem') ? (s.domains || []) : [] })) };
     }
     if (kind === 'wordform') return { type: 'wordform', form: obj.form, glosses: obj.glosses || [], font: obj.ws && obj.ws.vern && obj.ws.vern.font };
     const lines = spec.lines && spec.lines.length ? spec.lines : R.DEFAULT_LINES;
@@ -235,8 +240,9 @@
               + (seg.notes || []).map((n) => '<div class="note"><b>Note</b>' + runsHtml(n) + '</div>').join('') + '</div></div>';
           }).join('') + '</div>';
       }
-      case 'entry': return '<div class="obj"><div><span class="hw">' + esc(b.headword || '') + '</span>' + (b.pos ? ' <span class="pos">' + esc(b.pos) + '</span>' : '') + (b.label ? '<span class="lbl">' + esc(b.label) + '</span>' : '') + '</div>'
-        + (b.senses || []).map((s) => '<div class="sense"><span class="sn">' + esc(s.number || '') + '</span><div>' + (s.pos ? '<span class="pos">' + esc(s.pos) + '</span> ' : '') + '<span class="gl">' + esc(s.gloss || '') + '</span>' + (s.definition && s.definition !== s.gloss ? ' — ' + esc(s.definition) : '') + (s.examples || []).map((ex) => '<div class="ex"><span class="v">' + esc(ex.text || '') + '</span>' + (ex.translation ? ' ‘' + esc(ex.translation) + '’' : '') + '</div>').join('') + '</div></div>').join('') + '</div>';
+      case 'entry': return '<div class="obj"><div><span class="hw">' + esc(b.headword || '') + '</span>' + (b.citationForm ? ' <span class="pos">' + esc(b.citationForm) + '</span>' : '') + (b.lexemeForm ? ' <span class="pos">' + esc(b.lexemeForm) + '</span>' : '') + (b.morphType ? ' <span class="pos">' + esc(b.morphType) + '</span>' : '') + (b.label ? '<span class="lbl">' + esc(b.label) + '</span>' : '') + '</div>'
+        + (b.note ? '<div class="note">' + esc(b.note) + '</div>' : '')
+        + (b.senses || []).map((s) => '<div class="sense" style="margin-left:' + ((s.level || 0) * 18) + 'px"><span class="sn">' + esc(s.number || '') + '</span><div>' + (s.pos ? '<span class="pos">' + esc(s.pos) + '</span> ' : '') + '<span class="gl">' + esc(s.gloss || '') + '</span>' + (s.definition && s.definition !== s.gloss ? (s.gloss ? ' — ' : '') + esc(s.definition) : '') + ((s.domains || []).length ? '<div class="note">' + esc(s.domains.join('; ')) + '</div>' : '') + (s.examples || []).map((ex) => '<div class="ex"><span class="v">' + esc(ex.text || '') + '</span>' + (ex.translation ? ' ‘' + esc(ex.translation) + '’' : '') + '</div>').join('') + (s.note ? '<div class="note">' + esc(s.note) + '</div>' : '') + '</div></div>').join('') + '</div>';
       case 'wordform': return '<div class="obj"><span class="hw">' + esc(b.form || '') + '</span> <span class="gls">' + esc((b.glosses || []).join('; ')) + '</span></div>';
       case 'image': return '<p><img src="' + b.png + '" alt="' + esc(b.alt || '') + '"></p>';
       case 'imageref': return '<p><img src="' + esc(b.src) + '" alt="' + esc(b.alt || '') + '"></p>';

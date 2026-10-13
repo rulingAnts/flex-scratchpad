@@ -280,6 +280,9 @@ body.md-hide .blk-code .md-marker { display: inline; }
 .sense .sn { color: var(--faint); font-weight: 600; min-width: 20px; text-align: right; font-size: 13px; }
 .sense .pos { color: var(--pos); font-style: italic; font-size: 13px; margin-right: 6px; }
 .sense .gl { color: var(--gloss); font-weight: 600; }
+.sense.level1 { margin-left: 22px; } .sense.level2 { margin-left: 44px; } .sense.level3 { margin-left: 66px; }
+.sense .sem { color: var(--muted); font-size: 12.5px; }
+.sense .snote, .entry-card .enote { color: var(--muted); font-size: 13px; font-style: italic; margin-top: 2px; }
 .sense .def { color: var(--text); }
 .sense .ex { margin: 3px 0 0 4px; font-size: 13.5px; color: var(--muted); border-left: 2px solid var(--border-soft); padding-left: 8px; }
 .sense .ex .v { color: var(--vern); font-family: var(--font-vern); font-size: 14.5px; }

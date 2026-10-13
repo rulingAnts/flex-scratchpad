@@ -102,3 +102,18 @@ test('at= anchors round-trip and sit next to seg=', () => {
   assert.deepEqual(one.at, ['4ad2c1f0', '4ad2c1f0']);
   assert.equal(FS.flexref.serialize(one), '{{flex:text ' + G + ' seg=3 at=4ad2c1f0}}');
 });
+
+test('entry embeds: fields= and senses= round-trip and select', () => {
+  const spec = R.parse('{{flex:entry ' + G + ' fields=cf,gl,def,sub senses=1,2 "lex"}}');
+  assert.deepEqual(spec.fields, ['cf', 'gl', 'def', 'sub']);
+  assert.deepEqual(spec.senses, ['1', '2']);
+  assert.equal(R.serialize(spec), '{{flex:entry ' + G + ' fields=cf,gl,def,sub senses=1,2 "lex"}}');
+  assert.deepEqual(R.entryFields(R.parse('{{flex:entry ' + G + '}}')), R.DEFAULT_FIELDS);
+  assert.deepEqual(R.parse('{{flex:entry ' + G + ' fields=none}}').fields, []);
+  assert.equal(R.serialize(R.parse('{{flex:entry ' + G + ' fields=none}}')), '{{flex:entry ' + G + ' fields=none}}');
+  const senses = [{ number: '1', level: 0 }, { number: '2', level: 0 }, { number: '2.1', level: 1 }, { number: '3', level: 0 }];
+  assert.deepEqual(R.visibleSenses(spec, senses).map((s) => s.number), ['1', '2', '2.1']);
+  assert.deepEqual(R.visibleSenses(R.parse('{{flex:entry ' + G + ' fields=gl senses=2}}'), senses).map((s) => s.number), ['2']);
+  assert.deepEqual(R.visibleSenses(R.parse('{{flex:entry ' + G + ' senses=2.1}}'), senses).map((s) => s.number), ['2.1']);
+  assert.deepEqual(R.visibleSenses(R.parse('{{flex:entry ' + G + ' fields=gl,def}}'), senses).map((s) => s.number), ['1', '2', '3']);
+});

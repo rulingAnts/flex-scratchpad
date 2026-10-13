@@ -89,7 +89,9 @@ def test_demo_backend(tmp_path):
     hits = be.search_entries("ka")
     assert [h["headword"] for h in hits] == ["kabir", "ka-"]
     e = be.get_entry(E["kabir"])
-    assert len(e["senses"]) == 2 and e["senses"][0]["examples"][0]["translation"] == "the dog is sleeping"
+    assert len(e["senses"]) == 3 and e["senses"][0]["examples"][0]["translation"] == "the dog is sleeping"
+    assert [(s["number"], s["level"], s["parent"]) for s in e["senses"]] == [("1", 0, ""), ("2", 0, ""), ("2.1", 1, "2")]
+    assert e["senses"][0]["note"] == "Also used of puppies." and e["senses"][0]["domains"] == ["1.6.1.1.2 Carnivore"]
     senses = {s["guid"] for en in [be.get_entry(g) for g in E.values()] for s in en["senses"]}
     assert len(senses) == sum(len(be.get_entry(g)["senses"]) for g in E.values())   # sense guids are unique
     assert be.resolve_guid(e["senses"][1]["guid"])["sense"] == "2"

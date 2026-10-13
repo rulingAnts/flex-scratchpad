@@ -104,6 +104,10 @@ range and merge it. Columns resize by dragging; merged cells are kept as `span 2
 style line and survive a paste from Excel, Word or a browser; `freeze rows 1; freeze cols 1` pins
 panes. The bar under a table sticks to the bottom of the pane while the table is scrolled past it.
 
+Entry embeds choose their fields with `fields=cf,mt,gl,def,ex,tr,sub` and their senses with
+`senses=1,2.1` (the ⋯ menu offers both); text embeds choose lines with `lines=` and are anchored to
+their segments' GUIDs with `at=` so a renumbered text keeps the right segments.
+
 The embed line is the whole contract: `{{flex:entry <guid>}}`, `{{flex:sense <guid>}}`,
 `{{flex:text <guid> seg=3-5 lines=txt,morph,mgls,gls,pos,ft hl=3.2 b=3.1-3.4 u="ka-"}}`. Targets
 are `[line:]segment[.word[:from-to]]` (words counted without punctuation, characters as grapheme

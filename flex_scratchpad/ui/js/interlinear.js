@@ -471,20 +471,41 @@
         pop.appendChild(el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Title'), sel));
       }
       pop.appendChild(el('hr'));
-      pop.appendChild(el('div', { class: 'row' }, el('b', {}, 'Lines to show')));
-      const names = { txt: 'Word', morph: 'Morphemes', mgls: 'Morph glosses', cf: 'Lex. entries', gls: 'Word gloss', pos: 'Category', ft: 'Free translation', lit: 'Literal translation', note: 'Notes' };
-      const current = spec.lines && spec.lines.length ? spec.lines : R.DEFAULT_LINES;
-      for (const l of R.LINES) {
-        const cb = el('input', { type: 'checkbox', checked: current.includes(l) });
-        cb.addEventListener('change', () => {
-          const set = new Set(current);
-          cb.checked ? set.add(l) : set.delete(l);
-          spec.lines = R.LINES.filter((x) => set.has(x));
-          opts.onSpecChange && opts.onSpecChange(spec);
-        });
-        pop.appendChild(el('label', { class: 'row', style: { gap: '8px' } }, cb, names[l]));
+      if (spec.kind === 'entry' || spec.kind === 'sense') {
+        // Entries pick FIELDS, not interlinear lines (Seth, 2026-10-13: "fine-tune which
+        // fields (including senses and sub senses) we want to include instead of IGT fields")
+        const fnames = { cf: 'Citation form', lf: 'Lexeme form', mt: 'Morph type', hn: 'Homograph number', note: 'Entry note', sn: 'Sense numbers', spos: 'Category (per sense)', gl: 'Gloss', def: 'Definition', ex: 'Examples', tr: 'Example translations', sub: 'Sub-senses', snote: 'Sense notes', sem: 'Semantic domains' };
+        const cur = new Set(R.entryFields(spec));
+        const groups = [['Entry', ['cf', 'lf', 'mt', 'hn', 'note']], ['Senses', ['sn', 'spos', 'gl', 'def', 'ex', 'tr', 'sub', 'snote', 'sem']]];
+        for (const [title, keys] of groups) {
+          pop.appendChild(el('div', { class: 'row' }, el('b', {}, title + ' fields')));
+          for (const k of keys) {
+            const cb = el('input', { type: 'checkbox', checked: cur.has(k) });
+            cb.addEventListener('change', () => { cb.checked ? cur.add(k) : cur.delete(k); spec.fields = R.ENTRY_FIELDS.filter((x) => cur.has(x)); opts.onSpecChange && opts.onSpecChange(spec); });
+            pop.appendChild(el('label', { class: 'row', style: { gap: '8px' } }, cb, fnames[k]));
+          }
+        }
+        const sensesIn = el('input', { type: 'text', value: (spec.senses || []).join(', '), placeholder: 'all — or 1, 2.1, 3', style: { width: '160px' }, title: 'Which senses to show, by FLEx number; blank = all' });
+        sensesIn.addEventListener('change', () => { const v = sensesIn.value.split(/[,\s]+/).map((x) => x.trim()).filter((x) => /^\d+(\.\d+)*$/.test(x)); spec.senses = v.length ? v : null; opts.onSpecChange && opts.onSpecChange(spec); });
+        pop.appendChild(el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Senses'), sensesIn));
+        if (obj && (obj.senses || []).length) pop.appendChild(el('div', { class: 'hint' }, 'This entry has: ' + obj.senses.map((x) => x.number + (x.gloss ? ' ' + x.gloss : '')).join(' · ')));
+        pop.appendChild(el('hr'));
+      } else {
+        pop.appendChild(el('div', { class: 'row' }, el('b', {}, 'Lines to show')));
+        const names = { txt: 'Word', morph: 'Morphemes', mgls: 'Morph glosses', cf: 'Lex. entries', gls: 'Word gloss', pos: 'Category', ft: 'Free translation', lit: 'Literal translation', note: 'Notes' };
+        const current = spec.lines && spec.lines.length ? spec.lines : R.DEFAULT_LINES;
+        for (const l of R.LINES) {
+          const cb = el('input', { type: 'checkbox', checked: current.includes(l) });
+          cb.addEventListener('change', () => {
+            const set = new Set(current);
+            cb.checked ? set.add(l) : set.delete(l);
+            spec.lines = R.LINES.filter((x) => set.has(x));
+            opts.onSpecChange && opts.onSpecChange(spec);
+          });
+          pop.appendChild(el('label', { class: 'row', style: { gap: '8px' } }, cb, names[l]));
+        }
+        pop.appendChild(el('hr'));
       }
-      pop.appendChild(el('hr'));
       if (spec.kind === 'text' && obj && obj.wsOptions) {
         // Which writing system each line shows. FLEx keeps every alternative on each string;
         // the text's own vernacular WS and the default analysis WS are the defaults.
@@ -537,9 +558,13 @@
     const box = el('div', { class: 'flex-obj entry-card' + (obj.cached ? ' cached' : '') });
     const hw = el('span', Object.assign({ class: 'headword' }, wsAttrs(vern)), obj.headword || obj.lexemeForm || '?');
     if (obj.homograph) hw.appendChild(el('sub', {}, String(obj.homograph)));
+    const F = new Set(R.entryFields(spec));
     const head = el('div', { class: 'flex-head' + (opts.inCell ? ' compact' : '') }, hw);
-    if (obj.citationForm && obj.citationForm !== obj.headword && obj.citationForm !== obj.lexemeForm) head.appendChild(el('span', Object.assign({ class: 'ecf' }, wsAttrs(vern)), obj.citationForm));
-    if (obj.morphType) head.appendChild(el('span', { class: 'mtype' }, obj.morphType));
+    if (!F.has('hn')) hw.querySelectorAll('sub').forEach((x) => x.remove());
+    if (F.has('cf') && obj.citationForm && obj.citationForm !== obj.headword && obj.citationForm !== obj.lexemeForm) head.appendChild(el('span', Object.assign({ class: 'ecf', title: 'citation form' }, wsAttrs(vern)), obj.citationForm));
+    if (F.has('lf') && obj.lexemeForm && obj.lexemeForm !== obj.headword) head.appendChild(el('span', Object.assign({ class: 'ecf', title: 'lexeme form' }, wsAttrs(vern)), obj.lexemeForm));
+    if (F.has('mt') && obj.morphType) head.appendChild(el('span', { class: 'mtype' }, obj.morphType));
+    if (spec.label) head.appendChild(el('span', { class: 'badge' }, spec.label));
     if (obj.cached) head.appendChild(el('span', { class: 'badge warn', title: obj.liveError || '' }, 'cached' + (obj.cachedAt ? ' ' + obj.cachedAt.slice(0, 10) : '')));
     head.appendChild(el('span', { class: 'spacer' }));
     head.appendChild(el('button', { class: 'lnk', title: 'Reload from FLEx', onclick: () => opts.refresh && opts.refresh() }, '↻'));
@@ -547,16 +572,24 @@
     if (obj.url) head.appendChild(el('a', { href: obj.url, onclick: (e) => { e.preventDefault(); openInFlex(obj.url); } }, 'Open in FLEx ↗'));
     if (opts.editable) head.appendChild(el('button', { class: 'lnk', onclick: (e) => embedMenu(e.currentTarget, spec, opts, obj) }, '⋯'));
     box.appendChild(head);
-    for (const s of obj.senses || []) {
+    if (F.has('note') && obj.note) box.appendChild(el('div', { class: 'enote' }, obj.note));
+    const shown = R.visibleSenses(spec, obj.senses);
+    for (const s of shown) {
       const focus = spec.kind === 'sense' && s.guid === spec.guid;
-      const sd = el('div', { class: 'sense' + (focus ? ' focus' : '') },
-        el('span', { class: 'sn' }, s.number || ''),
-        el('div', { style: { flex: 1 } },
-          el('div', {}, s.pos ? el('span', { class: 'pos' }, s.pos) : null, el('span', { class: 'gl', lang: anal.tag || null }, s.gloss || ''), s.definition && s.definition !== s.gloss ? el('span', { class: 'def' }, (s.gloss ? ' — ' : '') + s.definition) : null),
-          ...(s.examples || []).map((ex) => el('div', { class: 'ex' }, el('span', Object.assign({ class: 'v' }, wsAttrs(vern)), ex.text || ''), ex.translation ? el('span', {}, '  ‘' + ex.translation + '’') : null))));
+      const line = el('div', {});
+      if (F.has('spos') && s.pos) line.appendChild(el('span', { class: 'pos' }, s.pos));
+      if (F.has('gl')) line.appendChild(el('span', { class: 'gl', lang: anal.tag || null }, s.gloss || ''));
+      if (F.has('def') && s.definition && (s.definition !== s.gloss || !F.has('gl'))) line.appendChild(el('span', { class: 'def' }, (F.has('gl') && s.gloss ? ' — ' : '') + s.definition));
+      const body = el('div', { style: { flex: 1 } }, line);
+      if (F.has('sem') && (s.domains || []).length) body.appendChild(el('div', { class: 'sem' }, s.domains.join('; ')));
+      if (F.has('ex')) for (const ex of s.examples || []) body.appendChild(el('div', { class: 'ex' }, el('span', Object.assign({ class: 'v' }, wsAttrs(vern)), ex.text || ''), F.has('tr') && ex.translation ? el('span', {}, '  ‘' + ex.translation + '’') : null));
+      if (F.has('snote') && s.note) body.appendChild(el('div', { class: 'snote' }, s.note));
+      const sd = el('div', { class: 'sense level' + Math.min(3, s.level || 0) + (focus ? ' focus' : '') },
+        el('span', { class: 'sn' }, F.has('sn') ? (s.number || '') : ''), body);
       box.appendChild(sd);
     }
     if (!(obj.senses || []).length) box.appendChild(el('div', { class: 'seg-empty' }, 'No senses.'));
+    else if (!shown.length) box.appendChild(el('div', { class: 'seg-empty' }, 'No sense selected (⋯ → Senses).'));
     return box;
   }
 

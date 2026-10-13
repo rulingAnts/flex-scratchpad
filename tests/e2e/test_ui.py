@@ -1162,3 +1162,32 @@ def test_insert_into_cell_keeps_the_place(app):
     assert "Refreshed" in page.locator(".toast").last.inner_text()
     assert page.locator("table.md-table").count() == 1
     assert not errors
+
+
+def test_entry_fields_and_senses_menu(app):
+    h, page, errors = app
+    new_note(page, "Entry fields")
+    page.keyboard.type("{{flex:entry %s}}" % "6a5f3a2e-1b1e-4c2a-9f10-0d2c1a7e0001")
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#editor .entry-card .sense")
+    assert page.locator("#editor .entry-card .sense").count() == 3            # 1, 2, 2.1
+    assert page.locator("#editor .entry-card .sense.level1").count() == 1
+    page.locator("#editor .entry-card .flex-head .lnk", has_text="⋯").click()
+    page.wait_for_selector(".popover")
+    assert page.locator(".popover b", has_text="Senses fields").count() == 1
+    assert page.locator(".popover", has_text="Lines to show").count() == 0
+    # definitions off
+    page.locator(".popover label", has_text="Definition").locator("input").click()
+    page.wait_for_function("() => document.querySelectorAll('#editor .entry-card .def').length === 0")
+    # only sense 2 (which brings 2.1)
+    sens = page.locator(".popover input[title*='Which senses']")
+    sens.fill("2")
+    sens.dispatch_event("change")
+    page.wait_for_function("() => document.querySelectorAll('#editor .entry-card .sense').length === 2")
+    # sub-senses off → just sense 2
+    page.locator(".popover label", has_text="Sub-senses").locator("input").click()
+    page.wait_for_function("() => document.querySelectorAll('#editor .entry-card .sense').length === 1")
+    page.wait_for_timeout(900)
+    body = body_of(h)
+    assert "fields=cf,mt,hn,sn,spos,gl,ex,tr senses=2" in body, body
+    assert not errors

@@ -547,17 +547,19 @@ class FlexiconBackend:
         d["homograph"] = int(_t(lambda: e.HomographNumber, 0) or 0)
         d["ws"] = self._writing_systems()
         d["url"] = self._goto(e, "entry")
-        senses = _t(lambda: list(e.AllSenses), None)
-        if senses is None:
-            senses = _t(lambda: list(e.SensesOS), [])
-        for s in senses:
+        d["note"] = self._anal_text(_t(lambda: e.Comment, None))
+        # senses and sub-senses in FLEx order (SensesOS, each sense's own SensesOS), numbered as
+        # FLEx numbers them ("2.1"); flat in the dict, with level / parent for the renderer
+        def walk(s, number):
             s = self._c(s)
             sd = model.make_sense(
                 _guid(s),
-                _s(_t(lambda: p.LexiconGetSenseNumber(s), "")),
+                _s(_t(lambda: p.LexiconGetSenseNumber(s), "")) or number,
                 _s(_t(lambda: p.LexiconGetSenseGloss(s), "")),
                 _s(_t(lambda: p.LexiconGetSenseDefinition(s), "")),
                 _s(_t(lambda: p.LexiconGetSensePOS(s), "")),
+                note=self._anal_text(_t(lambda: s.GeneralNote, None)),
+                domains=[x for x in (self._anal_text(_t(lambda: self._c(dm).Name, None)) or _s(_t(lambda: self._c(dm).ShortName, "")) for dm in _t(lambda: list(s.SemanticDomainsRC), [])) if x],
             )
             for ex in _t(lambda: list(s.ExamplesOS), []):
                 ex = self._c(ex)
@@ -567,6 +569,10 @@ class FlexiconBackend:
                     "translation": _s(_t(lambda: p.Examples.GetTranslation(ex), "")),
                 })
             d["senses"].append(sd)
+            for j, sub in enumerate(_t(lambda: list(s.SensesOS), []), 1):
+                walk(sub, f"{sd['number']}.{j}")
+        for i, s in enumerate(_t(lambda: list(e.SensesOS), []), 1):
+            walk(s, str(i))
         d["pos"] = d["senses"][0]["pos"] if d["senses"] else ""
         return d
 

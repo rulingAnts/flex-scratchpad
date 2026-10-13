@@ -150,15 +150,20 @@ def make_morph(form: str, gls: str = "", msa: str = "", cf: str = "", prefix: st
 def empty_entry(guid: str, headword: str = "") -> dict:
     return {
         "kind": "entry", "guid": guid, "headword": headword, "lexemeForm": "", "citationForm": "",
-        "morphType": "", "homograph": 0, "pos": "", "ws": {"vern": make_ws(), "anal": make_ws()},
+        "morphType": "", "homograph": 0, "pos": "", "note": "", "ws": {"vern": make_ws(), "anal": make_ws()},
         "senses": [], "url": "",
     }
 
 
 def make_sense(guid: str, number: str, gloss: str = "", definition: str = "", pos: str = "",
-               examples: list[dict] | None = None) -> dict:
+               examples: list[dict] | None = None, note: str = "", domains: list[str] | None = None) -> dict:
+    """One sense. `senses` on an entry is FLAT and in FLEx order; a sub-sense is the sense whose
+    number has a dot (`2.1`), `level` = depth, `parent` = the number it hangs under."""
+    number = number or ""
     return {"guid": guid, "number": number, "gloss": gloss, "definition": definition,
-            "pos": pos, "examples": list(examples or [])}
+            "pos": pos, "examples": list(examples or []), "note": note or "",
+            "domains": list(domains or []),
+            "level": number.count("."), "parent": number.rsplit(".", 1)[0] if "." in number else ""}
 
 
 # --------------------------------------------------------------------------- tokenising
@@ -287,8 +292,9 @@ def searchable_text(obj: dict) -> str:
     parts: list[str] = []
     if obj.get("kind") == "entry":
         parts += [obj.get("headword", ""), obj.get("lexemeForm", ""), obj.get("citationForm", ""), obj.get("pos", "")]
+        parts.append(obj.get("note", ""))
         for s in obj.get("senses", []):
-            parts += [s.get("gloss", ""), s.get("definition", ""), s.get("pos", "")]
+            parts += [s.get("gloss", ""), s.get("definition", ""), s.get("pos", ""), s.get("note", "")] + list(s.get("domains", []))
             for ex in s.get("examples", []):
                 parts += [ex.get("text", ""), ex.get("translation", "")]
     elif obj.get("kind") == "text":

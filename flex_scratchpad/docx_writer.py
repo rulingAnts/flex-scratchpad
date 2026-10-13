@@ -277,18 +277,32 @@ class Docx:
         return out
 
     def entry(self, block: dict) -> list[str]:
-        out = [self.para([{"text": block.get("headword", ""), "b": True, "color": "#00379c", "size": 13, "font": block.get("font")},
-                          {"text": ("  " + block["pos"]) if block.get("pos") else "", "i": True, "color": "#7a3e9d"}])]
+        head = [{"text": block.get("headword", ""), "b": True, "color": "#00379c", "size": 13, "font": block.get("font")}]
+        for k in ("citationForm", "lexemeForm"):
+            if block.get(k):
+                head.append({"text": "  " + block[k], "color": "#68717d", "font": block.get("font")})
+        if block.get("morphType"):
+            head.append({"text": "  " + block["morphType"], "i": True, "color": "#a8b0ba"})
+        elif block.get("pos") and not block.get("senses"):
+            head.append({"text": "  " + block["pos"], "i": True, "color": "#7a3e9d"})
+        out = [self.para(head)]
+        if block.get("note"):
+            out.append(self.para([{"text": block["note"], "i": True, "color": "#68717d"}], extra='<w:ind w:left="360"/>'))
         for s in block.get("senses", []):
-            runs = [{"text": f"{s.get('number', '')}  ", "color": "#68717d"}]
+            indent = 360 + 360 * int(s.get("level", 0) or 0)
+            runs = [{"text": f"{s.get('number', '')}  " if s.get("number") else "", "color": "#68717d"}]
             if s.get("pos"):
                 runs.append({"text": s["pos"] + " ", "i": True, "color": "#7a3e9d"})
             runs.append({"text": s.get("gloss", ""), "b": True, "color": "#2a6e2a"})
             if s.get("definition") and s.get("definition") != s.get("gloss"):
-                runs.append({"text": " — " + s["definition"]})
-            out.append(self.para(runs, extra='<w:ind w:left="360"/>'))
+                runs.append({"text": (" — " if s.get("gloss") else "") + s["definition"]})
+            out.append(self.para(runs, extra=f'<w:ind w:left="{indent}"/>'))
+            if s.get("domains"):
+                out.append(self.para([{"text": "; ".join(s["domains"]), "color": "#68717d", "size": 9}], extra=f'<w:ind w:left="{indent + 360}"/>'))
             for ex in s.get("examples", []):
-                out.append(self.para([{"text": ex.get("text", ""), "color": "#00379c", "font": block.get("font")}, {"text": ("  ‘" + ex["translation"] + "’") if ex.get("translation") else ""}], extra='<w:ind w:left="720"/>'))
+                out.append(self.para([{"text": ex.get("text", ""), "color": "#00379c", "font": block.get("font")}, {"text": ("  ‘" + ex["translation"] + "’") if ex.get("translation") else ""}], extra=f'<w:ind w:left="{indent + 360}"/>'))
+            if s.get("note"):
+                out.append(self.para([{"text": s["note"], "i": True, "color": "#68717d"}], extra=f'<w:ind w:left="{indent + 360}"/>'))
         return out
 
     def image(self, block: dict) -> str:
