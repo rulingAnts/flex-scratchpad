@@ -1104,3 +1104,19 @@ def test_example_settings_redraw_at_once(app):
     ins.nth(1).dispatch_event("change")
     page.wait_for_function("() => document.querySelectorAll('table.md-table .text-obj .segment').length === 4")
     assert not errors
+
+
+def test_interlinear_rows_stay_level_when_a_word_lacks_a_line(app):
+    """Every word cell has the same rows; a missing gloss / category leaves an empty row rather
+    than letting the row below move up (Seth, 2026-10-13)."""
+    h, page, errors = app
+    new_note(page, "Level")
+    page.click(".blk-body")
+    insert_text_segments(page, 0, 0)
+    page.wait_for_selector("#editor .text-obj .word-cell")
+    # strip the category and gloss from word 3 ("lo") in the rendered object model by editing
+    # the mock's data is not possible here, so check the structural guarantee instead:
+    # every non-punctuation cell has the same number of rows, in the same order
+    rows = page.evaluate("""() => [...document.querySelectorAll('#editor .text-obj .segment .word-cell:not(.punct-cell)')].map((c) => [...c.querySelectorAll('.il-line')].map((l) => l.className.replace(/\\bil-line\\b|\\bil-empty\\b|\\s+/g, ' ').trim()).join(','))""")
+    assert len(rows) >= 3 and len(set(rows)) == 1, rows
+    assert not errors

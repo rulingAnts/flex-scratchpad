@@ -228,6 +228,13 @@
     const main = el('div', { class: 'seg-main' });
     const wordRow = el('div', Object.assign({ class: 'word-row' }, vern.rtl ? { dir: 'rtl' } : {}));
     let w = 0;
+    // Every word cell carries the SAME rows, in the same order — a row a word has nothing for
+    // is an empty placeholder, so the rows stay level across the segment (Seth, 2026-10-13:
+    // "if there's a blank cell, then the row beneath it fills it in. We don't want that").
+    // Rows no word in the segment has at all are left out.
+    const hasLine = (word, line) => line === 'txt' || (line === 'morph' && !!(word.morphs && word.morphs.length)) || (line === 'mgls' && !!(word.morphs && word.morphs.some((m) => m.gls))) || (line === 'cf' && !!(word.morphs && word.morphs.some((m) => m.cf))) || (line === 'gls' && !!word.gls) || (line === 'pos' && !!word.pos);
+    const realWords = (seg.words || []).filter((x) => !x.punct);
+    const present = lines.filter((line) => ['txt', 'morph', 'mgls', 'cf', 'gls', 'pos'].includes(line) && realWords.some((x) => hasLine(x, line)));
     (seg.words || []).forEach((word) => {
       if (word.punct) {
         wordRow.appendChild(el('div', { class: 'word-cell punct-cell' }, el('div', Object.assign({ class: 'il-line il-txt' }, wsAttrs(vern)), word.txt)));
@@ -237,13 +244,15 @@
       const wi = w;                      // this cell's ordinal — captured per cell, not the loop counter
       const cell = el('div', { class: 'word-cell', dataset: { w: wi } });
       const sf = (line) => R.stylesFor(index, seg.n, line, wi);
-      for (const line of lines) {
+      const blank = (cls) => el('div', { class: 'il-line il-empty ' + cls, html: '&nbsp;' });
+      for (const line of present) {
         if (line === 'txt') cell.appendChild(el('div', Object.assign({ class: 'il-line il-txt', html: styled(word.txt || '', sf('txt')) }, wsAttrs(vern))));
-        else if (line === 'morph' && word.morphs && word.morphs.length) cell.appendChild(el('div', Object.assign({ class: 'il-line il-morph', html: styledParts(word.morphs.map((m) => m.form || ''), sf('morph')) }, wsAttrs(vern))));
-        else if (line === 'mgls' && word.morphs && word.morphs.length) cell.appendChild(el('div', { class: 'il-line il-mgls', lang: anal.tag || null, html: styledParts(word.morphs.map((m) => m.gls || ''), sf('mgls')) }));
-        else if (line === 'cf' && word.morphs && word.morphs.some((m) => m.cf)) cell.appendChild(el('div', { class: 'il-line il-cf', html: styledParts(word.morphs.map((m) => m.cf || ''), sf('cf')) }));
-        else if (line === 'gls' && word.gls) cell.appendChild(el('div', { class: 'il-line il-gls', lang: anal.tag || null, html: styled(word.gls, sf('gls')) }));
-        else if (line === 'pos' && word.pos) cell.appendChild(el('div', { class: 'il-line il-pos', html: styled(word.pos, sf('pos')) }));
+        else if (!hasLine(word, line)) cell.appendChild(blank('il-' + line));
+        else if (line === 'morph') cell.appendChild(el('div', Object.assign({ class: 'il-line il-morph', html: styledParts(word.morphs.map((m) => m.form || ''), sf('morph')) }, wsAttrs(vern))));
+        else if (line === 'mgls') cell.appendChild(el('div', { class: 'il-line il-mgls', lang: anal.tag || null, html: styledParts(word.morphs.map((m) => m.gls || ''), sf('mgls')) }));
+        else if (line === 'cf') cell.appendChild(el('div', { class: 'il-line il-cf', html: styledParts(word.morphs.map((m) => m.cf || ''), sf('cf')) }));
+        else if (line === 'gls') cell.appendChild(el('div', { class: 'il-line il-gls', lang: anal.tag || null, html: styled(word.gls, sf('gls')) }));
+        else if (line === 'pos') cell.appendChild(el('div', { class: 'il-line il-pos', html: styled(word.pos, sf('pos')) }));
       }
       if (opts.editable) {
         cell.addEventListener('click', (e) => {

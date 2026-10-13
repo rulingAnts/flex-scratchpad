@@ -246,6 +246,7 @@ body.md-hide .blk-code .md-marker { display: inline; }
 .punct-cell { cursor: default; }
 .punct-cell:hover { background: none; }
 .il-line { white-space: nowrap; line-height: 1.35; }
+.il-line.il-empty { min-height: 1.35em; }
 .il-txt { color: var(--vern); font-family: var(--font-vern); font-size: 17px; }
 .il-morph { color: var(--morph); font-family: var(--font-vern); font-size: 14px; display: flex; gap: 6px; }
 .il-mgls { color: var(--gloss); font-size: 13px; display: flex; gap: 6px; }
