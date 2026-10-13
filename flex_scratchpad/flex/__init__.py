@@ -348,11 +348,17 @@ class FlexService:
                     cells[0], numbered = m.group(1), True
             # a label followed by a space instead of a tab ("Free she caught it.")
             if len(cells) == 1:
-                m = re.match(r"^(" + "|".join(re.escape(k) for k in self._ROW_KEEP + self._ROW_DROP) + r")\s+(\S.*)$", cells[0], re.I)
+                labels = sorted(self._ROW_KEEP + self._ROW_DROP, key=len, reverse=True)   # "word gloss" before "word"
+                if cells[0].rstrip(":").casefold() in labels:
+                    continue                                                                 # an empty labelled row
+                m = re.match(r"^(" + "|".join(re.escape(k) for k in labels) + r")\s+(\S.*)$", cells[0], re.I)
                 if m:
                     cells = [m.group(1), m.group(2)]
             cells = [c for c in cells if c not in ("§", "¶")]
             if not cells:
+                continue
+            # the Print view's second analysis language: a bare "Ind" line under "Free Eng …"
+            if len(cells) == 1 and cur is not None and cur["free"] and re.fullmatch(r"[A-Za-z]{2,3}", cells[0]):
                 continue
             label = cells[0].rstrip(":").casefold() if len(cells) > 1 else ""
             is_morph = label.startswith("morphemes")

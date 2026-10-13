@@ -311,6 +311,17 @@ def test_locate_rows_without_a_word_row(tmp_path):
     two = pasted + "1.2\tMorphemes\tHaŋa\ttiket\tka-\tsila\t-mo\tpemu\n\tLex. Gloss\tyesterday\tchild\t3SG-\tsee\t-PST\triver\nFree Yesterday the child saw the river.\n"
     hits = svc.locate(two)
     assert hits and hits[0]["seg"] == 1 and hits[0]["segTo"] == 2 and hits[0]["matched"] == 2 and hits[0]["of"] == 2, hits
+    # the Print tab's shape (Seth's exact paste, 2026-10-13): Word row, empty Word Gloss row,
+    # "Free Eng …" with bidi marks, and a bare "Ind" line for the second analysis language
+    print_tab = ("1.1\tWord\tKabir\tka-nuwa-mo\tlo\t\t\n"
+                 "\tLex. Gloss\tdog\t3SG-\tsleep\t-PST\tDECL\n"
+                 "\tWord Gloss\t\t\t\t\t\n"
+                 "\u200eFree \u200eEng\u200e \u200e\u200eThe dog slept.\n"
+                 "\u200e \u200eInd\u200e \u200e\u200e\n")
+    hits = svc.locate(print_tab)
+    assert hits and hits[0]["seg"] == 1 and hits[0]["segTo"] == 1 and hits[0]["of"] == 1, hits
+    hits = svc.locate(print_tab + print_tab.replace("1.1", "1.2").replace("Kabir\tka-nuwa-mo\tlo", "Haŋa\ttiket\tka-sila-mo\tpemu").replace("The dog slept.", "Yesterday the child saw the river."))
+    assert hits and hits[0]["seg"] == 1 and hits[0]["segTo"] == 2 and hits[0]["matched"] == 2 and hits[0]["of"] == 2, hits
     # a Morphemes row under a Word row changes nothing
     assert svc.locate("Word\tKabir\tka-nuwa-mo\tlo\nMorphemes\tKabir\tka-\tnuwa\t-mo\tlo\nFree\tThe dog slept.")[0]["seg"] == 1
 
