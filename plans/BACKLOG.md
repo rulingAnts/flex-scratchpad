@@ -56,3 +56,37 @@ snapshot cache is already per project (`.scratchpad/flex-cache/<project>/`). Wha
 - **Links:** `open_in_flex` already passes the project in the URL, so a link to a closed project
   still opens FLEx on the right object.
 - **Settings:** `notebook.json` `flex.project` becomes a default plus a list of known projects.
+
+## Getting the SELECTED object out of FLEx with precision (research, Seth, 2026-10-13)
+
+> *"Is there ANY possible way for our app to inject a keyboard shortcut, context menu item, or
+> otherwise that would pass the GUID of the currently selected item to our app (or to the
+> clipboard so we can paste it in our app)? And with more precision than just the whole text?"*
+
+What is known so far, to be verified on a Windows machine with FieldWorks installed:
+
+- **What FLEx gives today.** *Edit → Copy Location as Hyperlink* puts the CURRENT RECORD on the
+  clipboard: the entry in the Lexicon, the wordform in Word Analyses, the whole text in the
+  interlinear views (an `StText`/`Text` guid, never a segment). Copying lines from the
+  interlinear view gives tab-separated rows, which the app already resolves to the exact
+  segment (`FlexService.locate`). Together they are already precise: text guid + lines.
+- **Inside FLEx.** The menus and commands come from XML (`Language Explorer/Configuration/…`,
+  xCore `Main.xml` in FW ≤ 9) but every command maps to a C# handler; there is no "run external
+  program" command and no scripting hook. The supported extension point is a *Utility*
+  (Tools → Utilities, an `IUtility` implementation in a DLL built against the FieldWorks
+  assemblies) — a utility can read the current selection through the FLEx services and write to
+  the clipboard, but it needs a compiled DLL per FW version and is invoked from a dialog, not a
+  shortcut. Worth a prototype only if the clipboard route proves insufficient.
+- **Outside FLEx (no FLEx change).** The app can register a global hotkey on Windows
+  (`RegisterHotKey` via ctypes, no server, no extra dependency) and, when pressed with FLEx in
+  front, drive FLEx through `SendInput`: Ctrl+C (the selected lines) then the *Edit* menu's
+  *Copy Location as Hyperlink* item (Alt+E, its accelerator letter — FLEx has no default key for
+  it), read both clipboards, and open the picker on the exact segment. Fragile across FLEx
+  versions and keyboard layouts, but it needs nothing installed into FLEx. UI Automation cannot
+  read the interlinear selection: the views are custom-drawn (RootSite), and expose no text
+  pattern.
+- **Reading FLEx's state from disk.** `Settings/…/db$local$Settings.xml` records the current
+  record per tool, but only when the tool changes or FLEx exits — not live.
+
+Decision deferred ("a research question for later"). First candidate to try: the global hotkey +
+two clipboard reads, since the segment-level match already exists in the app.
