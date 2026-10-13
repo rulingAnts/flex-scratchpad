@@ -88,5 +88,26 @@ What is known so far, to be verified on a Windows machine with FieldWorks instal
 - **Reading FLEx's state from disk.** `Settings/…/db$local$Settings.xml` records the current
   record per tool, but only when the tool changes or FLEx exits — not live.
 
-Decision deferred ("a research question for later"). First candidate to try: the global hotkey +
-two clipboard reads, since the segment-level match already exists in the app.
+**Chosen (Seth, 2026-10-13: "I like your idea for the combination of copy location + copy text
+and getting the exact item from there"). Design, to build when it comes up:**
+
+1. `flex_scratchpad/hotkey.py` (Windows only, ctypes, no new dependency): a thread with
+   `RegisterHotKey` + a message loop; default **Ctrl+Alt+F**, changeable in Settings; nothing is
+   registered on other platforms or when the setting is off.
+2. On the key, with FieldWorks in front (`GetForegroundWindow` title contains "FieldWorks"):
+   - `SendInput` Ctrl+C, wait for the clipboard sequence number to change, read the text
+     (the selected interlinear lines, or a headword / baseline fragment).
+   - Open FLEx's Edit menu with Alt+E and pick *Copy Location as Hyperlink* — NOT by typing a
+     letter (Cut / Copy / Copy Location… share one), but by walking the open menu with
+     `GetMenu`/`GetMenuItemCount`/`GetMenuString` to find the item's position and sending that
+     many Down presses + Enter; if the menu cannot be read, skip this step and rely on the text.
+     Read the clipboard again: `silfw://…guid=<text or entry guid>`.
+   - Restore the user's original clipboard contents afterwards.
+3. Hand both to the app window (`window.evaluate_js`): `flex_resolve_link` narrows to the object
+   (text / entry / wordform), `locate` finds the segment(s) inside THAT text (scored on the
+   pasted lines); the existing chooser offers *Insert rendered / Insert link / Paste as text*,
+   with the picker on the exact range. With no hyperlink the match runs across all texts and
+   the chooser lists candidates when more than one text matches.
+4. Nothing is installed into FLEx; FLEx versions and keyboard layouts are the risk, so every
+   step degrades to the next weaker one and the worst case is "copy it by hand", which works
+   today.
