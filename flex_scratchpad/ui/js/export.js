@@ -106,6 +106,7 @@
   async function buildDoc(note, editor) {
     const blocks = [];
     const numCtx = { counters: [] };                        // outline numbering carried across blocks
+    let exNum = 0;                                          // (1), (2)… for embeds flagged `ex`
     for (const b of editor.blocks) {
       if (b.type !== 'list' && b.type !== 'p') numCtx.counters = [];
       if (b.type === 'p' || b.type === 'quote') {
@@ -131,7 +132,13 @@
         blocks.push({ type: 'hr' });
       } else if (b.type === 'flex') {
         const spec = R.parse(b.src);
-        if (spec) { try { blocks.push(await flexBlock(spec)); } catch (e) { blocks.push({ type: 'p', runs: [{ text: '[FLEx object unavailable: ' + (e.message || e) + ']', color: '#c0392b' }] }); } }
+        if (spec) {
+          const x = spec.extra || {};
+          const layout = { exNum: x.ex ? '(' + (++exNum) + ')' : '', indent: Math.max(0, Math.min(4, parseInt(x.indent, 10) || 0)) };
+          let blk;
+          try { blk = await flexBlock(spec); } catch (e) { blk = { type: 'p', runs: [{ text: '[FLEx object unavailable: ' + (e.message || e) + ']', color: '#c0392b' }] }; }
+          blocks.push(Object.assign(blk, layout));
+        }
       } else if (b.type === 'table') {
         const t = FS.tables.parse(b.src);
         const rows = [];
@@ -185,6 +192,7 @@
   table.note.striped tbody tr:nth-child(even) td { background: #f7f8fa; } table.note.borders-light th, table.note.borders-light td { border-color: #e8ebef; } table.note.borders-none th, table.note.borders-none td { border-color: transparent; }
   .obj { border: 1px solid #e8ebef; border-radius: 10px; padding: 10px 12px; margin: 8px 0 14px; background: #fff; }
   .obj .ttl { font-weight: 700; color: #00379c; font-family: "Charis SIL", "Doulos SIL", serif; font-size: 15px; } .obj .lbl { color: #68717d; font-size: 13px; margin-left: 10px; }
+  .exrow { display: flex; gap: 10px; align-items: flex-start; } .exrow .exn { flex: none; min-width: 30px; padding-top: 14px; color: #68717d; } .exrow .exbody { flex: 1 1 auto; min-width: 0; }
   .seg { display: flex; gap: 10px; padding: 5px 0; border-top: 1px dotted #e8ebef; } .seg:first-of-type { border-top: 0; } .n { color: #a8b0ba; font-size: 12px; width: 26px; text-align: right; flex: none; }
   .il { display: flex; flex-wrap: wrap; gap: 0 14px; } .w { display: flex; flex-direction: column; } .l { white-space: nowrap; line-height: 1.35; }
   .txt { color: #00379c; font-family: "Charis SIL", "Doulos SIL", serif; font-size: 17px; } .morph { color: #4a4f57; font-family: "Charis SIL", serif; font-size: 14px; } .mgls, .gls { color: #2a6e2a; font-size: 13.5px; } .cf { color: #68717d; font-size: 12.5px; } .pos { color: #7a3e9d; font-size: 12px; }
@@ -211,6 +219,11 @@
   const runsHtml = (runs) => (runs || []).map(runHtml).join('');
 
   function blockHtml(b) {
+    const inner = blockHtmlInner(b);
+    if (!b.exNum && !b.indent) return inner;
+    return '<div class="exrow"' + (b.indent ? ' style="margin-left:' + (b.indent * 24) + 'px"' : '') + '>' + (b.exNum ? '<span class="exn">' + esc(b.exNum) + '</span>' : '') + '<div class="exbody">' + inner + '</div></div>';
+  }
+  function blockHtmlInner(b) {
     switch (b.type) {
       case 'h': return '<h' + b.level + '>' + runsHtml(b.runs) + '</h' + b.level + '>';
       case 'p': return '<p' + (b.rtl ? ' dir="rtl"' : '') + '>' + runsHtml(b.runs) + '</p>';

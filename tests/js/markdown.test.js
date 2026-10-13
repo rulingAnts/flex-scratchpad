@@ -82,7 +82,7 @@ test('tables: freeze panes and height round-trip through the style line', () => 
 
 test('tables: merged cells live in the style line and split/merge keep them', () => {
   const T = FS.tables;
-  const t = T.parse('| a | b | c |\n|---|---|---|\n| 1 | 2 | 3 |\n| 4 | 5 | 6 |\n| 7 | 8 | 9 |');
+  const t = FS.tables.parse('| a | b | c |\n|---|---|---|\n| 1 | 2 | 3 |\n| 4 | 5 | 6 |\n| 7 | 8 | 9 |');
   assert.ok(T.mergeCell(t, 1, 0, 'right'));
   assert.ok(T.mergeCell(t, 1, 0, 'down'));
   assert.deepEqual(t.style.spans, { '2.1': { rows: 2, cols: 2 } });
@@ -118,7 +118,7 @@ test('tables: merged cells live in the style line and split/merge keep them', ()
 
 test('tables: a range of cells merges into one span and unmerges again', () => {
   const T = FS.tables;
-  const t = T.parse('| a | b | c |\n|---|---|---|\n| 1 | 2 | 3 |\n| 4 | 5 | 6 |\n| 7 | 8 | 9 |');
+  const t = FS.tables.parse('| a | b | c |\n|---|---|---|\n| 1 | 2 | 3 |\n| 4 | 5 | 6 |\n| 7 | 8 | 9 |');
   assert.ok(T.mergeRange(t, { r1: 1, c1: 1, r2: 2, c2: 2 }));
   assert.deepEqual(t.style.spans, { '2.2': { rows: 2, cols: 2 } });
   assert.equal(t.rows[1][1], '2<br>3<br>5<br>6');
@@ -157,4 +157,23 @@ test('outline numbers are computed per level and carry across loose-list blocks'
   assert.match(html, /<span class="md-marker md-num" data-num="1\.">\s*2\. <\/span>/);
   assert.match(html, /md-num" data-num="1\.">\s*2\. <\/span>/);
   assert.equal(html.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&'), '1. one\n  2. sub');
+});
+
+test('an embed inside a line of text becomes a chip span whose text is still the markdown', () => {
+  const g = '6a5f3a2e-1b1e-4c2a-9f10-0d2c1a7e0001';
+  const src = 'see {{flex:entry ' + g + '}} and {{flex:text ' + g + ' seg=2-3 "label"}} here';
+  const html = MD.decorate(src, 'p');
+  assert.equal(html.replace(/<[^>]+>/g, '').replace(/&quot;/g, '"'), src);
+  assert.match(html, /<span class="md-embed" contenteditable="false" data-src="\{\{flex:entry [^"]+\}\}" data-icon="📖" data-title="entry 6a5f3a2e…">/);
+  assert.match(html, /data-icon="¶" data-title="label" data-range="2–3"/);
+  // a whole-line embed is not inline (it is a block of its own)
+  assert.equal(MD.splitBlocks('{{flex:entry ' + g + '}}')[0].type, 'flex');
+  assert.equal(MD.splitBlocks(src)[0].type, 'p');
+});
+
+test('tables: a row height round-trips through the style line', () => {
+  const t = FS.tables.parse('| a | b |\n|---|---|\n| 1 | 2 |\n{table: row 2: height 48px; col 1: width 120px}');
+  assert.equal(t.style.rows[2].height, '48px');
+  assert.equal(t.style.cols[1].width, '120px');
+  assert.match(FS.tables.serialize(t), /row 2: height 48px/);
 });

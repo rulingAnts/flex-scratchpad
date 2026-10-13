@@ -48,6 +48,20 @@ def test_docx_is_a_valid_package_with_the_content(tmp_path):
     ET.fromstring(z.read("word/_rels/document.xml.rels"))
 
 
+def test_docx_numbered_indented_examples():
+    """`ex` / `indent=N` on an embed: (n) above the example, the whole example stepped in."""
+    doc = {"title": "Ex", "blocks": [
+        dict(DOC["blocks"][5], exNum="(1)", indent=2),                       # the interlinear
+        dict(DOC["blocks"][6], exNum="(2)", indent=1),                       # the entry
+    ]}
+    xml = zipfile.ZipFile(__import__("io").BytesIO(build_docx(doc))).read("word/document.xml").decode("utf-8")
+    ET.fromstring(xml)
+    assert xml.index(">(1)<") < xml.index(">Kabir<") and xml.index(">(2)<") < xml.index(">kabir<")
+    assert '<w:tblInd w:w="720" w:type="dxa"/>' in xml                       # the interlinear grid, 2 levels
+    assert '<w:ind w:left="1080"/>' in xml                                   # its Free line: 360 + 720
+    assert '<w:ind w:left="360"/>' in xml and '<w:ind w:left="720"/>' in xml  # entry head / sense (level 0) + 1
+
+
 def test_zip_export_import_round_trip(tmp_path):
     cfg = AppConfig(tmp_path / "cfg.json")
     api = Api(cfg, notebook_dir=tmp_path / "nb", demo=True)

@@ -56,6 +56,15 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
 
 ## Editor invariants (ui/js/editor.js, markdown.js)
 
+- An embed on a line of its own is a `flex` block (expanded, or a chip with `collapsed`). An
+  embed INSIDE a line of text is an inline chip: `decorate()` emits it as a
+  `contenteditable=false` `.md-embed` span whose text is still the raw `{{flex …}}`, the chip is
+  drawn by CSS from `data-icon/title/range` (filled by `FS.interlinear.hydrateInline`), the
+  caret never lands inside it (`outsideChip`) and Backspace removes it whole. The picker inserts
+  inline when there is text before the caret on the line, else as a block.
+- Example layout keys on a block embed (`spec.extra`): `ex` = numbered (1), (2)… through the
+  note (`renumberExamples` on every change), `indent=N` (1–4) steps it in like a list level.
+  Tab / Shift+Tab on the focused block, or the ⋯ menu. Exports carry `exNum` / `indent`.
 - A text block's `textContent` **is** the markdown. `decorate()` only wraps characters in spans;
   it must never add or remove text (the node tests check this). Empty lines render a `<br>`.
   Outline numbers are COMPUTED (`markdown.numberLines`, per level, carried across blocks by the

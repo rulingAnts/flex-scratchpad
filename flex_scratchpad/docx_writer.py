@@ -16,6 +16,7 @@ is how FLEx's own Word export lays them out and what keeps the glosses under the
 """
 from __future__ import annotations
 
+import re
 import base64
 import io
 import zipfile
@@ -132,14 +133,32 @@ class Docx:
         elif t == "table":
             self.body.append(self.table(block))
             self.body.append("<w:p/>")
-        elif t == "interlinear":
-            self.body.extend(self.interlinear(block))
-        elif t == "entry":
-            self.body.extend(self.entry(block))
+        elif t in ("interlinear", "entry"):
+            parts = self.interlinear(block) if t == "interlinear" else self.entry(block)
+            if block.get("exNum"):      # (1), (2)… on its own line above the example
+                parts.insert(0, self.para([{"text": str(block["exNum"]), "color": "#68717d"}]))
+            if block.get("indent"):
+                parts = [self._indent(x, 360 * int(block["indent"])) for x in parts]
+            self.body.extend(parts)
         elif t == "image":
             self.body.append(self.image(block))
         elif t == "wordform":
             self.body.append(self.para([{"text": block.get("form", ""), "b": True, "font": block.get("font")}, {"text": "  " + "; ".join(block.get("glosses", []))}]))
+
+    @staticmethod
+    def _indent(xml: str, twips: int) -> str:
+        """Step a paragraph or table in by `twips` (added to any indent it already has)."""
+        if xml.startswith("<w:tbl>"):
+            return xml.replace("<w:tblPr>", f'<w:tblPr><w:tblInd w:w="{twips}" w:type="dxa"/>', 1)
+        if not xml.startswith("<w:p>"):
+            return xml
+        m = re.search(r'<w:ind w:left="(\d+)"', xml)
+        if m:
+            return xml[:m.start(1)] + str(int(m.group(1)) + twips) + xml[m.end(1):]
+        ind = f'<w:ind w:left="{twips}"/>'
+        if xml.startswith("<w:p><w:pPr>"):
+            return xml.replace("<w:pPr>", "<w:pPr>" + ind, 1)
+        return "<w:p><w:pPr>" + ind + "</w:pPr>" + xml[len("<w:p>"):]
 
     def cell(self, cell: dict, width: int | None = None, shade: str = "", borders: bool = True, extra: str = "") -> str:
         tcpr = []

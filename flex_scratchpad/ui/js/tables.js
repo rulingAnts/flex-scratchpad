@@ -69,7 +69,7 @@
     for (const raw of s.split(',')) {
       const p = raw.trim();
       if (!p) continue;
-      const wm = /^(width|bg|background|color|colour|font-size|size)\s+(.+)$/i.exec(p);
+      const wm = /^(width|height|bg|background|color|colour|font-size|size)\s+(.+)$/i.exec(p);
       if (wm) { const k = wm[1].toLowerCase(); o[k === 'background' ? 'bg' : k === 'colour' ? 'color' : k === 'font-size' ? 'size' : k] = wm[2].trim(); continue; }
       if (['left', 'center', 'centre', 'right'].includes(p.toLowerCase())) { o.align = p.toLowerCase() === 'centre' ? 'center' : p.toLowerCase(); continue; }
       o[p.toLowerCase()] = true;
@@ -271,6 +271,7 @@
     const a = row.align || col.align || t.aligns[c];
     if (a) css.textAlign = a;
     if (col.width) { css.width = col.width; css.minWidth = col.width; }
+    if (row.height) css.height = row.height;
     if (row.bg || col.bg) css.background = row.bg || col.bg;
     if (row.color || col.color) css.color = row.color || col.color;
     if (row.size || col.size) css.fontSize = row.size || col.size;
@@ -375,7 +376,11 @@
         const sp = spans.anchors[r + '.' + c];
         if (sp) { if (sp.rows > 1) td.rowSpan = sp.rows; if (sp.cols > 1) td.colSpan = sp.cols; td.classList.add('merged'); }
         mountCell(td, t, r, c, widget, commit, opts);
-        if (r === 0) td.appendChild(colResizer(td, t, c, widget, commit));
+        // every cell edge resizes (Seth, 2026-10-13: columns under a merged header, "any row
+        // or column border on any cell"): the right edge the column the cell ENDS in, the
+        // bottom edge the row it ends in
+        td.appendChild(colResizer(td, t, c + (sp && sp.cols > 1 ? sp.cols - 1 : 0), widget, commit));
+        td.appendChild(rowResizer(td, t, r + (sp && sp.rows > 1 ? sp.rows - 1 : 0), widget, commit));
         tr.appendChild(td);
       });
       (r === 0 ? thead : tbody).appendChild(tr);
@@ -618,14 +623,16 @@
    * squeezed (Seth, 2026-10-12: "the table can be wider than the document content pane, if the
    * user wants"). */
   function colResizer(th, t, c, widget, commit) {
-    const h = el('div', { class: 'col-resizer', title: 'Drag to resize this column' });
+    const h = el('div', { class: 'col-resizer', title: 'Drag to resize column ' + (c + 1) + '; double-click to reset' });
     h.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
       e.preventDefault(); e.stopPropagation();
-      const startX = e.clientX, startW = th.getBoundingClientRect().width;
       const table = th.closest('table');
       const wrap = widget.container.querySelector('.tbl-wrap');
       let started = false;
       const cells = [...table.querySelectorAll('[data-c="' + c + '"]')].filter((x) => (x.colSpan || 1) === 1);
+      // the column's own width (a merged cell's edge resizes the last column it covers)
+      const startX = e.clientX, startW = cells.length ? cells[0].getBoundingClientRect().width : th.getBoundingClientRect().width / (th.colSpan || 1);
       let w = startW;
       const move = (ev) => { if (!started && Math.abs(ev.clientX - startX) < 3) return; if (!started) { started = true; h.classList.add('dragging'); document.body.classList.add('resizing'); } w = Math.max(40, Math.round(startW + ev.clientX - startX)); for (const cell of cells) { cell.style.width = w + 'px'; cell.style.minWidth = w + 'px'; } };
       const up = () => {
@@ -640,6 +647,30 @@
       document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
     });
     h.addEventListener('dblclick', (e) => { e.stopPropagation(); if (t.style.cols[c + 1]) { delete t.style.cols[c + 1].width; commit(); widget.refresh(); } });
+    return h;
+  }
+
+  /* Drag the bottom edge of any cell to set its row's height (`row N: height NNpx`). */
+  function rowResizer(td, t, r, widget, commit) {
+    const h = el('div', { class: 'row-resizer', title: 'Drag to resize row ' + (r + 1) + '; double-click to reset' });
+    h.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault(); e.stopPropagation();
+      const table = td.closest('table');
+      const cells = [...table.querySelectorAll('[data-r="' + r + '"]')].filter((x) => (x.rowSpan || 1) === 1);
+      const startY = e.clientY, startH = cells.length ? cells[0].getBoundingClientRect().height : td.getBoundingClientRect().height / (td.rowSpan || 1);
+      let started = false, hh = startH;
+      const move = (ev) => { if (!started && Math.abs(ev.clientY - startY) < 3) return; if (!started) { started = true; h.classList.add('dragging'); document.body.classList.add('resizing', 'rows'); } hh = Math.max(20, Math.round(startH + ev.clientY - startY)); for (const cell of cells) cell.style.height = hh + 'px'; };
+      const up = () => {
+        document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up);
+        h.classList.remove('dragging'); document.body.classList.remove('resizing', 'rows');
+        if (!started) return;
+        t.style.rows[r + 1] = Object.assign(t.style.rows[r + 1] || {}, { height: hh + 'px' });
+        commit(); widget.refresh();
+      };
+      document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+    });
+    h.addEventListener('dblclick', (e) => { e.stopPropagation(); if (t.style.rows[r + 1] && t.style.rows[r + 1].height) { delete t.style.rows[r + 1].height; commit(); widget.refresh(); } });
     return h;
   }
 
@@ -807,6 +838,7 @@
       const ed = el('div', { class: 'cell-edit', contenteditable: 'true', spellcheck: 'true', dir: 'auto' });
       ed.textContent = src();
       ed.innerHTML = FS.markdown.decorate(ed.textContent, 'p') || '';
+      FS.interlinear.hydrateInline(ed);
       td.appendChild(ed);
       widget.focus = { r, c };
       widget.insertText = (text) => { if (ed.isConnected) { insertAtCaret(ed, text); refresh(); } else widget.insertInto(r, c, text); };
@@ -816,7 +848,7 @@
       const refresh = () => {
         const caret = FS.editor.getCaret(ed);
         const html = FS.markdown.decorate(ed.textContent, 'p');
-        if (html !== ed.innerHTML) { ed.innerHTML = html; FS.editor.setCaret(ed, caret); }
+        if (html !== ed.innerHTML) { ed.innerHTML = html; FS.interlinear.hydrateInline(ed); FS.editor.setCaret(ed, caret); }
       };
       let composing = false;
       ed.addEventListener('compositionstart', () => { composing = true; });
@@ -1002,7 +1034,11 @@
   }
   function rowPopover(anchor, t, r, commit, widget) {
     const props = t.style.rows[r + 1] = t.style.rows[r + 1] || {};
-    propsPopover(anchor, r === 0 ? 'Header row' : 'Row ' + (r + 1), props, () => { commit(); widget.refresh(); });
+    propsPopover(anchor, r === 0 ? 'Header row' : 'Row ' + (r + 1), props, () => { commit(); widget.refresh(); }, (pop, p, onChange) => {
+      const hgt = el('input', { type: 'text', value: p.height || '', placeholder: 'e.g. 40px', style: { width: '130px' } });
+      hgt.addEventListener('change', () => { if (hgt.value.trim()) p.height = hgt.value.trim(); else delete p.height; onChange(); });
+      pop.appendChild(el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Height'), hgt));
+    });
   }
   function cellPopover(anchor, t, at, commit, widget) {
     FS.popover(anchor, (pop, close) => {

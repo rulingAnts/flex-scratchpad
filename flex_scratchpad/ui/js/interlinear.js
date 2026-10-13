@@ -552,6 +552,19 @@
         pop.appendChild(el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Segments'), a, el('span', { class: 'muted' }, '–'), b, el('span', { class: 'small muted' }, 'FLEx numbers')));
         pop.appendChild(el('hr'));
       }
+      if (opts.layout) {
+        // Numbered, indented examples in body text (Seth, 2026-10-13): `ex` numbers the block
+        // as (1), (2)… through the note; `indent=N` steps it in like a list level.
+        const x = spec.extra = spec.extra || {};
+        const cb = el('input', { type: 'checkbox', checked: !!x.ex });
+        cb.addEventListener('change', () => { if (cb.checked) x.ex = true; else delete x.ex; opts.onSpecChange && opts.onSpecChange(spec); });
+        pop.appendChild(el('label', { class: 'row', style: { gap: '8px' } }, cb, 'Number as example (1), (2)…'));
+        const lvl = () => Math.max(0, Math.min(4, parseInt(x.indent, 10) || 0));
+        const show = el('span', { class: 'muted small' }, 'level ' + lvl());
+        const step = (d) => { const n = Math.max(0, Math.min(4, lvl() + d)); if (n) x.indent = String(n); else delete x.indent; show.textContent = 'level ' + n; opts.onSpecChange && opts.onSpecChange(spec); };
+        pop.appendChild(el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Indent'), el('button', { class: 'btn small', title: 'Outdent (Shift+Tab on the block)', onclick: () => step(-1) }, '◂'), el('button', { class: 'btn small', title: 'Indent (Tab on the block)', onclick: () => step(1) }, '▸'), show));
+        pop.appendChild(el('hr'));
+      }
       if (obj && obj.url) pop.appendChild(el('button', { class: 'menu-item', onclick: () => { FS.copyText(obj.url); FS.toast('FLEx link copied'); close(); } }, 'Copy FLEx link'));
       if (spec.kind === 'text' && obj && obj.kind === 'text') pop.appendChild(el('button', { class: 'menu-item', title: 'The rows FLEx itself puts on the clipboard (Word / Morphemes / Lex. Gloss / Free …), one block per segment, the lines this example shows', onclick: () => { FS.copyText(flexTsv(spec, obj)); FS.toast('Copied as FLEx TSV'); close(); } }, 'Copy as FLEx TSV'));
       pop.appendChild(el('button', { class: 'menu-item', onclick: () => { FS.copyText(R.serialize(spec)); FS.toast('Embed code copied'); close(); } }, 'Copy embed code'));
@@ -752,14 +765,15 @@
       el('span', { class: 'muted small' }, mode.pinned ? 'Preview' : 'Preview — click the chip to keep it open'),
       el('span', { class: 'spacer' }),
       opts.editable && opts.editCell ? el('button', { class: 'lnk', title: 'Edit the cell\u2019s text (type before or after this example, add another)', onclick: () => { closeOverlay(); opts.editCell(); } }, '✎ Edit cell') : null,
+      opts.editable && opts.editInline ? el('button', { class: 'lnk', title: 'Show the embed code in the text so it can be edited', onclick: () => { closeOverlay(); opts.editInline(); } }, '✎ Edit code') : null,
       spec.kind === 'text' ? el('button', { class: 'lnk', title: 'Copy as FLEx TSV', onclick: () => { const o = inner._obj; if (o) { FS.copyText(flexTsv(spec, o)); FS.toast('Copied as FLEx TSV'); } } }, '⎘ TSV') : null,
       opts.editable && opts.duplicate ? el('button', { class: 'lnk', title: 'Duplicate this object', onclick: () => { closeOverlay(); opts.duplicate(); } }, '⧉ Duplicate') : null,
       opts.editable && opts.remove ? el('button', { class: 'lnk danger', title: 'Remove this object…', onclick: (e) => removeObject(e.currentTarget, spec, opts) }, '🗑 Remove') : null,
-      opts.editable ? el('button', { class: 'lnk', onclick: () => { closeOverlay(); setCollapsed(spec, opts, false); } }, opts.inCell ? '⤢ Show in cell' : '⤢ Expand in note') : null,
+      opts.editable ? el('button', { class: 'lnk', onclick: () => { closeOverlay(); if (opts.expandInline) opts.expandInline(); else setCollapsed(spec, opts, false); } }, opts.inCell ? '⤢ Show in cell' : '⤢ Expand in note') : null,
       el('button', { class: 'lnk', onclick: () => closeOverlay() }, '✕'));
     node.append(bar, inner);
     document.body.appendChild(node);
-    const o = { node, anchor, home: anchor.parentElement, pinned: !!mode.pinned, hovering: false };
+    const o = { node, anchor, home: anchor.parentElement, pinned: !!mode.pinned, hovering: false, find: opts.findAnchor || null };
     o.onDown = (e) => { if (!node.contains(e.target) && !(o.anchor && o.anchor.contains(e.target)) && !e.target.closest('.popover, .modal')) closeOverlay(); };
     o.onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); closeOverlay(); } };
     document.addEventListener('mousedown', o.onDown, true);
@@ -783,7 +797,7 @@
     const place = () => {
       if (!node.isConnected) return;
       if (!anchor.isConnected) {                      // the chip was re-drawn: follow its replacement
-        const again = home && home.isConnected ? home.querySelector('.flex-collapsed') : null;
+        const again = o.find ? o.find() : (home && home.isConnected ? home.querySelector('.flex-collapsed') : null);
         if (!again) { if (overlay.current === o) closeOverlay(); return; }   // the object is gone: so is its preview
         anchor = again; o.anchor = again;
       }
@@ -853,5 +867,39 @@
     await doRender(false);
   }
 
-  FS.interlinear = { render, renderText, renderEntry, renderWordform, renderChip, openOverlay, closeOverlay, isCollapsed, setCollapsed, styled, styledParts, invalidate, flexGet, openInFlex, labelOf, numberFor, flexTsv, HL_COLORS };
+  /* Inline chips in editable text (the `.md-embed` spans markdown.decorate emits): fill the
+   * title / range from the object and open the same overlay as a collapsed chip. `opts`
+   * (optional) is the owner's: onSpecChange(spec, oldSrc), duplicate(src), remove(src),
+   * expandInline(src), editInline(span); without it the chips only get their titles. */
+  function hydrateInline(root, opts) {
+    root.querySelectorAll('.md-embed[data-src]').forEach((span) => {
+      if (span.dataset.ready) return;
+      span.dataset.ready = '1';
+      const src = span.dataset.src;
+      const spec = R.parse(src);
+      if (!spec) { span.classList.add('err'); return; }
+      const kind = spec.kind === 'sense' ? 'entry' : spec.kind;
+      flexGet(kind, spec.guid, spec.kind === 'text' && spec.seg ? spec.seg[0] : null, spec.kind === 'text' && spec.seg ? spec.seg[1] : null, false, null, spec.kind === 'text' ? spec.at : null)
+        .then((obj) => { if (!span.isConnected) return; span.dataset.title = chipTitle(spec, obj); if (spec.kind === 'text') span.dataset.range = chipRange(spec, obj); if (obj.cached) span.classList.add('cached'); })
+        .catch((e) => { span.classList.add('err'); span.title = e.message || String(e); });
+      if (!opts) return;
+      const o = {
+        editable: true, inline: true,
+        onSpecChange: (s) => opts.onSpecChange && opts.onSpecChange(s, src),
+        duplicate: opts.duplicate ? () => opts.duplicate(src) : null,
+        remove: opts.remove ? () => opts.remove(src) : null,
+        expandInline: opts.expandInline ? () => opts.expandInline(src) : null,
+        editInline: opts.editInline ? () => opts.editInline(span) : null,
+        findAnchor: () => (opts.findAnchor ? opts.findAnchor(src) : null),
+      };
+      const open = (e) => { e.preventDefault(); e.stopPropagation(); openOverlay(span, spec, o, { pinned: true }); };
+      span.addEventListener('mousedown', (e) => { if (e.button === 0) e.preventDefault(); });   // keep the caret where it is
+      span.addEventListener('click', open);
+      let hoverTimer = null;
+      span.addEventListener('mouseenter', () => { if (overlay.current && overlay.current.pinned) return; hoverTimer = setTimeout(() => openOverlay(span, spec, o, { pinned: false }), 380); });
+      span.addEventListener('mouseleave', () => { clearTimeout(hoverTimer); scheduleHoverClose(); });
+    });
+  }
+
+  FS.interlinear = { render, renderText, renderEntry, renderWordform, renderChip, hydrateInline, openOverlay, closeOverlay, isCollapsed, setCollapsed, styled, styledParts, invalidate, flexGet, openInFlex, labelOf, numberFor, flexTsv, HL_COLORS };
 })();

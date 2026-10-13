@@ -1447,3 +1447,126 @@ def test_copy_example_as_flex_tsv(app):
     assert page.locator(".popover .menu-item", has_text="Copy as FLEx TSV").count() == 1
     page.keyboard.press("Escape")
     assert not errors
+
+
+def test_inline_chip_in_body_text(app):
+    """Seth, 2026-10-13: "put chips inline with text". An entry inserted mid-sentence is a chip
+    whose span text is still the embed code; Backspace removes it whole; the overlay opens on
+    click and can expand it into a block of its own."""
+    h, page, errors = app
+    new_note(page, "Inline")
+    page.locator("#editor .blk-body").first.click()
+    page.keyboard.type("Compare the word  with")
+    page.keyboard.press("ArrowLeft")
+    for _ in range(4): page.keyboard.press("ArrowLeft")
+    page.keyboard.press("Control+Shift+L")
+    page.fill(".picker input[type=text]", "kab")
+    page.wait_for_selector(".pick-item .hw")
+    page.locator(".pick-item").first.click()
+    page.wait_for_selector(".picker-preview .entry-card")
+    page.locator(".btn.primary", has_text="Insert rendered").click()
+    page.wait_for_selector("#editor .md-embed")
+    page.wait_for_function("() => /kabir/.test(document.querySelector('#editor .md-embed').dataset.title)")
+    page.wait_for_timeout(900)
+    body = body_of(h)
+    assert "Compare the word {{flex:entry 6a5f3a2e-1b1e-4c2a-9f10-0d2c1a7e0001}} with" in body, body
+    assert page.locator("#editor .blk-p").count() == 1 and page.locator("#editor .entry-card").count() == 0
+    span = page.locator("#editor .md-embed")
+    assert span.get_attribute("contenteditable") == "false"
+    assert page.evaluate("() => getComputedStyle(document.querySelector('#editor .md-embed'), '::before').content").find("kabir") >= 0
+    # click → pinned overlay with the entry; "Expand in note" makes it a block between the two halves
+    span.click()
+    page.wait_for_selector(".flex-overlay.pinned .entry-card")
+    page.locator(".flex-overlay button", has_text="Expand in note").click()
+    page.wait_for_selector("#editor .blk-flex .entry-card")
+    page.wait_for_timeout(900)
+    assert body_of(h) == "Compare the word\n\n{{flex:entry 6a5f3a2e-1b1e-4c2a-9f10-0d2c1a7e0001}}\n\nwith", body_of(h)
+    # typing an embed code into text makes a chip too; Backspace after it removes the whole chip
+    page.locator("#editor .blk-body").last.click()
+    page.keyboard.press("Control+End")
+    page.keyboard.type(" {{flex:entry 6a5f3a2e-1b1e-4c2a-9f10-0d2c1a7e0001}} end")
+    page.wait_for_selector("#editor .blk-body .md-embed")
+    page.keyboard.press("Control+End")
+    for _ in range(4): page.keyboard.press("Backspace")
+    page.wait_for_timeout(300)
+    assert page.locator("#editor .blk-body").last.text_content() == "with {{flex:entry 6a5f3a2e-1b1e-4c2a-9f10-0d2c1a7e0001}}"
+    page.keyboard.press("Backspace")                          # one Backspace removes the whole chip
+    page.wait_for_timeout(900)
+    assert page.locator("#editor .blk-body").last.text_content() == "with "
+    assert body_of(h).endswith("with"), body_of(h)
+    assert page.locator("#editor .blk-body .md-embed").count() == 0
+    assert not errors
+
+
+def test_numbered_indented_examples(app):
+    """`ex` numbers examples (1), (2)… through the note; `indent=N` steps a block in; the ⋯
+    menu and Tab / Shift+Tab on the block drive both."""
+    h, page, errors = app
+    new_note(page, "Examples")
+    page.locator("#editor .blk-body").first.click()
+    paste(page, "Intro\n\n{{flex:text %s seg=1 ex}}\n\n{{flex:text %s seg=2 ex indent=1}}\n\n{{flex:entry 6a5f3a2e-1b1e-4c2a-9f10-0d2c1a7e0001}}" % (T_STORY, T_STORY))
+    page.wait_for_selector("#editor .entry-card")
+    nums = page.locator("#editor .blk-flex > .ex-num")
+    assert nums.all_inner_texts() == ["(1)", "(2)"]
+    assert page.locator("#editor .blk-flex.blk-indent1").count() == 1
+    # Tab on the first example block indents it; the number stays
+    page.locator("#editor .blk-flex").first.focus()
+    page.keyboard.press("Tab")
+    page.keyboard.press("Tab")
+    page.wait_for_timeout(900)
+    assert re.search(r"\{\{flex:text %s seg=1( at=[0-9a-f-]+)? ex indent=2\}\}" % T_STORY, body_of(h)), body_of(h)
+    assert page.locator("#editor .blk-flex.blk-indent2 > .ex-num").inner_text() == "(1)"
+    page.keyboard.press("Shift+Tab")
+    page.wait_for_timeout(900)
+    assert "indent=1}}" in body_of(h).split("\n")[2]
+    # the ⋯ menu numbers the entry as (3)
+    page.locator("#editor .entry-card .flex-head button[title='Options']").click()
+    page.wait_for_selector(".popover")
+    page.locator(".popover label", has_text="Number as example").locator("input").check()
+    page.wait_for_selector("#editor .blk-flex:nth-of-type(4) > .ex-num")
+    assert page.locator("#editor .blk-flex > .ex-num").all_inner_texts() == ["(1)", "(2)", "(3)"]
+    page.keyboard.press("Escape")
+    # deleting the first example renumbers the rest
+    page.locator("#editor .blk-flex").first.focus()
+    page.keyboard.press("Delete")
+    page.wait_for_timeout(300)
+    assert page.locator("#editor .blk-flex > .ex-num").all_inner_texts() == ["(1)", "(2)"]
+    assert not errors
+
+
+def test_resize_any_cell_edge_including_under_a_merged_header(app):
+    """Seth, 2026-10-13: columns whose headers are merged cells must still resize one by one —
+    any cell's right edge resizes the column it ends in, any bottom edge sets the row height."""
+    h, page, errors = app
+    new_note(page, "Edges")
+    page.locator("#editor .blk-body").first.click()
+    paste(page, "| A | B | C |\n|---|---|---|\n| 1 | 2 | 3 |\n| 4 | 5 | 6 |\n{table: span 1.1: 1x2}")
+    page.wait_for_selector("table.md-table th.merged")
+
+    def drag(sel, dx, dy):
+        cell = page.locator(sel)
+        cell.scroll_into_view_if_needed()
+        handle = cell.locator(".col-resizer" if dx else ".row-resizer")
+        box = handle.bounding_box()
+        page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+        page.mouse.down()
+        page.mouse.move(box["x"] + box["width"] / 2 + dx, box["y"] + box["height"] / 2 + dy, steps=6)
+        page.mouse.up()
+        page.wait_for_timeout(900)
+
+    # the body cell in column 2 (under the merged header) → col 2 only
+    drag("table.md-table td[data-r='1'][data-c='1']", 90, 0)
+    m = re.search(r"col 2: width (\d+)px", body_of(h))
+    assert m and int(m.group(1)) >= 120, body_of(h).split("\n")[-1]
+    assert "col 1:" not in body_of(h)
+    # the merged header's right edge → the last column it covers (2), from that column's own width
+    before = int(m.group(1))
+    drag("table.md-table th.merged[data-c='0']", 40, 0)
+    m = re.search(r"col 2: width (\d+)px", body_of(h))
+    assert m and before + 25 <= int(m.group(1)) <= before + 55, (before, body_of(h).split("\n")[-1])
+    # a bottom edge → the row's height
+    drag("table.md-table td[data-r='2'][data-c='2']", 0, 30)
+    m = re.search(r"row 3: height (\d+)px", body_of(h))
+    assert m and int(m.group(1)) >= 50, body_of(h).split("\n")[-1]
+    assert page.evaluate("() => document.querySelector(\"table.md-table td[data-r='2'][data-c='0']\").getBoundingClientRect().height") >= 50
+    assert not errors

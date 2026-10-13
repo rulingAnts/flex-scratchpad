@@ -281,13 +281,25 @@
     return c.join(' ');
   }
 
+  /* An embed inside a line of text is shown as a CHIP (Seth, 2026-10-13: "put chips inline
+   * with text"): the span keeps the raw `{{flex …}}` as its text (textContent stays the
+   * markdown) and is contenteditable=false, so the caret steps over it and Backspace removes
+   * it whole; CSS draws the chip from data-icon / data-title, which FS.interlinear.hydrateInline
+   * fills in from the object once it is known. */
+  function embedAttrs(src) {
+    const spec = FS.flexref && FS.flexref.parse ? FS.flexref.parse(src) : null;
+    const icon = !spec ? '?' : spec.kind === 'text' ? '¶' : spec.kind === 'wordform' ? 'ω' : '📖';
+    const title = !spec ? 'FLEx object' : spec.label || (spec.kind + ' ' + spec.guid.slice(0, 8) + '…');
+    return ' contenteditable="false" data-src="' + esc(src) + '" data-icon="' + icon + '" data-title="' + esc(title) + '"' + (spec && spec.kind === 'text' && spec.seg ? ' data-range="' + spec.seg[0] + (spec.seg[1] !== spec.seg[0] ? '–' + spec.seg[1] : '') + '"' : '');
+  }
   function emit(line, out) {
     if (!line.length) return '';
     let html = '';
     let cur = null, buf = '';
     const flush = () => {
       if (buf === '') return;
-      html += cur ? '<span class="' + cur + '">' + esc(buf) + '</span>' : esc(buf);
+      if (cur && /\bmd-embed\b/.test(cur) && /^\{\{[\s\S]*\}\}$/.test(buf)) html += '<span class="' + cur + '"' + embedAttrs(buf) + '>' + esc(buf) + '</span>';
+      else html += cur ? '<span class="' + cur + '">' + esc(buf) + '</span>' : esc(buf);
       buf = '';
     };
     for (let i = 0; i < line.length; i++) {

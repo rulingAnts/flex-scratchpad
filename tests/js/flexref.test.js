@@ -117,3 +117,13 @@ test('entry embeds: fields= and senses= round-trip and select', () => {
   assert.deepEqual(R.visibleSenses(R.parse('{{flex:entry ' + G + ' senses=2.1}}'), senses).map((s) => s.number), ['2.1']);
   assert.deepEqual(R.visibleSenses(R.parse('{{flex:entry ' + G + ' fields=gl,def}}'), senses).map((s) => s.number), ['1', '2', '3']);
 });
+
+test('example layout flags ride in extra and round-trip: ex, indent=N', () => {
+  const src = '{{flex:text 9b1c2d3e-4f50-4a6b-8c7d-0e1f2a3b0001 seg=1-2 ex indent=2}}';
+  const spec = R.parse(src);
+  assert.equal(spec.extra.ex, true);
+  assert.equal(spec.extra.indent, '2');
+  assert.equal(R.serialize(spec), src);
+  delete spec.extra.ex; spec.extra.indent = '1';
+  assert.equal(R.serialize(spec), '{{flex:text 9b1c2d3e-4f50-4a6b-8c7d-0e1f2a3b0001 seg=1-2 indent=1}}');
+});

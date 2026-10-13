@@ -59,11 +59,20 @@
     const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
     return w.nextNode();
   }
+  /* Never inside an inline chip (contenteditable=false): the caret goes just before or just
+   * after it, which is where typing and Backspace then act as a user expects. */
+  function outsideChip(pt) {
+    const parent = pt.node.nodeType === 3 ? pt.node.parentNode : pt.node;
+    const chip = parent && parent.closest ? parent.closest('.md-embed:not(.reveal-src)') : null;
+    if (!chip || !chip.parentNode) return pt;
+    const i = [...chip.parentNode.childNodes].indexOf(chip);
+    return { node: chip.parentNode, offset: i + (pt.offset > 0 ? 1 : 0) };
+  }
   function setCaret(root, start, end) {
     const sel = window.getSelection();
     if (!sel) return;
-    const a = pointAt(root, Math.max(0, Math.min(start, root.textContent.length)));
-    const b = end == null ? a : pointAt(root, Math.max(0, Math.min(end, root.textContent.length)));
+    const a = outsideChip(pointAt(root, Math.max(0, Math.min(start, root.textContent.length))));
+    const b = end == null ? a : outsideChip(pointAt(root, Math.max(0, Math.min(end, root.textContent.length))));
     const r = document.createRange();
     r.setStart(a.node, a.offset);
     r.setEnd(b.node, b.offset);
@@ -151,6 +160,7 @@
     changed(opts) {
       opts = opts || {};
       if (!opts.silent) this.pushSnapshot(opts.force);
+      this.renumberExamples();
       if (this.opts.onChange) this.opts.onChange(this.getMarkdown());
     }
 
@@ -159,6 +169,7 @@
       this.root.innerHTML = '';
       this.assignNumCtx();
       this.blocks.forEach((b, i) => this.root.appendChild(this.renderBlock(b, i)));
+      this.renumberExamples();
     }
     /* -- outline numbering across blocks ------------------------------------------------
      * Each text block remembers the numbering state BEFORE it (b.numCtx); decorating with a
@@ -185,7 +196,7 @@
       for (const other of this.assignNumCtx(i)) {
         if (other === b || !other.el || !TEXT_TYPES.has(other.type)) continue;
         const body = other.el.querySelector('.blk-body');
-        if (body && document.activeElement !== body) body.innerHTML = MD.decorate(other.src, other.type, this.numCtxFor(other));
+        if (body && document.activeElement !== body) this.decorateInto(body, other);
       }
     }
     renderBlock(b, i) {
@@ -195,7 +206,7 @@
       wrap.appendChild(handle);
       if (TEXT_TYPES.has(b.type)) {
         const body = el('div', { class: 'blk-body', contenteditable: 'true', spellcheck: b.type === 'code' ? 'false' : 'true', dir: 'auto', 'data-ph': b.type === 'p' && i === 0 && this.blocks.length === 1 ? PLACEHOLDER : '' });
-        body.innerHTML = MD.decorate(b.src, b.type, this.numCtxFor(b));
+        this.decorateInto(body, b);
         this.wireText(body, b);
         wrap.appendChild(body);
         this.applyFind(body);
@@ -234,6 +245,7 @@
       } else if (b.type === 'flex') {
         const spec = FS.flexref.parse(b.src);
         if (!spec) { host.appendChild(el('div', { class: 'flex-err' }, 'Unreadable FLEx embed: ' + b.src)); return; }
+        this.applyLayout(wrap, spec);
         FS.interlinear.render(host, spec, this._flexOpts(b, host));
       } else if (b.type === 'chart') {
         bar.insertBefore(el('button', { onclick: () => FS.charts.editDialog(b.src, (src) => { b.src = src; this.changed(); this.rerender(b); }) }, '✎ Edit chart'), edit);
@@ -248,10 +260,40 @@
         host.appendChild(el('pre', {}, b.src));
       }
     }
+    /* Numbered, indented examples (Seth, 2026-10-13): `indent=N` on the embed steps the block
+     * in like a list level; `ex` gives it a running (1), (2)… through the note. */
+    applyLayout(wrap, spec) {
+      const x = (spec && spec.extra) || {};
+      wrap.className = wrap.className.replace(/\bblk-indent\d\b/g, '').trim();
+      const n = Math.max(0, Math.min(4, parseInt(x.indent, 10) || 0));
+      if (n) wrap.classList.add('blk-indent' + n);
+      let num = wrap.querySelector(':scope > .ex-num');
+      if (x.ex && !num) { num = el('span', { class: 'ex-num' }, '(·)'); wrap.insertBefore(num, wrap.querySelector('.widget-host')); }
+      if (!x.ex && num) num.remove();
+      wrap.classList.toggle('ex-numbered', !!x.ex);
+    }
+    renumberExamples() {
+      let n = 0;
+      for (const b of this.blocks) {
+        if (b.type !== 'flex' || !b.el) continue;
+        const num = b.el.querySelector(':scope > .ex-num');
+        if (num) num.textContent = '(' + (++n) + ')';
+      }
+    }
+    indentFlex(b, d) {
+      const spec = FS.flexref.parse(b.src);
+      if (!spec) return;
+      spec.extra = spec.extra || {};
+      const n = Math.max(0, Math.min(4, (parseInt(spec.extra.indent, 10) || 0) + d));
+      if (n) spec.extra.indent = String(n); else delete spec.extra.indent;
+      b.src = FS.flexref.serialize(spec);
+      this.applyLayout(b.el, spec);
+      this.changed();
+    }
     _flexOpts(b, host) {
       return {
-        editable: true,
-        onSpecChange: (s) => { b.src = FS.flexref.serialize(s); this.changed(); FS.interlinear.render(host, s, this._flexOpts(b, host)); },
+        editable: true, layout: true,
+        onSpecChange: (s) => { b.src = FS.flexref.serialize(s); this.applyLayout(b.el, s); this.changed(); FS.interlinear.render(host, s, this._flexOpts(b, host)); },
         editSource: () => this.editSource(b),
         duplicate: () => { this.insertBlockAfter(b, { type: 'flex', src: b.src }, false); FS.toast('Duplicated'); },
         remove: () => this.deleteBlock(b),
@@ -275,7 +317,7 @@
         }
         const caret = getCaret(body), caretEnd = getCaretEnd(body);
         const html = MD.decorate(text, b.type, this.numCtxFor(b));
-        if (html !== body.innerHTML) { body.innerHTML = html; setCaret(body, caret, caretEnd); }
+        if (html !== body.innerHTML) { this.decorateInto(body, b, html); setCaret(body, caret, caretEnd); }
         this.applyFind(body);
         this.renumberAfter(b);
       };
@@ -283,6 +325,10 @@
       body.addEventListener('compositionend', () => { this.composing = false; refresh(); });
       body.addEventListener('input', () => { if (!this.composing) queueMicrotask(refresh); });
       body.addEventListener('focus', () => { b.el.classList.add('focus'); this.active = b; if (this.opts.onFocusChange) this.opts.onFocusChange(b); });
+      // where the caret was, for an insert after a dialog (the picker) has taken the focus
+      body.addEventListener('keyup', () => { b.lastCaret = [getCaret(body), getCaretEnd(body)]; });
+      body.addEventListener('mouseup', () => { b.lastCaret = [getCaret(body), getCaretEnd(body)]; });
+      body.addEventListener('input', () => { b.lastCaret = [getCaret(body), getCaretEnd(body)]; });
       body.addEventListener('blur', () => { b.el.classList.remove('focus'); setTimeout(() => this.resplit(b), 0); });
       body.addEventListener('beforeinput', (e) => this.onBeforeInput(e, body, b));
       body.addEventListener('keydown', (e) => this.onKeyDown(e, body, b));
@@ -382,9 +428,55 @@
     }
 
     /* -- editing primitives ----------------------------------------------------------- */
+    /* Decorate a text block and bring its inline FLEx chips to life (titles + overlay). */
+    decorateInto(body, b, html) {
+      body.innerHTML = html != null ? html : MD.decorate(b.src, b.type, this.numCtxFor(b));
+      if (body.querySelector('.md-embed')) FS.interlinear.hydrateInline(body, this._inlineOpts(body, b));
+    }
+    _inlineOpts(body, b) {
+      const live = () => (b.el && b.el.querySelector('.blk-body')) || body;
+      const replace = (src, next) => {
+        const i = b.src.indexOf(src);
+        if (i < 0) return;
+        const el2 = live();
+        const caret = document.activeElement === el2 ? getCaret(el2) : null;
+        this.setText(el2, b, b.src.slice(0, i) + next + b.src.slice(i + src.length), caret);
+      };
+      return {
+        onSpecChange: (spec, src) => replace(src, FS.flexref.serialize(spec)),
+        duplicate: (src) => { replace(src, src + ' ' + src); FS.toast('Duplicated'); },
+        remove: (src) => replace(src, ''),
+        expandInline: (src) => this.expandInline(b, src),
+        editInline: (span) => {
+          // reveal the embed code so it can be edited; it turns back into a chip on the next edit
+          const el2 = live();
+          span.classList.add('reveal-src');
+          span.removeAttribute('contenteditable');
+          el2.focus();
+          const r = document.createRange(); r.selectNodeContents(span); r.collapse(false);
+          const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+        },
+        findAnchor: (src) => { const el2 = live(); return [...el2.querySelectorAll('.md-embed')].find((x) => x.dataset.src === src) || null; },
+      };
+    }
+    /* An inline chip becomes a block of its own: the text before and after it stay paragraphs. */
+    expandInline(b, src) {
+      const i = b.src.indexOf(src);
+      if (i < 0) return;
+      const before = b.src.slice(0, i).replace(/\s+$/, ''), after = b.src.slice(i + src.length).replace(/^\s+/, '');
+      const k = this.blocks.indexOf(b);
+      const seq = [];
+      if (before) seq.push(Object.assign({ id: FS.uid() }, MD.splitBlocks(before)[0] || { type: 'p', src: before }));
+      seq.push({ id: FS.uid(), type: 'flex', src });
+      if (after) seq.push(Object.assign({ id: FS.uid() }, MD.splitBlocks(after)[0] || { type: 'p', src: after }));
+      this.blocks.splice(k, 1, ...seq);
+      this.renderAll();
+      this.changed({ force: true });
+      this.focusBlock(k + (before ? 1 : 0), 0);
+    }
     setText(body, b, text, caret, caretEnd) {
       b.src = text;
-      body.innerHTML = MD.decorate(text, b.type, this.numCtxFor(b));
+      this.decorateInto(body, b);
       if (caret != null) setCaret(body, caret, caretEnd);
       this.changed();
       this.applyFind(body);
@@ -394,6 +486,20 @@
       const a = getCaret(body), z = getCaretEnd(body);
       const s = body.textContent;
       this.setText(body, b, s.slice(0, a) + text + s.slice(z), a + text.length);
+    }
+    /* A FLEx embed inserted after text on a line goes INLINE as a chip (Seth, 2026-10-13: "put
+     * chips inline with text"); at the start of a line, or when it is not a single embed, the
+     * caller makes a block. A chip's overlay offers "Expand in note" to turn it into a block. */
+    embedInline(body, b, md) {
+      if (b.type === 'code' || !FS.flexref.isEmbedLine(md)) return false;
+      const a = getCaret(body), s = body.textContent;
+      const ls = s.lastIndexOf('\n', a - 1) + 1, le = s.indexOf('\n', a);
+      if (!s.slice(ls, a).trim()) return false;           // at the start of a line: a block, as before
+      const z = getCaretEnd(body);
+      const padL = a > ls && !/\s$/.test(s.slice(ls, a)) ? ' ' : '', padR = z < (le < 0 ? s.length : le) && !/^\s/.test(s.slice(z)) ? ' ' : '';
+      const ins = padL + md.trim() + padR;
+      this.setText(body, b, s.slice(0, a) + ins + s.slice(z), a + ins.length);
+      return true;
     }
     pasteText(body, b, text) {
       const trimmed = text.trim();
@@ -405,6 +511,7 @@
         const el2 = live();
         if (!this.blocks.includes(b)) { this.insertMarkdown(md, asBlock); return; }
         if (document.activeElement !== el2) { el2.focus(); setCaret(el2, a, z); }
+        if (asBlock && this.embedInline(el2, b, md)) return;
         if (asBlock) this.insertBlockSourceAtCaret(el2, b, md); else this.insertTextAtCaret(el2, b, md);
       };
       if (this.opts.onPasteLink && (/^silfw:\/\//i.test(trimmed) || FS.flexref.GUID.test(trimmed))) {
@@ -656,6 +763,7 @@
         if (e.target !== wrap) return;   // keys inside cells etc. are theirs
         const i = this.blocks.indexOf(b);
         if (e.key === 'Backspace' || e.key === 'Delete') { e.preventDefault(); this.deleteBlock(b); }
+        else if (e.key === 'Tab' && b.type === 'flex') { e.preventDefault(); this.indentFlex(b, e.shiftKey ? -1 : 1); }
         else if (e.key === 'ArrowUp' && i > 0) { e.preventDefault(); this.focusBlock(i - 1, 'end'); }
         else if (e.key === 'ArrowDown') { e.preventDefault(); this.focusBlock(i + 1, 0, true); }
         else if (e.key === 'Enter') { e.preventDefault(); if (b.type === 'table') { const cell = wrap.querySelector('.cell-view'); if (cell) cell.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); } else if (b.type === 'chart') FS.charts.editDialog(b.src, (src) => { b.src = src; this.changed(); this.rerender(b); }); else this.insertBlockAfter(b, { type: 'p', src: '' }, true); }
@@ -681,8 +789,10 @@
       if (!b) { this.load(md); this.changed({ force: true }); return; }
       if (TEXT_TYPES.has(b.type) && b.el) {
         const body = b.el.querySelector('.blk-body');
-        if (document.activeElement !== body) { body.focus(); setCaret(body, body.textContent.length); }
+        let placed = document.activeElement === body;      // the caret is where the user put it
+        if (!placed) { body.focus(); const lc = b.lastCaret && b.lastCaret[0] <= body.textContent.length ? b.lastCaret : null; setCaret(body, lc ? lc[0] : body.textContent.length, lc ? lc[1] : undefined); placed = !!lc; }
         if (!asBlock) { this.insertTextAtCaret(body, b, md); return; }
+        if (placed && this.embedInline(body, b, md)) return;
         if (body.textContent.trim() === '') {
           const i = this.blocks.indexOf(b);
           const parts = MD.splitBlocks(md).map((x) => Object.assign({ id: FS.uid() }, x));

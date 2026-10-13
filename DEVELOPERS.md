@@ -25,7 +25,8 @@ JavaScript mock with demo data when no bridge is present, so the page runs in an
 
 ## Data flow for an embed
 
-1. The note contains `{{flex:text <guid> seg=3-5 …}}` (a `flex` block, or inline in a table cell).
+1. The note contains `{{flex:text <guid> seg=3-5 …}}` (a `flex` block on its own line, or an inline chip
+   inside a line of text or a table cell).
 2. `flexref.parse` → spec. `interlinear.render` asks `api.flex_get('text', guid, 3, 5)`.
 3. `FlexService.get_object` tries the live backend (pages ≤ 60 segments), snapshots the result
    (`cache.merge_text` accumulates every range seen), and returns it with `cached: false`. If the
@@ -46,6 +47,7 @@ small, named extension in a form a plain Markdown reader survives.** The current
 | need | extension | what a plain reader sees |
 |---|---|---|
 | live FLEx objects | `{{flex:… }}` line or inline | a literal `{{…}}` |
+| numbered, indented examples | `ex` and `indent=N` keys on the embed line | the same literal |
 | table styling, widths, frozen panes | a `{table: …}` line after the table | a stray `{…}` line |
 | merged cells | `span R.C: RxC` in that line; covered cells left empty | the grid, with gaps |
 | line breaks in a cell | `<br>` (GFM already allows it) | a line break |
