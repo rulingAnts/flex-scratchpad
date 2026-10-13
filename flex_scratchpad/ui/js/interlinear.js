@@ -319,8 +319,10 @@
     let info;
     try { info = await FS.api.audio_clip(obj.guid, mediaGuid, begin, end); }
     catch (e) { FS.toast(e.message, 'error'); return; }
+    // the cached clip first (exact, local, FLAC/WAV — it is what the example keeps), else the
+    // live file; a live file that will not decode falls back to the clip when there is one
     let src = info.fileUrl, offBegin = begin, offEnd = end;
-    if (!src && info.clipUrl) { src = info.clipUrl; offBegin = 0; offEnd = end - begin; }
+    if (info.clipUrl) { src = info.clipUrl; offBegin = 0; offEnd = end - begin; }
     if (!src) {
       const m = mediaByGuid.get(mediaGuid) || (obj.media && obj.media[0]) || {};
       return mediaMissingPopover(btn || box.querySelector('.flex-head'), m, info, opts);
@@ -343,9 +345,10 @@
       // the file exists but WebView2 cannot decode it (a format it has no codec for, a broken
       // file): offer a playable copy, keeping FLEx's segment times (Seth, 2026-10-13)
       const m = mediaByGuid.get(mediaGuid) || (obj.media && obj.media[0]) || {};
+      if (src !== info.clipUrl && info.clipUrl) { audio.elForSrc.delete(src); return playRange(box, Object.assign({}, obj, { _clipOnly: true }), segs, mediaByGuid, opts, btn); }
       mediaMissingPopover(btn || box.querySelector('.flex-head'), m, info, opts, {
         title: 'Could not play this audio',
-        hint: (e.message || String(e)) + ' — the file FLEx names (' + (m.uri || info.path || 'unknown') + ') is there but will not play here. Point the Scratchpad at a playable copy (e.g. a WAV or MP3 export of the same recording): the segment times stay exactly as FLEx has them.',
+        hint: (e.message || String(e)) + ' — the file FLEx names (' + (m.uri || info.path || 'unknown') + ') is there but will not play here. Point the Scratchpad at a playable copy (a WAV, MP3 or FLAC export of the same recording): the segment times stay exactly as FLEx has them, and the slice this example needs is cached with the notebook (FLAC when ffmpeg is installed, see Settings).',
       });
     }
     if (capture) capture.then((r) => { if (r && r.clipUrl) FS.toast('Clip cached in the notebook', 'ok'); });

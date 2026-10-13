@@ -385,7 +385,12 @@ table.md-table td.sel, table.md-table th.sel { background: var(--accent-soft) !i
 .btn.danger { background: #c0392b; color: #fff; border-color: #c0392b; }
 table.md-table.wide { max-width: none; }
 .tbl-wrap { overflow-x: auto; overflow-y: hidden; padding-bottom: 2px; }
-.tbl-wrap.frozen { overflow: auto; border: 1px solid var(--border-soft); border-radius: 6px; }
+.tbl-wrap.framed, .tbl-wrap.frozen { overflow: auto; border: 1px solid var(--border-soft); border-radius: 6px; overscroll-behavior: auto; }
+.tbl-frame { position: relative; }
+.tbl-grip { position: absolute; right: -2px; bottom: -2px; width: 14px; height: 14px; cursor: nwse-resize; opacity: 0; transition: opacity 0.12s; z-index: 4; background: linear-gradient(135deg, transparent 0 45%, var(--muted) 45% 55%, transparent 55% 70%, var(--muted) 70% 80%, transparent 80%); border-radius: 0 0 6px 0; }
+.widget:hover .tbl-grip, .widget.focus .tbl-grip { opacity: 0.8; }
+.tbl-grip:hover { opacity: 1 !important; }
+.tbl-frame.framed .tbl-grip { right: 2px; bottom: 2px; }
 .tbl-wrap.frozen table.md-table { border-collapse: separate; border-spacing: 0; }
 .tbl-wrap.frozen th, .tbl-wrap.frozen td { border-width: 0 1px 1px 0; }
 .tbl-wrap.frozen tr > :first-child { border-left-width: 1px; }

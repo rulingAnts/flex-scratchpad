@@ -35,14 +35,37 @@ def cut_wav(src: Path, dst: Path, begin_ms: int, end_ms: int) -> Path:
     return dst
 
 
-def cut_ffmpeg(src: Path, dst: Path, begin_ms: int, end_ms: int) -> Path | None:
-    exe = shutil.which("ffmpeg")
+_FFMPEG_CANDIDATES = (
+    r"%LOCALAPPDATA%\\Microsoft\\WinGet\\Links\\ffmpeg.exe",
+    r"C:\\ffmpeg\\bin\\ffmpeg.exe",
+    r"%ProgramFiles%\\ffmpeg\\bin\\ffmpeg.exe",
+    r"%LOCALAPPDATA%\\Programs\\ffmpeg\\bin\\ffmpeg.exe",
+    "/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg",
+)
+
+
+def find_ffmpeg(configured: str = "") -> str | None:
+    """ffmpeg, if there is one: the path from Settings, PATH, then the usual install spots."""
+    import os
+    for cand in ([configured] if configured else []) + [shutil.which("ffmpeg") or ""] + [os.path.expandvars(c) for c in _FFMPEG_CANDIDATES]:
+        if cand and Path(cand).is_file():
+            return str(cand)
+    return None
+
+
+def cut_ffmpeg(src: Path, dst: Path, begin_ms: int, end_ms: int, exe: str | None = None) -> Path | None:
+    """Slice with ffmpeg. A .flac destination gets lossless FLAC (small, exact, plays in
+    WebView2); anything else 16-bit WAV. Seth, 2026-10-13: "I'm thinking FLAC for caching"."""
+    exe = exe or find_ffmpeg()
     if not exe:
         return None
     dst.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dst.with_suffix(".tmp.wav")
-    cmd = [exe, "-y", "-v", "error", "-ss", f"{begin_ms / 1000:.3f}", "-to", f"{end_ms / 1000:.3f}",
-           "-i", str(src), "-vn", "-acodec", "pcm_s16le", str(tmp)]
+    flac = dst.suffix.lower() == ".flac"
+    tmp = dst.with_name(dst.stem + ".tmp" + (".flac" if flac else ".wav"))
+    # -ss before -i seeks the input; the length is then a DURATION (-t), never -to, whose
+    # meaning after an input seek differs between ffmpeg versions
+    cmd = [exe, "-y", "-v", "error", "-ss", f"{begin_ms / 1000:.3f}", "-t", f"{(end_ms - begin_ms) / 1000:.3f}",
+           "-i", str(src), "-vn", "-acodec", "flac" if flac else "pcm_s16le", str(tmp)]
     try:
         subprocess.run(cmd, check=True, capture_output=True, timeout=120)
     except (subprocess.SubprocessError, OSError):
@@ -55,17 +78,23 @@ def cut_ffmpeg(src: Path, dst: Path, begin_ms: int, end_ms: int) -> Path | None:
     return dst
 
 
-def cut_clip(src: str | Path, dst_wav: Path, begin_ms: int, end_ms: int) -> Path | None:
-    """Try the two Python-side cutters. None means "let the UI capture it"."""
+def cut_clip(src: str | Path, dst_wav: Path, begin_ms: int, end_ms: int, ffmpeg: str | None = None) -> Path | None:
+    """Try the Python-side cutters: ffmpeg → a FLAC slice of any format; else the stdlib → a
+    WAV slice of a WAV. None means "let the UI capture it"."""
     src = Path(src)
     if not src.is_file() or end_ms <= begin_ms:
         return None
+    exe = ffmpeg or find_ffmpeg()
+    if exe:
+        out = cut_ffmpeg(src, dst_wav.with_suffix(".flac"), begin_ms, end_ms, exe)
+        if out:
+            return out
     if src.suffix.lower() == ".wav":
         try:
-            return cut_wav(src, dst_wav, begin_ms, end_ms)
+            return cut_wav(src, dst_wav.with_suffix(".wav"), begin_ms, end_ms)
         except (wave.Error, EOFError, OSError):
-            pass  # a WAV the stdlib cannot read (e.g. WAVE_FORMAT_EXTENSIBLE float) → ffmpeg
-    return cut_ffmpeg(src, dst_wav, begin_ms, end_ms)
+            pass  # a WAV the stdlib cannot read (e.g. WAVE_FORMAT_EXTENSIBLE float)
+    return None
 
 
 def store_clip_bytes(dst: Path, data_base64: str) -> Path:

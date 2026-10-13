@@ -213,11 +213,12 @@ def test_audio_segment_plays_and_clip_is_cached(app):
     page.locator(".seg-play").first.click()
     page.wait_for_selector(".transport")
     page.wait_for_timeout(400)
-    t = page.evaluate("FS.audio.current ? FS.audio.current.el.currentTime : -1")
-    assert 1.4 <= t <= 3.3
+    # plays from the cached clip when there is one (its time starts at 0), else from the file
+    t = page.evaluate("FS.audio.current ? [FS.audio.current.el.currentTime, FS.audio.current.begin, FS.audio.current.end] : [-1, 0, 0]")
+    assert t[1] <= t[0] <= t[2] + 0.1 and t[2] - t[1] > 1.0, t
     page.wait_for_timeout(2600)
     assert page.evaluate("!!FS.audio.current") is False       # stopped at `end`
-    clips = list(h.api._nb.cache_dir.rglob("*_1500-3200.wav"))
+    clips = [c for c in h.api._nb.cache_dir.rglob("*_1500-3200.*") if c.suffix in (".wav", ".flac")]
     assert clips, "the clip was cut into the notebook cache"
     # the clip keeps playing after the source media is gone
     import os
@@ -225,7 +226,7 @@ def test_audio_segment_plays_and_clip_is_cached(app):
     os.remove(src)
     h.api._flex.backend._resolve_media()
     info = h.api.audio_clip(T_STORY, None, 1500, 3200)
-    assert info["found"] is False and info["clipUrl"].endswith("_1500-3200.wav")
+    assert info["found"] is False and re.search(r"_1500-3200\.(wav|flac)$", info["clipUrl"])
 
 
 def test_search_tags_and_folders(app):
@@ -1295,4 +1296,58 @@ def test_row_selection_keeps_to_the_row_with_merged_cells(app):
     sel = page.evaluate("() => [...document.querySelectorAll('table.md-table .sel')].map((c) => c.dataset.r + ',' + c.dataset.c)")
     assert sorted(sel) == ["0,1", "1,1", "3,1"], sel
     assert page.locator("table.md-table th.gutter.col.on").count() == 1
+    assert not errors
+
+
+def test_table_frame_grip_and_scroll_chaining(app):
+    h, page, errors = app
+    new_note(page, "Frame")
+    page.locator("#editor .blk-body").first.click()
+    paste(page, "intro\n\n" + "| a | b |\n|---|---|\n" + "\n".join(f"| r{i} | x{i} |" for i in range(40)) + "\n\n" + "\n\n".join(f"para {i}" for i in range(60)))
+    page.wait_for_selector("table.md-table")
+    # drag the grip up: the frame gets a height and scrolls inside
+    grip = page.locator(".tbl-grip")
+    grip.scroll_into_view_if_needed()
+    page.locator("table.md-table").hover()
+    box = grip.bounding_box()
+    page.mouse.move(box["x"] + 7, box["y"] + 7)
+    page.mouse.down()
+    page.mouse.move(box["x"] + 7, box["y"] - 900, steps=8)
+    page.mouse.up()
+    page.wait_for_timeout(900)
+    body = body_of(h)
+    assert re.search(r"max-height \d+px", body), body.split("\n")[-62:-58]
+    wrap = page.locator(".tbl-wrap.framed")
+    assert wrap.count() == 1
+    assert page.evaluate("() => { const w = document.querySelector('.tbl-wrap.framed'); return w.scrollHeight > w.clientHeight; }")
+    # a fast scroll through the document is not trapped by the frame: wheel while the document
+    # was just scrolling → the document moves, the frame does not
+    page.evaluate("() => { document.getElementById('editor').scrollTop = 0; }")
+    wrap.scroll_into_view_if_needed()
+    page.evaluate("() => { const ed = document.getElementById('editor'); const w = document.querySelector('.tbl-wrap.framed'); ed.scrollTop += w.getBoundingClientRect().top - ed.getBoundingClientRect().top - 40; ed._lastScroll = performance.now(); }")
+    b2 = wrap.bounding_box()
+    page.mouse.move(b2["x"] + 60, b2["y"] + b2["height"] - 60)      # low in the frame: clear of the sticky toolbar
+    before = page.evaluate("() => [document.getElementById('editor').scrollTop, document.querySelector('.tbl-wrap.framed').scrollTop]")
+    page.mouse.wheel(0, 120)
+    page.wait_for_timeout(100)
+    after = page.evaluate("() => [document.getElementById('editor').scrollTop, document.querySelector('.tbl-wrap.framed').scrollTop]")
+    assert after[0] > before[0] and after[1] == before[1], (before, after)
+    # after a pause over the frame, the wheel scrolls the frame
+    page.wait_for_timeout(500)
+    b3 = wrap.bounding_box()
+    page.mouse.move(b3["x"] + 60, b3["y"] + b3["height"] - 60)
+    page.wait_for_timeout(500)
+    before = page.evaluate("() => [document.getElementById('editor').scrollTop, document.querySelector('.tbl-wrap.framed').scrollTop]")
+    page.mouse.wheel(0, 120)
+    page.wait_for_timeout(200)
+    after = page.evaluate("() => [document.getElementById('editor').scrollTop, document.querySelector('.tbl-wrap.framed').scrollTop]")
+    assert after[1] > before[1] and after[0] == before[0], (before, after)
+    # double-click the grip resets the frame
+    grip = page.locator(".tbl-grip")
+    grip.scroll_into_view_if_needed()
+    page.locator("table.md-table").hover()
+    page.wait_for_timeout(100)
+    grip.dblclick()
+    page.wait_for_timeout(900)
+    assert "max-height" not in body_of(h)
     assert not errors

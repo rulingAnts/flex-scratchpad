@@ -541,6 +541,15 @@
       } catch (e) { status.textContent = e.message; }
     } }, 'Connect');
     fx.append(el('div', { class: 'form-row' }, el('label', {}, 'Source'), source), projectRow, fileRow, el('div', { class: 'btn-row', style: { justifyContent: 'flex-start' } }, connect, el('button', { class: 'btn', onclick: async () => { S.flex = await FS.api.flex_refresh(); renderFlexPill(); FS.interlinear.invalidate(); FS.toast('Reloaded from FLEx'); } }, 'Reload data')), status);
+    // audio tooling: ffmpeg turns any media into cached FLAC slices
+    const ffRow = el('div', { class: 'form-row' }, el('label', {}, 'ffmpeg'));
+    const ffIn = el('input', { type: 'text', value: (S.config.settings || {}).ffmpegPath || '', placeholder: 'auto-detect (PATH, winget, C:\\ffmpeg)', style: { width: '260px' } });
+    const ffSt = el('span', { class: 'small muted' });
+    const ffCheck = async () => { try { const r = await FS.api.audio_tools(); ffSt.textContent = r.ffmpeg ? '✓ ' + r.ffmpeg + ' — clips are cached as FLAC' : '○ not found — clips are cut from WAV files only (stdlib); other formats are recorded while they play'; } catch (e) { ffSt.textContent = e.message; } };
+    ffIn.addEventListener('change', async () => { S.config.settings = await FS.api.set_setting('ffmpegPath', ffIn.value.trim()); ffCheck(); });
+    ffRow.appendChild(el('div', { style: { display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' } }, ffIn, ffSt));
+    fx.appendChild(ffRow);
+    ffCheck();
     const st0 = flexState();
     if (st0.level !== 'ok') { const ex = el('div', { class: 'flex-explain' }, el('div', { class: 'small' }, el('b', {}, (st0.level === 'warn' ? '⚠ ' : st0.level === 'err' ? '✖ ' : '') + st0.title), ' ', st0.text || '')); if (st0.fix) ex.appendChild(el('div', { class: 'fix' }, el('b', {}, 'How to fix it'), el('ol', {}, ...st0.fix.map((x) => el('li', {}, x))))); fx.appendChild(ex); }
     fx.appendChild(el('p', { class: 'muted small' }, 'Reading the project directly needs FieldWorks installed on this computer plus the flexicon and pythonnet packages (pip install "flex-scratchpad[flex]"). If FLEx is open at the same time, turn on Project Properties → Sharing → “Share project contents with programs on this computer”.'));

@@ -97,3 +97,14 @@ def test_flex_status_reports_configuration_and_error_codes(tmp_path):
     assert not st["open"] and not st["configured"] and st["errorCode"] == "no-project"
     st = api.flex_configure("flextext", "", "")
     assert not st["open"] and st["errorCode"] == "no-file"
+
+
+def test_file_dialog_filters_are_well_formed(tmp_path):
+    from flex_scratchpad.api import Api
+    from flex_scratchpad.config import AppConfig
+    api = Api(AppConfig(tmp_path / "cfg.json"), notebook_dir=tmp_path / "nb", demo=True)
+    seen = {}
+    api._dialog = lambda kind, **kw: seen.update(kw) or None
+    api._file_dialog(("Audio (*.wav;*.mp3)", "*.wav;*.mp3"), ("All files", "*.*"))
+    assert seen["file_types"] == ("Audio (*.wav;*.mp3)", "All files (*.*)")
+    assert api.audio_tools()["clipFormat"] in ("flac", "wav")

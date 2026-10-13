@@ -51,11 +51,13 @@
         const fm = /^borders?\s+(\w+)$/i.exec(p);
         const fr = /^freeze\s+(rows?|cols?|columns?)\s+(\d+)$/i.exec(p);
         const mh = /^(?:max-?height|height)\s+(\S+)$/i.exec(p);
+        const fw = /^frame-?width\s+(\S+)$/i.exec(p);
         const sp = /^span\s+(\d+)\.(\d+)\s*:\s*(\d+)\s*[x×]\s*(\d+)$/i.exec(p);
         if (fm) st.flags.add('borders-' + fm[1].toLowerCase());
         else if (sp) { if (+sp[3] > 1 || +sp[4] > 1) st.spans[sp[1] + '.' + sp[2]] = { rows: Math.max(1, +sp[3]), cols: Math.max(1, +sp[4]) }; }
         else if (fr) st[fr[1].toLowerCase().startsWith('r') ? 'freezeRows' : 'freezeCols'] = +fr[2];
         else if (mh) st.maxHeight = mh[1];
+        else if (fw) st.frameWidth = fw[1];
         else st.flags.add(p.toLowerCase().replace(/\s+/g, '-'));
       }
     }
@@ -90,6 +92,7 @@
     if (st.freezeRows) parts.push('freeze rows ' + st.freezeRows);
     if (st.freezeCols) parts.push('freeze cols ' + st.freezeCols);
     if (st.maxHeight) parts.push('max-height ' + st.maxHeight);
+    if (st.frameWidth) parts.push('frame-width ' + st.frameWidth);
     for (const [k, v] of Object.entries(st.spans || {})) parts.push('span ' + k + ': ' + v.rows + 'x' + v.cols);
     for (const [i, o] of Object.entries(st.cols)) { const s = serializeProps(o); if (s) parts.push('col ' + i + ': ' + s); }
     for (const [i, o] of Object.entries(st.rows)) { const s = serializeProps(o); if (s) parts.push('row ' + i + ': ' + s); }
@@ -220,7 +223,7 @@
    * column styles and the flags; row styles and spans follow their rows. Returns [top, bottom]. */
   function splitAt(t, r) {
     if (r <= 0 || r >= t.rows.length) return null;
-    const clone = (rows) => ({ rows: rows.map((x) => x.slice()), aligns: t.aligns.slice(), style: { flags: new Set(t.style.flags), cols: JSON.parse(JSON.stringify(t.style.cols)), rows: {}, spans: {}, freezeRows: t.style.freezeRows, freezeCols: t.style.freezeCols, maxHeight: t.style.maxHeight } });
+    const clone = (rows) => ({ rows: rows.map((x) => x.slice()), aligns: t.aligns.slice(), style: { flags: new Set(t.style.flags), cols: JSON.parse(JSON.stringify(t.style.cols)), rows: {}, spans: {}, freezeRows: t.style.freezeRows, freezeCols: t.style.freezeCols, maxHeight: t.style.maxHeight, frameWidth: t.style.frameWidth } });
     const top = clone(t.rows.slice(0, r)), bottom = clone([t.rows[0], ...t.rows.slice(r)]);
     for (const [k, v] of Object.entries(t.style.rows)) { const n = +k; if (n <= r) top.style.rows[n] = v; else bottom.style.rows[n - r + 1] = v; }
     for (const [k, v] of Object.entries(t.style.spans || {})) {
@@ -235,7 +238,7 @@
   function mergeTables(a, b) {
     const same = b.rows[0].length === a.rows[0].length && b.rows[0].every((x, i) => (x || '').trim() === (a.rows[0][i] || '').trim());
     const w = Math.max(a.rows[0].length, b.rows[0].length);
-    const t = { rows: a.rows.map((x) => x.slice()), aligns: a.aligns.slice(), style: { flags: new Set(a.style.flags), cols: JSON.parse(JSON.stringify(a.style.cols)), rows: JSON.parse(JSON.stringify(a.style.rows)), spans: JSON.parse(JSON.stringify(a.style.spans || {})), freezeRows: a.style.freezeRows, freezeCols: a.style.freezeCols, maxHeight: a.style.maxHeight } };
+    const t = { rows: a.rows.map((x) => x.slice()), aligns: a.aligns.slice(), style: { flags: new Set(a.style.flags), cols: JSON.parse(JSON.stringify(a.style.cols)), rows: JSON.parse(JSON.stringify(a.style.rows)), spans: JSON.parse(JSON.stringify(a.style.spans || {})), freezeRows: a.style.freezeRows, freezeCols: a.style.freezeCols, maxHeight: a.style.maxHeight, frameWidth: a.style.frameWidth } };
     const skip = same ? 1 : 0, base = a.rows.length;
     for (const row of b.rows.slice(skip)) t.rows.push(row.slice());
     for (const r of t.rows) while (r.length < w) r.push('');
@@ -378,10 +381,18 @@
       (r === 0 ? thead : tbody).appendChild(tr);
     });
     table.append(thead, tbody);
-    const wrap = el('div', { class: 'tbl-wrap' + ((t.style.freezeRows || t.style.freezeCols) ? ' frozen' : '') }, table);
-    if (t.style.freezeRows || t.style.freezeCols) wrap.style.maxHeight = t.style.maxHeight || '60vh';
-    container.appendChild(wrap);
-    if (t.style.freezeRows || t.style.freezeCols) requestAnimationFrame(() => applyFreeze(table, t));
+    /* The table frame (Seth, 2026-10-13): a sized box the table scrolls inside — its height
+     * (`max-height`) and width (`frame-width`) come from the style line, set by the corner
+     * grip or Table ▾. Frozen panes imply a frame. */
+    const frozen = !!(t.style.freezeRows || t.style.freezeCols);
+    const framed = frozen || !!t.style.maxHeight || !!t.style.frameWidth;
+    const wrap = el('div', { class: 'tbl-wrap' + (frozen ? ' frozen' : '') + (framed ? ' framed' : '') }, table);
+    if (framed) { wrap.style.maxHeight = t.style.maxHeight || (frozen ? '60vh' : ''); if (t.style.frameWidth) { wrap.style.width = t.style.frameWidth; wrap.style.maxWidth = '100%'; } }
+    const frame = el('div', { class: 'tbl-frame' + (framed ? ' framed' : '') }, wrap);
+    frame.appendChild(frameGrip(wrap, t, widget, commit));
+    container.appendChild(frame);
+    if (frozen) requestAnimationFrame(() => applyFreeze(table, t));
+    if (framed) wheelGate(wrap, container);
     // the structural operations, shared by the bar under the table and the right-click menu
     const done = () => { commit(); widget.refresh(); };
     const ops = widget.ops = {
@@ -613,13 +624,14 @@
       const startX = e.clientX, startW = th.getBoundingClientRect().width;
       const table = th.closest('table');
       const wrap = widget.container.querySelector('.tbl-wrap');
-      h.classList.add('dragging'); document.body.classList.add('resizing');
+      let started = false;
       const cells = [...table.querySelectorAll('[data-c="' + c + '"]')].filter((x) => (x.colSpan || 1) === 1);
       let w = startW;
-      const move = (ev) => { w = Math.max(40, Math.round(startW + ev.clientX - startX)); for (const cell of cells) { cell.style.width = w + 'px'; cell.style.minWidth = w + 'px'; } };
+      const move = (ev) => { if (!started && Math.abs(ev.clientX - startX) < 3) return; if (!started) { started = true; h.classList.add('dragging'); document.body.classList.add('resizing'); } w = Math.max(40, Math.round(startW + ev.clientX - startX)); for (const cell of cells) { cell.style.width = w + 'px'; cell.style.minWidth = w + 'px'; } };
       const up = () => {
         document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up);
         h.classList.remove('dragging'); document.body.classList.remove('resizing');
+        if (!started) return;                                  // a click, not a drag (a double-click resets)
         t.style.cols[c + 1] = Object.assign(t.style.cols[c + 1] || {}, { width: w + 'px' });
         const total = [...table.querySelectorAll('thead th')].reduce((a, x) => a + x.getBoundingClientRect().width, 0);
         if (wrap && total > wrap.clientWidth + 2) t.style.flags.add('wide');
@@ -629,6 +641,62 @@
     });
     h.addEventListener('dblclick', (e) => { e.stopPropagation(); if (t.style.cols[c + 1]) { delete t.style.cols[c + 1].width; commit(); widget.refresh(); } });
     return h;
+  }
+
+  /* The corner grip sizes the frame: drag for height and width (live), release to save them
+   * in the style line; double-click resets to the natural size. */
+  function frameGrip(wrap, t, widget, commit) {
+    const g = el('div', { class: 'tbl-grip', title: 'Drag to size the table frame (height and width); double-click to reset' });
+    g.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault(); e.stopPropagation();
+      const x0 = e.clientX, y0 = e.clientY;
+      const h0 = wrap.getBoundingClientRect().height, w0 = wrap.getBoundingClientRect().width;
+      let h = h0, w = w0, movedX = false, movedY = false;
+      const move = (ev) => {
+        if (Math.abs(ev.clientX - x0) > 4) movedX = true;
+        if (Math.abs(ev.clientY - y0) > 4) movedY = true;
+        if (!(movedX || movedY)) return;
+        // only now: the class blanks pointer events, which would also swallow a double-click
+        document.body.classList.add('resizing'); wrap.classList.add('framed');
+        if (movedY) { h = Math.max(60, Math.round(h0 + ev.clientY - y0)); wrap.style.maxHeight = h + 'px'; }
+        if (movedX) { w = Math.max(120, Math.round(w0 + ev.clientX - x0)); wrap.style.width = w + 'px'; wrap.style.maxWidth = '100%'; }
+      };
+      const up = () => {
+        document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up);
+        document.body.classList.remove('resizing');
+        if (movedY) t.style.maxHeight = h + 'px';
+        if (movedX) t.style.frameWidth = w + 'px';
+        if (movedX || movedY) { commit(); widget.refresh(); }
+      };
+      document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+    });
+    g.addEventListener('dblclick', (e) => { e.stopPropagation(); delete t.style.maxHeight; delete t.style.frameWidth; commit(); widget.refresh(); });
+    return g;
+  }
+
+  /* Two scroll levels, one wheel (Seth, 2026-10-13): a wheel over the frame scrolls the
+   * DOCUMENT while the document was just scrolling or the pointer just arrived (a fast
+   * scroll through the note is never trapped by a table), and scrolls the FRAME once the
+   * reader has paused on it; at the frame's end the browser chains into the document. */
+  const PAUSE_MS = 280;
+  document.addEventListener('scroll', (e) => { const el2 = e.target; if (el2 && el2.id === 'editor') el2._lastScroll = performance.now(); }, true);
+  function wheelGate(wrap, container) {
+    let entered = 0;
+    wrap.addEventListener('mouseenter', () => { entered = performance.now(); });
+    wrap.addEventListener('wheel', (e) => {
+      const pane = container.closest('#editor');
+      if (!pane || e.ctrlKey) return;
+      const dy = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? pane.clientHeight : 1);
+      const dx = e.deltaX * (e.deltaMode === 1 ? 16 : 1);
+      const frameCanY = (dy < 0 && wrap.scrollTop > 0) || (dy > 0 && wrap.scrollTop + wrap.clientHeight < wrap.scrollHeight - 1);
+      const frameCanX = (dx < 0 && wrap.scrollLeft > 0) || (dx > 0 && wrap.scrollLeft + wrap.clientWidth < wrap.scrollWidth - 1);
+      if (!frameCanY && !frameCanX) return;                         // the frame is at its end: native chaining to the document
+      const paneCanY = (dy < 0 && pane.scrollTop > 0) || (dy > 0 && pane.scrollTop + pane.clientHeight < pane.scrollHeight - 1);
+      const now = performance.now();
+      const passing = (now - (pane._lastScroll || 0)) < PAUSE_MS || (now - entered) < PAUSE_MS;
+      if (passing && dy && paneCanY) { e.preventDefault(); pane.scrollBy({ top: dy, left: 0 }); pane._lastScroll = now; }
+    }, { passive: false });
   }
 
   /* Excel-style frozen panes: the first N rows stick to the top and the first M columns to
@@ -939,11 +1007,13 @@
         pop.appendChild(fz);
         const fr = el('input', { type: 'number', min: 0, max: 10, value: t.style.freezeRows || 0, style: { width: '56px' } });
         const fc = el('input', { type: 'number', min: 0, max: 10, value: t.style.freezeCols || 0, style: { width: '56px' } });
-        const mh = el('input', { type: 'text', value: t.style.maxHeight || '', placeholder: '60vh', style: { width: '70px' } });
-        const setFreeze = () => { t.style.freezeRows = +fr.value || 0; t.style.freezeCols = +fc.value || 0; t.style.maxHeight = mh.value.trim(); commit(); widget.refresh(); };
-        fr.addEventListener('change', setFreeze); fc.addEventListener('change', setFreeze); mh.addEventListener('change', setFreeze);
-        pop.appendChild(el('div', { class: 'row' }, el('span', { class: 'lbl' }, ''), el('span', { class: 'small muted' }, 'rows'), fr, el('span', { class: 'small muted' }, 'cols'), fc, el('span', { class: 'small muted' }, 'height'), mh));
-        pop.appendChild(el('div', { class: 'hint' }, 'Frozen rows and columns stay put while the table scrolls inside its box (set height to e.g. 300px or 60vh).'));
+        const mh = el('input', { type: 'text', value: t.style.maxHeight || '', placeholder: 'auto', style: { width: '70px' }, title: 'Frame height, e.g. 300px or 60vh' });
+        const mw = el('input', { type: 'text', value: t.style.frameWidth || '', placeholder: 'auto', style: { width: '70px' }, title: 'Frame width, e.g. 600px or 80%' });
+        const setFreeze = () => { t.style.freezeRows = +fr.value || 0; t.style.freezeCols = +fc.value || 0; t.style.maxHeight = mh.value.trim(); t.style.frameWidth = mw.value.trim(); commit(); widget.refresh(); };
+        fr.addEventListener('change', setFreeze); fc.addEventListener('change', setFreeze); mh.addEventListener('change', setFreeze); mw.addEventListener('change', setFreeze);
+        pop.appendChild(el('div', { class: 'row' }, el('span', { class: 'lbl' }, ''), el('span', { class: 'small muted' }, 'rows'), fr, el('span', { class: 'small muted' }, 'cols'), fc));
+        pop.appendChild(el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Frame'), el('span', { class: 'small muted' }, 'height'), mh, el('span', { class: 'small muted' }, 'width'), mw));
+        pop.appendChild(el('div', { class: 'hint' }, 'A sized frame scrolls the table inside it (drag the corner grip under the table to size it). Frozen rows and columns stay put while it scrolls.'));
         const b = el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Borders'));
         for (const [v, l] of [['', 'Normal'], ['borders-light', 'Light'], ['borders-none', 'None']]) b.appendChild(el('button', { class: 'tog' + ((v ? t.style.flags.has(v) : !t.style.flags.has('borders-light') && !t.style.flags.has('borders-none')) ? ' on' : ''), onclick: () => { t.style.flags.delete('borders-light'); t.style.flags.delete('borders-none'); if (v) t.style.flags.add(v); commit(); widget.refresh(); render(); } }, l));
         pop.appendChild(b);

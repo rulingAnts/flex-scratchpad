@@ -106,7 +106,9 @@ selected (also in the menu: Paste rows above/below, Paste columns left/right). R
 cells, freeze panes, split or merge tables, styles). Shift-click or drag across cells to select a
 range and merge it. Columns resize by dragging; merged cells are kept as `span 2.1: 1x2` in the
 style line and survive a paste from Excel, Word or a browser; `freeze rows 1; freeze cols 1` pins
-panes. The bar under a table sticks to the bottom of the pane while the table is scrolled past it.
+panes. The bar under a table sticks to the bottom of the pane while the table is scrolled past it. Drag the
+corner grip under a table to give it a frame of its own size (height and width) that scrolls inside;
+scrolling fast through the note passes over the frame, pausing on it scrolls the frame.
 
 Entry embeds choose their fields with `fields=cf,mt,gl,def,ex,tr,sub` and their senses with
 `senses=1,2.1` (the ⋯ menu offers both); text embeds choose lines with `lines=` and are anchored to

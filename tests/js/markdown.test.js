@@ -133,3 +133,11 @@ test('tables: a range of cells merges into one span and unmerges again', () => {
   assert.deepEqual(t.style.spans, { '1.1': { rows: 1, cols: 2 } });
   assert.ok(!T.unmergeRange(t, { r1: 2, c1: 2, r2: 2, c2: 2 }));
 });
+
+test('tables: the frame size round-trips', () => {
+  const t = FS.tables.parse('| a |\n|---|\n| 1 |\n{table: max-height 300px; frame-width 640px}');
+  assert.equal(t.style.maxHeight, '300px'); assert.equal(t.style.frameWidth, '640px');
+  assert.equal(FS.tables.serialize(t).split('\n').pop(), '{table: max-height 300px; frame-width 640px}');
+  const [top] = FS.tables.splitAt(t, 1) || [null];
+  assert.ok(top === null || top.style.frameWidth === '640px');
+});

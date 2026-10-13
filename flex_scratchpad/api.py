@@ -245,7 +245,7 @@ class Api:
     def import_notebook_zip(self, zip_path: str | None = None, folder: str | None = None) -> dict | None:
         """Unpack a notebook zip into a (new) folder and open it."""
         import zipfile
-        zp = zip_path or self._file_dialog(("Notebook archive (*.zip)", "*.zip"))
+        zp = zip_path or self._file_dialog(("Notebook archive", "*.zip"))
         if not zp:
             return None
         dest = folder or self._folder_dialog()
@@ -337,7 +337,7 @@ class Api:
 
     def flex_choose_file(self) -> dict | None:
         """Pick a .flextext file (fallback source)."""
-        p = self._file_dialog(("FLEx interlinear export (*.flextext)", "*.flextext"), ("All files (*.*)", "*.*"))
+        p = self._file_dialog(("FLEx interlinear export", "*.flextext"), ("All files", "*.*"))
         return {"path": p} if p else None
 
     def flex_open_object(self, kind: str, guid: str) -> bool:
@@ -364,8 +364,7 @@ class Api:
         return self._flex.store_captured_clip(text_guid, begin, end, data_base64, mime)
 
     def audio_browse_media(self, media_guid: str) -> dict | None:
-        p = self._file_dialog(("Audio (*.wav;*.mp3;*.m4a;*.ogg;*.flac;*.wma)", "*.wav;*.mp3;*.m4a;*.ogg;*.flac;*.wma"),
-                              ("All files (*.*)", "*.*"))
+        p = self._file_dialog(("Audio", "*.wav;*.mp3;*.m4a;*.ogg;*.flac;*.wma;*.aac;*.opus"), ("All files", "*.*"))
         if not p:
             return None
         self._flex.set_media_path(media_guid, p)
@@ -373,6 +372,12 @@ class Api:
 
     def audio_set_media_path(self, media_guid: str, path: str) -> dict:
         return self._flex.set_media_path(media_guid, path)
+
+    def audio_tools(self) -> dict:
+        """Where clips come from: ffmpeg (FLAC slices of any format) or the stdlib (WAV only)."""
+        from .flex.audio import find_ffmpeg
+        exe = find_ffmpeg(self._nb.config.get("settings", {}).get("ffmpegPath", ""))
+        return {"ffmpeg": exe or "", "clipFormat": "flac" if exe else "wav"}
 
     def save_file_as(self, suggested_name: str, source_path: str) -> str | None:
         """Save dialog + copy (used for *Save clip…*)."""
@@ -402,7 +407,16 @@ class Api:
         return self._dialog("folder")
 
     def _file_dialog(self, *filters: tuple[str, str]) -> str | None:
-        return self._dialog("open", allow_multiple=False, file_types=tuple(f"{a} ({b})" for a, b in filters))
+        """pywebview wants 'Description (*.ext;*.ext)' — exactly one parenthesised pattern list.
+        (Seth's run, 2026-10-13: a description that already carried the patterns produced
+        'Audio (*.wav…) (*.wav…)', "not a valid file filter".)"""
+        types = []
+        for a, b in filters:
+            a = a.strip()
+            if a.endswith(")") and "(" in a:
+                a = a[:a.rfind("(")].strip()
+            types.append(f"{a} ({b})")
+        return self._dialog("open", allow_multiple=False, file_types=tuple(types))
 
     def _save_dialog(self, name: str) -> str | None:
         return self._dialog("save", save_filename=name)

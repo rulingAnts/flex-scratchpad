@@ -446,8 +446,9 @@ class FlexService:
             found = bool(m.get("found")) and Path(m.get("path", "")).is_file()
             clip = self.cache.find_audio_clip(self.project_name, text_guid, begin, end)
             if not clip and found:
+                from .audio import find_ffmpeg
                 dst = self.cache.audio_clip_path(self.project_name, text_guid, begin, end, ".wav")
-                clip = cut_clip(m["path"], dst, begin, end)
+                clip = cut_clip(m["path"], dst, begin, end, find_ffmpeg(self.nb.config.get("settings", {}).get("ffmpegPath", "")))
             return {
                 "found": found,
                 "fileUrl": Path(m["path"]).resolve().as_uri() if found else "",

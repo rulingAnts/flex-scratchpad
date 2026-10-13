@@ -153,3 +153,19 @@ A whole-note export next to Markdown / HTML / DOCX / PDF: prose as plain LaTeX (
 lists, tables as `tabular`), examples as langsci-gb4e (`\\ea … \\gll … \\glt … \\z`, see the
 copy-as-LaTeX item above — the two share one serializer), vernacular in the writing system's
 font via `fontspec`. Exact packages and macros to be settled with Seth.
+
+## Import .flextext and ELAN files as extra texts (Seth, 2026-10-13)
+
+> *"the ability to import flextext and elan files, regardless of whether they're in the FLEx
+> database (as long as they've got matching writing systems) and have them included in the list of
+> texts you can pull examples from"*
+
+The `.flextext` parser exists (`flex/flextext.py`, the fallback source). What this adds: a
+notebook-level list of extra text files (`notebook.json` → `extraTexts: [paths]`, files copied
+into `.scratchpad/texts/`), merged into the picker's text list and `all_baselines` beside the
+project's texts, with a source badge; GUIDs come from the file (flextext) or are minted and kept
+(ELAN). ELAN (`.eaf`): the reverse of flextext-editor's `seg-exports.js` — phrase tier → segments
+with times, word/gloss tiers → words; writing systems matched by the tier's language or chosen on
+import. Embeds keep working through `{{flex:text <guid> …}}`; "Open in FLEx" is hidden for them.
+SFM / UFM (standard-format interlinear, Toolbox-style `\\tx \\mb \\gl \\ft`) later, by the same
+route (Seth, 2026-10-13: "Or SFM/UFM eventually. Later.").

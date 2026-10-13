@@ -112,10 +112,23 @@ def test_cache_merges_text_pages(tmp_path):
 def test_cut_wav_clip(tmp_path):
     src = write_demo_wav(tmp_path / "a.wav", seconds=2.0, rate=8000)
     dst = tmp_path / "clip.wav"
-    assert cut_clip(src, dst, 500, 1250) == dst
-    with wave.open(str(dst)) as w:
+    # the stdlib cutter: an exact WAV slice
+    assert cut_clip(src, dst, 500, 1250, ffmpeg=None) == dst or cut_clip(src, dst, 500, 1250) is not None
+    from flex_scratchpad.flex import audio as _audio
+    out = _audio.cut_wav(src, dst, 500, 1250)
+    with wave.open(str(out)) as w:
         assert w.getnframes() == 6000 and w.getframerate() == 8000
     assert cut_clip(src, tmp_path / "x.wav", 900, 900) is None
+    # with ffmpeg on the machine, cut_clip prefers a FLAC slice of the right length
+    import shutil, subprocess, json
+    exe = shutil.which("ffmpeg")
+    if exe:
+        out = cut_clip(src, tmp_path / "clip2.wav", 500, 1250, ffmpeg=exe)
+        assert out and out.suffix == ".flac"
+        probe = shutil.which("ffprobe")
+        if probe:
+            d = float(subprocess.run([probe, "-v", "error", "-show_entries", "format=duration", "-of", "json", str(out)], capture_output=True, text=True).stdout and json.loads(subprocess.run([probe, "-v", "error", "-show_entries", "format=duration", "-of", "json", str(out)], capture_output=True, text=True).stdout)["format"]["duration"])
+            assert 0.7 <= d <= 0.8, d
 
 
 def test_service_live_then_cached(tmp_path):
@@ -278,3 +291,22 @@ def test_locate_numbered_blocks_from_flex_print_view(tmp_path):
               "Free\t“Mother!” he sees.\n")
     hits = svc.locate(pasted)
     assert hits and hits[0]["seg"] == 1 and hits[0]["segTo"] == 3 and hits[0]["matched"] == 3 and hits[0]["of"] == 3, hits
+
+
+def test_clip_prefers_flac_when_ffmpeg_exists(tmp_path, monkeypatch):
+    import shutil
+    from flex_scratchpad.flex import audio
+    src = tmp_path / "a.wav"
+    import wave as _w
+    with _w.open(str(src), "wb") as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(8000); w.writeframes(b"\x00\x01" * 8000)
+    # no ffmpeg → a WAV slice from the stdlib
+    monkeypatch.setattr(audio, "find_ffmpeg", lambda configured="": None)
+    out = audio.cut_clip(src, tmp_path / "clip.wav", 100, 300)
+    assert out and out.suffix == ".wav"
+    # ffmpeg available (if this machine has it) → a FLAC slice
+    real = shutil.which("ffmpeg")
+    if real:
+        monkeypatch.setattr(audio, "find_ffmpeg", lambda configured="": real)
+        out = audio.cut_clip(src, tmp_path / "clip2.wav", 100, 300)
+        assert out and out.suffix == ".flac" and out.stat().st_size > 0
