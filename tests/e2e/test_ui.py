@@ -1396,6 +1396,10 @@ def test_outline_numbering_and_enter(app):
     page.wait_for_timeout(400)
     shown = page.evaluate("() => [...document.querySelectorAll('#editor .md-line[data-num]')].map((l) => l.dataset.num + ' ' + l.textContent.trim().replace(/^\\d+\\.\\s*/, ''))")
     assert shown == ["1. Symmetrical", "1. Examples:", "2. One-word", "1. Examples:", "3. Argument sharing", "1. All", "2. Shared subject"], shown
+    # what is DRAWN: the computed number via ::before, the typed digits invisible
+    drawn = page.evaluate("() => [...document.querySelectorAll('#editor .md-num[data-num]')].map((n) => [getComputedStyle(n, '::before').content, getComputedStyle(n).color])")
+    assert [d[0] for d in drawn] == ['"1."', '"1."', '"2."', '"1."', '"3."', '"1."', '"2."'], drawn
+    assert all(d[1] == "rgba(0, 0, 0, 0)" for d in drawn), drawn
     # Enter after the last sub-item continues ITS level with the shown number + 1
     last = page.locator("#editor .blk-list .blk-body").last
     last.click()

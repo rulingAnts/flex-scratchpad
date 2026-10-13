@@ -264,8 +264,12 @@
       // an empty line needs a <br> to have height and to count as a real line for Chromium
       // (a bare trailing "\n" text node gets collapsed away when typing after it); <br> adds
       // nothing to textContent, so the text-is-the-markdown invariant holds.
+      // the computed number rides on the number span itself: CSS attr() reads only the
+      // element the ::before belongs to (the line's copy is for tests and tooling)
       const numAttr = nums[li] != null ? ' data-num="' + nums[li] + '."' : '';
-      html.push('<span class="md-line ' + lineCls + '"' + numAttr + '>' + (line.length ? emit(line, out) : '<br>') + '</span>');
+      let inner = line.length ? emit(line, out) : '<br>';
+      if (numAttr) inner = inner.replace('<span class="md-marker md-num">', '<span class="md-marker md-num"' + numAttr + '>');
+      html.push('<span class="md-line ' + lineCls + '"' + numAttr + '>' + inner + '</span>');
       offset += line.length + 1;
     });
     return html.join('\n');

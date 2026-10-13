@@ -153,7 +153,8 @@ test('outline numbers are computed per level and carry across loose-list blocks'
   assert.deepEqual(MD.numberLines(['7. again'], 'list', ctx), [1]);
   // decorate shows the computed number and keeps the typed text intact
   const html = MD.decorate('1. one\n  2. sub', 'list', { counters: [] });
-  assert.equal((html.match(/data-num="1\."/g) || []).length, 2);
-  assert.match(html, /md-num">\s*2\. <\/span>/);
+  assert.equal((html.match(/data-num="1\."/g) || []).length, 4);          // on the line AND on the number span
+  assert.match(html, /<span class="md-marker md-num" data-num="1\.">\s*2\. <\/span>/);
+  assert.match(html, /md-num" data-num="1\.">\s*2\. <\/span>/);
   assert.equal(html.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&'), '1. one\n  2. sub');
 });
