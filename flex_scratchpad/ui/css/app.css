@@ -93,6 +93,18 @@ body.resizing * { pointer-events: none; }
 .flex-pill:hover { border-color: var(--accent); }
 .flex-pill .led { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; }
 .flex-pill.on .led { background: #22a06b; box-shadow: 0 0 0 3px rgba(34, 160, 107, 0.2); }
+.flex-pill.err .led { background: #c0392b; box-shadow: 0 0 0 3px rgba(192, 57, 43, 0.2); }
+.flex-pill.warn .led { background: #e0a800; box-shadow: 0 0 0 3px rgba(224, 168, 0, 0.25); }
+.flex-pill .warn-icon { display: none; color: #c0392b; font-weight: 700; margin-left: 2px; }
+.flex-pill.warn .warn-icon, .flex-pill.err .warn-icon { display: inline; }
+.flex-banner { display: flex; align-items: center; gap: 10px; margin: 8px 28px 0; padding: 8px 12px; border-radius: 10px; background: #fff6e5; border: 1px solid #f0c36d; color: #5a4200; font-size: 13.5px; }
+.flex-banner[hidden] { display: none; }
+.flex-banner .icon { font-size: 16px; }
+.flex-banner .spacer { flex: 1; }
+.flex-banner.err { background: #fdecea; border-color: #f1b0a8; color: #7a1f14; }
+.flex-explain { max-width: 520px; }
+.flex-explain .fix { background: var(--panel); border-radius: 8px; padding: 8px 10px; margin-top: 6px; font-size: 13px; }
+.flex-explain ol { margin: 4px 0 0 18px; padding: 0; }
 .flex-pill.err .led { background: var(--danger); }
 .flex-pill .label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 

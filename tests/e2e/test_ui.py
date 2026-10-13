@@ -1240,3 +1240,59 @@ def test_overlay_scrolls_inside_and_duplicate_remove(app):
     page.locator(".popover .btn.danger").click()
     page.wait_for_function("() => document.querySelectorAll('table.md-table .entry-card').length === 1")
     assert not errors
+
+
+def test_flex_pairing_prompt_banner_and_sharing_warning(app):
+    h, page, errors = app
+    # demo project: connected, no prompt, no banner
+    assert page.locator("#flex-pill.on").count() == 1 and page.locator("#flex-banner").is_hidden()
+    assert page.locator(".modal", has_text="Link a FieldWorks project").count() == 0
+    # nothing linked → the first-run prompt and the banner appear
+    page.evaluate("() => { sessionStorage.removeItem('fs:flexPromptShown'); FS.flexUi.setFlex({ open: false, configured: false, error: '', errorCode: '' }); FS.flexUi.flexPrompt(false); }")
+    page.wait_for_selector(".modal", state="visible")
+    assert "Link a FieldWorks project" in page.locator(".modal .modal-title").inner_text()
+    assert page.locator(".modal .btn", has_text="Choose a project").count() == 1
+    page.locator(".modal .btn", has_text="Not now").click()
+    assert page.locator("#flex-banner").is_visible() and "No FieldWorks project is linked" in page.locator("#flex-banner .text").inner_text()
+    assert page.locator("#flex-pill .warn-icon").is_visible()
+    # a locked project → error state with the sharing fix in the pill's explanation
+    page.evaluate("() => FS.flexUi.setFlex({ open: false, configured: true, project: 'fau-iya-flex', error: 'The project is locked by FieldWorks.', errorCode: 'locked' })")
+    assert page.locator("#flex-pill.err").count() == 1
+    page.locator("#flex-pill").click()
+    page.wait_for_selector(".popover.flex-explain")
+    assert "Share project contents" in page.locator(".popover.flex-explain").inner_text()
+    page.keyboard.press("Escape")
+    # connected but sharing off → warning, still usable
+    page.evaluate("() => FS.flexUi.setFlex({ open: true, configured: true, backend: 'lcm', project: 'fau-iya-flex', shared: false, flexHasItOpen: false })")
+    assert page.locator("#flex-pill.warn").count() == 1 and page.locator("#flex-banner").is_hidden()
+    page.locator("#flex-pill").click()
+    page.wait_for_selector(".popover.flex-explain")
+    assert "sharing" in page.locator(".popover.flex-explain").inner_text().lower() and "Sharing tab" in page.locator(".popover.flex-explain").inner_text()
+    page.keyboard.press("Escape")
+    # connected and shared → plain
+    page.evaluate("() => FS.flexUi.setFlex({ open: true, configured: true, backend: 'lcm', project: 'fau-iya-flex', shared: true })")
+    assert page.locator("#flex-pill.on").count() == 1 and page.locator("#flex-pill .warn-icon").is_hidden()
+    assert not errors
+
+
+def test_row_selection_keeps_to_the_row_with_merged_cells(app):
+    h, page, errors = app
+    new_note(page, "Merged rows")
+    page.locator("#editor .blk-body").first.click()
+    paste(page, "| a | b | c |\n|---|---|---|\n| 1 | tall | 3 |\n| 4 |  | 6 |\n| 7 | 8 | 9 |\n{table: span 2.2: 2x1}")
+    page.wait_for_selector("table.md-table td[rowspan='2']")
+    page.locator("table.md-table").hover()
+    # row 3 (0-based 2) is spanned by the merged cell anchored in row 2: selecting it selects
+    # that row only, and the merged cell counts as part of it
+    page.locator("table.md-table th.gutter.row").nth(2).dispatch_event("mousedown", {"button": 0, "bubbles": True})
+    page.wait_for_timeout(100)
+    sel = page.evaluate("() => [...document.querySelectorAll('table.md-table .sel')].map((c) => c.dataset.r + ',' + c.dataset.c)")
+    assert sorted(sel) == ["1,1", "2,0", "2,2"], sel
+    assert page.locator("table.md-table th.gutter.row.on").count() == 1
+    # the column with the merged cell: that column only
+    page.locator("table.md-table th.gutter.col").nth(1).dispatch_event("mousedown", {"button": 0, "bubbles": True})
+    page.wait_for_timeout(100)
+    sel = page.evaluate("() => [...document.querySelectorAll('table.md-table .sel')].map((c) => c.dataset.r + ',' + c.dataset.c)")
+    assert sorted(sel) == ["0,1", "1,1", "3,1"], sel
+    assert page.locator("table.md-table th.gutter.col.on").count() == 1
+    assert not errors

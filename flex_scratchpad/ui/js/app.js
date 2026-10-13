@@ -23,6 +23,7 @@
       return;
     }
     wire();
+    setTimeout(() => flexPrompt(false), 400);
     if (!S.notes.length) {
       try {
         const n = await FS.api.create_note(S.tab, '', 'Welcome to FLEx Scratchpad', FS.welcomeNote());
@@ -148,14 +149,87 @@
     try { const p = await FS.api.create_folder(tab || S.tab, (parent ? parent + '/' : '') + name.trim()); S.openFolders.add(parent || ''); S.folder = p; await refreshLists(); } catch (e) { FS.toast(e.message, 'error'); }
   }
 
+  /* ------------------------------------------------------------------ FLEx connection state
+   * One assessment of the connection, used by the pill, the banner, the first-run prompt and
+   * Settings (Seth, 2026-10-13: "make it obvious for new users how to pair a FLEx project").
+   *   level: 'ok' | 'warn' | 'err' | 'none'  (none = nothing linked yet) */
+  const SHARING_FIX = ['In FieldWorks open the project.', 'File → Project Management → FieldWorks Project Properties… → Sharing tab.', 'Tick “Share project contents with programs on this computer” and click OK.', 'Back here, press Retry.'];
+  function flexState() {
+    const f = S.flex || {};
+    const src = f.backend === 'demo' ? ' (demo)' : f.backend === 'flextext' ? ' (.flextext)' : '';
+    if (f.open) {
+      if (f.shared === false) {
+        return { level: 'warn', short: 'FLEx: ' + f.project + ' — sharing is off', title: 'This project is not shared with other programs',
+          text: 'The Scratchpad can read “' + f.project + '” right now' + (f.flexHasItOpen === false ? ' because FieldWorks does not have it open' : '') + ', but as soon as FieldWorks opens this project without sharing, reads here will fail with “locked by FieldWorks”.', fix: SHARING_FIX };
+      }
+      return { level: 'ok', short: 'FLEx: ' + (f.project || '') + src, title: 'Connected to ' + f.project + src,
+        text: f.backend === 'lcm' ? ('Reading the project directly' + (f.shared ? '; sharing is on, so FieldWorks and the Scratchpad can both have it open.' : '.')) : (f.backend === 'demo' ? 'The built-in demo project (for trying things out).' : 'A .flextext export file: texts only, no lexicon.'), fix: null };
+    }
+    if (!f.configured) return { level: 'none', short: 'FLEx: no project linked', title: 'No FieldWorks project is linked yet', text: 'Link one to insert entries and interlinear examples into your notes. The notebook works without it, but FLEx objects stay as they were last seen.', fix: null };
+    if (f.errorCode === 'locked') return { level: 'err', short: 'FLEx: ' + f.project + ' is locked', title: 'FieldWorks has “' + f.project + '” open without sharing', text: f.error, fix: SHARING_FIX };
+    if (f.errorCode === 'no-flexicon') return { level: 'err', short: 'FLEx: flexicon not installed', title: 'The FieldWorks link is not installed', text: f.error, fix: ['On the Windows machine with FieldWorks, run:  pip install "flex-scratchpad[flex]"', 'Restart the Scratchpad and press Retry.'] };
+    return { level: 'err', short: 'FLEx: ' + (f.error || 'not reachable'), title: 'The project “' + (f.project || f.flextextPath || '') + '” could not be opened', text: f.error || 'Unknown error', fix: f.errorCode === 'migration' ? ['Open the project in FieldWorks once (it migrates the data).', 'Back here, press Retry.'] : f.errorCode === 'not-found' ? ['Check the project name in Settings, or pick it from the list.'] : null };
+  }
   function renderFlexPill() {
     const pill = $('flex-pill');
-    const f = S.flex || {};
-    pill.classList.toggle('on', !!f.open);
-    pill.classList.toggle('err', !!f.error && !f.open);
-    const src = f.backend === 'demo' ? ' (demo)' : f.backend === 'flextext' ? ' (.flextext)' : '';
-    pill.querySelector('.label').textContent = f.open ? 'FLEx: ' + (f.project || '') + src : f.error ? 'FLEx: ' + f.error : 'FLEx: not connected';
-    pill.title = f.error || (f.open ? 'Connected to ' + f.project : 'Open Settings to connect a FieldWorks project');
+    const st = flexState();
+    pill.classList.toggle('on', st.level === 'ok');
+    pill.classList.toggle('warn', st.level === 'warn');
+    pill.classList.toggle('err', st.level === 'err' || st.level === 'none');
+    pill.querySelector('.label').textContent = st.short;
+    if (!pill.querySelector('.warn-icon')) pill.appendChild(el('span', { class: 'warn-icon', title: 'There is a problem — click for details' }, '!'));
+    pill.title = st.title + (st.level === 'ok' ? '' : ' — click for details');
+    renderFlexBanner(st);
+  }
+  function renderFlexBanner(st) {
+    const b = $('flex-banner');
+    if (!b) return;
+    const hidden = sessionStorage.getItem('fs:flexBannerHidden') === '1';
+    const show = (st.level === 'none' || st.level === 'err') && !hidden;
+    b.hidden = !show;
+    if (!show) return;
+    b.classList.toggle('err', st.level === 'err');
+    b.querySelector('.text').textContent = st.title + (st.level === 'err' && st.fix ? ' — ' + st.fix[0] : '');
+    $('flex-banner-fix').textContent = st.level === 'none' ? 'Link a project…' : 'Open Settings…';
+  }
+  async function retryFlex() {
+    try { S.flex = await FS.api.flex_open(); } catch (e) { FS.toast(e.message, 'error'); return; }
+    renderFlexPill(); FS.interlinear.invalidate();
+    if (S.flex.open) { FS.toast('Connected to ' + S.flex.project, 'ok'); if (S.note) ensureEditor().load(S.note.body); }
+    else FS.toast(S.flex.error || 'Still not connected', 'error');
+  }
+  /* The pill explains itself: state, what it means, how to fix it. */
+  function flexStatusPopover(anchor) {
+    const st = flexState();
+    FS.popover(anchor, (pop, close) => {
+      pop.classList.add('flex-explain');
+      pop.appendChild(el('div', { class: 'row' }, el('b', {}, (st.level === 'warn' ? '⚠ ' : st.level === 'err' ? '✖ ' : st.level === 'none' ? '○ ' : '● ') + st.title)));
+      pop.appendChild(el('div', { class: 'row small' }, st.text || ''));
+      if (st.fix) pop.appendChild(el('div', { class: 'fix' }, el('b', {}, 'How to fix it'), el('ol', {}, ...st.fix.map((x) => el('li', {}, x)))));
+      const row = el('div', { class: 'row', style: { justifyContent: 'flex-end', marginTop: '8px' } });
+      if (st.level !== 'ok') row.appendChild(el('button', { class: 'btn', onclick: () => { close(); retryFlex(); } }, 'Retry'));
+      row.appendChild(el('button', { class: 'btn primary', onclick: () => { close(); openSettings(); } }, st.level === 'none' ? 'Link a project…' : 'Settings…'));
+      pop.appendChild(row);
+    });
+  }
+  /* First run, or a linked project that cannot be reached: ask, rather than leaving it to the
+   * pill. Shown once per start while the state stays that way. */
+  function flexPrompt(force) {
+    const st = flexState();
+    if (st.level === 'ok' || st.level === 'warn') return false;
+    if (!force && sessionStorage.getItem('fs:flexPromptShown') === '1') return false;
+    sessionStorage.setItem('fs:flexPromptShown', '1');
+    const m = FS.modal({ title: st.level === 'none' ? 'Link a FieldWorks project?' : 'FieldWorks project not reachable' });
+    m.body.appendChild(el('p', {}, st.level === 'none' ? 'FLEx Scratchpad shows live entries and interlinear examples from a FieldWorks project inside your notes. No project is linked yet.' : st.title + '.'));
+    if (st.level !== 'none') m.body.appendChild(el('p', { class: 'small muted' }, st.text));
+    if (st.fix) m.body.appendChild(el('div', { class: 'fix flex-explain' }, el('b', {}, 'How to fix it'), el('ol', {}, ...st.fix.map((x) => el('li', {}, x)))));
+    const row = el('div', { class: 'btn-row' });
+    row.appendChild(el('button', { class: 'btn', onclick: () => m.close() }, 'Not now'));
+    if (st.level !== 'none') row.appendChild(el('button', { class: 'btn', onclick: () => { m.close(); retryFlex(); } }, 'Retry'));
+    if (st.level === 'none') row.appendChild(el('button', { class: 'btn', onclick: async () => { m.close(); try { S.flex = await FS.api.flex_configure('demo', 'Kalu Demo', ''); renderFlexPill(); FS.toast('Demo project linked', 'ok'); } catch (e) { FS.toast(e.message, 'error'); } } }, 'Try the demo project'));
+    row.appendChild(el('button', { class: 'btn primary', onclick: () => { m.close(); openSettings(); } }, st.level === 'none' ? 'Choose a project…' : 'Open Settings…'));
+    m.body.appendChild(row);
+    return true;
   }
 
   /* ------------------------------------------------------------------ note list */
@@ -467,6 +541,8 @@
       } catch (e) { status.textContent = e.message; }
     } }, 'Connect');
     fx.append(el('div', { class: 'form-row' }, el('label', {}, 'Source'), source), projectRow, fileRow, el('div', { class: 'btn-row', style: { justifyContent: 'flex-start' } }, connect, el('button', { class: 'btn', onclick: async () => { S.flex = await FS.api.flex_refresh(); renderFlexPill(); FS.interlinear.invalidate(); FS.toast('Reloaded from FLEx'); } }, 'Reload data')), status);
+    const st0 = flexState();
+    if (st0.level !== 'ok') { const ex = el('div', { class: 'flex-explain' }, el('div', { class: 'small' }, el('b', {}, (st0.level === 'warn' ? '⚠ ' : st0.level === 'err' ? '✖ ' : '') + st0.title), ' ', st0.text || '')); if (st0.fix) ex.appendChild(el('div', { class: 'fix' }, el('b', {}, 'How to fix it'), el('ol', {}, ...st0.fix.map((x) => el('li', {}, x))))); fx.appendChild(ex); }
     fx.appendChild(el('p', { class: 'muted small' }, 'Reading the project directly needs FieldWorks installed on this computer plus the flexicon and pythonnet packages (pip install "flex-scratchpad[flex]"). If FLEx is open at the same time, turn on Project Properties → Sharing → “Share project contents with programs on this computer”.'));
     if (S.flex.error) fx.appendChild(el('p', { class: 'small', style: { color: 'var(--danger)' } }, S.flex.error));
     body.appendChild(fx);
@@ -577,7 +653,10 @@
     $('btn-add-folder').addEventListener('click', () => newFolder(S.tab, S.folder || ''));
     $('btn-edit-tags').addEventListener('click', openSettings);
     $('btn-settings').addEventListener('click', openSettings);
-    $('flex-pill').addEventListener('click', openSettings);
+    $('flex-pill').addEventListener('click', (e) => flexStatusPopover(e.currentTarget));
+    $('flex-banner-fix').addEventListener('click', openSettings);
+    $('flex-banner-retry').addEventListener('click', retryFlex);
+    $('flex-banner-hide').addEventListener('click', () => { sessionStorage.setItem('fs:flexBannerHidden', '1'); $('flex-banner').hidden = true; });
     $('btn-sort').addEventListener('click', (e) => FS.popover(e.currentTarget, (pop, close) => { for (const [v, l] of [['updated', 'Last edited'], ['created', 'Date created'], ['title', 'Title']]) pop.appendChild(el('button', { class: 'menu-item' + (S.sort === v ? ' on' : ''), onclick: () => { S.sort = v; close(); renderList(); } }, (S.sort === v ? '✓ ' : '') + l)); }));
     $('note-title').addEventListener('input', () => { if (S.note) { S.note.title = $('note-title').value; S.dirty = true; scheduleSave(); } });
     $('note-title').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); ensureEditor().focusBlock(0, 0); } });
@@ -646,6 +725,7 @@
   }
 
   /* ------------------------------------------------------------------ welcome note */
+  FS.flexUi = { flexState, flexPrompt, renderFlexPill, setFlex: (f) => { S.flex = f; renderFlexPill(); } };
   FS.welcomeNote = () => [
     '# Welcome to FLEx Scratchpad',
     '',

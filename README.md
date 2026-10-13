@@ -95,6 +95,10 @@ The suffix **-mo** marks past tense:
 {table: striped; col 1: bold}
 ```
 
+On first start (and whenever the linked project cannot be opened) the app asks whether to link or
+fix it; the FLEx pill at the bottom left explains the state and, when a project is open in FLEx
+without sharing, shows a warning with the exact steps (Project Properties → Sharing).
+
 Tables: click the strip above a column or left of a row to select it (drag or Shift-click for
 several, the corner for the whole table); Ctrl+C / Ctrl+X / Delete act on the selection, and
 Ctrl+V pastes a grid over the cells, or as new rows / columns when whole rows / columns are

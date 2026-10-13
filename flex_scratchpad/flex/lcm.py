@@ -246,8 +246,38 @@ class FlexiconBackend:
         return self.worker.call(self._status)
 
     def _status(self) -> dict:
-        return {"source": "lcm", "project": self.project_name, "open": self.project is not None,
-                "ws": self._writing_systems() if self.project is not None else None}
+        st = {"source": "lcm", "project": self.project_name, "open": self.project is not None,
+              "ws": self._writing_systems() if self.project is not None else None}
+        st.update(self._sharing_status(self.project_name))
+        return st
+
+    def _sharing_status(self, name: str) -> dict:
+        """Is the project shared with other programs (FLEx: Project Properties → Sharing)?
+        `shared`: True / False / None (unknown); `flexHasItOpen`: the .fwdata.lock file is
+        there; `projectDir`. Read from the open cache's backend type when we have it (the
+        shared XML backend is what sharing switches on), else unknown."""
+        out: dict = {"shared": None, "flexHasItOpen": None, "projectDir": ""}
+        if not name:
+            return out
+        pdir = self._project_dir(name)
+        if pdir:
+            out["projectDir"] = pdir
+            out["flexHasItOpen"] = _t(lambda: (Path(pdir) / f"{name}.fwdata.lock").is_file(), None)
+        if self.project is not None:
+            kind = _s(_t(lambda: self.project.project.ProjectId.Type, "")) or _s(_t(lambda: str(self.project.project.ProjectId.Type), ""))
+            if kind:
+                out["shared"] = "shared" in kind.lower()
+                out["backendType"] = kind
+        return out
+
+    def _project_dir(self, name: str) -> str:
+        mod = self._mod
+        for fn in (lambda: str(mod.FLExLCM.FwDirectoryFinder.ProjectsDirectory),
+                   lambda: str(mod.code.FLExLCM.FwDirectoryFinder.ProjectsDirectory)):
+            base = _t(fn, "")
+            if base:
+                return str(Path(base) / name)
+        return ""
 
     def set_media_map(self, media_map: dict) -> None:
         self.media_map = dict(media_map or {})

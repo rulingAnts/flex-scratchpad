@@ -72,6 +72,10 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
   `paragraph.segment` (what people read, shown everywhere). Morph glosses wear the morph type's
   break characters (`-PST`, `3SG-`, `=lo`), from `IMoMorphType.Prefix/Postfix` with a fallback
   to the markers already on the form or headword — unverified against a real project yet.
+- Sharing check (`_sharing_status`): `shared` comes from the open cache's `ProjectId.Type`
+  (the shared XML backend is what Project Properties → Sharing switches on) and `flexHasItOpen`
+  from `<project>.fwdata.lock`; both are guesses from the LCM model until confirmed on a real
+  project — the UI treats `null` as unknown and says nothing.
 - `flex/lcm.py` has never met a real FieldWorks: it was written from flexicon 4.12's source and
   the LCM model. The first run on Windows will need adjustments — keep every access behind the
   `_t()` guard so one odd object degrades a rendering instead of failing it, and record what you

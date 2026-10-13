@@ -343,9 +343,9 @@
      * grid code (spans, freeze, resize) never sees them. */
     const gutterSelect = (kind, a, b) => {
       if (widget.finishEdit) widget.finishEdit();
-      if (kind === 'col') widget.select({ r: 0, c: Math.min(a, b) }, { r: nRows - 1, c: Math.max(a, b) });
-      else if (kind === 'row') widget.select({ r: Math.min(a, b), c: 0 }, { r: Math.max(a, b), c: nCols - 1 });
-      else widget.select({ r: 0, c: 0 }, { r: nRows - 1, c: nCols - 1 });
+      if (kind === 'col') widget.select({ r: 0, c: Math.min(a, b) }, { r: nRows - 1, c: Math.max(a, b) }, { exact: true });
+      else if (kind === 'row') widget.select({ r: Math.min(a, b), c: 0 }, { r: Math.max(a, b), c: nCols - 1 }, { exact: true });
+      else widget.select({ r: 0, c: 0 }, { r: nRows - 1, c: nCols - 1 }, { exact: true });
       widget.gsel = { kind, a };
     };
     const gutter = (kind, i, title) => {
@@ -440,16 +440,27 @@
     };
     // a selected range of cells (Shift+click or drag across cells): {r1,c1,r2,c2}, 0-based
     widget.sel = null;
-    widget.select = (a, b) => {
+    /* A cell-range selection grows to cover any merged cell it touches (a merge over it must
+     * be whole); a row / column / table selection does NOT (Seth, 2026-10-13: "It should
+     * select ONLY that column, plus any merged cells in it"): a merged cell is simply part of
+     * every row and column it spans, and is drawn selected when any of them is. */
+    widget.select = (a, b, how) => {
       const raw = { r1: Math.min(a.r, b.r), c1: Math.min(a.c, b.c), r2: Math.max(a.r, b.r), c2: Math.max(a.c, b.c) };
-      widget.sel = growToSpans(t, raw);
+      widget.sel = (how && how.exact) ? raw : growToSpans(t, raw);
       activeWidget = widget;
       // the selection takes the keyboard: a text block or input that still had focus would
       // otherwise swallow Ctrl+C / Ctrl+V / Delete
       const act = document.activeElement;
       if (act && act !== document.body && act.blur && !(act.closest && act.closest('.popover, .modal'))) act.blur();
       table.querySelectorAll('.sel').forEach((x) => x.classList.remove('sel'));
-      table.querySelectorAll('td, th').forEach((cell) => { const r = +cell.dataset.r, c = +cell.dataset.c; if (r >= widget.sel.r1 && r <= widget.sel.r2 && c >= widget.sel.c1 && c <= widget.sel.c2) cell.classList.add('sel'); });
+      const sp = spanMap(t).anchors;
+      table.querySelectorAll('td, th').forEach((cell) => {
+        const r = +cell.dataset.r, c = +cell.dataset.c;
+        if (Number.isNaN(r)) return;
+        const a = sp[r + '.' + c] || { rows: 1, cols: 1 };          // a merged cell covers a rectangle
+        const hit = r <= widget.sel.r2 && r + a.rows - 1 >= widget.sel.r1 && c <= widget.sel.c2 && c + a.cols - 1 >= widget.sel.c1;
+        if (hit) cell.classList.add('sel');
+      });
       table.querySelectorAll('.gutter.row').forEach((g) => g.classList.toggle('on', +g.dataset.gr >= widget.sel.r1 && +g.dataset.gr <= widget.sel.r2));
       table.querySelectorAll('.gutter.col').forEach((g) => g.classList.toggle('on', +g.dataset.gc >= widget.sel.c1 && +g.dataset.gc <= widget.sel.c2));
     };

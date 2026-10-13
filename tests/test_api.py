@@ -84,3 +84,16 @@ def test_flex_refresh_all_touches_every_embed(tmp_path):
     assert r["objects"] == 4 and r["refreshed"] == 3 and len(r["failed"]) == 1 and r["failed"][0]["guid"] == "00000000-0000-4000-8000-000000000000"
     snap = api._flex.cache.get(api._flex.project_name, "text", "9b1c2d3e-4f50-4a6b-8c7d-0e1f2a3b0001")
     assert [s["n"] for s in snap["segments"]] == [1, 2, 3]
+
+
+def test_flex_status_reports_configuration_and_error_codes(tmp_path):
+    from flex_scratchpad.api import Api
+    from flex_scratchpad.config import AppConfig
+    api = Api(AppConfig(tmp_path / "cfg.json"), notebook_dir=tmp_path / "nb", demo=True)
+    st = api.flex_status()
+    assert st["open"] and st["configured"] and st["errorCode"] == "" and st.get("shared") is None
+    # an unconfigured LCM source: not open, not configured, a clear code
+    st = api.flex_configure("lcm", "", "")
+    assert not st["open"] and not st["configured"] and st["errorCode"] == "no-project"
+    st = api.flex_configure("flextext", "", "")
+    assert not st["open"] and st["errorCode"] == "no-file"

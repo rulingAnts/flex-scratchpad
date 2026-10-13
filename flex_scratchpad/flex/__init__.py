@@ -58,6 +58,7 @@ class FlexService:
         self.lock = threading.RLock()
         self.progress = progress or (lambda msg: None)
         self.last_error: str = ""
+        self.last_error_code: str = ""
 
     # -- configuration -----------------------------------------------------------
 
@@ -80,7 +81,8 @@ class FlexService:
             cfg = dict(self.flex_config)
             st = {"source": cfg.get("source", "lcm"), "project": cfg.get("project", ""),
                   "flextextPath": cfg.get("flextextPath", ""), "open": False, "error": self.last_error,
-                  "backend": None}
+                  "errorCode": self.last_error_code, "backend": None,
+                  "configured": bool(cfg.get("project") or cfg.get("flextextPath") or cfg.get("source") == "demo")}
             if self.backend is not None:
                 try:
                     st.update(self.backend.status())
@@ -125,6 +127,7 @@ class FlexService:
             cfg = self.flex_config
             src = cfg.get("source", "lcm")
             self.last_error = ""
+            self.last_error_code = ""
             try:
                 if src == "demo":
                     from .demo import DemoBackend
@@ -149,9 +152,11 @@ class FlexService:
                     self.backend = be
             except FlexError as e:
                 self.last_error = e.message
+                self.last_error_code = e.code
                 self.backend = None
             except Exception as e:  # noqa: BLE001
                 self.last_error = f"Could not open the FLEx source: {e}"
+                self.last_error_code = "lcm"
                 self.backend = None
             return self.status()
 
