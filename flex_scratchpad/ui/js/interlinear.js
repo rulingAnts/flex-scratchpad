@@ -205,6 +205,7 @@
     if (opts.editable && opts.inCell && opts.editCell && !opts.overlay) head.appendChild(el('button', { class: 'lnk', title: 'Edit the cell\u2019s text (type before or after this example, add another)', onclick: () => opts.editCell() }, '✎'));
     if (opts.editable && !opts.overlay && opts.duplicate) head.appendChild(el('button', { class: 'lnk', title: 'Duplicate this object', onclick: () => opts.duplicate() }, '⧉'));
     if (opts.editable && !opts.overlay && opts.remove) head.appendChild(el('button', { class: 'lnk danger', title: 'Remove this object…', onclick: (e) => removeObject(e.currentTarget, spec, opts) }, '🗑'));
+    if (!opts.context) head.appendChild(el('button', { class: 'lnk', title: 'See this example in its context: the whole text, scrolled to it', onclick: () => openContext(spec, obj) }, '⊡ Context'));
     if (!opts.inCell) head.appendChild(el('button', { class: 'lnk', title: 'Copy as FLEx TSV (the rows FLEx itself copies)', onclick: () => { FS.copyText(flexTsv(spec, obj)); FS.toast('Copied as FLEx TSV'); } }, '⎘ TSV'));
     if (obj.url) head.appendChild(el('a', { href: obj.url, title: 'Open in FieldWorks', onclick: (e) => { e.preventDefault(); openInFlex(obj.url); } }, 'Open in FLEx ↗'));
     if (opts.editable) head.appendChild(el('button', { class: 'lnk', title: 'Options', onclick: (e) => embedMenu(e.currentTarget, spec, opts, obj) }, '⋯'));
@@ -566,6 +567,7 @@
         pop.appendChild(el('hr'));
       }
       if (obj && obj.url) pop.appendChild(el('button', { class: 'menu-item', onclick: () => { FS.copyText(obj.url); FS.toast('FLEx link copied'); close(); } }, 'Copy FLEx link'));
+      if (spec.kind === 'text') pop.appendChild(el('button', { class: 'menu-item', onclick: () => { close(); openContext(spec, obj); } }, 'View in context (whole text)'));
       if (spec.kind === 'text' && obj && obj.kind === 'text') pop.appendChild(el('button', { class: 'menu-item', title: 'The rows FLEx itself puts on the clipboard (Word / Morphemes / Lex. Gloss / Free …), one block per segment, the lines this example shows', onclick: () => { FS.copyText(flexTsv(spec, obj)); FS.toast('Copied as FLEx TSV'); close(); } }, 'Copy as FLEx TSV'));
       pop.appendChild(el('button', { class: 'menu-item', onclick: () => { FS.copyText(R.serialize(spec)); FS.toast('Embed code copied'); close(); } }, 'Copy embed code'));
       if (opts.editSource) pop.appendChild(el('button', { class: 'menu-item', onclick: () => { close(); opts.editSource(); } }, 'Edit source'));
@@ -671,6 +673,52 @@
     return box;
   }
 
+  /* ------------------------------------------------------------------ an example in its context
+   * (Seth, 2026-10-13): the WHOLE text in a modal, scrolled to the example's range, the range
+   * set off from the rest so it is not lost while scrolling. The backend pages texts (60
+   * segments a call), so the text is fetched in pages and stitched. The example's own styles
+   * still apply (they address segment numbers), nothing is editable here. */
+  async function wholeText(guid, ws, first) {
+    const PAGE = 60;
+    let a = 1, all = null;
+    for (;;) {
+      const part = await flexGet('text', guid, a, a + PAGE - 1, false, ws || null, null);
+      if (!all) all = Object.assign({}, part, { segments: [] });
+      all.segments.push(...(part.segments || []));
+      const total = part.segmentCount || first.segmentCount || all.segments.length;
+      a += PAGE;
+      if (!(part.segments || []).length || a > total) break;
+    }
+    all.range = all.segments.length ? [all.segments[0].n, all.segments[all.segments.length - 1].n] : null;
+    return all;
+  }
+  function openContext(spec, obj) {
+    const range = spec.seg || (obj && obj.range) || null;
+    const m = FS.modal({ title: (obj && obj.title ? obj.title : 'Text') + ' — in context', class: 'context' });
+    m.body.appendChild(el('div', { class: 'flex-loading' }, 'Loading the whole text…'));
+    const full = Object.assign({}, spec, { seg: null, at: null, extra: {} });
+    wholeText(spec.guid, spec.ws, obj || {}).then((text) => {
+      m.body.innerHTML = '';
+      const segs = text.segments || [];
+      const inRange = (n) => !!range && n >= range[0] && n <= range[1];
+      const host = el('div', { class: 'context-text' });
+      host.appendChild(renderText(text, full, { editable: false, context: true }));
+      const rows = [...host.querySelectorAll('.segment[data-n]')].filter((r) => inRange(+r.dataset.n));
+      rows.forEach((r, i) => { r.classList.add('in-focus'); if (i === 0) r.classList.add('first'); if (i === rows.length - 1) r.classList.add('last'); });
+      const label = range ? (range[0] === range[1] ? 'segment ' + labelOf(text, range[0]) : 'segments ' + labelOf(text, range[0]) + '–' + labelOf(text, range[1])) : 'the whole text';
+      const back = () => { if (rows[0]) rows[0].scrollIntoView({ block: 'center', behavior: 'smooth' }); };
+      const bar = el('div', { class: 'context-bar' },
+        el('span', { class: 'ctx-mark' }), el('span', {}, 'This example: ' + label + ' of ' + segs.length),
+        el('span', { class: 'spacer' }),
+        rows.length ? el('button', { class: 'lnk', onclick: back }, '⌖ Back to the example') : null,
+        el('button', { class: 'lnk', title: 'Copy the whole text as FLEx TSV', onclick: () => { FS.copyText(flexTsv(full, text)); FS.toast('Copied as FLEx TSV'); } }, '⎘ TSV'),
+        text.url ? el('a', { href: text.url, onclick: (e) => { e.preventDefault(); openInFlex(text.url); } }, 'Open in FLEx ↗') : null);
+      m.body.append(bar, host);
+      if (rows[0]) requestAnimationFrame(() => rows[0].scrollIntoView({ block: 'center' }));
+    }).catch((e) => { m.body.innerHTML = ''; m.body.appendChild(el('div', { class: 'flex-err' }, 'Could not load the text. ', el('span', { class: 'hint' }, e.message || String(e)))); });
+    return m;
+  }
+
   /* ------------------------------------------------------------------ collapsed chips + overlay
    * A block embed is expanded unless it carries the `collapsed` flag; an embed inside a table
    * cell is a chip unless it carries `expanded`. Both flags live in the embed line, so the
@@ -766,6 +814,7 @@
       el('span', { class: 'spacer' }),
       opts.editable && opts.editCell ? el('button', { class: 'lnk', title: 'Edit the cell\u2019s text (type before or after this example, add another)', onclick: () => { closeOverlay(); opts.editCell(); } }, '✎ Edit cell') : null,
       opts.editable && opts.editInline ? el('button', { class: 'lnk', title: 'Show the embed code in the text so it can be edited', onclick: () => { closeOverlay(); opts.editInline(); } }, '✎ Edit code') : null,
+      spec.kind === 'text' ? el('button', { class: 'lnk', title: 'See this example in its context: the whole text, scrolled to it', onclick: () => { closeOverlay(); openContext(spec, inner._obj || null); } }, '⊡ Context') : null,
       spec.kind === 'text' ? el('button', { class: 'lnk', title: 'Copy as FLEx TSV', onclick: () => { const o = inner._obj; if (o) { FS.copyText(flexTsv(spec, o)); FS.toast('Copied as FLEx TSV'); } } }, '⎘ TSV') : null,
       opts.editable && opts.duplicate ? el('button', { class: 'lnk', title: 'Duplicate this object', onclick: () => { closeOverlay(); opts.duplicate(); } }, '⧉ Duplicate') : null,
       opts.editable && opts.remove ? el('button', { class: 'lnk danger', title: 'Remove this object…', onclick: (e) => removeObject(e.currentTarget, spec, opts) }, '🗑 Remove') : null,
@@ -901,5 +950,5 @@
     });
   }
 
-  FS.interlinear = { render, renderText, renderEntry, renderWordform, renderChip, hydrateInline, openOverlay, closeOverlay, isCollapsed, setCollapsed, styled, styledParts, invalidate, flexGet, openInFlex, labelOf, numberFor, flexTsv, HL_COLORS };
+  FS.interlinear = { render, renderText, renderEntry, renderWordform, renderChip, hydrateInline, openContext, wholeText, openOverlay, closeOverlay, isCollapsed, setCollapsed, styled, styledParts, invalidate, flexGet, openInFlex, labelOf, numberFor, flexTsv, HL_COLORS };
 })();

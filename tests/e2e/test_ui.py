@@ -1570,3 +1570,44 @@ def test_resize_any_cell_edge_including_under_a_merged_header(app):
     assert m and int(m.group(1)) >= 50, body_of(h).split("\n")[-1]
     assert page.evaluate("() => document.querySelector(\"table.md-table td[data-r='2'][data-c='0']\").getBoundingClientRect().height") >= 50
     assert not errors
+
+
+def test_view_example_in_context(app):
+    """Seth, 2026-10-13: the whole text in an overlay, scrolled to the example's range, the
+    range set off from the rest."""
+    h, page, errors = app
+    new_note(page, "Context")
+    page.keyboard.type("{{flex:text %s seg=4-5 hl=4.1}}" % T_STORY)
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#editor .text-obj .segment")
+    assert page.locator("#editor .text-obj .segment").count() == 2
+    page.locator("#editor .text-obj .flex-head button", has_text="Context").click()
+    page.wait_for_selector(".modal.context .context-text .segment")
+    segs = page.locator(".modal.context .context-text .segment")
+    assert segs.count() == 6                                        # the whole demo text
+    focus = page.locator(".modal.context .segment.in-focus")
+    assert [focus.nth(i).get_attribute("data-n") for i in range(focus.count())] == ["4", "5"]
+    assert "segments 2.2–3.1 of 6" in page.locator(".context-bar").inner_text()
+    assert page.locator(".modal.context .segment[data-n='4'] .st-hl").count() == 1   # the example's own styling shows
+    # scrolled to the range: the first focused row sits inside the modal body's viewport
+    page.wait_for_timeout(300)
+    inside = page.evaluate("""() => { const b = document.querySelector('.modal.context .modal-body').getBoundingClientRect();
+      const r = document.querySelector('.modal.context .segment.in-focus').getBoundingClientRect(); return r.top >= b.top && r.bottom <= b.bottom; }""")
+    assert inside
+    # scroll away, "Back to the example" returns
+    page.evaluate("() => { document.querySelector('.modal.context .modal-body').scrollTop = 0; }")
+    page.locator(".context-bar button", has_text="Back to the example").click()
+    page.wait_for_timeout(700)
+    assert page.evaluate("""() => { const b = document.querySelector('.modal.context .modal-body').getBoundingClientRect();
+      const r = document.querySelector('.modal.context .segment.in-focus').getBoundingClientRect(); return r.top >= b.top && r.bottom <= b.bottom; }""")
+    page.keyboard.press("Escape")
+    page.wait_for_selector(".modal.context", state="detached")
+    # also from a chip's overlay
+    page.locator("#editor .text-obj .flex-head button[title='Collapse to a chip']").click()
+    page.wait_for_selector("#editor .flex-collapsed")
+    page.locator("#editor .flex-collapsed").click()
+    page.wait_for_selector(".flex-overlay.pinned .text-obj")
+    page.locator(".flex-overlay-bar button", has_text="Context").click()
+    page.wait_for_selector(".modal.context .segment.in-focus")
+    page.keyboard.press("Escape")
+    assert not errors
