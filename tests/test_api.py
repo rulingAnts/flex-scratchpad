@@ -72,3 +72,15 @@ def test_tabs_folders_settings(tmp_path):
     assert s["diacriticsInsensitive"] is False
     api.set_tags([{"name": "#todo", "color": "#000"}, {"name": "todo"}])
     assert [x["name"] for x in api._nb.config["tags"]] == ["todo"]
+
+
+def test_flex_refresh_all_touches_every_embed(tmp_path):
+    from flex_scratchpad.api import Api
+    from flex_scratchpad.config import AppConfig
+    api = Api(AppConfig(tmp_path / "cfg.json"), notebook_dir=tmp_path / "nb", demo=True)
+    api.create_note(None, "", "A", "x {{flex:entry 6a5f3a2e-1b1e-4c2a-9f10-0d2c1a7e0001}} y")
+    api.create_note(None, "", "B", "| a |\n|---|\n| {{flex:text 9b1c2d3e-4f50-4a6b-8c7d-0e1f2a3b0001 seg=1-2 at=0e1f2a3b1001-0e1f2a3b1002 hl=1.1}} |\n\n{{flex:text 9b1c2d3e-4f50-4a6b-8c7d-0e1f2a3b0001 seg=3}}\n\n{{flex:entry 00000000-0000-4000-8000-000000000000}}")
+    r = api.flex_refresh_all()
+    assert r["objects"] == 4 and r["refreshed"] == 3 and len(r["failed"]) == 1 and r["failed"][0]["guid"] == "00000000-0000-4000-8000-000000000000"
+    snap = api._flex.cache.get(api._flex.project_name, "text", "9b1c2d3e-4f50-4a6b-8c7d-0e1f2a3b0001")
+    assert [s["n"] for s in snap["segments"]] == [1, 2, 3]

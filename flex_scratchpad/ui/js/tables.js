@@ -290,8 +290,39 @@
     // (Seth, 2026-10-12: "Resizing columns … loses data … and since there's no undo, I
     // can't get it back"). finishEdit is set by the open cell editor and cleared by it.
     if (activeWidget && activeWidget.container === container) activeWidget = null;   // a re-render drops the old selection
-    const widget = { t, container, focus: null, insertText: null, finishEdit: null };
-    widget.refresh = () => { if (widget.finishEdit) widget.finishEdit(); render(container, serialize(t), opts); };
+    // ONE widget object per table, reused by every re-render: the editor (activeTable,
+    // wrap._table), paste handlers and dialogs keep references to it across refreshes, and a
+    // stale copy would insert into — and commit — the table as it was before the last change
+    // (Seth, 2026-10-13: objects "jumping from cells I insert them into to other columns").
+    const widget = container._widget = container._widget || {};
+    for (const k of Object.keys(widget)) delete widget[k];
+    Object.assign(widget, { t, container, focus: null, insertText: null, finishEdit: null, lastCell: null, lastCaret: null, sel: null, gsel: null, anchor: null });
+    /* A re-render keeps the user where they were (Seth, 2026-10-13: "not have the table jump
+     * back to the first cell whenever an example has been inserted"): the editor pane's scroll
+     * position is restored, the focused cell stays the focused cell, and a cell that was being
+     * edited — or just received an insert — is reopened with its caret. */
+    widget.refresh = (reopen) => {
+      const editing = !!widget.finishEdit;
+      const focus = widget.focus;
+      const caret = editing && widget.lastCaret ? widget.lastCaret() : null;
+      if (widget.finishEdit) widget.finishEdit();
+      const pane = container.closest('#editor');
+      const top = pane ? pane.scrollTop : 0;
+      const w2 = render(container, serialize(t), opts);
+      if (pane) pane.scrollTop = top;
+      const want = reopen || (editing && focus ? { r: focus.r, c: focus.c, caret } : null);
+      if (want && w2) {
+        const cell = container.querySelector('[data-r="' + want.r + '"][data-c="' + want.c + '"]');
+        if (cell && want.rendered) {
+          // after an insert: show the rendered cell (the chip), keep it the target of the next
+          // insert and of a click on its padding, but do not drop the user into the source
+          w2.focus = { r: want.r, c: want.c };
+          w2.lastCell = { r: want.r, c: want.c, caret: want.caret };
+          w2.insertText = (text) => w2.insertInto(want.r, want.c, text, want.caret);
+        } else if (cell) { w2.focus = { r: want.r, c: want.c }; cell.dispatchEvent(new CustomEvent('cell-edit', { detail: { caret: want.caret } })); }
+      } else if (focus && w2) w2.focus = focus;
+      return w2;
+    };
     const table = el('table', { class: 'md-table ' + [...t.style.flags].join(' ') });
     const thead = el('thead'), tbody = el('tbody');
     const commit = () => opts.onChange && opts.onChange(serialize(t));
@@ -302,7 +333,7 @@
       const sep = (at > 0 && !/\s$/.test(s.slice(0, at))) ? ' ' : '';
       t.rows[r][c] = s.slice(0, at) + sep + text + s.slice(at);
       commit();
-      widget.refresh();
+      widget.refresh({ r, c, caret: at + sep.length + text.length, rendered: true });
     };
     const spans = spanMap(t);
     const nRows = t.rows.length, nCols = t.rows[0] ? t.rows[0].length : 0;
@@ -704,7 +735,9 @@
       ed.addEventListener('blur', () => setTimeout(() => { if (ed.isConnected) finish(); }, 0));
       const finish = () => {
         if (!ed.isConnected) return;
-        widget.finishEdit = null;
+        // only unhook OURSELVES: another cell may have opened (and registered its own
+        // finish) between our blur and this deferred call
+        if (widget.finishEdit === finish) widget.finishEdit = null;
         const val = ed.textContent.replace(/\n+$/, '');
         ed.remove();
         const caret = FS.editor.getCaret(ed);
@@ -715,6 +748,7 @@
         hydrate(view, t, r, c, commit, opts);
         td.appendChild(view);
       };
+      if (widget.finishEdit && widget.finishEdit !== finish) widget.finishEdit();   // one open cell at a time
       widget.finishEdit = finish;
       const moveTo = (rr, cc, create) => {
         if (rr < 0 || cc < 0) return;
@@ -755,6 +789,7 @@
     });
     td.addEventListener('cell-edit', (e) => {
       const ph = e.detail && e.detail.after;
+      if (!ph && e.detail && e.detail.caret != null) { startEdit(e.detail.caret); return; }
       const srcTxt = ph && ph.dataset ? ph.dataset.src : '';
       const at = srcTxt ? t.rows[r][c].indexOf(srcTxt) : -1;
       startEdit(at >= 0 ? at + srcTxt.length : undefined);

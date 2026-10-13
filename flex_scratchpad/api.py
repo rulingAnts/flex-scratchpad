@@ -291,6 +291,15 @@ class Api:
     def flex_refresh(self) -> dict:
         return self._flex.refresh()
 
+    def flex_refresh_all(self) -> dict:
+        """Reload the project's data, then re-fetch every example embedded in every note."""
+        try:
+            self._flex.refresh()
+            bodies = [self._nb.get_note(n["id"]).body for n in self._nb.list_notes()]
+            return self._flex.refresh_all(bodies)
+        except FlexError as e:
+            raise RuntimeError(e.message)
+
     def flex_get(self, kind: str, guid: str, seg_from: int | None = None, seg_to: int | None = None,
                  prefer_cache: bool = False, ws: dict | None = None, at: list | None = None) -> dict:
         try:

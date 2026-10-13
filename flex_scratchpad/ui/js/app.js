@@ -359,6 +359,26 @@
 
   /* ------------------------------------------------------------------ insert / slash */
   function insertFlex() { FS.picker.open((md, asBlock) => ensureEditor().insertMarkdown(md, asBlock)); }
+  /* Refresh all: every example in every note is re-fetched from FLEx and re-snapshotted,
+   * then the open note is redrawn in place (scroll kept). */
+  async function refreshAll() {
+    const btn = $('btn-refresh-all');
+    if (!(S.flex && S.flex.open)) { FS.toast('Connect a FieldWorks project first (Settings)', 'error'); return; }
+    btn.disabled = true; btn.textContent = '↻ Refreshing…';
+    try {
+      await flushSave();
+      const r = await FS.api.flex_refresh_all();
+      FS.interlinear.invalidate();
+      if (S.note) {
+        const edEl = $('editor'); const top = edEl.scrollTop;
+        ensureEditor().load(S.note.body || '');
+        edEl.scrollTop = top;
+      }
+      const failed = (r.failed || []).length;
+      FS.toast('Refreshed ' + r.refreshed + ' of ' + r.objects + ' FLEx object' + (r.objects === 1 ? '' : 's') + (failed ? ' — ' + failed + ' could not be read: ' + r.failed.slice(0, 3).map((f) => f.error).join('; ') : ''), failed ? 'error' : 'ok');
+    } catch (e) { FS.toast(e.message, 'error'); }
+    btn.disabled = false; btn.textContent = '↻ Refresh all';
+  }
   function slashMenu(body, b) {
     FS.popover(body, (pop, close) => {
       const item = (label, fn) => pop.appendChild(el('button', { class: 'menu-item', onclick: () => { close(); fn(); } }, label));
@@ -567,6 +587,7 @@
     $('toolbar').querySelectorAll('[data-ins]').forEach((b) => b.addEventListener('mousedown', (e) => { e.preventDefault(); toolbarAction(b.dataset.ins); }));
     $('btn-find').addEventListener('click', openFind);
     $('btn-markers').addEventListener('click', toggleMarkers);
+    $('btn-refresh-all').addEventListener('click', refreshAll);
     $('find-input').addEventListener('input', doFind);
     $('find-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); S.editor.findNext(e.shiftKey ? -1 : 1); } if (e.key === 'Escape') closeFind(); });
     $('find-next').addEventListener('click', () => S.editor && S.editor.findNext(1));

@@ -16,6 +16,8 @@ from .cache import SnapshotCache
 from .lcm import FlexError
 
 EMBED_RE = re.compile(r"\{\{\s*flex:(entry|sense|text|wordform)\s+([0-9a-fA-F-]{36})", re.I)
+# the whole embed, for refresh-all: kind, guid and the rest of the spec (seg= / at= are read out of it)
+EMBED_FULL_RE = re.compile(r"\{\{\s*flex:(entry|sense|text|wordform)\s+([0-9a-fA-F-]{36})([^}]*)\}\}", re.I)
 LINK_RE = re.compile(r"\(flex:(entry|sense|text|wordform)/([0-9a-fA-F-]{36})", re.I)
 
 
@@ -233,6 +235,40 @@ class FlexService:
             if live_err:
                 raise live_err
             raise FlexError("Not in the FLEx project and not cached.", "", "missing")
+
+    def refresh_all(self, bodies: list[str]) -> dict:
+        """Re-fetch every FLEx object embedded anywhere in the notebook from the live project
+        (Seth, 2026-10-13: "a refresh all that goes through ALL examples everywhere"), so the
+        snapshots are current. Returns {objects, refreshed, failed: [{kind, guid, error}]}."""
+        wanted: dict = {}
+        for body in bodies:
+            for m in EMBED_FULL_RE.finditer(body or ""):
+                kind, guid, rest = m.group(1).lower(), m.group(2).lower(), m.group(3) or ""
+                kind = "entry" if kind == "sense" else kind
+                seg = re.search(r"\bseg=(\d+)(?:-(\d+))?", rest)
+                at = re.search(r"\bat=([0-9a-fA-F]+)(?:-([0-9a-fA-F]+))?", rest)
+                ws = re.search(r"\bws=(\S+)", rest)
+                a = int(seg.group(1)) if seg else None
+                b = int(seg.group(2) or seg.group(1)) if seg else None
+                wsd = None
+                if ws:
+                    wsd = {}
+                    for item in ws.group(1).split(","):
+                        if ":" in item:
+                            k, v = item.split(":", 1)
+                            wsd[k.strip().lower()] = v.strip()
+                key = (kind, guid, a, b, tuple(sorted((wsd or {}).items())))
+                wanted[key] = (kind, guid, a, b, wsd or None, [at.group(1), at.group(2) or at.group(1)] if at else None)
+        out = {"objects": len(wanted), "refreshed": 0, "failed": []}
+        for kind, guid, a, b, wsd, at in wanted.values():
+            try:
+                self.get_object(kind, guid, a, b, prefer_cache=False, ws=wsd, at=at)
+                out["refreshed"] += 1
+            except FlexError as e:
+                out["failed"].append({"kind": kind, "guid": guid, "error": e.message})
+            except Exception as e:  # noqa: BLE001
+                out["failed"].append({"kind": kind, "guid": guid, "error": str(e)})
+        return out
 
     def search_entries(self, q: str, limit: int = 30) -> list[dict]:
         with self.lock:

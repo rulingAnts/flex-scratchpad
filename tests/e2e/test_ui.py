@@ -1120,3 +1120,45 @@ def test_interlinear_rows_stay_level_when_a_word_lacks_a_line(app):
     rows = page.evaluate("""() => [...document.querySelectorAll('#editor .text-obj .segment .word-cell:not(.punct-cell)')].map((c) => [...c.querySelectorAll('.il-line')].map((l) => l.className.replace(/\\bil-line\\b|\\bil-empty\\b|\\s+/g, ' ').trim()).join(','))""")
     assert len(rows) >= 3 and len(set(rows)) == 1, rows
     assert not errors
+
+
+def test_insert_into_cell_keeps_the_place(app):
+    """After an insert into a table cell the same cell is open again, with the caret after the
+    inserted text, and the pane has not scrolled (Seth, 2026-10-13)."""
+    h, page, errors = app
+    cell = page.locator("table.md-table td[data-r='2'][data-c='1'] .cell-view")
+    cell.scroll_into_view_if_needed()
+    cell.dispatch_event("mousedown")
+    page.wait_for_selector(".cell-edit")
+    page.keyboard.press("End")
+    page.keyboard.press("Control+Shift+L")
+    page.wait_for_selector(".pick-item .hw")
+    page.locator(".pick-item").first.click()
+    page.wait_for_selector(".picker-preview .entry-card")
+    page.locator(".btn.primary", has_text="Insert rendered").click()
+    page.wait_for_timeout(900)
+    # the chip is shown in the same cell; the next insert and a click on the padding target it
+    assert page.locator(".cell-edit").count() == 0
+    assert page.locator("table.md-table td[data-r='2'][data-c='1'] .flex-collapsed").count() == 1
+    page.keyboard.press("Control+Shift+L")
+    page.wait_for_selector(".pick-item .hw")
+    page.locator(".pick-item").nth(1).click()
+    page.wait_for_selector(".picker-preview .entry-card")
+    page.locator(".btn.primary", has_text="Insert rendered").click()
+    page.wait_for_timeout(900)
+    assert page.locator("table.md-table td[data-r='2'][data-c='1'] .flex-collapsed").count() == 2
+    assert page.locator("table.md-table .flex-collapsed").count() == 2          # nowhere else
+    page.locator("table.md-table td[data-r='2'][data-c='1']").dispatch_event("mousedown", {"button": 0, "bubbles": True})
+    page.wait_for_selector(".cell-edit")
+    page.keyboard.press("End")
+    page.keyboard.type(" then")
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(900)
+    assert re.search(r"\{\{flex:entry [0-9a-f-]+\}\} \{\{flex:entry [0-9a-f-]+\}\} then \|", body_of(h)), body_of(h)
+    # the Refresh all button reloads every example and keeps the note open
+    page.locator("#btn-refresh-all").click()
+    page.wait_for_function("() => document.getElementById('btn-refresh-all').textContent.includes('Refresh all')")
+    page.wait_for_selector(".toast")
+    assert "Refreshed" in page.locator(".toast").last.inner_text()
+    assert page.locator("table.md-table").count() == 1
+    assert not errors

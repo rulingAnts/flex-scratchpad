@@ -134,3 +134,22 @@ exception to the read-only rule:
 
 **Note links (FLEx → note), later:** inserting a `flexscratchpad://note/<id>` link into a FLEx
 note or field would be a second write and needs the reverse-link scheme (see above) first.
+
+## Word export: IGT rendering compatible with the LingTeX Word project (Seth, 2026-10-13)
+
+> *"Making sure our Microsoft Word exports use IGT rendering and styling compatible with our
+> LingTeX Word project would be good. That's for later though."*
+
+`docx_writer.py` builds examples as borderless tables (one row per interlinear line, one
+column per word) with its own run formatting. To match the LingTeX Word project: use its
+paragraph / character style NAMES (example number, vernacular, gloss, free translation, …)
+so a document pasted into that project picks up the project's definitions, its numbering
+convention for examples, and its tab-or-table choice for the aligned lines. Needs the
+project's template (`.dotx`) or a sample `.docx` to read the style names and layout from.
+
+## LaTeX export (Seth, 2026-10-13: "LaTeX exports also for later")
+
+A whole-note export next to Markdown / HTML / DOCX / PDF: prose as plain LaTeX (emphasis,
+lists, tables as `tabular`), examples as langsci-gb4e (`\\ea … \\gll … \\glt … \\z`, see the
+copy-as-LaTeX item above — the two share one serializer), vernacular in the writing system's
+font via `fontspec`. Exact packages and macros to be settled with Seth.
