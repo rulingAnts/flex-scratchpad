@@ -352,6 +352,18 @@ def test_locate_rows_without_a_word_row(tmp_path):
     two = gloss_tab + gloss_tab.replace("1.1", "1.2").replace("Kabir\tka-nuwa-mo\tlo", "Haŋa\ttiket\tka-sila-mo\tpemu").replace("The dog slept.", "Yesterday the child saw the river.")
     hits = svc.locate(two)
     assert hits and hits[0]["seg"] == 1 and hits[0]["segTo"] == 2 and hits[0]["matched"] == 2 and hits[0]["of"] == 2, hits
+    # the Print tab with limited lines (Seth, 2026-10-13): no Word row, a clitic "=mo" in the
+    # morphemes, an EMPTY "Free Eng" line and the translation on the "Ind" line under it
+    limited = ("1.1\tMorphemes\tKabir\tka-\tnuwa\t=mo\tlo\t\t\n"
+               "\tLex. Gloss\t***\t3SG-\tsleep\t-PST\tDECL\n"
+               "\tWord Gloss\tanjing\ttidur\t\t\t\n"
+               "\u200eFree \u200eEng\u200e \u200e\u200e\n"
+               "\u200e \u200eInd\u200e \u200e\u200eAnjing itu tidur.\n")
+    hits = svc.locate(limited)
+    assert hits and hits[0]["seg"] == 1 and hits[0]["segTo"] == 1 and hits[0]["of"] == 1, hits
+    two = limited + limited.replace("1.1", "1.2").replace("Kabir\tka-\tnuwa\t=mo\tlo", "Haŋa\ttiket\tka-\tsila\t=mo\tpemu")
+    hits = svc.locate(two)
+    assert hits and hits[0]["seg"] == 1 and hits[0]["segTo"] == 2 and hits[0]["matched"] == 2 and hits[0]["of"] == 2, hits
     # a Morphemes row under a Word row changes nothing
     assert svc.locate("Word\tKabir\tka-nuwa-mo\tlo\nMorphemes\tKabir\tka-\tnuwa\t-mo\tlo\nFree\tThe dog slept.")[0]["seg"] == 1
 

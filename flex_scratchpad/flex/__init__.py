@@ -28,6 +28,12 @@ def _depunct(s: str) -> str:
     return " ".join("".join(c for c in s if not _ud.category(c).startswith("P")).split())
 
 
+def _joined(s: str) -> str:
+    """Letters, digits and marks only: morpheme forms ('ka- nuwa =mo') against a baseline word
+    ('ka-nuwa=mo' / 'kanuwamo'), with every break character, space and clitic marker gone."""
+    return "".join(c for c in s if c.isalnum() or _ud.category(c).startswith("M"))
+
+
 def _text_score(q: str, hay: str) -> int:
     """3 = equal, 2 = one contains the other (and the query is substantial), else 0."""
     if not q or not hay:
@@ -47,7 +53,7 @@ def _query_score(q: dict, baseline: str, free: str) -> int:
     bases, morphs = q.get("bases") or [], q.get("morphs") or []
     base = max((_text_score(b, baseline) for b in bases), default=0)
     if not bases and morphs:
-        joined = baseline.replace(" ", "")                      # morphemes vs the baseline, spaces and breaks gone
+        joined = _joined(baseline)                              # morphemes vs the baseline, spaces and breaks gone
         base = max((_text_score(m, joined) for m in morphs), default=0)
     fr = _text_score(q.get("free", ""), free) if q.get("free") else 0
     if bases or morphs:
@@ -321,6 +327,7 @@ class FlexService:
         norm = lambda t: _depunct(normalize(" ".join((t or "").split()), strip))  # noqa: E731
         queries: list[dict] = []
         cur: dict | None = None
+        prev_free = False            # the previous row was a Free row (a "Ind …" line continues it)
 
         def block() -> dict:
             nonlocal cur
@@ -355,14 +362,19 @@ class FlexService:
                     continue                                                                 # an empty labelled row
                 m = re.match(r"^(" + "|".join(re.escape(k) for k in labels) + r")\s+(\S.*)$", cells[0], re.I)
                 if m and re.fullmatch(r"[A-Za-z]{2,3}(-[\w-]+)*", m.group(2)):
+                    prev_free = m.group(1).casefold() == "free"                              # "Free Eng" with nothing after it
                     continue                                                                 # "Word fau-ose" with every cell empty
                 if m:
                     cells = [m.group(1), m.group(2)]
+                elif prev_free:
+                    # the Print view's second analysis language: "Ind <translation>" under "Free Eng …"
+                    m2 = re.match(r"^([A-Za-z]{2,3})(?:\s+(\S.*))?$", cells[0])
+                    if m2:
+                        if m2.group(2) and cur is not None and not cur["free"]:
+                            cur["free"] = norm(m2.group(2))
+                        continue
             cells = [c for c in cells if c not in ("§", "¶")]
             if not cells:
-                continue
-            # the Print view's second analysis language: a bare "Ind" line under "Free Eng …"
-            if len(cells) == 1 and cur is not None and cur["free"] and re.fullmatch(r"[A-Za-z]{2,3}", cells[0]):
                 continue
             label = cells[0].rstrip(":").casefold() if len(cells) > 1 else ""
             # the Gloss / Analyze tabs suffix a label with the writing system when more than
@@ -377,6 +389,7 @@ class FlexService:
             is_free = key == "free"
             labelled = bool(key)
             words = [c for c in (cells[1:] if labelled else cells) if c]
+            prev_free = is_free
             if not words:
                 continue
             text = " ".join(words)
@@ -391,7 +404,7 @@ class FlexService:
                 # no Word row copied: the morpheme forms, joined, stand in for the baseline
                 if cur is None or numbered or cur["free"] or (cur["morphs"] and not suffix):
                     block()
-                cur["morphs"].append(norm(text).replace(" ", ""))
+                cur["morphs"].append(_joined(norm(text)))
             else:
                 if cur is None or numbered or cur["free"] or not labelled or not (suffix and cur["bases"]):
                     block()
