@@ -1611,3 +1611,15 @@ def test_view_example_in_context(app):
     page.wait_for_selector(".modal.context .segment.in-focus")
     page.keyboard.press("Escape")
     assert not errors
+
+
+def test_paste_of_flex_rows_that_match_nothing_explains_the_word_line(app):
+    h, page, errors = app
+    new_note(page, "Nomatch")
+    page.locator("#editor .blk-body").first.click()
+    paste(page, "3.1\tMorphemes\tzzz\t-qq\n\tLex. Gloss\tnone\tat.all\n\u200eFree \u200e\u200enothing here.\n")
+    page.wait_for_selector(".toast", state="attached")
+    assert "Word line showing" in page.locator(".toast").last.inner_text()
+    page.wait_for_timeout(900)
+    assert "Morphemes" in body_of(h)                                       # and the rows still landed, as text
+    assert not errors

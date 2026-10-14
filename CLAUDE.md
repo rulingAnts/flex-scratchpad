@@ -83,6 +83,11 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
   `paragraph.segment` (what people read, shown everywhere). Morph glosses wear the morph type's
   break characters (`-PST`, `3SG-`, `=lo`), from `IMoMorphType.Prefix/Postfix` with a fallback
   to the markers already on the form or headword — unverified against a real project yet.
+- Locating pasted FLEx rows (`FlexService.locate`): the per-session index (`all_baselines`) holds
+  every segment's baseline, free translation, Morphemes line and Lex. Gloss line. A Word row
+  matches the baseline; without one, Morphemes rows match the segment's OWN morpheme line
+  (Seth, 2026-10-14: morph forms need not spell the surface word), then Lex. Gloss rows its
+  gloss line. When nothing matches, the picker tells the user to copy with the Word line showing.
 - Sharing check (`_sharing_status`): `shared` comes from the open cache's `ProjectId.Type`
   (the shared XML backend is what Project Properties → Sharing switches on) and `flexHasItOpen`
   from `<project>.fwdata.lock`; both are guesses from the LCM model until confirmed on a real

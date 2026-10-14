@@ -236,7 +236,7 @@ class FlextextBackend:
         raise KeyError("Lexical entries are not available from a .flextext file; open the FLEx project.")
 
     def all_baselines(self) -> dict:
-        return {g: {"title": t["title"], "segments": [(sg["n"], sg["baseline"], sg.get("free", "")) for sg in t["segments"]]}
+        return {g: {"title": t["title"], "segments": [(sg["n"], sg["baseline"], sg.get("free", "")) + model.index_lines(sg) for sg in t["segments"]]}
                 for g, t in self.texts.items()}
 
     def resolve_guid(self, guid: str) -> dict | None:

@@ -684,7 +684,8 @@ class FlexiconBackend:
                         for seg in _t(lambda: list(p.Segments.GetAll(para)), []):
                             n += 1
                             segs.append((n, _s(_t(lambda: p.Segments.GetBaselineText(seg), "")),
-                                         _s(_t(lambda: p.Segments.GetFreeTranslation(seg), ""))))
+                                         _s(_t(lambda: p.Segments.GetFreeTranslation(seg), "")))
+                                        + self._index_lines(seg))
                     index[_guid(t)] = {"title": self._text_title(t), "segments": segs}
                 self._baseline_index = index
             return self._baseline_index
@@ -692,6 +693,24 @@ class FlexiconBackend:
             return self.worker.call(go, timeout=OPEN_TIMEOUT)
         except BaseException as e:
             raise _friendly(e, self.project_name)
+
+    def _index_lines(self, seg) -> tuple[str, str]:
+        """The segment's Morphemes and Lex. Gloss lines (forms and glosses of every morph
+        bundle), so rows pasted without a Word line can still be located. Worker thread only."""
+        p = self.project
+        forms, glosses = [], []
+        try:
+            for tok in _t(lambda: list(p.Segments.GetAnalyses(self._c(seg))), []):
+                analysis = self._c(_t(lambda: self._c(tok).Analysis, None))
+                if analysis is None:
+                    continue
+                for b in _t(lambda: list(p.WfiMorphBundles.GetAll(analysis)), []):
+                    b = self._c(b)
+                    forms.append(_s(_t(lambda: p.WfiMorphBundles.GetForm(b), "")))
+                    glosses.append(_s(_t(lambda: p.WfiMorphBundles.GetGloss(b), "")))
+        except Exception:  # noqa: BLE001 — the index degrades to baselines for this segment
+            pass
+        return " ".join(x for x in forms if x), " ".join(x for x in glosses if x)
 
     def search_texts(self, q: str) -> list[dict]:
         ql = (q or "").casefold()

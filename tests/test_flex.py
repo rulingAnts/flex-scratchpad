@@ -385,3 +385,30 @@ def test_clip_prefers_flac_when_ffmpeg_exists(tmp_path, monkeypatch):
         monkeypatch.setattr(audio, "find_ffmpeg", lambda configured="": real)
         out = audio.cut_clip(src, tmp_path / "clip2.wav", 100, 300)
         assert out and out.suffix == ".flac" and out.stat().st_size > 0
+
+
+def test_locate_without_a_word_line_uses_the_segment_s_own_morphemes_and_glosses(tmp_path):
+    """Seth, 2026-10-14: morpheme forms need NOT spell the baseline word (an underlying form,
+    another writing system). Rows without a Word line are matched against the segment's own
+    Morphemes and Lex. Gloss lines, which every backend indexes."""
+    nb = Notebook(tmp_path)
+    svc = FlexService(nb)
+    svc.configure(source="demo")
+    svc.open()
+    # the demo index carries morphemes and glosses per segment
+    idx = svc._live().all_baselines()[T_STORY]["segments"]
+    assert idx[0][3].startswith("kabir ka-") and "sleep" in idx[0][4], idx[0]
+    # a stand-in text whose morpheme line does not spell the baseline (kuɾi vs kudi)
+    svc._live().all_baselines = lambda: {"g1": {"title": "fau", "segments": [
+        (1, "ia toduo", "he walked", "ia todu -o", "3SG walk -PST"),
+        (2, "nawa kudi", "she caught it", "naw -a kuɾi", "hold lnk take.CMP"),
+        (3, "boda ohodode", "", "boda ohodo =de", "ball foot ERG")]}}
+    morph_only = "11.5\tMorphemes\tnaw\t-a\tkuɾi\t\t\n\tLex. Gloss\thold\tlnk\t\ttake\t.CMP\n\u200eFree \u200e\u200eshe caught it.\n"
+    hits = svc.locate(morph_only)
+    assert hits and hits[0]["seg"] == 2 and hits[0]["segTo"] == 2 and hits[0]["score"] >= 5, hits   # morphs 3 + gloss 1 + free 1
+    # Lex. Gloss alone (no Word, no Morphemes) still finds it
+    assert svc.locate("\tLex. Gloss\thold\tlnk\t\ttake\t.CMP\n")[0]["seg"] == 2
+    # a range of morpheme-only blocks
+    two = morph_only + "11.6\tMorphemes\tboda\tohodo\t=de\n\tLex. Gloss\tball\tfoot\tERG\n"
+    hits = svc.locate(two)
+    assert hits and hits[0]["seg"] == 2 and hits[0]["segTo"] == 3 and hits[0]["matched"] == 2, hits

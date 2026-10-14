@@ -275,6 +275,17 @@ def index_of_segments(segments: list[dict]) -> list[dict]:
     return [{"n": int(s["n"]), "label": s.get("label") or str(s["n"]), "guid": s.get("guid", "")} for s in segments]
 
 
+def index_lines(seg: dict) -> tuple[str, str]:
+    """A segment's Morphemes and Lex. Gloss lines as FLEx copies them, for locating pasted
+    rows that have no Word line (the morpheme forms need not spell the baseline word)."""
+    forms, glosses = [], []
+    for w in seg.get("words") or []:
+        for m in w.get("morphs") or []:
+            forms.append(m.get("form", "") or "")
+            glosses.append(m.get("gls", "") or "")
+    return " ".join(x for x in forms if x), " ".join(x for x in glosses if x)
+
+
 def anchors_for(segments: list[dict]) -> list[str]:
     """[first, last] anchors of the segments actually returned ('' when none)."""
     if not segments:

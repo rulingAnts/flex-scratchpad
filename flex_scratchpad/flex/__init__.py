@@ -46,18 +46,26 @@ def _text_score(q: str, hay: str) -> int:
     return 0
 
 
-def _query_score(q: dict, baseline: str, free: str) -> int:
-    """A segment query {bases, morphs, free} against a segment: the best baseline match over
-    the Word rows (joined morphemes when only Morphemes rows were copied; or, for a
-    translation-only query, the free match) plus a bonus when the free translation agrees."""
-    bases, morphs = q.get("bases") or [], q.get("morphs") or []
+def _query_score(q: dict, baseline: str, free: str, morphs: str = "", glosses: str = "") -> int:
+    """A segment query {bases, morphs, glosses, free} against a segment: the best baseline
+    match over the Word rows; without a Word row the Morphemes rows against the segment's own
+    morpheme line, then the Lex. Gloss rows against its gloss line; a translation-only query
+    matches the free translation. Agreeing glosses / free translation add a bonus each."""
+    bases, morphs_q, gloss_q = q.get("bases") or [], q.get("morphs") or [], q.get("glosses") or []
     base = max((_text_score(b, baseline) for b in bases), default=0)
-    if not bases and morphs:
-        joined = _joined(baseline)                              # morphemes vs the baseline, spaces and breaks gone
-        base = max((_text_score(m, joined) for m in morphs), default=0)
+    if not bases and morphs_q:
+        # the segment's own Morphemes line (the forms need not spell the baseline word: an
+        # underlying form, another writing system); the baseline only when the index has none
+        hay = morphs or _joined(baseline)
+        base = max((_text_score(m, hay) for m in morphs_q), default=0)
+        if not base and morphs:
+            base = max((_text_score(m, _joined(baseline)) for m in morphs_q), default=0)
+    gl = max((_text_score(g, glosses) for g in gloss_q), default=0) if gloss_q and glosses else 0
     fr = _text_score(q.get("free", ""), free) if q.get("free") else 0
-    if bases or morphs:
-        return base + (1 if fr else 0) if base else 0
+    if bases or morphs_q:
+        return base + (1 if fr else 0) + (1 if gl else 0) if base else 0
+    if gloss_q:
+        return gl + (1 if fr else 0) if gl else 0
     return 1 if fr else 0
 
 
@@ -317,7 +325,8 @@ class FlexService:
                  "word gloss", "word cat.", "word cat", "literal", "note", "notes", "gloss", "category")
 
     def locate(self, pasted: str, limit: int = 5) -> list[dict]:
-        """Where in the project do these pasted interlinear lines come from?
+        """Where in the project do these pasted interlinear lines come from? Matched against
+        every segment's baseline, Morphemes line, Lex. Gloss line and free translation.
         FLEx's labelled rows (Word / Morphemes / Free …) all describe ONE segment: the Word row
         is its baseline, the Free row its translation; unlabelled lines are taken as one
         segment each, in order. Matching is normalised and diacritics-insensitive, with
@@ -331,7 +340,7 @@ class FlexService:
 
         def block() -> dict:
             nonlocal cur
-            cur = {"bases": [], "morphs": [], "free": ""}
+            cur = {"bases": [], "morphs": [], "glosses": [], "free": ""}
             queries.append(cur)
             return cur
 
@@ -384,7 +393,8 @@ class FlexService:
             key = next((k for k in sorted(self._ROW_KEEP + self._ROW_DROP, key=len, reverse=True) if label == k or label.startswith(k + " ") or label.startswith(k + ".")), "") if label else ""
             suffix = label[len(key):].lstrip(".").strip() if key else ""
             is_morph = key == "morphemes"
-            if key and not is_morph and key in self._ROW_DROP:
+            is_gloss = key in ("lex. gloss", "lex gloss")
+            if key and not is_morph and not is_gloss and key in self._ROW_DROP:
                 continue
             is_free = key == "free"
             labelled = bool(key)
@@ -401,15 +411,21 @@ class FlexService:
                 else:
                     block()["free"] = norm(text)
             elif is_morph:
-                # no Word row copied: the morpheme forms, joined, stand in for the baseline
+                # no Word row copied: the morpheme forms match the segment's own Morphemes line
                 if cur is None or numbered or cur["free"] or (cur["morphs"] and not suffix):
                     block()
                 cur["morphs"].append(_joined(norm(text)))
+            elif is_gloss:
+                if cur is None or numbered or cur["free"] or (cur["glosses"] and not suffix):
+                    block()
+                g = _joined(norm(" ".join(w for w in words if w.strip("*"))))   # *** = no gloss
+                if g:
+                    cur["glosses"].append(g)
             else:
                 if cur is None or numbered or cur["free"] or not labelled or not (suffix and cur["bases"]):
                     block()
                 cur["bases"].append(norm(text))
-        queries = [q for q in queries if q["bases"] or q["morphs"] or q["free"]]
+        queries = [q for q in queries if q["bases"] or q["morphs"] or q["glosses"] or q["free"]]
         if not queries:
             return []
         with self.lock:
@@ -417,14 +433,15 @@ class FlexService:
             index = be.all_baselines()
         hits = []
         for guid, t in index.items():
-            segs = [(n, norm(b), norm(f)) for n, b, f in t["segments"]]
-            for i, (n, nb, nf) in enumerate(segs):
-                sc = _query_score(queries[0], nb, nf)
+            segs = [(row[0], norm(row[1]), norm(row[2]), _joined(norm(row[3] if len(row) > 3 else "")), _joined(norm(row[4] if len(row) > 4 else "")))
+                    for row in t["segments"]]
+            for i, (n, nb, nf, nm, ng) in enumerate(segs):
+                sc = _query_score(queries[0], nb, nf, nm, ng)
                 if sc <= 0:
                     continue
                 score, last, k, j = sc, n, 1, i + 1
                 while k < len(queries) and j < len(segs):
-                    s2 = _query_score(queries[k], segs[j][1], segs[j][2])
+                    s2 = _query_score(queries[k], segs[j][1], segs[j][2], segs[j][3], segs[j][4])
                     if s2 <= 0:
                         break
                     score += s2

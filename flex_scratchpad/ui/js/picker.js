@@ -189,7 +189,16 @@
     let hits = [];
     try { hits = await FS.api.flex_locate(text); } catch (e) { hits = []; }
     const best = hits[0];
-    if (!best || best.score < 2) { fallback(); return; }
+    if (!best || best.score < 2) {
+      // rows copied from FLEx that match nothing: say what makes a paste reliable (Seth,
+      // 2026-10-14: "inform users that to paste … they need to have the word line showing")
+      if (/^(\d+(\.\d+)?\t)?\s*(Word|Morphemes|Lex\.|Free|Literal|Note)\b/im.test(text) && !/^(\d+(\.\d+)?\t)?\s*Word(\s|\t)/im.test(text)) {
+        FS.toast('Nothing in the project matched these FLEx lines. Copying works best with the Word line showing in FLEx (Configure interlinear lines → Word), then copy again.', 'warn');
+      } else if (/^(\d+(\.\d+)?\t)?\s*(Word|Morphemes|Lex\.|Free)\b/im.test(text)) {
+        FS.toast('Nothing in the project matched these FLEx lines; pasted as text.', 'warn');
+      }
+      fallback(); return;
+    }
     const m = FS.modal({ title: 'Found in FieldWorks', class: 'narrow' });
     const lines = text.trim().split('\n').filter((l) => l.trim()).length;
     const pick = { hit: best };
