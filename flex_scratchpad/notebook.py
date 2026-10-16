@@ -524,6 +524,19 @@ class Notebook:
             self._write_note(note)
             return note
 
+    def duplicate_note(self, note_id: str, tab: str | None = None, folder: str | None = None, title: str | None = None) -> Note:
+        """A copy of a note (Seth, 2026-10-16): same body and tags, a new id, in the same place
+        unless a tab / folder is given ("copy to"). Not pinned. Titled "<title> (copy)" in the
+        same place, the original title elsewhere, unless `title` says otherwise."""
+        with self.lock:
+            src = self.get_note(note_id)
+            same_place = (tab is None or tab == src.tab) and (folder is None or (folder or "") == (src.folder or ""))
+            new_title = title if title is not None else ((src.title + " (copy)") if same_place and src.title else src.title)
+            copy = self.create_note(tab or src.tab, src.folder if folder is None else (folder or ""), new_title, src.body)
+            if src.tags:
+                copy = self.save_note(copy.id, tags=list(src.tags))
+            return copy
+
     def save_note(self, note_id: str, title: str | None = None, body: str | None = None,
                   tags: list[str] | None = None, pinned: bool | None = None) -> Note:
         with self.lock:

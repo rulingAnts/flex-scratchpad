@@ -387,6 +387,8 @@
       const item = (label, fn, cls) => pop.appendChild(el('button', { class: 'menu-item ' + (cls || ''), onclick: () => { close(); fn(); } }, label));
       item(n.pinned ? 'Unpin' : 'Pin to top', async () => { await FS.api.save_note(n.id, { pinned: !n.pinned }); if (S.note && S.note.id === n.id) S.note.pinned = !n.pinned; await refreshLists(); renderNoteMeta(); });
       item('Move to…', () => moveDialog(n));
+      item('Duplicate', async () => { await flushSave(); const c = await FS.api.duplicate_note(n.id); await refreshLists(); openNote(c.id); FS.toast('Duplicated — this is the copy'); });
+      item('Copy to…', () => moveDialog(n, true));
       item('Copy markdown', async () => { const full = await FS.api.get_note(n.id); FS.copyText(full.body); FS.toast('Copied'); });
       item('Copy link to this note', () => { FS.copyText('flexscratchpad://note/' + n.id); FS.toast('Link copied — it opens this note in FLEx Scratchpad'); });
       pop.appendChild(el('hr'));
@@ -402,15 +404,18 @@
       item('Delete (to trash)', async () => { if (!confirm('Move “' + (n.title || 'Untitled') + '” to the trash?')) return; await FS.api.delete_note(n.id); if (S.note && S.note.id === n.id) { S.note = null; $('editor-pane').classList.add('no-note'); } await refreshLists(); }, 'danger');
     });
   }
-  function moveDialog(n) {
-    const m = FS.modal({ title: 'Move note', class: 'narrow' });
+  function moveDialog(n, copy) {
+    const m = FS.modal({ title: copy ? 'Copy note to' : 'Move note', class: 'narrow' });
     const tab = el('select');
     for (const t of S.config.tabs) tab.appendChild(el('option', { value: t.dir, selected: t.dir === n.tab }, t.name));
     const folder = el('select');
     const fill = () => { folder.innerHTML = ''; folder.appendChild(el('option', { value: '' }, '(tab root)')); for (const f of S.folders[tab.value] || []) folder.appendChild(el('option', { value: f, selected: f === n.folder }, f)); };
     tab.addEventListener('change', fill); fill();
     m.body.appendChild(el('div', { class: 'form-row' }, el('label', {}, 'Tab'), tab, el('label', {}, 'Folder'), folder));
-    m.body.appendChild(el('div', { class: 'btn-row' }, el('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'), el('button', { class: 'btn primary', onclick: async () => { await FS.api.move_note(n.id, tab.value, folder.value); if (S.note && S.note.id === n.id) { S.note.tab = tab.value; S.note.folder = folder.value; renderNoteMeta(); } m.close(); await refreshLists(); } }, 'Move')));
+    m.body.appendChild(el('div', { class: 'btn-row' }, el('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'), el('button', { class: 'btn primary', onclick: async () => {
+      if (copy) { await flushSave(); const c = await FS.api.duplicate_note(n.id, tab.value, folder.value); m.close(); await refreshLists(); openNote(c.id); FS.toast('Copied — this is the copy'); return; }
+      await FS.api.move_note(n.id, tab.value, folder.value); if (S.note && S.note.id === n.id) { S.note.tab = tab.value; S.note.folder = folder.value; renderNoteMeta(); } m.close(); await refreshLists();
+    } }, copy ? 'Copy' : 'Move')));
   }
 
   /* ------------------------------------------------------------------ links */

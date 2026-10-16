@@ -1778,3 +1778,20 @@ def test_list_start_number(app):
     shown = page.evaluate("() => [...document.querySelectorAll('#editor .md-num[data-num]')].map((n) => n.dataset.num)")
     assert shown[-2:] == ["7.", "8."], shown
     assert not errors
+
+
+def test_duplicate_note_from_the_menu(app):
+    h, page, errors = app
+    new_note(page, "Original")
+    page.locator("#editor .blk-body").first.click()
+    page.keyboard.type("Keep me")
+    page.wait_for_timeout(900)
+    before = page.locator(".note-card").count()
+    page.locator(".note-card", has_text="Original").first.click(button="right")
+    page.locator(".popover .menu-item", has_text="Duplicate").click()
+    page.wait_for_function("(n) => document.querySelectorAll('.note-card').length === n + 1", arg=before)
+    assert page.locator("#note-title").input_value() == "Original (copy)"
+    assert "Keep me" in page.locator("#editor").inner_text()
+    titles = sorted(x["title"] for x in h.api._nb.list_notes())
+    assert "Original" in titles and "Original (copy)" in titles
+    assert not errors

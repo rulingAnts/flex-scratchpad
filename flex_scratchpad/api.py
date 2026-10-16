@@ -128,6 +128,10 @@ class Api:
                               tags=patch.get("tags"), pinned=patch.get("pinned"))
         return n.summary()
 
+    def duplicate_note(self, note_id: str, tab: str | None = None, folder: str | None = None, title: str | None = None) -> dict:
+        n = self._nb.duplicate_note(note_id, tab, folder, title)
+        return self.get_note(n.id)
+
     def move_note(self, note_id: str, tab: str, folder: str = "") -> dict:
         return self._nb.move_note(note_id, tab, folder).summary()
 

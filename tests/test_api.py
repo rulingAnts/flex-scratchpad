@@ -108,3 +108,17 @@ def test_file_dialog_filters_are_well_formed(tmp_path):
     api._file_dialog(("Audio (*.wav;*.mp3)", "*.wav;*.mp3"), ("All files", "*.*"))
     assert seen["file_types"] == ("Audio (*.wav;*.mp3)", "All files (*.*)")
     assert api.audio_tools()["clipFormat"] in ("flac", "wav")
+
+
+def test_duplicate_note_in_place_and_to_another_tab(tmp_path):
+    api = make(tmp_path)
+    n = api.create_note(None, "", "SVCs", "Body with {{flex:text %s seg=1}}" % T_STORY)
+    api.save_note(n["id"], {"tags": ["grammar"], "pinned": True})
+    c = api.duplicate_note(n["id"])
+    assert c["id"] != n["id"] and c["title"] == "SVCs (copy)" and c["body"] == api.get_note(n["id"])["body"]
+    assert c["tags"] == ["grammar"] and not c["pinned"] and c["tab"] == n["tab"] and c["folder"] == n["folder"]
+    assert len(api.list_notes()) == 2
+    api.add_tab("Archive")
+    d = api.duplicate_note(n["id"], "Archive", "Old")
+    assert d["title"] == "SVCs" and d["tab"] == "Archive" and d["folder"] == "Old" and d["body"] == c["body"]
+    assert (tmp_path / "nb" / "Archive" / "Old").is_dir()
