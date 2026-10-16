@@ -781,13 +781,33 @@
     // click → pinned overlay; hover → temporary overlay
     chip.addEventListener('click', (e) => { if (e.target.closest('.cexp')) return; openOverlay(chip, spec, opts, { pinned: true }); });
     chip.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openOverlay(chip, spec, opts, { pinned: true }); } });
-    let hoverTimer = null;
-    chip.addEventListener('mouseenter', () => { if (overlay.current && overlay.current.pinned) return; hoverTimer = setTimeout(() => openOverlay(chip, spec, opts, { pinned: false }), 380); });
-    chip.addEventListener('mouseleave', () => { clearTimeout(hoverTimer); scheduleHoverClose(); });
+    hoverPreview(chip, () => openOverlay(chip, spec, opts, { pinned: false }));
     return chip;
   }
 
   const overlay = { current: null, closeTimer: null };
+  /* Hovering a chip previews it after a moment — but a press on the chip is the start of a
+   * click or a DRAG, so it cancels the pending preview and drops an unpinned one, and a drag
+   * closes any overlay (Seth, 2026-10-16: the preview appeared on mouse down and then sat in
+   * the way of the drop). The click that follows a press without a drag still pins it open. */
+  let pressed = false;
+  function hoverPreview(anchor, open) {
+    let timer = null;
+    anchor.addEventListener('mouseenter', (e) => {
+      if ((overlay.current && overlay.current.pinned) || FS.drag || pressed || (e.buttons & 1)) return;
+      timer = setTimeout(() => { if (!pressed && !FS.drag && anchor.isConnected) open(); }, 380);
+    });
+    anchor.addEventListener('mouseleave', () => { clearTimeout(timer); scheduleHoverClose(); });
+    anchor.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      clearTimeout(timer);
+      pressed = true;
+      if (overlay.current && !overlay.current.pinned) closeOverlay();
+    });
+  }
+  document.addEventListener('mouseup', () => { pressed = false; }, true);
+  document.addEventListener('dragstart', (e) => { if (!(e.target.closest && e.target.closest('.flex-overlay'))) closeOverlay(); }, true);
+  document.addEventListener('dragend', () => { pressed = false; }, true);
   function closeOverlay() {
     const o = overlay.current;
     if (!o) return;
@@ -952,9 +972,7 @@
       };
       const open = (e) => { e.preventDefault(); e.stopPropagation(); openOverlay(span, spec, o, { pinned: true }); };
       span.addEventListener('click', open);
-      let hoverTimer = null;
-      span.addEventListener('mouseenter', () => { if (overlay.current && overlay.current.pinned) return; hoverTimer = setTimeout(() => openOverlay(span, spec, o, { pinned: false }), 380); });
-      span.addEventListener('mouseleave', () => { clearTimeout(hoverTimer); scheduleHoverClose(); });
+      hoverPreview(span, () => openOverlay(span, spec, o, { pinned: false }));
     });
   }
 

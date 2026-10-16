@@ -1914,3 +1914,39 @@ def test_table_insert_above_while_editing_and_paste_rows_from_the_menu(app):
     b = body_of(h)
     assert "b2+zz" not in b and "| p | q |" in b, b
     assert not errors
+
+
+def test_pressing_or_dragging_a_chip_keeps_the_preview_out_of_the_way(app):
+    """Seth, 2026-10-16: the overlay appeared the moment a tile was pressed and then sat in the
+    way of the drag. A press cancels the hover preview; a drag closes any overlay."""
+    h, page, errors = app
+    new_note(page, "Press")
+    page.locator("#editor .blk-body").first.click()
+    paste(page, "Intro line.\n\n{{flex:text %s seg=1 collapsed}}\n\nInline {{flex:entry 6a5f3a2e-1b1e-4c2a-9f10-0d2c1a7e0001}} here." % T_STORY)
+    chip = page.locator("#editor .flex-collapsed").first
+    chip.wait_for()
+    # hovering previews it…
+    chip.hover()
+    page.wait_for_selector(".flex-overlay")
+    # …pressing drops the preview, and holding still does not bring it back
+    page.mouse.down()
+    page.wait_for_timeout(700)
+    assert page.locator(".flex-overlay").count() == 0
+    page.mouse.up()                     # a click without a drag still pins it open
+    page.wait_for_selector(".flex-overlay.pinned")
+    # a drag that starts on the chip closes even the pinned overlay
+    page.evaluate("""() => { const s = document.querySelector('#editor .flex-collapsed');
+      s.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: new DataTransfer() })); }""")
+    assert page.locator(".flex-overlay").count() == 0
+    page.evaluate("() => document.querySelector('#editor .flex-collapsed').dispatchEvent(new DragEvent('dragend', { bubbles: true }))")
+    # the inline chip behaves the same
+    page.mouse.move(5, 5)
+    page.wait_for_timeout(500)
+    inline = page.locator("#editor .md-embed").first
+    inline.hover()
+    page.wait_for_selector(".flex-overlay")
+    page.mouse.down()
+    page.wait_for_timeout(700)
+    assert page.locator(".flex-overlay").count() == 0
+    page.mouse.up()
+    assert not errors

@@ -70,7 +70,10 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
   a table cell, or between blocks (on a block's top/bottom half = before/after, which re-orders).
   One delegated handler on the editor root (`wireDrag` → `dragSourceOf` / `dropTargetAt` /
   `moveEmbed`): string surgery on the markdown, a move unless Ctrl/Alt (copy). `FS.drag` holds
-  the source during the drag; the `application/x-flex-embed` type marks our drags.
+  the source during the drag; the `application/x-flex-embed` type marks our drags. A chip's
+  hover preview (`hoverPreview` in interlinear.js) yields to the drag: a press cancels the
+  pending preview and drops an unpinned one, `dragstart` closes any overlay, and only a click
+  without a drag pins it open.
 - A text block's `textContent` **is** the markdown. `decorate()` only wraps characters in spans;
   it must never add or remove text (the node tests check this). Empty lines render a `<br>`.
   Outline numbers are COMPUTED (`markdown.numberLines`, per level, carried across blocks by the
