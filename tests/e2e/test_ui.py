@@ -1950,3 +1950,46 @@ def test_pressing_or_dragging_a_chip_keeps_the_preview_out_of_the_way(app):
     assert page.locator(".flex-overlay").count() == 0
     page.mouse.up()
     assert not errors
+
+
+def test_a_slow_paste_lookup_shows_a_spinner_and_can_be_skipped(app):
+    """Seth, 2026-10-16: "when I paste a flex example and it takes awhile to process/find it,
+    could we get a loading or 'searching...' spinner?" """
+    h, page, errors = app
+    new_note(page, "Slow")
+    rows = "Word\tHaŋa\ttiket\tka-sila-mo\tpemu\nWord Gloss\tyesterday\tchild\tsaw\triver\nFree\tYesterday the child saw the river."
+    # make the lookup slow (on the page side: a sleeping Python call would stall the test driver)
+    page.evaluate("""() => { const real = window.__flexBridge; window.__locateDelay = 2500;
+      window.__flexBridge = (req) => JSON.parse(req).method === 'flex_locate'
+        ? new Promise((res) => setTimeout(() => res(real(req)), window.__locateDelay)) : real(req); }""")
+    paste(page, rows)
+    page.wait_for_selector(".busy-pill .spinner")
+    assert "Searching the project" in page.locator(".busy-pill").inner_text()
+    page.wait_for_selector(".modal", timeout=6000)          # the answer arrives: the pill goes
+    assert page.locator(".busy-pill").count() == 0
+    page.locator(".modal .btn", has_text="Paste as text").click()
+    # skipping the wait pastes the lines as text, and the late answer is ignored
+    page.locator("#editor .blk-body").last.click()
+    page.keyboard.press("End")
+    page.keyboard.press("Enter")
+    paste(page, rows)
+    page.wait_for_selector(".busy-pill")
+    page.locator(".busy-pill button", has_text="Paste as text").click()
+    assert page.locator(".busy-pill").count() == 0
+    page.wait_for_timeout(3200)
+    assert page.locator(".modal").count() == 0
+    # a quick answer never flashes the pill
+    page.evaluate("() => { window.__locateDelay = 0; }")
+    page.locator("#editor .blk-body").last.click()
+    page.keyboard.press("End")
+    page.keyboard.press("Enter")
+    seen = page.evaluate("""() => new Promise((res) => { let s = false;
+      const mo = new MutationObserver(() => { if (document.querySelector('.busy-pill')) s = true; });
+      mo.observe(document.body, { childList: true, subtree: true }); window.__seenPill = () => { mo.disconnect(); return s; }; res(true); })""")
+    paste(page, rows)
+    page.wait_for_selector(".modal")
+    assert page.evaluate("() => window.__seenPill()") is False
+    page.locator(".modal .btn", has_text="Paste as text").click()
+    page.wait_for_timeout(900)
+    assert body_of(h).count("Yesterday the child saw the river.") >= 2, body_of(h)
+    assert not errors

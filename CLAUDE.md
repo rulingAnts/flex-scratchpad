@@ -116,6 +116,9 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
   matches the baseline; without one, Morphemes rows match the segment's OWN morpheme line
   (Seth, 2026-10-14: morph forms need not spell the surface word), then Lex. Gloss rows its
   gloss line. When nothing matches, the picker tells the user to copy with the Word line showing.
+  While a pasted example or `silfw://` link is being looked up, `FS.busy` (util.js) shows a
+  spinner pill by the caret after 200 ms (a quick answer never flashes it), with "Paste as
+  text" / Esc to stop waiting; a late answer after that is ignored (Seth, 2026-10-16).
 - Exporting a note's examples as a `.flextext` (`flex/flextext_writer.py`, `Api.export_note_flextext`,
   Seth, 2026-10-16): one `<interlinear-text>` PER BASELINE WRITING SYSTEM (a FLEx text has one
   vernacular WS), one paragraph per example, one phrase per segment, every writing-system

@@ -104,6 +104,48 @@
     setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 300); }, kind === 'error' ? 6000 : 2600);
   };
 
+  /* A "working on it" pill with a spinner, for a wait the user caused (a paste being looked up
+   * in the project). It appears only after `delay` ms so a quick answer never flashes it, sits
+   * by the caret, changes to `slowMsg` after `slowAfter` ms, and with `onCancel` carries a button
+   * (and Esc) to give up waiting. Returns done(), which removes it; call it in every path. */
+  FS.busy = function (msg, opts) {
+    opts = opts || {};
+    let node = null, slow = null, finished = false;
+    // where the caret is NOW: the paste point, before anything moves
+    let at = null;
+    try {
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount) { const r = sel.getRangeAt(0).getBoundingClientRect(); if (r.width || r.height || r.top) at = r; }
+      if (!at || (!at.top && !at.left)) { const a = document.activeElement; if (a && a !== document.body) at = a.getBoundingClientRect(); }
+    } catch (e) { at = null; }
+    const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancel(); } };
+    const cancel = () => { if (finished) return; done(); if (opts.onCancel) opts.onCancel(); };
+    function done() {
+      finished = true;
+      clearTimeout(timer); clearTimeout(slow);
+      if (node) node.remove();
+      document.removeEventListener('keydown', onKey, true);
+    }
+    const timer = setTimeout(() => {
+      if (finished) return;
+      const text = FS.el('span', { class: 'busy-msg' }, msg);
+      node = FS.el('div', { class: 'busy-pill', role: 'status', 'aria-live': 'polite' },
+        FS.el('span', { class: 'spinner', 'aria-hidden': 'true' }), text,
+        opts.onCancel ? FS.el('button', { class: 'lnk', title: 'Stop waiting (Esc)', onclick: cancel }, opts.cancelLabel || 'Cancel') : null);
+      document.body.appendChild(node);
+      if (at && (at.top || at.left)) {
+        const w = node.offsetWidth, h = node.offsetHeight;
+        const left = Math.max(8, Math.min(at.left, window.innerWidth - w - 8));
+        let top = at.bottom + 8;
+        if (top + h > window.innerHeight - 8) top = Math.max(8, at.top - h - 8);
+        Object.assign(node.style, { left: left + 'px', top: top + 'px' });
+      } else node.classList.add('centred');
+      if (opts.onCancel) document.addEventListener('keydown', onKey, true);
+      if (opts.slowMsg) slow = setTimeout(() => { text.textContent = opts.slowMsg; }, opts.slowAfter || 3000);
+    }, opts.delay == null ? 200 : opts.delay);
+    return done;
+  };
+
   /* Lightweight modal: returns {root, body, close}. */
   FS.modal = function (opts) {
     const root = FS.el('div', { class: 'modal-backdrop' });

@@ -169,8 +169,10 @@
 
   /* A FLEx link was pasted: resolve it and ask how to insert it. insert(md, asBlock). */
   async function pasteChooser(text, insert) {
-    let info = null;
-    try { info = await FS.api.flex_resolve_link(text); } catch (e) { info = null; }
+    let info = null, gaveUp = false;
+    const done = FS.busy('Looking up the FieldWorks link…', { slowMsg: 'Still looking… the first lookup takes longest', onCancel: () => { gaveUp = true; insert(text, false); }, cancelLabel: 'Paste as text' });
+    try { info = await FS.api.flex_resolve_link(text); } catch (e) { info = null; } finally { done(); }
+    if (gaveUp) return;
     if (!info) { insert(text, false); return; }
     const m = FS.modal({ title: 'FieldWorks link', class: 'narrow' });
     const what = info.kind === 'entry' ? 'Entry' : info.kind === 'text' ? 'Text' : info.kind === 'wordform' ? 'Wordform' : 'Object';
@@ -186,8 +188,12 @@
   /* Interlinear lines were pasted: ask Python where they come from; offer the embed, or
    * fall back to a plain paste (fallback()) when nothing matches well enough. */
   async function locateChooser(text, insert, fallback) {
-    let hits = [];
-    try { hits = await FS.api.flex_locate(text); } catch (e) { hits = []; }
+    let hits = [], gaveUp = false;
+    // the lookup reads the project's segment index, which can take a while the first time
+    // (Seth, 2026-10-16: "could we get a loading or 'searching…' spinner?")
+    const done = FS.busy('Searching the project for these lines…', { slowMsg: 'Still searching… the first search takes longest', onCancel: () => { gaveUp = true; fallback(); }, cancelLabel: 'Paste as text' });
+    try { hits = await FS.api.flex_locate(text); } catch (e) { hits = []; } finally { done(); }
+    if (gaveUp) return;
     const best = hits[0];
     if (!best || best.score < 2) {
       // rows copied from FLEx that match nothing: say what makes a paste reliable (Seth,
