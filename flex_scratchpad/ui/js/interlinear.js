@@ -310,7 +310,9 @@
     main.appendChild(wordRow);
     const lineEl = (cls, line, text) => {
       const d = el('div', { class: cls, lang: anal.tag || null, html: styled(text, R.stylesFor(index, seg.n, line, 0)) });
-      if (opts.editable) d.addEventListener('click', (e) => { e.stopPropagation(); stylePopover(d, spec, { line, seg: seg.n }, null, opts, { lineOnly: true, text, box }); });
+      // a click styles the whole line; a drag-selection inside it styles just those characters
+      // (Seth, 2026-10-16: "drag select part of the free translation and highlight the selection")
+      if (opts.editable) d.addEventListener('click', (e) => { e.stopPropagation(); const chars = selectedChars(d, text); stylePopover(d, spec, { line, seg: seg.n }, null, opts, { lineOnly: true, text, box, chars }); });
       return d;
     };
     if (lines.includes('ft') && seg.free) main.appendChild(lineEl('seg-free', 'ft', seg.free));
@@ -404,6 +406,33 @@
     FS.api.open_in_flex(url).then(() => FS.toast('Sent to FieldWorks'), (e) => FS.toast(e.message, 'error'));
   }
 
+  /* The grapheme range [c1, c2] (1-based, inclusive) of the current selection when it lies
+   * inside `node`, whose textContent is `text`; null when nothing in it is selected. Spaces
+   * at either end of the selection are left out. */
+  function selectedChars(node, text) {
+    const sel = window.getSelection && window.getSelection();
+    if (!sel || !sel.rangeCount || sel.isCollapsed) return null;
+    const r = sel.getRangeAt(0);
+    if (!node.contains(r.startContainer) || !node.contains(r.endContainer)) return null;
+    const offsetOf = (container, off) => { const x = document.createRange(); x.setStart(node, 0); x.setEnd(container, off); return x.toString().length; };
+    let a = offsetOf(r.startContainer, r.startOffset), b = offsetOf(r.endContainer, r.endOffset);
+    if (a > b) [a, b] = [b, a];
+    while (a < b && /\s/.test(text[a])) a++;
+    while (b > a && /\s/.test(text[b - 1])) b--;
+    if (a >= b) return null;
+    const gs = FS.graphemes(text);
+    let pos = 0, c1 = 0, c2 = 0;
+    for (let i = 0; i < gs.length; i++) {
+      const end = pos + gs[i].length;
+      if (!c1 && a < end) c1 = i + 1;
+      if (b > pos) c2 = i + 1;
+      pos = end;
+    }
+    if (!c1 || !c2) return null;
+    try { sel.removeAllRanges(); } catch (e) { /* nothing to clear */ }
+    return [c1, c2];
+  }
+
   /* ------------------------------------------------------------------ popovers */
   const HL_COLORS = ['', '#ffd6a5', '#caffbf', '#9bf6ff', '#bdb2ff', '#ffadad', '#fdffb6'];
   const TXT_COLORS = ['#c0392b', '#1f7a4d', '#1f4f8f', '#7a3e9d', '#b45309'];
@@ -413,6 +442,8 @@
     FS.popover(anchor, (pop, close) => {
       const state = { line: target.line || 'txt', chars: extra.chars || null, color: '' };
       const apply = (style, color) => {
+        // with text in the "match" box, the swatches and styles apply to that match instead
+        if (state.match) { R.toggleStyle(spec, { line: state.line, text: state.match, all: state.all }, style, color || ''); opts.onSpecChange && opts.onSpecChange(spec); close(); return; }
         const t = Object.assign({}, target, { line: state.line });
         if (state.chars) t.chars = state.chars;
         R.toggleStyle(spec, t, style, color || '');
@@ -429,6 +460,7 @@
         rows.innerHTML = '';
         const desc = extra.range ? 'Words ' + target.seg + '.' + target.word + ' – ' + target.segEnd + '.' + target.wordEnd
           : extra.lineOnly ? ({ ft: 'Free translation', lit: 'Literal translation', note: 'Note' }[target.line] || target.line) + ' of segment ' + target.seg
+              + (state.chars ? ': \u201c' + FS.graphemes(extra.text || '').slice(state.chars[0] - 1, state.chars[1]).join('') + '\u201d' : '')
             : (word ? '“' + (word.txt || '') + '”  (' + target.seg + '.' + target.word + ')' : 'segment ' + target.seg);
         rows.appendChild(el('div', { class: 'row' }, el('b', {}, desc)));
         if (!extra.lineOnly) {
@@ -454,8 +486,10 @@
           const setChars = () => { const a = +from.value || 1, b = +to.value || n; state.chars = (a === 1 && b >= n) ? null : [Math.min(a, b), Math.max(a, b)]; refresh(); };
           from.addEventListener('change', setChars); to.addEventListener('change', setChars);
           rows.appendChild(el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Characters'), from, el('span', { class: 'muted' }, '–'), to, el('span', { class: 'muted small' }, 'of ' + n)));
-          const match = el('input', { type: 'text', placeholder: 'match text… e.g. ka-', style: { width: '120px' } });
-          const all = el('input', { type: 'checkbox', title: 'all occurrences' });
+          const match = el('input', { type: 'text', value: state.match || '', placeholder: 'match text… e.g. ka-', title: 'With text here, the highlight colours and styles above apply to every match of it', style: { width: '120px' } });
+          const all = el('input', { type: 'checkbox', title: 'all occurrences', checked: !!state.all });
+          match.addEventListener('input', () => { state.match = match.value; });
+          all.addEventListener('change', () => { state.all = all.checked; });
           const matchBtn = el('button', { class: 'tog', onclick: () => { if (!match.value) return; const t = { line: state.line, text: match.value, all: all.checked }; R.toggleStyle(spec, t, 'hl', state.color); opts.onSpecChange && opts.onSpecChange(spec); close(); } }, 'Highlight match');
           rows.appendChild(el('div', { class: 'row' }, match, el('label', { class: 'small muted' }, all, ' all'), matchBtn));
         }
@@ -463,7 +497,7 @@
         rows.appendChild(el('div', { class: 'row' },
           el('button', { class: 'tog', onclick: () => { const t = Object.assign({}, target, { line: state.line }); if (state.chars) t.chars = state.chars; R.clearStyles(spec, t); opts.onSpecChange && opts.onSpecChange(spec); refresh(); } }, 'Clear this'),
           el('button', { class: 'tog', onclick: () => { R.clearStyles(spec, null); opts.onSpecChange && opts.onSpecChange(spec); close(); } }, 'Clear all styles'),
-          el('span', { class: 'hint' }, extra.range ? '' : 'Shift+click another word to style a range.')));
+          el('span', { class: 'hint' }, extra.range ? '' : extra.lineOnly ? 'Drag across part of the line to style just that part.' : 'Shift+click another word to style a range.')));
       }
       refresh();
       pop.appendChild(rows);

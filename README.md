@@ -76,7 +76,8 @@ elsewhere (marked *cached*).
 | New note / tab / folder | **Ctrl+N**; the `+` next to *Tabs* / *Folders*; right-click a tab or folder for rename, colour, delete |
 | Insert a FLEx object | **Ctrl+Shift+L** → search the lexicon or the texts → click the first and last segment → *Insert segments*; or paste a FLEx hyperlink (*Edit → Copy Location as Hyperlink* in FLEx) |
 | Find a segment by its text | In the picker's text view, *find segment by text…* |
-| Style words in an example | Click a word → Highlight / Bold / Underline / Italic / Strike / Colour; Shift+click another word for a range; *Characters* for part of a word; *match text* for every occurrence |
+| Style words in an example | Click a word → Highlight / Bold / Underline / Italic / Strike / Colour; Shift+click another word for a range; *Characters* for part of a word; *match text* (then a colour or style) for every occurrence |
+| Style part of a free translation | Drag across the words in the free (or literal) translation, release, and pick a colour or style; a plain click styles the whole line |
 | Choose the lines shown | The `⋯` on an embed: Word, Morphemes, Morph glosses, Lex. entries, Word gloss, Category, Free, Literal, Notes; segment range |
 | Play audio | `▶` beside a timed segment; *Play 3–5* on a range; loop and scrub in the transport strip |
 | Table | *Table* button; click a cell to edit (**Tab** moves on, **Shift+Enter** breaks a line, **Enter** goes down); *Column ▾ / Row ▾ / Table ▾* for styling |

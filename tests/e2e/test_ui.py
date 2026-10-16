@@ -2201,3 +2201,45 @@ def test_collection_groups_and_example_notes(app):
     page.wait_for_timeout(900)
     assert "## Same subject" in body()
     assert not errors
+
+
+def test_drag_select_part_of_a_free_translation_and_highlight_it(app):
+    """Seth, 2026-10-16: "I'd like to be able to drag select part of the free translation and
+    highlight the selection" — in any colour, not only by typing into "match text"."""
+    h, page, errors = app
+    new_note(page, "Free")
+    page.keyboard.type("{{flex:text %s seg=2}}" % T_STORY)
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#editor .text-obj .seg-free")
+    page.wait_for_timeout(600)
+    # the screen positions of "the child" in "Yesterday the child saw the river."
+    pts = page.evaluate("""() => {
+      const d = document.querySelector('#editor .seg-free'); const node = d.firstChild;
+      const t = node.textContent, a = t.indexOf('the child'), b = a + 'the child'.length;
+      const r = document.createRange();
+      r.setStart(node, a); r.setEnd(node, a + 1); const ra = r.getBoundingClientRect();
+      r.setStart(node, b - 1); r.setEnd(node, b); const rb = r.getBoundingClientRect();
+      return [ra.left + 1, ra.top + ra.height / 2, rb.right - 1, rb.top + rb.height / 2];
+    }""")
+    page.mouse.move(pts[0], pts[1])
+    page.mouse.down()
+    page.mouse.move((pts[0] + pts[2]) / 2, pts[1])
+    page.mouse.move(pts[2], pts[3])
+    page.mouse.up()
+    page.wait_for_selector(".popover")
+    assert "“the child”" in page.locator(".popover").inner_text()
+    # a green highlight, not the default
+    page.locator(".popover button.sw[title='#caffbf']").click()
+    page.wait_for_timeout(900)
+    assert re.search(r"hl\[#caffbf\]=ft:2:11-19", body_of(h)), body_of(h)
+    span = page.locator("#editor .seg-free span.st-hl")
+    assert span.inner_text() == "the child" and "202, 255, 191" in span.evaluate("(e) => getComputedStyle(e).backgroundColor")
+    page.keyboard.press("Escape")
+    # "match text" takes any colour too: type the match, then pick a swatch
+    page.locator("#editor .seg-free").click()
+    page.wait_for_selector(".popover")
+    page.locator(".popover input[placeholder^='match text']").fill("river")
+    page.locator(".popover button.sw[title='#bdb2ff']").click()
+    page.wait_for_timeout(900)
+    assert 'hl[#bdb2ff]=ft:"river"' in body_of(h), body_of(h)
+    assert not errors
