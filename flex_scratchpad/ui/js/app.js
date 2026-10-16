@@ -306,6 +306,7 @@
         try { const r = await FS.api.save_attachment(file.name || 'pasted.png', b64); insert('![' + (file.name || 'image') + '](' + (r.fileUrl || b64) + ')'); } catch (e) { FS.toast(e.message, 'error'); }
       },
       onSlash: (body, b) => slashMenu(body, b),
+      onInsertFlex: () => insertFlex(),
     });
     window.__fsEditor = S.editor;        // for the tests and the console
     return S.editor;

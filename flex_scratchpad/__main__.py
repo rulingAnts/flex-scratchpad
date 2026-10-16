@@ -24,6 +24,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--version", action="store_true", help="print the version and build fingerprint and exit")
     ap.add_argument("--project", help="FieldWorks project name (with --dump)")
     ap.add_argument("--dump", metavar="TEXT", help="print the first segments of a text (title, part of a title, or GUID) as JSON and exit — for diagnosing what flexicon returns")
+    ap.add_argument("--locate", metavar="SOURCE", help="explain where pasted FLEx rows land: SOURCE is 'clip' (the clipboard, Windows) or a text file; writes a JSON report (--out) and exits")
+    ap.add_argument("--out", default="flex-scratchpad-locate.json", help="report file for --locate")
     ap.add_argument("--register-links", action="store_true", help="register flexscratchpad:// links for this user (Windows) and exit")
     ap.add_argument("url", nargs="?", help="a flexscratchpad://note/<id> link to open (what Windows passes when such a link is clicked)")
     args = ap.parse_args(argv)
@@ -42,6 +44,8 @@ def main(argv: list[str] | None = None) -> int:
         return check()
     if args.dump:
         return dump(args.project, args.dump)
+    if args.locate:
+        return locate_report(args.project, args.locate, args.out, demo=args.demo)
     if args.list_projects:
         from .flex.lcm import FlexError, FlexiconBackend
         be = FlexiconBackend()
@@ -92,6 +96,82 @@ def dump(project: str | None, which: str) -> int:
         return 2
     finally:
         be.close()
+
+
+def _clipboard_text() -> str:
+    """The Windows clipboard's Unicode text (no third-party packages)."""
+    import ctypes
+    from ctypes import wintypes
+    user32, kernel32 = ctypes.windll.user32, ctypes.windll.kernel32
+    user32.GetClipboardData.restype = wintypes.HANDLE
+    kernel32.GlobalLock.restype = ctypes.c_void_p
+    kernel32.GlobalLock.argtypes = [wintypes.HGLOBAL]
+    kernel32.GlobalUnlock.argtypes = [wintypes.HGLOBAL]
+    if not user32.OpenClipboard(None):
+        raise RuntimeError("could not open the clipboard")
+    try:
+        h = user32.GetClipboardData(13)              # CF_UNICODETEXT
+        if not h:
+            return ""
+        ptr = kernel32.GlobalLock(h)
+        try:
+            return ctypes.wstring_at(ptr)
+        finally:
+            kernel32.GlobalUnlock(h)
+    finally:
+        user32.CloseClipboard()
+
+
+def locate_report(project: str | None, source: str, out: str, demo: bool = False) -> int:
+    """Run the paste locator on rows copied from FLEx against the real project and write what it
+    saw to a UTF-8 JSON file (the Windows console cannot be trusted with IPA)."""
+    import json
+    import tempfile
+    from pathlib import Path
+    from . import __version__, build_id
+    from .flex import FlexService
+    from .flex.lcm import FlexError
+    from .notebook import Notebook
+    if source == "clip":
+        if sys.platform != "win32":
+            print("--locate clip reads the Windows clipboard; pass a file instead", file=sys.stderr)
+            return 2
+        text = _clipboard_text()
+    else:
+        text = Path(source).read_text(encoding="utf-8-sig")
+    if not text.strip():
+        print("Nothing to locate (the clipboard or file is empty).", file=sys.stderr)
+        return 2
+    fs = FlexService(Notebook(tempfile.mkdtemp(prefix="fs-locate-")))
+    try:
+        if demo:
+            from .flex.demo import DemoBackend
+            fs.backend = DemoBackend()
+        else:
+            from .flex.lcm import FlexiconBackend
+            be = FlexiconBackend(progress=lambda m: print(m, file=sys.stderr))
+            if not project:
+                names = be.list_projects()
+                if len(names) != 1:
+                    print("Several projects; pass --project NAME. Found: " + ", ".join(names), file=sys.stderr)
+                    return 2
+                project = names[0]
+            be.open(project)
+            fs.backend = be
+        report = {"app": f"FLEx Scratchpad {__version__} (build {build_id()})", "project": project or "demo", "pasted": text}
+        report.update(fs.explain_locate(text))
+        Path(out).write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
+        hits = report.get("hits") or []
+        print(f"{len(report.get('queries') or [])} pasted segment(s); {len(hits)} candidate(s)"
+              + (f"; best: segments {hits[0].get('label', hits[0]['seg'])}-{hits[0].get('labelTo', hits[0]['segTo'])}, {hits[0]['matched']} of {hits[0]['of']} matched" if hits else ""))
+        print("Report written to " + str(Path(out).resolve()))
+        return 0
+    except FlexError as e:
+        print(e.message, file=sys.stderr)
+        return 2
+    finally:
+        if fs.backend is not None and hasattr(fs.backend, "close"):
+            fs.backend.close()
 
 
 def check() -> int:

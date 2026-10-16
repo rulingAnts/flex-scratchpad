@@ -56,8 +56,11 @@ def app(browser):
 
 
 def body_of(h):
+    """The body of the note the test is working on: the most recently edited one — skipping the
+    Welcome note when the test made another, since edit times tie within a second."""
     notes = h.api._nb.list_notes()
-    return h.api.get_note(notes[0]["id"])["body"]
+    own = [n for n in notes if n["title"] != "Welcome to FLEx Scratchpad"] or notes
+    return h.api.get_note(own[0]["id"])["body"]
 
 
 def tool(page, text, nth=0):
@@ -1852,14 +1855,14 @@ def test_list_start_number(app):
     page.keyboard.press("Control+End")
     page.keyboard.press("Enter")
     page.keyboard.type("fifth")
-    page.wait_for_timeout(600)
+    page.wait_for_timeout(1000)   # past the 600 ms autosave
     assert "5. fifth" in body_of(h), body_of(h)
     # the block menu sets the start of the second list
     page.once("dialog", lambda d: d.accept("7"))
     page.locator("#editor .blk-list").nth(1).hover()
     page.locator("#editor .blk-list").nth(1).locator(".blk-handle button").dispatch_event("mousedown")
     page.locator(".popover .menu-item", has_text="Start numbering at").click()
-    page.wait_for_timeout(600)
+    page.wait_for_timeout(1000)
     assert "7. again\n2. more" in body_of(h), body_of(h)
     shown = page.evaluate("() => [...document.querySelectorAll('#editor .md-num[data-num]')].map((n) => n.dataset.num)")
     assert shown[-2:] == ["7.", "8."], shown
@@ -2314,4 +2317,46 @@ def test_a_pasted_line_lands_on_its_own_segment_even_when_numbering_differs(app)
         assert re.search(r"seg=4 at=0e1f2a3b1004\b", body), body                         # number healed, GUID kept
     finally:
         be.all_baselines = real
+    assert not errors
+
+
+def test_insert_a_new_block_from_the_context_menu(app):
+    """Seth, 2026-10-16: "the ability to insert a new block in a note (like list, text, heading …).
+    This is especially useful after examples or tables … I think the context menu is a good place"."""
+    h, page, errors = app
+    new_note(page, "Blocks")
+    page.locator("#editor .blk-body").first.click()
+    paste(page, "Intro.\n\n{{flex:text %s seg=1}}\n\n| A | B |\n|---|---|\n| a | b |\n\nEnd." % T_STORY)
+    page.wait_for_selector("#editor .blk-flex .text-obj")
+    page.wait_for_selector("table.md-table")
+    # right-click the example: a heading below it, the caret in it
+    page.locator("#editor .blk-flex .seg-free").first.click(button="right")
+    page.locator(".popover [data-ins-kind='h'][data-ins-where='after']").click()
+    page.keyboard.type("Analysis")
+    page.wait_for_timeout(900)
+    b = body_of(h)
+    assert re.search(r"seg=1[^}]*\}\}\n\n## Analysis\n\n\| A \| B \|", b), b
+    # the table's own cell menu ends with the same section: a paragraph below the table
+    page.locator("table.md-table td[data-r='1'][data-c='0']").click(button="right")
+    page.locator(".popover [data-ins-kind='p'][data-ins-where='after']").click()
+    page.keyboard.type("After the table.")
+    page.wait_for_timeout(900)
+    b = body_of(h)
+    assert re.search(r"\| a \| b \|\n\nAfter the table\.\n\nEnd\.", b), b
+    # the ⋮ block menu: a numbered list above the closing paragraph
+    page.locator("#editor .blk", has_text="End.").hover()
+    page.locator("#editor .blk", has_text="End.").locator(".blk-handle button[title='Block menu']").dispatch_event("mousedown")
+    page.locator(".popover [data-ins-kind='ol'][data-ins-where='before']").click()
+    page.keyboard.type("first")
+    page.wait_for_timeout(900)
+    assert "1. first\n\nEnd." in body_of(h), body_of(h)
+    # right-click inside running text keeps the browser's menu (spelling, copy, paste)
+    page.locator("#editor .blk-body", has_text="Intro.").click(button="right")
+    assert page.locator(".popover [data-ins-kind]").count() == 0
+    # "FLEx example" opens the picker for the new spot
+    page.locator("#editor .blk-flex .seg-free").first.click(button="right")
+    page.locator(".popover [data-ins-kind='flex'][data-ins-where='before']").click()
+    page.wait_for_selector(".modal", timeout=5000)
+    assert "Insert from FieldWorks" in page.locator(".modal").inner_text()
+    page.keyboard.press("Escape")
     assert not errors

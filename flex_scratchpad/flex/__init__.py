@@ -356,6 +356,101 @@ class FlexService:
         is its baseline, the Free row its translation; unlabelled lines are taken as one
         segment each, in order. Matching is normalised and diacritics-insensitive, with
         punctuation ignored. Returns candidates [{guid, title, seg, segTo, score, matched, of}]."""
+        queries, norm = self._paste_queries(pasted)
+        if not queries:
+            return []
+        with self.lock:
+            be = self._live()
+            index = be.all_baselines()
+        hits = []
+        by_label: set = set()
+        for guid, t in index.items():
+            segs = [(row[0], norm(row[1]), norm(row[2]), _joined(norm(row[3] if len(row) > 3 else "")), _joined(norm(row[4] if len(row) > 4 else "")))
+                    for row in t["segments"]]
+            # FLEx's numbers on the pasted rows say exactly which segments were copied (Seth,
+            # 2026-10-16: content matching "grabbing the wrong line … two lines above"); they
+            # decide the range whenever the text has them and its content there agrees
+            labels = {_label_key(row[5]): i for i, row in enumerate(t["segments"]) if len(row) > 5 and row[5]}
+            if queries[0].get("label") and labels:
+                placed = self._place_by_labels(queries, segs, labels)
+                if placed:
+                    score, i0, i1, k = placed
+                    hits.append(dict({"guid": guid, "title": t["title"], "seg": segs[i0][0], "segTo": segs[i1][0], "score": score, "matched": k, "of": len(queries), "byLabel": True},
+                                     **_pinned(t["segments"], i0, i1)))
+                    by_label.add(guid)
+                    continue
+            for i, (n, nb, nf, nm, ng) in enumerate(segs):
+                sc = _query_score(queries[0], nb, nf, nm, ng)
+                if sc <= 0:
+                    continue
+                score, last, k, j, skipped, li = sc, n, 1, i + 1, 0, i
+                while k < len(queries) and j < len(segs):
+                    # FLEx's copy can leave segments out (Seth, 2026-10-16: a paste of 12.1, 12.3,
+                    # 13, 14 — no 12.2 — found only 12.1), so the next pasted segment may skip a
+                    # few of the text's; the example's range still runs first to last
+                    s2, step = 0, 0
+                    for step in range(LOCATE_GAP + 1):
+                        if j + step >= len(segs):
+                            break
+                        s2 = _query_score(queries[k], segs[j + step][1], segs[j + step][2], segs[j + step][3], segs[j + step][4])
+                        if s2 > 0:
+                            break
+                    if s2 <= 0:
+                        break
+                    score += s2
+                    skipped += step
+                    last, li = segs[j + step][0], j + step
+                    k += 1
+                    j += step + 1
+                hits.append(dict({"guid": guid, "title": t["title"], "seg": n, "segTo": last, "score": score, "matched": k, "of": len(queries), "skipped": skipped},
+                                 **_pinned(t["segments"], i, li)))
+        # numbered rows placed by their numbers first; then the best content match, and on a tie
+        # the placement that skips the fewest of the text's segments
+        hits.sort(key=lambda h: (not h.get("byLabel"), -h["score"], -h["matched"], h.get("skipped", 0), h["title"]))
+        return hits[:limit]
+
+    def explain_locate(self, pasted: str) -> dict:
+        """Why a paste lands where it does (or nowhere): the rows as read, the hits, the best few
+        segments for EACH pasted segment, and what every text holding the pasted FLEx numbers has
+        at those numbers — raw and as normalised for matching. For `flex-scratchpad --locate`."""
+        queries, norm = self._paste_queries(pasted)
+        out: dict = {"queries": queries, "hits": self.locate(pasted, limit=5) if queries else []}
+        if not queries:
+            return out
+        with self.lock:
+            index = self._live().all_baselines()
+        prepared = {g: [(row, (row[0], norm(row[1]), norm(row[2]), _joined(norm(row[3] if len(row) > 3 else "")),
+                               _joined(norm(row[4] if len(row) > 4 else "")))) for row in t["segments"]]
+                    for g, t in index.items()}
+        best = []
+        for k, q in enumerate(queries):
+            scored = [(_query_score(q, *sg[1:]), index[g]["title"], row[5] if len(row) > 5 else "", row[0])
+                      for g, rows in prepared.items() for row, sg in rows]
+            scored = sorted((x for x in scored if x[0] > 0), key=lambda x: -x[0])[:5]
+            best.append({"segment": k + 1, "label": q.get("label", ""),
+                         "candidates": [{"score": a, "text": b, "label": c, "n": d} for a, b, c, d in scored]})
+        out["bestPerSegment"] = best
+        labels = [q["label"] for q in queries if q.get("label")]
+        if labels:
+            want = {_label_key(x) for x in labels}
+            found = []
+            for g, rows in prepared.items():
+                sel = [(row, sg) for row, sg in rows if len(row) > 5 and _label_key(row[5]) in want]
+                if not sel:
+                    continue
+                first = next((x for x in sel if _label_key(x[0][5]) == _label_key(labels[0])), None)
+                found.append((_query_score(queries[0], *first[1][1:]) if first else 0, g, sel))
+            found.sort(key=lambda x: -x[0])
+            out["textsWithThoseNumbers"] = [
+                {"text": index[g]["title"], "guid": g, "firstSegmentScore": s0,
+                 "segments": [{"label": row[5], "n": row[0], "baseline": row[1], "baselineNorm": sg[1],
+                               "morphsNorm": sg[3], "glossesNorm": sg[4], "free": row[2]} for row, sg in sel]}
+                for s0, g, sel in found[:3]]
+        return out
+
+    def _paste_queries(self, pasted: str):
+        """The pasted FLEx rows as segment queries [{bases, morphs, glosses, free, label}], and the
+        normaliser they were made with (see locate)."""
         from ..notebook import normalize
         strip = bool(self.nb.config.get("settings", {}).get("diacriticsInsensitive", True))
         norm = lambda t: _depunct(normalize(" ".join((t or "").split()), strip))  # noqa: E731
@@ -429,7 +524,7 @@ class FlexService:
                 continue
             text = " ".join(words)
             if len(text) > 400:
-                return []
+                return [], norm
             if is_free:
                 if cur is not None and not cur["free"] and not numbered:
                     cur["free"] = norm(text)
@@ -453,57 +548,7 @@ class FlexService:
             if numbered and cur is not None and not cur.get("label"):
                 cur["label"] = row_label          # FLEx's own number for this segment ("12.3", "13")
         queries = [q for q in queries if q["bases"] or q["morphs"] or q["glosses"] or q["free"]]
-        if not queries:
-            return []
-        with self.lock:
-            be = self._live()
-            index = be.all_baselines()
-        hits = []
-        by_label: set = set()
-        for guid, t in index.items():
-            segs = [(row[0], norm(row[1]), norm(row[2]), _joined(norm(row[3] if len(row) > 3 else "")), _joined(norm(row[4] if len(row) > 4 else "")))
-                    for row in t["segments"]]
-            # FLEx's numbers on the pasted rows say exactly which segments were copied (Seth,
-            # 2026-10-16: content matching "grabbing the wrong line … two lines above"); they
-            # decide the range whenever the text has them and its content there agrees
-            labels = {_label_key(row[5]): i for i, row in enumerate(t["segments"]) if len(row) > 5 and row[5]}
-            if queries[0].get("label") and labels:
-                placed = self._place_by_labels(queries, segs, labels)
-                if placed:
-                    score, i0, i1, k = placed
-                    hits.append(dict({"guid": guid, "title": t["title"], "seg": segs[i0][0], "segTo": segs[i1][0], "score": score, "matched": k, "of": len(queries), "byLabel": True},
-                                     **_pinned(t["segments"], i0, i1)))
-                    by_label.add(guid)
-                    continue
-            for i, (n, nb, nf, nm, ng) in enumerate(segs):
-                sc = _query_score(queries[0], nb, nf, nm, ng)
-                if sc <= 0:
-                    continue
-                score, last, k, j, skipped, li = sc, n, 1, i + 1, 0, i
-                while k < len(queries) and j < len(segs):
-                    # FLEx's copy can leave segments out (Seth, 2026-10-16: a paste of 12.1, 12.3,
-                    # 13, 14 — no 12.2 — found only 12.1), so the next pasted segment may skip a
-                    # few of the text's; the example's range still runs first to last
-                    s2, step = 0, 0
-                    for step in range(LOCATE_GAP + 1):
-                        if j + step >= len(segs):
-                            break
-                        s2 = _query_score(queries[k], segs[j + step][1], segs[j + step][2], segs[j + step][3], segs[j + step][4])
-                        if s2 > 0:
-                            break
-                    if s2 <= 0:
-                        break
-                    score += s2
-                    skipped += step
-                    last, li = segs[j + step][0], j + step
-                    k += 1
-                    j += step + 1
-                hits.append(dict({"guid": guid, "title": t["title"], "seg": n, "segTo": last, "score": score, "matched": k, "of": len(queries), "skipped": skipped},
-                                 **_pinned(t["segments"], i, li)))
-        # numbered rows placed by their numbers first; then the best content match, and on a tie
-        # the placement that skips the fewest of the text's segments
-        hits.sort(key=lambda h: (not h.get("byLabel"), -h["score"], -h["matched"], h.get("skipped", 0), h["title"]))
-        return hits[:limit]
+        return queries, norm
 
     @staticmethod
     def _place_by_labels(queries: list, segs: list, labels: dict):

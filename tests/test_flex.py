@@ -504,3 +504,19 @@ def test_locate_returns_flex_numbers_and_guid_anchors(tmp_path):
     assert top["at"] == [model.anchor_of(segs[4]["guid"]), model.anchor_of(segs[5]["guid"])]
     h = fs.locate("Word\tKabir\tlo\nFree\tThe dog.")                 # unnumbered: content, still anchored
     assert h[0]["seg"] == 6 and h[0]["at"] == [model.anchor_of(segs[6]["guid"])] * 2 and h[0]["label"] == "3.2"
+
+
+def test_locate_report_explains_a_paste(tmp_path):
+    """`flex-scratchpad --locate FILE` writes what the locator saw: for diagnosing a paste that
+    does not land, against the real project (here the demo)."""
+    import json
+    from flex_scratchpad.__main__ import main
+    paste = tmp_path / "paste.txt"
+    paste.write_text("2.2\tWord\tKabir\tpemu\tka-nuwa\tlo\n‎Free ‎Eng‎ The dog sleeps by the river.\n", encoding="utf-8")
+    out = tmp_path / "report.json"
+    assert main(["--demo", "--locate", str(paste), "--out", str(out)]) == 0
+    r = json.loads(out.read_text(encoding="utf-8"))
+    assert r["queries"][0]["label"] == "2.2" and r["hits"][0]["label"] == "2.2" and r["hits"][0]["seg"] == 4
+    assert r["bestPerSegment"][0]["candidates"][0]["label"] == "2.2"
+    seg = r["textsWithThoseNumbers"][0]["segments"][0]
+    assert seg["label"] == "2.2" and seg["baselineNorm"] == "kabir pemu kanuwa lo"

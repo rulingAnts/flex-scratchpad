@@ -609,3 +609,7 @@ table.md-table td.drop-target, table.md-table th.drop-target { outline: 2px soli
 .coll-note { display: block; width: 100%; box-sizing: border-box; margin: 6px 0 2px; padding: 6px 10px; resize: none; overflow: hidden; font: inherit; font-size: 13.5px; line-height: 1.45; color: var(--text); background: var(--paper); border: 1px solid var(--border-soft); border-left: 3px solid var(--accent); border-radius: 6px; }
 .coll-note:focus { outline: none; border-color: var(--accent); }
 .coll-note[hidden] { display: none; }
+/* "Insert a new block" (editor.insertSection) */
+.ins-grid { display: grid; grid-template-columns: auto auto auto; gap: 3px 6px; align-items: center; padding: 2px 8px 6px; }
+.ins-grid .ins-label { font-size: 13px; padding-right: 6px; }
+.ins-grid .tog { font-size: 12px; padding: 2px 8px; }

@@ -97,6 +97,12 @@
     return rects[0];
   }
 
+  // the kinds "Insert a new block" offers: [kind, label, starting markdown]
+  const NEW_BLOCKS = [
+    ['p', 'Paragraph', ''], ['h', 'Heading', '## '], ['list', 'Bulleted list', '- '], ['ol', 'Numbered list', '1. '],
+    ['task', 'Checklist', '- [ ] '], ['quote', 'Quote', '> '], ['table', 'Table', () => FS.tables.template(3, 3)],
+    ['flex', 'FLEx example', ''], ['hr', 'Divider', '---'],
+  ];
   const TEXT_TYPES = new Set(['p', 'h', 'list', 'quote', 'code']);
   const PLACEHOLDER = 'Write something, or type / for a menu';
 
@@ -148,6 +154,7 @@
       root.addEventListener('focusin', (e) => { const w = e.target.closest('.widget'); this.activeTable = w && w._table ? w._table : null; if (w && w._table) this.active = this.blocks.find((b) => b.el === w) || this.active; });
       this.wireDrag(root);
       this.wireMultiSelect(root);
+      this.wireInsertMenu(root);
     }
 
     /* -- selecting across blocks (Seth, 2026-10-16) --------------------------------------
@@ -157,6 +164,33 @@
      * highlight API (no DOM change) plus a class on fully covered blocks. Cut / copy / delete /
      * type-over / paste / Enter act on it; Shift+click and Shift+Arrow Up/Down extend it;
      * Ctrl+A with a whole block already selected takes the whole note. */
+    /* Right-click on a block that is not running text (an example, a chart, a divider…) or in
+     * the space between / after blocks: the "Insert a new block" menu. Text keeps the browser's
+     * own menu (spelling, copy, paste); a table's cells have theirs, which ends with the same
+     * section. */
+    wireInsertMenu(root) {
+      root.addEventListener('contextmenu', (e) => {
+        if (e.defaultPrevented) return;
+        const t = e.target;
+        if (t.closest && t.closest('.blk-body, input, textarea, select, a, .popover, .modal, .cell-edit')) return;
+        const sel = window.getSelection();
+        if (sel && !sel.isCollapsed && root.contains(sel.anchorNode)) return;     // selected text: the browser's Copy
+        let b = this.blocks.find((x) => x.el && x.el.contains(t));
+        let where = 'after';
+        if (!b) {                                          // between blocks: the nearest one above the point
+          const above = this.blocks.filter((x) => x.el && x.el.getBoundingClientRect().bottom <= e.clientY + 1);
+          b = above.length ? above[above.length - 1] : this.blocks[0];
+          where = above.length ? 'after' : 'before';
+          if (!b) { e.preventDefault(); this.insertNewBlock(null, 'after', 'p'); return; }
+        }
+        e.preventDefault();
+        FS.popoverAt(e.clientX, e.clientY, (pop, close) => {
+          pop.classList.add('menu');
+          this.insertSection(pop, close, b);
+          if (where === 'before') pop.querySelectorAll('[data-ins-where="after"]').forEach((x) => x.remove());
+        });
+      });
+    }
     wireMultiSelect(root) {
       this.msel = null;
       let drag = null;
@@ -625,6 +659,7 @@
           onSplit: (r) => this.splitTable(b, r),
           canMerge: (dir) => !!this.neighbourTable(b, dir),
           onMerge: (dir) => this.mergeTables(b, dir),
+          insertSection: (pop, close) => this.insertSection(pop, close, b),
         });
       } else if (b.type === 'flex') {
         const spec = FS.flexref.parse(b.src);
@@ -1156,6 +1191,37 @@
       });
       if (b.type === 'hr') wrap.addEventListener('click', () => wrap.focus());
     }
+    /* A NEW block above or below `b` — paragraph, heading, list, checklist, quote, table, FLEx
+     * example, divider (Seth, 2026-10-16: "insert a new block in a note … especially useful
+     * after examples or tables (before existing text blocks or example blocks)"). From the
+     * right-click menu on a block or between blocks, the ⋮ block menu, and a table's cell menu. */
+    insertNewBlock(b, where, kind) {
+      const def = NEW_BLOCKS.find((k) => k[0] === kind) || NEW_BLOCKS[0];
+      const src = typeof def[2] === 'function' ? def[2]() : def[2];
+      const nb = Object.assign({ type: 'p', src: '' }, src ? MD.splitBlocks(src)[0] : {}, { id: FS.uid() });
+      let i = b ? this.blocks.indexOf(b) : this.blocks.length;
+      if (i < 0) i = this.blocks.length;
+      if (b && where !== 'before') i += 1;
+      this.blocks.splice(i, 0, nb);
+      const node = this.renderBlock(nb, i);
+      const next = this.blocks[i + 1];
+      if (next && next.el && next.el.parentNode === this.root) this.root.insertBefore(node, next.el); else this.root.appendChild(node);
+      this.changed({ force: true });
+      this.focusBlock(i, 'end');
+      if (kind === 'flex' && this.opts.onInsertFlex) this.opts.onInsertFlex();   // the picker fills the new paragraph
+      return nb;
+    }
+    /* The "Insert a block" section of a menu: one row per kind, Above / Below. */
+    insertSection(pop, close, b) {
+      pop.appendChild(el('div', { class: 'row' }, el('b', {}, 'Insert a new block')));
+      const grid = el('div', { class: 'ins-grid' });
+      for (const [kind, label] of NEW_BLOCKS) {
+        grid.append(el('span', { class: 'ins-label' }, label),
+          el('button', { class: 'tog', 'data-ins-kind': kind, 'data-ins-where': 'before', title: label + ' above this block', onclick: () => { close(); this.insertNewBlock(b, 'before', kind); } }, '\u2191 Above'),
+          el('button', { class: 'tog', 'data-ins-kind': kind, 'data-ins-where': 'after', title: label + ' below this block', onclick: () => { close(); this.insertNewBlock(b, 'after', kind); } }, '\u2193 Below'));
+      }
+      pop.appendChild(grid);
+    }
     insertBlockAfter(b, nb, focus) {
       const i = b ? this.blocks.indexOf(b) : this.blocks.length - 1;
       nb = Object.assign({ id: FS.uid() }, nb);
@@ -1280,6 +1346,8 @@
         const item = (label, fn, cls) => pop.appendChild(el('button', { class: 'menu-item ' + (cls || ''), onclick: () => { close(); fn(); } }, label));
         item('Move up', () => this.moveBlock(b, -1));
         item('Move down', () => this.moveBlock(b, 1));
+        pop.appendChild(el('hr'));
+        this.insertSection(pop, close, b);
         if (TEXT_TYPES.has(b.type)) {
           pop.appendChild(el('hr'));
           item('Turn into paragraph', () => { b.src = b.src.replace(/^(#{1,6}\s+|\s*([-*+]|\d+[.)])\s+(\[[ xX]\]\s+)?|\s*>\s?)/gm, ''); b.type = 'p'; this.rerender(b); this.changed(); });

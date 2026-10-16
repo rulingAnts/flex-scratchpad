@@ -656,6 +656,7 @@
       item('Column style…', () => colPopover(anchorCell(), t, at.c, commit, widget));
       item('Row style…', () => rowPopover(anchorCell(), t, at.r, commit, widget));
       item('Table style…', () => tablePopover(anchorCell(), t, commit, widget, opts));
+      if (opts && opts.insertSection) { sep(); opts.insertSection(pop, close); }   // a new block above / below the table
     });
   }
 

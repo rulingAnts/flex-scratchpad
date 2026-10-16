@@ -88,6 +88,11 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
   jumps forward (`3.` starts at 3, `1.` after a blank line starts over); a smaller typed number
   is stale (an item was added above) and the count continues; nested items always count under
   their parent. The block ⋮ menu has "Start numbering at…".
+- New blocks (Seth, 2026-10-16): right-click a block that is not running text (an example, a
+  chart, a divider…) or the space between blocks, a table cell, or open the ⋮ block menu →
+  "Insert a new block": paragraph, heading, bulleted / numbered list, checklist, quote, table,
+  FLEx example (opens the picker for the spot), divider, ↑ above or ↓ below (`insertNewBlock`,
+  `insertSection`, `NEW_BLOCKS`). Right-click inside running text keeps the browser's menu.
 - A table's indent in the note is `indent N` (1–4) in its style line: Tab / Shift+Tab on the
   focused table, the context menu, Table style. Exports carry it (`indent` on the table block).
 - Table structure ops (`tables.js` `ops.*`) FINISH THE OPEN CELL FIRST (Seth, 2026-10-16: insert
@@ -134,6 +139,10 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
   item), and the inserted embed is written with `at=`: an anchor wins over `seg=` when the
   example is drawn, so a running count that differs between the index and the text can never
   move the example (Seth, 2026-10-16: the dialog was right, the example two lines above).
+  When a paste does not land, `flex-scratchpad --project NAME --locate clip` (or a file) runs the
+  locator against the real project and writes `flex-scratchpad-locate.json`: the rows as read,
+  the hits, the best segments per pasted segment, and what the texts holding the pasted numbers
+  have there, raw and normalised (`FlexService.explain_locate`) — ask for that file first.
   While a pasted example or `silfw://` link is being looked up, `FS.busy` (util.js) shows a
   spinner pill by the caret after 200 ms (a quick answer never flashes it), with "Paste as
   text" / Esc to stop waiting; a late answer after that is ignored (Seth, 2026-10-16).

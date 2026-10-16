@@ -86,6 +86,8 @@ elsewhere (marked *cached*).
 | Chart | *Chart* button; double-click the chart or use *Edit chart* |
 | Search | The box at the top left (**Ctrl+Shift+F**); `tag:todo`, `tab:Grammar`, `"exact phrase"`; **Ctrl+F** finds in the open note |
 | Tags | `+ tag` on the note, or type `#tag` anywhere in the text |
+| Insert a block | Right-click an example, a table cell, or the space between blocks (or the ⋮ beside any block) → *Insert a new block*: paragraph, heading, list, checklist, quote, table, FLEx example or divider, above or below |
+| A paste lands wrong | `flex-scratchpad --project NAME --locate clip` with the rows still copied writes `flex-scratchpad-locate.json`, which shows what the app read and what the project holds there |
 | Move a note | Drag it onto a tab or folder, or `⋯ → Move to…` |
 | Collect examples for FLEx | `+ New ▾` → *New example collection*: a note that is only interlinear examples, numbered in order. Paste FLEx rows into its paste box, use *Add from FLEx…*, or choose *Add to an example collection…* on any example (its `⋯`, or *＋ Collection* on a chip's preview). Reorder with the arrows or the `⠿` grip |
 | Sort a collection | *＋ Group…* adds a labelled block; ▸ / ▾ collapses it (or *Collapse all*); double-click its label to rename; drag examples onto it or use ↑ ↓. Groups are for sorting only and are not exported |
