@@ -122,3 +122,10 @@ def test_duplicate_note_in_place_and_to_another_tab(tmp_path):
     d = api.duplicate_note(n["id"], "Archive", "Old")
     assert d["title"] == "SVCs" and d["tab"] == "Archive" and d["folder"] == "Old" and d["body"] == c["body"]
     assert (tmp_path / "nb" / "Archive" / "Old").is_dir()
+
+
+def test_build_fingerprint_is_short_hex_and_reported(tmp_path):
+    from flex_scratchpad import build_id
+    b = build_id()
+    assert len(b) == 7 and int(b, 16) >= 0 and build_id() == b
+    assert make(tmp_path).init()["build"] == b

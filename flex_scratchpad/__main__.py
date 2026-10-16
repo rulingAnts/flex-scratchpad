@@ -21,6 +21,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--debug", action="store_true", help="open WebView2 devtools")
     ap.add_argument("--list-projects", action="store_true")
     ap.add_argument("--check", action="store_true")
+    ap.add_argument("--version", action="store_true", help="print the version and build fingerprint and exit")
     ap.add_argument("--project", help="FieldWorks project name (with --dump)")
     ap.add_argument("--dump", metavar="TEXT", help="print the first segments of a text (title, part of a title, or GUID) as JSON and exit — for diagnosing what flexicon returns")
     ap.add_argument("--register-links", action="store_true", help="register flexscratchpad:// links for this user (Windows) and exit")
@@ -33,6 +34,10 @@ def main(argv: list[str] | None = None) -> int:
         print("registered flexscratchpad:// for this user" if ok else "could not register (not Windows, or the registry refused)")
         return 0 if ok else 1
 
+    if args.version:
+        from . import __version__, build_id
+        print(f"FLEx Scratchpad {__version__} (build {build_id()})")
+        return 0
     if args.check:
         return check()
     if args.dump:
@@ -100,6 +105,8 @@ def check() -> int:
         except Exception as e:  # noqa: BLE001
             ok = False
             print(f"MISSING  {mod:10s} {why}: {type(e).__name__}: {e}")
+    from . import __version__, build_id
+    print("app     ", __version__, "build", build_id())
     print("python  ", sys.version.split()[0], "64-bit" if sys.maxsize > 2**32 else "32-bit (FieldWorks needs 64-bit)")
     return 0 if ok else 1
 

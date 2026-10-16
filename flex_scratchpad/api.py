@@ -15,7 +15,7 @@ import sys
 import threading
 from pathlib import Path
 
-from . import APP_NAME, __version__
+from . import APP_NAME, __version__, build_id
 from .config import AppConfig
 from .flex import FlexService
 from .flex.lcm import FlexError
@@ -67,7 +67,7 @@ class Api:
         """Everything the page needs on load."""
         with self._lock:
             return {
-                "app": APP_NAME, "version": __version__, "platform": sys.platform,
+                "app": APP_NAME, "version": __version__, "build": build_id(), "platform": sys.platform,
                 "notebook": str(self._nb.root),
                 "config": self._nb.config,
                 "notes": self._nb.list_notes(),

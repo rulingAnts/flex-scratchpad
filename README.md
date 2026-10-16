@@ -44,6 +44,17 @@ flex-scratchpad
 
 Or from a clone: `pip install -e ".[flex]"` then `python -m flex_scratchpad`.
 
+**Updating.** The version number does not change between commits, so `pip install --upgrade`
+keeps the copy you already have. Reinstall the app itself (its dependencies stay as they are):
+
+```bat
+py -m pip install --force-reinstall --no-deps "flex-scratchpad @ git+https://github.com/rulingAnts/flex-scratchpad@<branch>"
+flex-scratchpad --version      :: prints the build fingerprint, also shown in Settings
+```
+
+The build fingerprint is computed from the installed files, so two installs of the same code show
+the same build and any difference in the code shows a different one.
+
 On first run the notebook is created at `Documents\FLEx Scratchpad`. Open **Settings** (⚙, or the
 FLEx pill at the bottom left), pick the FieldWorks project, **Connect**.
 

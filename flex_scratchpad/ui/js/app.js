@@ -594,7 +594,7 @@
     };
     renderTags();
     body.appendChild(tg);
-    body.appendChild(el('p', { class: 'muted small' }, S.init.app + ' ' + S.init.version + ' · ' + (S.init.platform || '')));
+    body.appendChild(el('p', { class: 'muted small' }, S.init.app + ' ' + S.init.version + (S.init.build ? ' (build ' + S.init.build + ')' : '') + ' · ' + (S.init.platform || '')));
   }
   async function addTab() {
     const name = prompt('New tab name');
