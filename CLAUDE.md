@@ -131,7 +131,10 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
   `{{flex:text …}}` per paragraph. `ui/js/collection.js` draws it in place of the editor (the
   hidden editor must never write into it: `isCollection()` guards in app.js). Only a collection
   exports a `.flextext` — the API refuses other notes; ordinary notes get "Collect the examples
-  into a new collection…", every example gets "Add to an example collection…". The body format
+  into a new collection…" (the HIGHLIGHTED part when it holds examples — a cross-block selection,
+  a selection in one text block, table cells, or a click into an example; `highlightedSource()`,
+  read on mousedown of the note menu because opening it can clear the selection — else the
+  whole note), every example gets "Add to an example collection…". The body format
   (`FS.collection.parse/serialize`, pinned by `tests/js/collection.test.js`): `## Label` is a
   GROUP (` {collapsed}` when closed) — it only organises the view and is NOT exported; `> `
   lines after an example are its NOTE, which IS exported (a `note` item on the example's first

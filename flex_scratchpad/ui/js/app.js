@@ -361,13 +361,41 @@
   }
   /* "Collect the examples into a new collection…": every interlinear example in a note (blocks,
    * inline chips, table cells), in order, copied into a new collection next to it. */
-  async function collectExamples(n) {
+  const examplesIn = (md) => FS.flexref.findEmbeds(md || '').filter((e) => e.spec && e.spec.kind === 'text').map((e) => FS.collection.cleanEmbed(FS.flexref.serialize(e.spec))).filter(Boolean);
+  /* The markdown of what is highlighted in the open note, or null when nothing is (Seth,
+   * 2026-10-16: collect "a highlighted PART of a note … OR a whole document"): a selection
+   * across blocks, a selection inside one text block (inline chips included), a range of
+   * table cells, or a selection inside a rendered example (that example). */
+  function highlightedSource() {
+    const ed = S.editor;
+    if (!ed || !S.note || isCollection()) return null;
+    if (ed.msel) { const md = ed.selectionMarkdown(); if (md.trim()) return md; }
+    for (const b of ed.blocks) {
+      const w = b.el && b.el._table;
+      if (w && w.sel) { const rows = w.selectedRows(); if (rows.length) return rows.map((r) => r.join('\n')).join('\n'); }
+    }
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount && !sel.isCollapsed) {
+      const r = sel.getRangeAt(0);
+      const c = r.commonAncestorContainer;
+      const node = c.nodeType === 1 ? c : c.parentElement;
+      if (node && $('editor').contains(node)) {
+        if (node.closest('.blk-body')) return r.toString();          // a text block's text IS its markdown
+        const blk = ed.blocks.find((b) => b.el && b.el.contains(node));
+        if (blk) return blk.src;
+      }
+    }
+    return null;
+  }
+  // the highlight as it was when the note menu was pressed (opening the menu can clear it)
+  document.addEventListener('mousedown', (e) => { if (e.target.closest && e.target.closest('#btn-note-menu')) S.menuHighlight = highlightedSource(); }, true);
+  async function collectExamples(n, md) {
     await flushSave();
-    const full = await FS.api.get_note(n.id);
-    const srcs = FS.flexref.findEmbeds(full.body || '').filter((e) => e.spec && e.spec.kind === 'text').map((e) => FS.collection.cleanEmbed(FS.flexref.serialize(e.spec))).filter(Boolean);
-    if (!srcs.length) { FS.toast('This note has no interlinear examples to collect.', 'warn'); return; }
+    const part = md != null;
+    const srcs = examplesIn(part ? md : (await FS.api.get_note(n.id)).body);
+    if (!srcs.length) { FS.toast((part ? 'The selection has' : 'This note has') + ' no interlinear examples to collect.', 'warn'); return; }
     const c = await newCollection((n.title || 'Untitled') + ' \u2014 examples', srcs.join('\n\n') + '\n');
-    if (c) FS.toast(srcs.length + ' example' + (srcs.length === 1 ? '' : 's') + ' collected — export it with \u201cExport as FLEx text\u2026\u201d', 'ok');
+    if (c) FS.toast(srcs.length + ' example' + (srcs.length === 1 ? '' : 's') + (part ? ' from the selection' : '') + ' collected — export it with \u201cExport as FLEx text\u2026\u201d', 'ok');
   }
   /* "Add to an example collection…" on any example: a pick of the collections, or a new one. */
   FS.addToCollection = (anchor, src) => {
@@ -468,7 +496,14 @@
       item('Move to…', () => moveDialog(n));
       item('Duplicate', async () => { await flushSave(); const c = await FS.api.duplicate_note(n.id); await refreshLists(); openNote(c.id); FS.toast('Duplicated — this is the copy'); });
       item('Copy to…', () => moveDialog(n, true));
-      if (n.kind !== 'examples') item('Collect the examples into a new collection…', () => collectExamples(n));
+      if (n.kind !== 'examples') {
+        // the highlighted part of the open note when it holds examples, else the whole note
+        const hl = S.note && S.note.id === n.id ? (S.menuHighlight !== undefined ? S.menuHighlight : highlightedSource()) : null;
+        const k = hl ? examplesIn(hl).length : 0;
+        if (k) item('Collect the ' + k + ' selected example' + (k === 1 ? '' : 's') + ' into a new collection…', () => collectExamples(n, hl), 'collect-selection');
+        else item('Collect the examples into a new collection…' + (hl ? '  (none selected: the whole note)' : ''), () => collectExamples(n));
+      }
+      S.menuHighlight = undefined;
       item('Copy markdown', async () => { const full = await FS.api.get_note(n.id); FS.copyText(full.body); FS.toast('Copied'); });
       item('Copy link to this note', () => { FS.copyText('flexscratchpad://note/' + n.id); FS.toast('Link copied — it opens this note in FLEx Scratchpad'); });
       pop.appendChild(el('hr'));

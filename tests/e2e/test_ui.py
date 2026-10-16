@@ -2243,3 +2243,42 @@ def test_drag_select_part_of_a_free_translation_and_highlight_it(app):
     page.wait_for_timeout(900)
     assert 'hl[#bdb2ff]=ft:"river"' in body_of(h), body_of(h)
     assert not errors
+
+
+def test_collect_examples_from_a_highlighted_part_or_the_whole_note(app):
+    """Seth, 2026-10-16: "Collect examples into a new collection…" on "a highlighted PART of a note
+    (for all FLEx objects within that highlight) OR a whole document (if nothing … selected)"."""
+    h, page, errors = app
+    new_note(page, "Mixed")
+    page.locator("#editor .blk-body").first.click()
+    paste(page, "Intro with {{flex:entry 6a5f3a2e-1b1e-4c2a-9f10-0d2c1a7e0001}} and {{flex:text %s seg=1}} inline.\n\n"
+                "{{flex:text %s seg=2}}\n\n{{flex:text %s seg=4}}\n\nOutro." % (T_STORY, T_STORY, T_STORY))
+    page.wait_for_function("document.querySelectorAll('#editor .blk-flex .text-obj').length === 2")
+    page.wait_for_timeout(900)
+    def collect(expect_label):
+        page.locator("#btn-note-menu").click()
+        item = page.locator(".popover .menu-item", has_text="Collect the")
+        assert expect_label in item.inner_text(), item.inner_text()
+        item.click()
+        page.wait_for_selector("#collection .coll-item")
+        page.wait_for_timeout(900)
+        cols = h.api.list_collections()
+        body = h.api.get_note(cols[0]["id"])["body"]
+        page.locator(".note-card").filter(has=page.locator(".t", has_text=re.compile(r"^Mixed$"))).click()
+        page.wait_for_selector("#editor .blk-flex .text-obj")
+        page.wait_for_timeout(500)
+        return sorted(int(m) for m in re.findall(r"seg=(\d+)", body))
+    # a selection inside the first paragraph: its inline example only (the entry is not one)
+    page.evaluate("""() => { const body = document.querySelector('#editor .blk-body'); const r = document.createRange();
+      r.selectNodeContents(body); const s = window.getSelection(); s.removeAllRanges(); s.addRange(r); }""")
+    assert collect("1 selected example") == [1]
+    # a selection across blocks: from the end of the first paragraph to the second block example
+    page.locator("#editor .blk-body").first.click()
+    page.keyboard.press("End")
+    page.locator("#editor .blk-flex").nth(1).click(modifiers=["Shift"])
+    page.wait_for_function("!!window.__fsEditor.msel")
+    assert collect("2 selected examples") == [2, 4]
+    # nothing highlighted: the whole note, entry left out
+    page.locator("#editor .blk-body", has_text="Outro").click()
+    assert collect("Collect the examples into a new collection") == [1, 2, 4]
+    assert not errors
