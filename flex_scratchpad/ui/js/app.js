@@ -844,6 +844,16 @@
   // a flexscratchpad://note/<id> link handed over by Python (see links.py)
   FS.openNoteById = async (id) => { try { await openNote(id); await refreshLists(); } catch (e) { FS.toast('That note is not in this notebook', 'warn'); } };
   FS.bringToFront = () => { try { window.focus(); } catch (e) { /* nothing to do */ } };
+  /* A second start found this window running, but the code installed on disk is a different
+   * build: this window keeps the old one until it is closed and started again. */
+  FS.otherBuild = (installed, running) => {
+    if (document.querySelector('.modal.other-build')) return;
+    const m = FS.modal({ title: 'A different build is installed', class: 'narrow other-build' });
+    m.body.append(
+      el('p', {}, 'This window is running build ', el('b', {}, running), ', but build ', el('b', {}, installed), ' has been installed since it started.'),
+      el('p', {}, 'Close FLEx Scratchpad and start it again to use the installed build. Your notes are saved.'),
+      el('div', { class: 'btn-row' }, el('button', { class: 'btn primary', onclick: () => m.close() }, 'OK')));
+  };
   FS.welcomeNote = () => [
     '# Welcome to FLEx Scratchpad',
     '',

@@ -130,6 +130,10 @@ def test_note_links_parse_hand_over_and_lock(tmp_path):
     links.hand_over("flexscratchpad://note/two", req)
     assert done.wait(3) and got == ["flexscratchpad://note/two"]
     t.stop.set()
+    # a second start tells the running window which build it would have run
+    assert links.parse_build_line(links.build_line("f629ec1")) == "f629ec1"
+    assert links.parse_build_line("flexscratchpad://note/x") is None and links.parse_build_line("") is None
+    assert links.parse_note_url(links.build_line("abc")) is None          # an older window just comes forward
     a = links.InstanceLock(tmp_path / "instance.lock")
     b = links.InstanceLock(tmp_path / "instance.lock")
     assert a.acquire() and not b.acquire()

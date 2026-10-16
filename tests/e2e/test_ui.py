@@ -2079,3 +2079,34 @@ def test_a_slow_paste_lookup_shows_a_spinner_and_can_be_skipped(app):
     page.wait_for_timeout(900)
     assert body_of(h).count("Yesterday the child saw the river.") >= 2, body_of(h)
     assert not errors
+
+
+def test_new_menu_stays_visible_beside_a_long_folder_name(app):
+    """Seth, 2026-10-16: with the folder "Morning- SVCs (Part I)" open, the ▾ beside "+ New"
+    (where New example collection lives) was pushed out of the pane by the title."""
+    h, page, errors = app
+    page.evaluate("() => { document.getElementById('list-title').textContent = 'Morning- SVCs (Part I) and a much longer folder name still'; }")
+    lst = page.locator("#list").bounding_box()
+    for sel in ("#btn-new-note", "#btn-new-menu"):
+        b = page.locator(sel).bounding_box()
+        assert b["x"] + b["width"] <= lst["x"] + lst["width"] + 0.5, (sel, b, lst)
+    page.locator("#btn-new-menu").click()
+    page.locator("[data-test='new-collection']").click()
+    page.wait_for_selector("#collection .coll-add")
+    assert not errors
+
+
+def test_a_running_window_says_when_another_build_is_installed(app):
+    """A second start hands over to the running window; when the installed build differs, that
+    window says to close and restart (Seth, 2026-10-16: the update "doesn't appear to have
+    added the feature" — the old window was still the one running)."""
+    h, page, errors = app
+    page.evaluate("() => FS.otherBuild('f629ec1', '87496d6')")
+    page.wait_for_selector(".modal.other-build")
+    t = page.locator(".modal.other-build").inner_text()
+    assert "87496d6" in t and "f629ec1" in t and "start it again" in t
+    page.evaluate("() => FS.otherBuild('f629ec1', '87496d6')")             # never stacked
+    assert page.locator(".modal.other-build").count() == 1
+    page.locator(".modal.other-build .btn.primary").click()
+    assert page.locator(".modal.other-build").count() == 0
+    assert not errors

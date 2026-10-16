@@ -13,7 +13,12 @@ Built 2026-10-12 with Seth; the decisions below are his.
   document and the only bridge is pywebview's `js_api` (`window.pywebview.api.<method>()`). The
   Playwright tests honour this too: `tests/e2e/bridge.py` exposes a binding into the real `Api`.
   Consequences: classic `<script>` files only (no ES modules, no `fetch`, no workers on file://),
-  `url=` never `html=` on `create_window`, media and images loaded as `file://` URLs.
+  `url=app.ui_url()` — a `file://` URL — on `create_window`, never `html=` and NEVER A PLAIN PATH:
+  pywebview starts its built-in HTTP server on 127.0.0.1 for any url that is not http(s):// or
+  file://. Until 2026-10-16 the app passed a plain path, so that server ran on Windows, and the
+  persistent WebView2 profile cached its responses: a reinstalled app kept showing its old page.
+  `webview.start(..., http_server=False)` says it too; `tests/test_app_url.py` guards both.
+  Media and images are loaded as `file://` URLs.
 - **FLEx is read directly, read-only.** `OpenProject(name, writeEnabled=False)`. The app never
   writes to a project. (Seth, 2026-10-13: the ONE write planned for later is correcting a
   text's media source — `plans/BACKLOG.md`; nothing else, ever.) The `.flextext` file source is a *fallback* (texts only), the demo is for
@@ -144,7 +149,12 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
   recordings and offsets; `none` drops timing.
 - `flexscratchpad://note/<id>` (`links.py`): registered per user (HKCU) at start on Windows; a
   second instance hands the URL to the running one through `open-request.txt` in the local data
-  folder (polled; no sockets) and exits; one instance is kept by a lock file. Off Windows the
+  folder (polled; no sockets) and exits; one instance is kept by a lock file. The second start
+  also hands over its build (`#build <id>`); when it differs from the running window's, that
+  window says to close and restart (`FS.otherBuild`), and the terminal says it was already
+  running. `build_id()` (package `__init__`) fingerprints the installed files; Settings and
+  `--version` show it. Updating from a branch needs `pip install --force-reinstall --no-deps`
+  (the version stays 0.1.0, so `--upgrade` keeps the old copy). Off Windows the
   registration is a no-op and the link is plain text.
 - Sharing check (`_sharing_status`): `shared` is True only when the open cache's
   `ProjectId.Type` says shared, else `null` (unknown) — Seth's shared project read as plain XML

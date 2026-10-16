@@ -111,7 +111,8 @@ body.resizing * { pointer-events: none; }
 /* ---------- note list ---------- */
 #list { border-right: 1px solid var(--border); display: flex; flex-direction: column; min-width: 0; background: var(--bg); overflow: hidden; }
 .list-head { display: flex; align-items: center; gap: 6px; padding: 12px 12px 8px; }
-.list-head h2 { margin: 0; font-size: 15px; font-weight: 650; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.list-head h2 { margin: 0; font-size: 15px; font-weight: 650; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.list-head > button, .list-head > .split-btn { flex: none; }   /* a long folder name shortens itself, never pushes these out */
 .list-head .sub { color: var(--muted); font-size: 12px; margin: -6px 12px 6px; }
 #notes { overflow: auto; flex: 1; padding: 0 8px 20px; }
 .note-card { padding: 9px 10px; border-radius: 9px; cursor: pointer; border: 1px solid transparent; margin-bottom: 2px; }

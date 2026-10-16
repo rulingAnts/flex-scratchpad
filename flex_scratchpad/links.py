@@ -134,6 +134,19 @@ def hand_over(url: str, path: Path | None = None) -> None:
         f.write((url or "").strip() + "\n")
 
 
+BUILD_PREFIX = "#build "
+
+
+def build_line(build: str) -> str:
+    """The hand-over line that tells the running instance which build a second start would run
+    (an older instance reads it as a plain "come to the front")."""
+    return BUILD_PREFIX + (build or "").strip()
+
+
+def parse_build_line(line: str) -> str | None:
+    return line[len(BUILD_PREFIX):].strip() or None if (line or "").startswith(BUILD_PREFIX) else None
+
+
 def take_requests(path: Path | None = None) -> list[str]:
     """Read and clear the request file; [] when there is nothing."""
     p = path or request_file()

@@ -14,6 +14,16 @@ from .config import AppConfig, local_data_dir
 UI_DIR = Path(__file__).parent / "ui"
 
 
+def ui_url() -> str:
+    """The page as a file:// URL. NEVER a plain path: pywebview treats a plain path as a "local
+    URL" and starts its built-in HTTP server on 127.0.0.1 to serve it (pywebview 6.2,
+    webview/__init__.py start(): `http_server or has_local_urls`). That server is exactly what
+    Seth ruled out ("NO HTTP SERVER. EVER." — it triggers anti-malware software), and with a
+    persistent WebView2 profile its responses were cached, so a reinstalled app kept showing
+    its OLD page (2026-10-16). A file:// URL is loaded directly, with no server and no cache."""
+    return (UI_DIR / "index.html").resolve().as_uri()
+
+
 def run(notebook_dir: str | None = None, demo: bool = False, debug: bool = False, open_url: str | None = None) -> int:
     import json
     import webview  # imported here so the package stays importable without pywebview (tests, Linux)
@@ -21,9 +31,16 @@ def run(notebook_dir: str | None = None, demo: bool = False, debug: bool = False
 
     # One window per user: a second start (a flexscratchpad:// link clicked in FLEx or a
     # browser) hands its URL to the running instance through a file and exits.
+    from . import build_id
+    build = build_id()                  # this start's code, read before anything can replace it
     lock = links.InstanceLock()
     if not lock.acquire():
+        # Seth, 2026-10-16: after a reinstall the OLD window kept running and a new start only
+        # brought it forward, so the update looked missing. Say so here, and tell that window.
+        links.hand_over(links.build_line(build))
         links.hand_over(open_url or "")
+        print(f"FLEx Scratchpad is already running; brought its window to the front. Close it and "
+              f"start again to run the installed build {build}.")
         return 0
 
     config = AppConfig()
@@ -31,7 +48,7 @@ def run(notebook_dir: str | None = None, demo: bool = False, debug: bool = False
     size = config.data.get("window", {})
     window = webview.create_window(
         APP_NAME,
-        url=str(UI_DIR / "index.html"),     # url=, never html= — a file document keeps its base URL
+        url=ui_url(),                       # a file:// URL: never a plain path (that starts an HTTP server), never html=
         js_api=api,
         width=int(size.get("width", 1280)),
         height=int(size.get("height", 820)),
@@ -51,6 +68,14 @@ def run(notebook_dir: str | None = None, demo: bool = False, debug: bool = False
     window.events.closing += on_closing
 
     def open_link(url: str):
+        other = links.parse_build_line(url)
+        if other is not None:
+            if other != build:          # a different build is installed than this window runs
+                try:
+                    window.evaluate_js("FS.otherBuild && FS.otherBuild(" + json.dumps(other) + ", " + json.dumps(build) + ")")
+                except Exception:  # noqa: BLE001
+                    pass
+            return
         note_id = links.parse_note_url(url)
         js = "FS.openNoteById(" + json.dumps(note_id) + ")" if note_id else "FS.bringToFront && FS.bringToFront()"
         try:
@@ -82,7 +107,7 @@ def run(notebook_dir: str | None = None, demo: bool = False, debug: bool = False
     # localStorage (UI preferences only) survives restarts. Everything that matters is on disk
     # through the Api anyway.
     try:
-        webview.start(debug=debug, private_mode=False, storage_path=str(storage))
+        webview.start(debug=debug, private_mode=False, storage_path=str(storage), http_server=False)
     finally:
         lock.release()
     return 0
