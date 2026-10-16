@@ -11,6 +11,9 @@
     tab: null, folder: null, tag: null, query: '', results: null,
     note: null, editor: null, dirty: false, saving: false, sort: 'updated',
     openFolders: new Set(),
+    // a folder (or tab) lists only its OWN notes unless this is on (Seth, 2026-10-16: "VERY
+    // cluttery if every parent folder shows ALL daughter notes"); remembered on this computer
+    subfolders: (() => { try { return localStorage.getItem('fs:showSubfolders') === '1'; } catch (e) { return false; } })(),
   };
 
   /* ------------------------------------------------------------------ boot */
@@ -237,19 +240,41 @@
   function visibleNotes() {
     if (S.results) return S.results;
     let list = S.notes.filter((n) => n.tab === S.tab);
-    if (S.folder) list = list.filter((n) => n.folder === S.folder || n.folder.startsWith(S.folder + '/'));
+    // its own notes, or the whole tree under it; a tag looks through the whole tab regardless
+    const here = S.folder || '';
+    if (S.subfolders || S.tag) { if (here) list = list.filter((n) => n.folder === here || n.folder.startsWith(here + '/')); }
+    else list = list.filter((n) => (n.folder || '') === here);
     if (S.tag) list = list.filter((n) => n.tags.includes(S.tag) || (n.inlineTags || []).includes(S.tag));
     if (S.sort === 'title') list = list.slice().sort((a, b) => (b.pinned - a.pinned) || a.title.localeCompare(b.title));
     else if (S.sort === 'created') list = list.slice().sort((a, b) => (b.pinned - a.pinned) || b.created.localeCompare(a.created));
     return list;
   }
+  /* Notes in the folders below the current place (for the checkbox and the empty list). */
+  function notesBelow() {
+    const here = S.folder || '';
+    return S.notes.filter((n) => n.tab === S.tab && (n.folder || '') !== here && (!here || (n.folder || '').startsWith(here + '/')));
+  }
+  function setSubfolders(on) {
+    S.subfolders = !!on;
+    try { localStorage.setItem('fs:showSubfolders', on ? '1' : '0'); } catch (e) { /* a convenience only */ }
+    renderList();
+  }
   function renderList() {
     const host = $('notes');
     host.innerHTML = '';
     const list = visibleNotes();
+    const below = S.results || S.tag ? [] : notesBelow();
+    const hasSub = !S.results && !S.tag && (S.folders[S.tab] || []).some((f) => !S.folder || f.startsWith(S.folder + '/'));
+    $('list-subfolders').hidden = !hasSub;
+    $('chk-subfolders').checked = S.subfolders;
     const tabInfo = S.config.tabs.find((t) => t.dir === S.tab) || {};
     $('list-title').textContent = S.results ? 'Search results' : (S.folder ? S.folder.split('/').pop() : (tabInfo.name || 'Notes'));
     $('list-sub').textContent = S.results ? list.length + ' match' + (list.length === 1 ? '' : 'es') : [S.folder ? tabInfo.name + ' / ' + S.folder : '', S.tag ? '#' + S.tag : ''].filter(Boolean).join('  ·  ');
+    if (!list.length && !S.results && !S.subfolders && below.length) {
+      host.appendChild(el('div', { class: 'empty' }, el('b', {}, S.folder ? 'No notes directly in this folder' : 'No notes at the top of this tab'),
+        el('button', { class: 'btn', 'data-test': 'show-below', onclick: () => setSubfolders(true) }, 'Show the ' + below.length + ' note' + (below.length === 1 ? '' : 's') + ' in its subfolders')));
+      return;
+    }
     if (!list.length) { host.appendChild(el('div', { class: 'empty' }, el('b', {}, S.results ? 'Nothing found' : 'No notes here'), S.results ? 'Try other words, or clear the tag filter.' : 'Press Ctrl+N to write one.')); return; }
     for (const n of list) {
       const card = el('div', { class: 'note-card' + (S.note && S.note.id === n.id ? ' active' : ''), draggable: 'true', dataset: { id: n.id } });
@@ -259,6 +284,7 @@
       card.appendChild(x);
       const meta = el('div', { class: 'm' }, FS.relTime(n.updated));
       if (S.results || S.tag) meta.appendChild(el('span', {}, '· ' + (S.config.tabs.find((t) => t.dir === n.tab) || {}).name + (n.folder ? ' / ' + n.folder : '')));
+      else if (S.subfolders && (n.folder || '') !== (S.folder || '')) meta.appendChild(el('span', { class: 'sub-loc', title: 'In a subfolder' }, '· ' + (S.folder ? (n.folder || '').slice(S.folder.length + 1) : n.folder)));
       for (const t of n.tags.slice(0, 4)) meta.appendChild(el('span', { class: 'chip', style: tagStyle(t) }, '#' + t));
       card.appendChild(meta);
       card.addEventListener('click', () => openNote(n.id));
@@ -795,6 +821,7 @@
     }));
     $('btn-add-tab').addEventListener('click', addTab);
     $('btn-add-folder').addEventListener('click', () => newFolder(S.tab, S.folder || ''));
+    $('chk-subfolders').addEventListener('change', (e) => setSubfolders(e.target.checked));
     $('btn-edit-tags').addEventListener('click', openSettings);
     $('btn-settings').addEventListener('click', openSettings);
     $('flex-pill').addEventListener('click', (e) => flexStatusPopover(e.currentTarget));

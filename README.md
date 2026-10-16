@@ -35,27 +35,68 @@ talking to Python through pywebview's exposed API only.
 ## Install (Windows, with FieldWorks)
 
 Requirements: Windows 10/11, FieldWorks 9.x installed, 64-bit Python 3.10–3.13 (match FieldWorks:
-x64), the Edge WebView2 runtime (already on Windows 10/11).
+x64), the Edge WebView2 runtime (already on Windows 10/11). Installing from GitHub or a clone also
+needs [Git for Windows](https://git-scm.com/download/win).
+
+The repository is **https://github.com/rulingAnts/flex-scratchpad**. Until the current work is
+merged into `main`, it lives on the branch **`claude/trusting-cori-k4jhvy`** — the commands below
+name it; drop the `@…` / `--branch …` part once it is on `main`.
+
+### A. Straight from GitHub (pip)
 
 ```bat
-py -3.12 -m pip install "flex-scratchpad[flex] @ git+https://github.com/rulingAnts/flex-scratchpad"
+py -m pip install "flex-scratchpad[flex] @ git+https://github.com/rulingAnts/flex-scratchpad@claude/trusting-cori-k4jhvy"
 flex-scratchpad --check        :: reports whether pywebview, pythonnet and flexicon import
 flex-scratchpad --list-projects
 flex-scratchpad
 ```
 
-Or from a clone: `pip install -e ".[flex]"` then `python -m flex_scratchpad`.
-
 **Updating.** The version number does not change between commits, so `pip install --upgrade`
-keeps the copy you already have. Reinstall the app itself (its dependencies stay as they are):
+keeps the copy you already have. Close the app, then reinstall the app itself (its dependencies
+stay as they are):
 
 ```bat
-py -m pip install --force-reinstall --no-deps "flex-scratchpad @ git+https://github.com/rulingAnts/flex-scratchpad@<branch>"
+py -m pip install --force-reinstall --no-deps "flex-scratchpad[flex] @ git+https://github.com/rulingAnts/flex-scratchpad@claude/trusting-cori-k4jhvy"
 flex-scratchpad --version      :: prints the build fingerprint, also shown in Settings
 ```
 
-The build fingerprint is computed from the installed files, so two installs of the same code show
-the same build and any difference in the code shows a different one.
+### B. From a clone (updates are a `git pull`)
+
+```bat
+git clone --branch claude/trusting-cori-k4jhvy https://github.com/rulingAnts/flex-scratchpad.git
+cd flex-scratchpad
+py -m pip install -e ".[flex]"
+flex-scratchpad
+```
+
+`-e` installs the clone itself, so **updating is `git pull` in that folder** and restarting the
+app — no reinstall. (`py -m flex_scratchpad` runs it too.)
+
+### C. A wheel, for a laptop without internet
+
+On a machine with internet and the **same Python version** as the field laptop, build the app's
+wheel and download everything it needs into one folder:
+
+```bat
+py -m pip wheel --no-deps -w wheels "git+https://github.com/rulingAnts/flex-scratchpad@claude/trusting-cori-k4jhvy"
+py -m pip download -d wheels "flex-scratchpad[flex] @ git+https://github.com/rulingAnts/flex-scratchpad@claude/trusting-cori-k4jhvy"
+```
+
+(From a clone, `py -m pip wheel --no-deps -w wheels .` builds the same wheel.) Copy the `wheels`
+folder to the laptop and install from it alone:
+
+```bat
+py -m pip install --no-index --find-links wheels "flex-scratchpad[flex]"
+```
+
+To update, build a new wheel the same way and install it with `--force-reinstall --no-deps`.
+
+### Which build is installed?
+
+`flex-scratchpad --version` (and Settings) shows a build fingerprint computed from the installed
+files: two installs of the same code show the same build, and any difference in the code shows a
+different one. Start the app again after an update — if an older window is still open, starting
+it only brings that window forward, and it says that a different build is installed.
 
 On first run the notebook is created at `Documents\FLEx Scratchpad`. Open **Settings** (⚙, or the
 FLEx pill at the bottom left), pick the FieldWorks project, **Connect**.
@@ -88,6 +129,7 @@ elsewhere (marked *cached*).
 | Tags | `+ tag` on the note, or type `#tag` anywhere in the text |
 | Insert a block | Right-click an example, a table cell, or the space between blocks (or the ⋮ beside any block) → *Insert a new block*: paragraph, heading, list, checklist, quote, table, FLEx example or divider, above or below |
 | A paste lands wrong | `flex-scratchpad --project NAME --locate clip` with the rows still copied writes `flex-scratchpad-locate.json`, which shows what the app read and what the project holds there |
+| Folders | A folder shows the notes directly in it; tick *Show notes in subfolders* under the list title to see everything below it |
 | Move a note | Drag it onto a tab or folder, or `⋯ → Move to…` |
 | Collect examples for FLEx | `+ New ▾` → *New example collection*: a note that is only interlinear examples, numbered in order. Paste FLEx rows into its paste box, use *Add from FLEx…*, or choose *Add to an example collection…* on any example (its `⋯`, or *＋ Collection* on a chip's preview). Reorder with the arrows or the `⠿` grip |
 | Sort a collection | *＋ Group…* adds a labelled block; ▸ / ▾ collapses it (or *Collapse all*); double-click its label to rename; drag examples onto it or use ↑ ↓. Groups are for sorting only and are not exported |

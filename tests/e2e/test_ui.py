@@ -262,6 +262,8 @@ def test_mock_mode_without_python(browser):
     page.wait_for_selector("#tabs .tab-item", timeout=10000)
     page.wait_for_timeout(600)
     page.locator(".tab-item", has_text="Grammar").click()
+    # the note lives in Grammar / Verbs / Aspect: the tab lists its own notes and offers the rest
+    page.locator("[data-test='show-below']").click()
     page.wait_for_selector(".note-card")
     page.locator(".note-card", has_text="Past tense").click()
     page.wait_for_selector("#editor .entry-card")
@@ -2398,4 +2400,51 @@ def test_refresh_in_a_collection_takes_in_changes_saved_in_flex(app):
     finally:
         seg1["free"] = original
         del be.refresh
+    assert not errors
+
+
+def test_a_folder_lists_its_own_notes_unless_subfolders_are_shown(app):
+    """Seth, 2026-10-16: "it's VERY cluttery if every parent folder shows ALL daughter notes. If a
+    note is in a sub-folder, I'd like it to not show up in the parent folder, or maybe give me a
+    checkbox to show or hide the whole tree"."""
+    h, page, errors = app
+    tab = h.api.init()["config"]["tabs"][0]["dir"]
+    h.api.create_folder(tab, "Week One")
+    h.api.create_folder(tab, "Week One/Tuesday")
+    h.api.create_folder(tab, "Empty parent")
+    h.api.create_folder(tab, "Empty parent/Child")
+    h.api.create_note(tab, "Week One", "Overview", "plan #week")
+    h.api.create_note(tab, "Week One/Tuesday", "Morning SVCs", "svc #week")
+    h.api.create_note(tab, "Empty parent/Child", "Deep note", "deep")
+    page.reload()
+    page.wait_for_selector(".folder-item")
+    titles = lambda: page.locator("#notes .note-card .t").all_inner_texts()   # noqa: E731
+    # the tab itself: only its top-level notes (the Welcome note), no daughter notes
+    assert not any("Overview" in t or "Morning SVCs" in t for t in titles()), titles()
+    page.locator(".folder-item[data-path='Week One']").click()
+    page.wait_for_timeout(300)
+    assert [t.strip() for t in titles()] == ["Overview"], titles()
+    # the checkbox shows the whole tree, with where each daughter note lives
+    page.locator("#chk-subfolders").check()
+    assert sorted(t.strip() for t in titles()) == ["Morning SVCs", "Overview"], titles()
+    assert "Tuesday" in page.locator("#notes .note-card", has_text="Morning SVCs").locator(".sub-loc").inner_text()
+    # remembered on this computer
+    page.reload()
+    page.wait_for_selector(".folder-item")
+    page.locator(".folder-item[data-path='Week One']").click()
+    page.wait_for_timeout(300)
+    assert page.locator("#chk-subfolders").is_checked() and len(titles()) == 2
+    page.locator("#chk-subfolders").uncheck()
+    # a folder with notes only below it says so, and offers them
+    page.locator(".folder-item[data-path='Empty parent']").click()
+    page.wait_for_selector("[data-test='show-below']")
+    assert "1 note" in page.locator("[data-test='show-below']").inner_text()
+    page.locator("[data-test='show-below']").click()
+    assert [t.strip() for t in titles()] == ["Deep note"]
+    page.locator("#chk-subfolders").uncheck()
+    # a folder without subfolders has no checkbox
+    page.locator(".folder-item[data-path='Week One'] .chev").click()
+    page.locator(".folder-item[data-path='Week One/Tuesday']").click()
+    page.wait_for_timeout(300)
+    assert page.locator("#list-subfolders").is_hidden()
     assert not errors
