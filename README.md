@@ -1,3 +1,5 @@
+<img src="flex_scratchpad/ui/img/icon-128.png" width="96" height="96" alt="FLEx Scratchpad icon: a page of glossed interlinear text with a pencil" align="right">
+
 # FLEx Scratchpad
 
 A notebook for [FieldWorks Language Explorer](https://software.sil.org/fieldworks/) (FLEx).

@@ -43,5 +43,6 @@ exe = EXE(
     strip=False,
     upx=False,
     console=False,
+    icon=os.path.join(root, "flex_scratchpad", "ui", "img", "flex-scratchpad.ico"),
 )
 coll = COLLECT(exe, a.binaries, a.zipfiles, a.datas, strip=False, upx=False, name="FLEx Scratchpad")

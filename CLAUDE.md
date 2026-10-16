@@ -171,6 +171,13 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
   the LCM model. The first run on Windows will need adjustments — keep every access behind the
   `_t()` guard so one odd object degrades a rendering instead of failing it, and record what you
   learn in this file.
+- The app icon (Seth, 2026-10-16): `ui/img/icon.svg` (48 px and up) and `icon-small.svg`
+  (16–32 px, also the rail mark) are the sources; `tools/make_icons.py` renders the PNGs and
+  the multi-size `flex-scratchpad.ico` (dev-only Playwright + Pillow) — re-run it and commit the
+  outputs after editing either SVG. The .ico is the window/taskbar icon (`webview.start(icon=)`,
+  which pywebview's WinForms backend honours despite its docs), the exe icon (the spec) and the
+  `flexscratchpad://` link icon; the process sets its own AppUserModelID so the taskbar does not
+  group it under Python. Link registration is keyed on the build, so updates reach the registry.
 - ffmpeg is optional at runtime (`flex/audio.py` falls back to the stdlib for WAV) but a
   release must ship it or install it on first use (Seth, 2026-10-16) — `plans/BACKLOG.md`.
 - GitHub Actions: public repo, standard runners only, Windows build is `workflow_dispatch`. Never

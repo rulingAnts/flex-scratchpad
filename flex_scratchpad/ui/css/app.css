@@ -66,7 +66,7 @@ body.resizing * { pointer-events: none; }
 /* ---------- left rail ---------- */
 #rail { background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
 .rail-head { display: flex; align-items: center; gap: 8px; padding: 12px 12px 6px; }
-.rail-head .logo { width: 26px; height: 26px; border-radius: 7px; background: linear-gradient(135deg, var(--vern), var(--accent)); display: grid; place-items: center; color: #fff; font-weight: 700; font-size: 13px; }
+.rail-head .logo { width: 26px; height: 26px; flex: none; display: block; }
 .rail-head .name { font-weight: 650; letter-spacing: 0.1px; flex: 1; }
 .search-box { padding: 4px 10px 8px; }
 .search-box input { width: 100%; padding: 7px 10px 7px 30px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); outline: none; }

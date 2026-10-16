@@ -5,6 +5,7 @@ the page is a `file://` document and talks to Python only through the exposed `j
 """
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 from . import APP_NAME
@@ -12,6 +13,21 @@ from .api import Api
 from .config import AppConfig, local_data_dir
 
 UI_DIR = Path(__file__).parent / "ui"
+
+
+ICON = UI_DIR / "img" / "flex-scratchpad.ico"      # rendered from ui/img/icon*.svg by tools/make_icons.py
+
+
+def _own_taskbar_identity() -> None:
+    """On Windows, give the process its own AppUserModelID so the taskbar shows the app's icon
+    and groups its window apart from other Python programs."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("FLExScratchpad.App")
+    except Exception:  # noqa: BLE001 — cosmetic; never a reason not to start
+        pass
 
 
 def ui_url() -> str:
@@ -93,9 +109,10 @@ def run(notebook_dir: str | None = None, demo: bool = False, debug: bool = False
         links.watch_requests(open_link)
         # the per-user scheme registration is cheap and idempotent; once per version is plenty
         try:
-            from . import __version__
-            if config.data.get("linksRegistered") != __version__ and links.register_scheme():
-                config.data["linksRegistered"] = __version__
+            # keyed on the build, not the version (which stays 0.1.0), so a new icon or launch
+            # command reaches the registry after an update
+            if config.data.get("linksRegistered") != build and links.register_scheme():
+                config.data["linksRegistered"] = build
                 config.save()
         except Exception:  # noqa: BLE001
             pass
@@ -107,7 +124,9 @@ def run(notebook_dir: str | None = None, demo: bool = False, debug: bool = False
     # localStorage (UI preferences only) survives restarts. Everything that matters is on disk
     # through the Api anyway.
     try:
-        webview.start(debug=debug, private_mode=False, storage_path=str(storage), http_server=False)
+        _own_taskbar_identity()
+        webview.start(debug=debug, private_mode=False, storage_path=str(storage), http_server=False,
+                      icon=str(ICON) if ICON.exists() else None)
     finally:
         lock.release()
     return 0

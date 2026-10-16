@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <!-- FLEx Scratchpad: a scratchpad page of interlinear text — words in FLEx blue, their
+       glosses in FLEx green, one highlighted — with a pencil. Drawn for 48 px and up;
+       icon-small.svg is the 16–32 px version. Rendered by tools/make_icons.py. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2563eb"/>
+      <stop offset="1" stop-color="#0b2a6f"/>
+    </linearGradient>
+    <linearGradient id="paper" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fffdf7"/>
+      <stop offset="1" stop-color="#f1ecdc"/>
+    </linearGradient>
+    <linearGradient id="wood" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#fbbf24"/>
+      <stop offset="1" stop-color="#f59e0b"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="7" flood-color="#000" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="56" fill="url(#bg)"/>
+  <g transform="rotate(-5 128 136)">
+    <rect x="50" y="54" width="156" height="168" rx="14" fill="url(#paper)" filter="url(#shadow)"/>
+    <!-- spiral binding -->
+    <g fill="#0b2a6f">
+      <circle cx="74" cy="66" r="5"/><circle cx="101" cy="66" r="5"/><circle cx="128" cy="66" r="5"/>
+      <circle cx="155" cy="66" r="5"/><circle cx="182" cy="66" r="5"/>
+    </g>
+    <g fill="none" stroke="#cbd5e1" stroke-width="6" stroke-linecap="round">
+      <path d="M74 66 V44"/><path d="M101 66 V44"/><path d="M128 66 V44"/><path d="M155 66 V44"/><path d="M182 66 V44"/>
+    </g>
+    <!-- interlinear: a highlighted word, words in FLEx blue, glosses in FLEx green -->
+    <rect x="109" y="86" width="56" height="44" rx="8" fill="#ffd84d"/>
+    <g fill="#00379c">
+      <rect x="68" y="92" width="34" height="13" rx="6.5"/>
+      <rect x="114" y="92" width="46" height="13" rx="6.5"/>
+      <rect x="168" y="92" width="22" height="13" rx="6.5"/>
+      <rect x="68" y="148" width="52" height="13" rx="6.5"/>
+      <rect x="128" y="148" width="36" height="13" rx="6.5"/>
+    </g>
+    <g fill="#2a8a2a">
+      <rect x="68" y="113" width="26" height="8" rx="4"/>
+      <rect x="114" y="113" width="38" height="8" rx="4"/>
+      <rect x="168" y="113" width="18" height="8" rx="4"/>
+      <rect x="68" y="169" width="40" height="8" rx="4"/>
+      <rect x="128" y="169" width="28" height="8" rx="4"/>
+    </g>
+    <rect x="68" y="192" width="98" height="6" rx="3" fill="#a8b0ba"/>
+  </g>
+  <!-- pencil -->
+  <g transform="translate(168 172) rotate(45)">
+    <rect x="-9" y="-58" width="18" height="78" rx="3" fill="url(#wood)" stroke="#7c4a03" stroke-width="2"/>
+    <rect x="-9" y="-66" width="18" height="12" rx="3" fill="#f472b6" stroke="#7c4a03" stroke-width="2"/>
+    <rect x="-9" y="-56" width="18" height="5" fill="#cbd5e1"/>
+    <path d="M-9 20 L0 42 L9 20 Z" fill="#fde7c2" stroke="#7c4a03" stroke-width="2" stroke-linejoin="round"/>
+    <path d="M-3.4 33.5 L0 42 L3.4 33.5 Z" fill="#1f2937"/>
+  </g>
+</svg>

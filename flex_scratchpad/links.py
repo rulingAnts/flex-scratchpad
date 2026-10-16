@@ -59,7 +59,8 @@ def register_scheme() -> bool:
         winreg.SetValueEx(base, "", 0, winreg.REG_SZ, f"URL:{APP_NAME} link")
         winreg.SetValueEx(base, "URL Protocol", 0, winreg.REG_SZ, "")
         icon = winreg.CreateKey(base, "DefaultIcon")
-        winreg.SetValueEx(icon, "", 0, winreg.REG_SZ, f'"{sys.executable}",0')
+        ico = Path(__file__).resolve().parent / "ui" / "img" / "flex-scratchpad.ico"
+        winreg.SetValueEx(icon, "", 0, winreg.REG_SZ, f'"{ico}",0' if ico.exists() else f'"{sys.executable}",0')
         cmd = winreg.CreateKey(base, r"shell\\open\\command")
         winreg.SetValueEx(cmd, "", 0, winreg.REG_SZ, launch_command())
         return True
