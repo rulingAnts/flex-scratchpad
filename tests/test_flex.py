@@ -452,3 +452,42 @@ def test_locate_a_range_when_flex_left_segments_out_of_the_copy(tmp_path):
     for labels, want in ((["12.1", "12.3"], (2, 4)), (["12.3", "13", "14"], (4, 7)), (["12.1", "12.3", "13", "14"], (2, 7))):
         hits = fs.locate(paste(labels))
         assert hits and (hits[0]["seg"], hits[0]["segTo"]) == want and hits[0]["matched"] == hits[0]["of"] == len(labels), (labels, hits[:1])
+
+
+def test_locate_follows_flexs_own_segment_numbers(tmp_path):
+    """Seth, 2026-10-16: the paste "pretty consistently [grabbed] the wrong line (like two lines
+    above the one I selected)". A refrain repeated in a story matches by content in several
+    places; the number FLEx puts on the pasted rows says which one was copied."""
+    refrain = ("ka ɸu dʒɥa", "ka= ɸu =dʒɥ -a", "put canoe stand lnk", "They put it in the canoe.")
+    other = ("ti natɛɾi", "ti natɛɾi", "fish leave.behind", "They left the fish.")
+    segs = [  # (n, baseline, free, morphs, glosses, FLEx number)
+        (1, refrain[0], refrain[3], refrain[1], refrain[2], "10.1"),
+        (2, other[0], other[3], other[1], other[2], "10.2"),
+        (3, refrain[0], refrain[3], refrain[1], refrain[2], "10.3"),
+        (4, other[0], other[3], other[1], other[2], "11"),
+        (5, "bɛɾia ɸu", "Um, the canoe.", "bɛɾɛ ɸu", "um canoe", "12.1"),
+    ]
+
+    class Fake:
+        kind = "fake"
+
+        def all_baselines(self):
+            return {"g1": {"title": "Story", "segments": [s[:5] + ((s[5],) if len(s) > 5 else ()) for s in segs]}}
+
+    fs = FlexService(Notebook(tmp_path / "nb"))
+    fs.backend = Fake()
+
+    def rows(label, r):
+        return f"{label}\tWord\t" + "\t".join(r[0].split()) + f"\n\tMorphemes\t" + "\t".join(r[1].split()) + f"\n‎Free ‎Eng‎ {r[3]}\n"
+    # the second copy of the refrain, by its number (content alone found the first, two lines up)
+    h = fs.locate(rows("10.3", refrain))
+    assert (h[0]["seg"], h[0]["segTo"], h[0].get("byLabel")) == (3, 3, True), h[:2]
+    # a range across a segment the copy left out follows the numbers too ("11" is "11.1")
+    h = fs.locate(rows("10.3", refrain) + rows("11", other))
+    assert (h[0]["seg"], h[0]["segTo"], h[0]["matched"]) == (3, 4, 2), h[:2]
+    # a number whose content disagrees (another text numbered alike) is not trusted
+    h = fs.locate(rows("12.1", refrain))
+    assert not h[0].get("byLabel") and h[0]["seg"] in (1, 3), h[:2]
+    # no numbers on the rows: content matching as before
+    h = fs.locate("Word\t" + "\t".join(other[0].split()) + "\n")
+    assert h[0]["seg"] in (2, 4) and not h[0].get("byLabel")

@@ -125,6 +125,11 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
   A pasted RANGE matches its segments in order but may skip up to `LOCATE_GAP` (3) of the
   text's segments between two of its own: FLEx's copy can leave segments out (Seth,
   2026-10-16: 12.1, 12.3, 13, 14 with no 12.2 found only 12.1); the range runs first to last.
+  FLEx's OWN NUMBERS on the pasted rows ("12.3", "13" = 13.1) decide the place when the matched
+  text has them and the first pasted segment's content agrees there (`_place_by_labels`; the
+  index rows carry the label as their 6th item): content alone picked the first copy of a
+  repeated line, "two lines above" (Seth, 2026-10-16). Unnumbered pastes rank by content, then
+  by fewest skipped segments.
   While a pasted example or `silfw://` link is being looked up, `FS.busy` (util.js) shows a
   spinner pill by the caret after 200 ms (a quick answer never flashes it), with "Paste as
   text" / Esc to stop waiting; a late answer after that is ignored (Seth, 2026-10-16).

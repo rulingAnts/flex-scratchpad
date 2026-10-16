@@ -669,7 +669,8 @@ class FlexiconBackend:
             raise _friendly(e, self.project_name)
 
     def all_baselines(self) -> dict:
-        """{text guid: {title, segments: [(n, baseline, free), …]}} for every text — one walk,
+        """{text guid: {title, segments: [(n, baseline, free, morphs, glosses, label), …]}} for
+        every text (label = FLEx's own paragraph.segment number) — one walk,
         kept for the session, so pasted interlinear lines can be located without knowing the
         text. Reset by refresh()."""
         def go():
@@ -683,12 +684,12 @@ class FlexiconBackend:
                         self.progress(f"Indexing texts\u2026 {i}/{len(texts)}")
                     segs = []
                     n = 0
-                    for para in _t(lambda: list(p.Paragraphs.GetAll(t)), []):
-                        for seg in _t(lambda: list(p.Segments.GetAll(para)), []):
+                    for pi, para in enumerate(_t(lambda: list(p.Paragraphs.GetAll(t)), []), 1):
+                        for k, seg in enumerate(_t(lambda: list(p.Segments.GetAll(para)), []), 1):
                             n += 1
                             segs.append((n, _s(_t(lambda: p.Segments.GetBaselineText(seg), "")),
                                          _s(_t(lambda: p.Segments.GetFreeTranslation(seg), "")))
-                                        + self._index_lines(seg))
+                                        + self._index_lines(seg) + (f"{pi}.{k}",))
                     index[_guid(t)] = {"title": self._text_title(t), "segments": segs}
                 self._baseline_index = index
                 self.progress("")                  # done: the pill shows the connection again

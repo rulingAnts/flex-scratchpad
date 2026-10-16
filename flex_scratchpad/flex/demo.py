@@ -236,7 +236,7 @@ class DemoBackend:
         return slice_text(t, seg_from, seg_to, max_segments, at=at, alts=alts)
 
     def all_baselines(self) -> dict:
-        return {g: {"title": t["title"], "segments": [(sg["n"], sg["baseline"], sg.get("free", "")) + model.index_lines(sg) for sg in t["segments"]]}
+        return {g: {"title": t["title"], "segments": [(sg["n"], sg["baseline"], sg.get("free", "")) + model.index_lines(sg) + (sg.get("label") or str(sg["n"]),) for sg in t["segments"]]}
                 for g, t in self.texts.items()}
 
     def resolve_guid(self, guid: str) -> dict | None:

@@ -49,6 +49,12 @@ def _text_score(q: str, hay: str) -> int:
 LOCATE_GAP = 3   # segments of the text a pasted range may skip between two of its own
 
 
+def _label_key(label: str) -> str:
+    """FLEx's segment number as a key: "13" (a paragraph of one segment) is "13.1"."""
+    s = str(label or "").strip().rstrip(".")
+    return s if "." in s else s + ".1"
+
+
 def _query_score(q: dict, baseline: str, free: str, morphs: str = "", glosses: str = "") -> int:
     """A segment query {bases, morphs, glosses, free} against a segment: the best baseline
     match over the Word rows; without a Word row the Morphemes rows against the segment's own
@@ -362,13 +368,13 @@ class FlexService:
             # its own cell or glued to the label ("4.1 Word") — and end the Word row with the
             # paragraph mark "§"; neither is text to match (Seth, 2026-10-13: a pasted range
             # only found its first segment)
-            numbered = False
+            numbered, row_label = False, ""
             if cells and re.fullmatch(r"\d+(\.\d+)?", cells[0]) and len(cells) > 1:
-                cells, numbered = cells[1:], True
+                row_label, cells, numbered = cells[0], cells[1:], True
             elif cells:
-                m = re.match(r"^\d+(?:\.\d+)?\s+(\S.*)$", cells[0])
+                m = re.match(r"^(\d+(?:\.\d+)?)\s+(\S.*)$", cells[0])
                 if m and len(cells) > 1:
-                    cells[0], numbered = m.group(1), True
+                    row_label, cells[0], numbered = m.group(1), m.group(2), True
             # a label followed by a space instead of a tab ("Free she caught it.")
             if len(cells) == 1:
                 labels = sorted(self._ROW_KEEP + self._ROW_DROP, key=len, reverse=True)   # "word gloss" before "word"
@@ -430,6 +436,8 @@ class FlexService:
                 if cur is None or numbered or cur["free"] or not labelled or not (suffix and cur["bases"]):
                     block()
                 cur["bases"].append(norm(text))
+            if numbered and cur is not None and not cur.get("label"):
+                cur["label"] = row_label          # FLEx's own number for this segment ("12.3", "13")
         queries = [q for q in queries if q["bases"] or q["morphs"] or q["glosses"] or q["free"]]
         if not queries:
             return []
@@ -437,14 +445,26 @@ class FlexService:
             be = self._live()
             index = be.all_baselines()
         hits = []
+        by_label: set = set()
         for guid, t in index.items():
             segs = [(row[0], norm(row[1]), norm(row[2]), _joined(norm(row[3] if len(row) > 3 else "")), _joined(norm(row[4] if len(row) > 4 else "")))
                     for row in t["segments"]]
+            # FLEx's numbers on the pasted rows say exactly which segments were copied (Seth,
+            # 2026-10-16: content matching "grabbing the wrong line … two lines above"); they
+            # decide the range whenever the text has them and its content there agrees
+            labels = {_label_key(row[5]): i for i, row in enumerate(t["segments"]) if len(row) > 5 and row[5]}
+            if queries[0].get("label") and labels:
+                placed = self._place_by_labels(queries, segs, labels)
+                if placed:
+                    score, i0, i1, k = placed
+                    hits.append({"guid": guid, "title": t["title"], "seg": segs[i0][0], "segTo": segs[i1][0], "score": score, "matched": k, "of": len(queries), "byLabel": True})
+                    by_label.add(guid)
+                    continue
             for i, (n, nb, nf, nm, ng) in enumerate(segs):
                 sc = _query_score(queries[0], nb, nf, nm, ng)
                 if sc <= 0:
                     continue
-                score, last, k, j = sc, n, 1, i + 1
+                score, last, k, j, skipped = sc, n, 1, i + 1, 0
                 while k < len(queries) and j < len(segs):
                     # FLEx's copy can leave segments out (Seth, 2026-10-16: a paste of 12.1, 12.3,
                     # 13, 14 — no 12.2 — found only 12.1), so the next pasted segment may skip a
@@ -459,12 +479,36 @@ class FlexService:
                     if s2 <= 0:
                         break
                     score += s2
+                    skipped += step
                     last = segs[j + step][0]
                     k += 1
                     j += step + 1
-                hits.append({"guid": guid, "title": t["title"], "seg": n, "segTo": last, "score": score, "matched": k, "of": len(queries)})
-        hits.sort(key=lambda h: (-h["score"], -h["matched"], h["title"]))
+                hits.append({"guid": guid, "title": t["title"], "seg": n, "segTo": last, "score": score, "matched": k, "of": len(queries), "skipped": skipped})
+        # numbered rows placed by their numbers first; then the best content match, and on a tie
+        # the placement that skips the fewest of the text's segments
+        hits.sort(key=lambda h: (not h.get("byLabel"), -h["score"], -h["matched"], h.get("skipped", 0), h["title"]))
         return hits[:limit]
+
+    @staticmethod
+    def _place_by_labels(queries: list, segs: list, labels: dict):
+        """The pasted segments put where their FLEx numbers say: (score, first index, last index,
+        matched) when the first one's content agrees with the segment of that number, else None.
+        A query without a number follows the one before it."""
+        idx, first, last, score, matched = None, None, None, 0, 0
+        for k, q in enumerate(queries):
+            idx = labels.get(_label_key(q["label"])) if q.get("label") else (idx + 1 if idx is not None else None)
+            if idx is None or idx >= len(segs) or (last is not None and idx <= last):
+                break
+            s = _query_score(q, segs[idx][1], segs[idx][2], segs[idx][3], segs[idx][4])
+            if k == 0:
+                if s <= 0:
+                    return None
+                first = idx
+            if s > 0:
+                score += s
+                matched += 1
+            last = idx
+        return (score, first, last, matched) if first is not None else None
 
     def example_text(self, guid: str, seg: list | None, at: list | None) -> dict:
         """A text carrying exactly an example's segments with every writing system — the whole
