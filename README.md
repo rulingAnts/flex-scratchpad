@@ -1,4 +1,4 @@
-<img src="flex_scratchpad/ui/img/icon-128.png" width="96" height="96" alt="FLEx Scratchpad icon: a page of glossed interlinear text with a pencil" align="right">
+<img src="flex_scratchpad/ui/img/icon-128.png" width="96" height="96" alt="FLEx Scratchpad icon: a scratchpad page of IPA words (ʃə ŋɔ ʔa) glossed beneath, with a pencil" align="right">
 
 # FLEx Scratchpad
 

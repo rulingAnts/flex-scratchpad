@@ -171,8 +171,10 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
   the LCM model. The first run on Windows will need adjustments — keep every access behind the
   `_t()` guard so one odd object degrades a rendering instead of failing it, and record what you
   learn in this file.
-- The app icon (Seth, 2026-10-16): `ui/img/icon.svg` (48 px and up) and `icon-small.svg`
-  (16–32 px, also the rail mark) are the sources; `tools/make_icons.py` renders the PNGs and
+- The app icon (Seth, 2026-10-16): `ui/img/icon.svg` (40 px and up: a scratchpad page whose top
+  row is IPA, ʃə ŋɔ ʔa, glossed beneath), `icon-small.svg` (32 px and the rail mark: a highlighted
+  ŋ) and `icon-tiny.svg` (16–24 px: lines only) are the sources. The IPA is glyph OUTLINES from
+  DejaVu Sans Bold (fontTools, once), never `<text>`, so no machine's fonts can change it; `tools/make_icons.py` renders the PNGs and
   the multi-size `flex-scratchpad.ico` (dev-only Playwright + Pillow) — re-run it and commit the
   outputs after editing either SVG. The .ico is the window/taskbar icon (`webview.start(icon=)`,
   which pywebview's WinForms backend honours despite its docs), the exe icon (the spec) and the

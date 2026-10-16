@@ -1,5 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <!-- The 16–32 px FLEx Scratchpad icon: the page and its interlinear lines, nothing finer. -->
+  <!-- The 32 px FLEx Scratchpad icon (also the mark in the app's rail): the page, its
+       interlinear lines, and an IPA ŋ highlighted (a DejaVu Sans Bold outline). -->
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#2563eb"/>
@@ -7,18 +8,18 @@
     </linearGradient>
   </defs>
   <rect x="0.5" y="0.5" width="31" height="31" rx="7" fill="url(#bg)"/>
-  <rect x="5" y="5" width="22" height="23" rx="2.5" fill="#fffdf7"/>
-  <rect x="13" y="8" width="9" height="8" rx="1.5" fill="#ffd84d"/>
+  <rect x="5" y="4.5" width="22" height="24" rx="2.5" fill="#fffdf7"/>
+  <rect x="13.4" y="5.6" width="10" height="13.4" rx="1.6" fill="#ffd84d"/>
   <g fill="#00379c">
-    <rect x="7.5" y="9" width="5" height="3" rx="1.2"/>
-    <rect x="14" y="9" width="7" height="3" rx="1.2"/>
-    <rect x="7.5" y="18" width="7.5" height="3" rx="1.2"/>
-    <rect x="16.5" y="18" width="6" height="3" rx="1.2"/>
+    <rect x="7.5" y="9.2" width="4.6" height="3" rx="1.2"/>
+    <path d="M22.21 9.2V13.08Q22.21 14.39 21.56 15.1Q20.93 15.79 19.73 15.79H18.08V14.41H19.05Q19.65 14.41 19.87 14.14Q20.1 13.87 20.1 13.08V10.14Q20.1 9.29 20.06 8.97Q20.02 8.65 19.93 8.49Q19.8 8.29 19.59 8.17Q19.38 8.06 19.11 8.06Q18.46 8.06 18.08 8.57Q17.71 9.07 17.71 9.97V13.2H15.61V6.64H17.71V7.6Q18.18 7.02 18.71 6.75Q19.25 6.48 19.89 6.48Q21.03 6.48 21.62 7.18Q22.21 7.87 22.21 9.2Z"/>
+    <rect x="7.5" y="20.5" width="7.5" height="3" rx="1.2"/>
+    <rect x="16.5" y="20.5" width="6" height="3" rx="1.2"/>
   </g>
   <g fill="#2a8a2a">
-    <rect x="7.5" y="13" width="4" height="2" rx="1"/>
-    <rect x="14" y="13" width="5.5" height="2" rx="1"/>
-    <rect x="7.5" y="22" width="6" height="2" rx="1"/>
-    <rect x="16.5" y="22" width="4.5" height="2" rx="1"/>
+    <rect x="7.5" y="13.4" width="3.8" height="2" rx="1"/>
+    <rect x="14.8" y="16.2" width="6.6" height="1.8" rx="0.9"/>
+    <rect x="7.5" y="24.6" width="6" height="2" rx="1"/>
+    <rect x="16.5" y="24.6" width="4.5" height="2" rx="1"/>
   </g>
 </svg>

@@ -1,7 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
-  <!-- FLEx Scratchpad: a scratchpad page of interlinear text — words in FLEx blue, their
-       glosses in FLEx green, one highlighted — with a pencil. Drawn for 48 px and up;
-       icon-small.svg is the 16–32 px version. Rendered by tools/make_icons.py. -->
+  <!-- FLEx Scratchpad: a scratchpad page of interlinear text — IPA words (ʃə ŋɔ ʔa) in FLEx
+       blue, their glosses in FLEx green, one highlighted — with a pencil. The IPA is drawn as
+       outlines (DejaVu Sans Bold glyphs, Bitstream Vera / DejaVu licence) so it never depends
+       on the fonts of the machine showing it. For 48 px and up; icon-small.svg (32 px, and the
+       rail mark) and icon-tiny.svg (16–24 px) are the smaller versions. Rendered by tools/make_icons.py. -->
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#2563eb"/>
@@ -30,19 +32,19 @@
     <g fill="none" stroke="#cbd5e1" stroke-width="6" stroke-linecap="round">
       <path d="M74 66 V44"/><path d="M101 66 V44"/><path d="M128 66 V44"/><path d="M155 66 V44"/><path d="M182 66 V44"/>
     </g>
-    <!-- interlinear: a highlighted word, words in FLEx blue, glosses in FLEx green -->
-    <rect x="109" y="86" width="56" height="44" rx="8" fill="#ffd84d"/>
+    <!-- interlinear: IPA words in FLEx blue, one highlighted, glosses in FLEx green -->
+    <rect x="104" y="83" width="47" height="46" rx="8" fill="#ffd84d"/>
     <g fill="#00379c">
-      <rect x="68" y="92" width="34" height="13" rx="6.5"/>
-      <rect x="114" y="92" width="46" height="13" rx="6.5"/>
-      <rect x="168" y="92" width="22" height="13" rx="6.5"/>
+      <path d="M74.99 107.74Q74.99 110.7 73.56 112.26Q72.14 113.83 69.44 113.83H67.1V110.73H67.92Q69.27 110.73 69.77 110.12Q70.27 109.52 70.27 107.74V93.58Q70.27 90.61 71.69 89.05Q73.12 87.49 75.82 87.49H79.63V90.58H77.33Q75.99 90.58 75.49 91.19Q74.99 91.8 74.99 93.58ZM80.37 100.68V99.34H91.4Q91.23 97.68 90.2 96.85Q89.17 96.02 87.33 96.02Q85.84 96.02 84.28 96.46Q82.71 96.9 81.06 97.8V94.16Q82.74 93.52 84.41 93.2Q86.09 92.88 87.76 92.88Q91.77 92.88 93.99 94.92Q96.21 96.95 96.21 100.63Q96.21 104.24 94.03 106.31Q91.85 108.38 88.03 108.38Q84.55 108.38 82.46 106.29Q80.37 104.19 80.37 100.68ZM85.22 102.25Q85.22 103.6 86 104.42Q86.79 105.24 88.05 105.24Q89.42 105.24 90.28 104.47Q91.14 103.7 91.35 102.25Z"/>
+      <path d="M127.11 99.01V107.74Q127.11 110.68 125.66 112.27Q124.24 113.83 121.54 113.83H117.83V110.73H120.02Q121.36 110.73 121.87 110.12Q122.37 109.52 122.37 107.74V101.12Q122.37 99.21 122.29 98.48Q122.19 97.76 121.98 97.41Q121.71 96.95 121.23 96.69Q120.76 96.44 120.15 96.44Q118.67 96.44 117.83 97.58Q116.99 98.72 116.99 100.74V108H112.27V93.23H116.99V95.4Q118.06 94.1 119.25 93.5Q120.45 92.88 121.9 92.88Q124.46 92.88 125.79 94.45Q127.11 96.02 127.11 99.01ZM130.38 93.7Q131.5 93.29 132.63 93.08Q133.76 92.88 134.92 92.88Q138.91 92.88 141.17 94.93Q143.42 96.98 143.42 100.63Q143.42 104.28 141.17 106.33Q138.91 108.38 134.92 108.38Q133.77 108.38 132.63 108.18Q131.49 107.97 130.38 107.56V103.7Q131.23 104.35 132.22 104.68Q133.22 105.01 134.32 105.01Q136.3 105.01 137.4 103.85Q138.5 102.7 138.5 100.63Q138.5 98.56 137.4 97.41Q136.3 96.25 134.32 96.25Q133.28 96.25 132.31 96.57Q131.34 96.89 130.38 97.55Z"/>
+      <path d="M160.59 98.3H161.81Q164.67 98.3 165.81 96.79Q166.56 95.79 166.56 94.86Q166.54 93.59 165.79 92.72Q164.49 91.22 162.13 91.22Q161.07 91.22 160.03 91.51Q159 91.78 157.98 92.35V88.42Q158.98 87.96 160.05 87.74Q161.11 87.5 163.5 87.5Q166.66 87.49 169.43 90.27Q171.17 92.02 171.17 94.86Q171.17 97.9 169.13 99.81Q167.78 101.05 165.31 101.46V108H160.59ZM181.35 101.36Q179.87 101.36 179.13 101.86Q178.38 102.36 178.38 103.33Q178.38 104.23 178.98 104.74Q179.58 105.24 180.65 105.24Q181.98 105.24 182.89 104.29Q183.8 103.33 183.8 101.9V101.36ZM188.56 99.58V108H183.8V105.81Q182.85 107.16 181.67 107.77Q180.48 108.38 178.78 108.38Q176.49 108.38 175.05 107.04Q173.62 105.71 173.62 103.57Q173.62 100.97 175.41 99.76Q177.2 98.55 181.02 98.55H183.8V98.18Q183.8 97.06 182.92 96.54Q182.04 96.02 180.16 96.02Q178.65 96.02 177.34 96.32Q176.04 96.62 174.92 97.23V93.63Q176.43 93.26 177.96 93.07Q179.49 92.88 181.02 92.88Q185.02 92.88 186.79 94.45Q188.56 96.03 188.56 99.58Z"/>
       <rect x="68" y="148" width="52" height="13" rx="6.5"/>
       <rect x="128" y="148" width="36" height="13" rx="6.5"/>
     </g>
     <g fill="#2a8a2a">
-      <rect x="68" y="113" width="26" height="8" rx="4"/>
-      <rect x="114" y="113" width="38" height="8" rx="4"/>
-      <rect x="168" y="113" width="18" height="8" rx="4"/>
+      <rect x="68" y="118" width="24" height="8" rx="4"/>
+      <rect x="110" y="118" width="30" height="8" rx="4"/>
+      <rect x="157" y="118" width="26" height="8" rx="4"/>
       <rect x="68" y="169" width="40" height="8" rx="4"/>
       <rect x="128" y="169" width="28" height="8" rx="4"/>
     </g>

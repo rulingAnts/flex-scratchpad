@@ -1,5 +1,5 @@
-"""Render the app icon: ui/img/icon.svg (48 px and up) and ui/img/icon-small.svg (16–32 px)
-into PNGs and a multi-size Windows .ico, with the Chromium the Playwright tests already use.
+"""Render the app icon: ui/img/icon.svg (40 px and up), ui/img/icon-small.svg (32 px) and
+ui/img/icon-tiny.svg (16–24 px) into PNGs and a multi-size Windows .ico, with the Chromium the Playwright tests already use.
 
     pip install playwright pillow      (dev only; the app itself needs neither)
     python tools/make_icons.py
@@ -16,7 +16,8 @@ from PIL import Image
 from playwright.sync_api import sync_playwright
 
 IMG = Path(__file__).resolve().parent.parent / "flex_scratchpad" / "ui" / "img"
-SMALL = (16, 20, 24, 32)
+TINY = (16, 20, 24)
+SMALL = (32,)
 LARGE = (40, 48, 64, 96, 128, 256)
 PNGS = (32, 64, 128, 256, 512)
 
@@ -38,6 +39,8 @@ def _b64(s: str) -> str:
 def main() -> None:
     big = (IMG / "icon.svg").read_text(encoding="utf-8")
     small = (IMG / "icon-small.svg").read_text(encoding="utf-8")
+    tiny = (IMG / "icon-tiny.svg").read_text(encoding="utf-8")
+    pick = lambda s: tiny if s in TINY else small if s in SMALL else big   # noqa: E731
     exe = os.environ.get("FS_CHROMIUM") or None          # as in tests/e2e: else an installed Playwright Chromium
     if not exe:
         root = Path(os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "/opt/pw-browsers"))
@@ -46,9 +49,9 @@ def main() -> None:
     with sync_playwright() as p:
         b = p.chromium.launch(executable_path=exe) if exe else p.chromium.launch()
         page = b.new_page(device_scale_factor=1)
-        frames = {s: render(page, small if s in SMALL else big, s) for s in SMALL + LARGE}
+        frames = {s: render(page, pick(s), s) for s in TINY + SMALL + LARGE}
         for s in PNGS:
-            (render(page, small if s in SMALL else big, s)).save(IMG / f"icon-{s}.png")
+            render(page, pick(s), s).save(IMG / f"icon-{s}.png")
         b.close()
     ico = IMG / "flex-scratchpad.ico"
     # each size drawn from its own SVG rendering (Pillow would otherwise scale one bitmap down)
