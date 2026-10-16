@@ -181,6 +181,20 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
   it (`AudioVisual/x.wav`, as FLEx stores media); `bundle` = one WAV of all the examples with
   600 ms gaps and rewritten offsets (`audio.concat_clips`); `original` keeps the source
   recordings and offsets; `none` drops timing.
+  ⚠ VALID BY THE SCHEMA IS NOT IMPORTABLE (Seth, 2026-10-16: an export stopped FLEx with "Object
+  reference not set…" on one `<word/>` with no items, and the file passed the XSD). FLEx reads a
+  .flextext with XmlSerializer and never validates it; `BIRDInterlinearImporter.cs` assumes more
+  than `FlexInterlinear.xsd` says. So every export passes TWO checks: `tests/test_flextext_schema.py`
+  validates every export shape against a verbatim copy of FieldWorks' XSD
+  (`tests/fixtures/FlexInterlinear.xsd`; `lxml`, dev only), and `flex/flextext_check.import_problems`
+  (stdlib, the importer's own assumptions with the source line behind each) runs in the export
+  itself, which refuses to save a file FLEx would fail on. The writer never emits a word without a
+  txt/punct, puts the baseline WS's item FIRST (the importer builds the baseline from the first),
+  drops a morpheme line with a missing form, keeps morph types to the XSD's list and skips empty
+  paragraphs. `RightToLeft` on `<language>` is not in the XSD but FLEx's own exporter writes it, so
+  we do too. When FLEx changes, re-read those two files in sillsdev/FieldWorks before trusting either.
+  Save dialogs (`Api._save_dialog`) make the suggested name Windows-safe (a "/" in a title lost the
+  extension) and always end the path in the suggested extension.
 - `flexscratchpad://note/<id>` (`links.py`): registered per user (HKCU) at start on Windows; a
   second instance hands the URL to the running one through `open-request.txt` in the local data
   folder (polled; no sockets) and exits; one instance is kept by a lock file. The second start

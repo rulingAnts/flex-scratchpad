@@ -21,6 +21,7 @@ import uuid
 import xml.etree.ElementTree as ET
 
 from . import model
+from .flextext_check import MORPH_TYPES
 
 
 def _item(parent: ET.Element, typ: str, alts: dict | None, fallback: str = "", lang: str = "en") -> None:
@@ -28,6 +29,8 @@ def _item(parent: ET.Element, typ: str, alts: dict | None, fallback: str = "", l
     pairs = [(k, v) for k, v in (alts or {}).items() if v]
     if not pairs and fallback:
         pairs = [(lang, fallback)]
+    # `lang` first: FLEx's importer builds the baseline from a word's FIRST txt / punct item
+    pairs.sort(key=lambda kv: kv[0] != lang)
     for tag, text in pairs:
         it = ET.SubElement(parent, "item", {"type": typ, "lang": tag})
         it.text = text
@@ -63,7 +66,15 @@ def _source_note(ex: dict, seg: dict, note_url: str) -> str:
     return " · ".join(parts)
 
 
+def _has_form(w: dict) -> bool:
+    return bool(w.get("txt") or any(v for v in (w.get("txtAlts") or {}).values()))
+
+
 def _word(words_el: ET.Element, w: dict, vern: str, anal: str, word_guids: bool) -> None:
+    if not _has_form(w):
+        # FLEx's importer reads every word's items unchecked: a <word/> without a txt or punct
+        # item fails the whole import ("Object reference not set…", Seth, 2026-10-16)
+        return
     attrs = {}
     if word_guids and w.get("guid") and not w.get("punct"):
         attrs["guid"] = w["guid"]
@@ -73,10 +84,15 @@ def _word(words_el: ET.Element, w: dict, vern: str, anal: str, word_guids: bool)
         return
     _item(we, "txt", w.get("txtAlts"), w.get("txt", ""), vern)
     morphs = w.get("morphs") or []
-    if morphs:
+    # every <morph> needs a txt item: the importer compares the FIRST one's writing system with
+    # the existing analysis and fails on a morph without one; a morpheme line with a missing form
+    # is left out whole rather than written as a different analysis
+    if morphs and all(m.get("form") or any((m.get("formAlts") or {}).values()) for m in morphs):
         ms = ET.SubElement(we, "morphemes")
         for m in morphs:
-            mtype = m.get("type") or model.morph_type_of(m.get("form", ""))
+            mtype = (m.get("type") or "").strip().lower()
+            if mtype not in MORPH_TYPES:    # FlexInterlinear.xsd's list; a custom type reads from the form
+                mtype = model.morph_type_of(m.get("form", ""))
             me = ET.SubElement(ms, "morph", {"type": mtype})
             _item(me, "txt", m.get("formAlts"), m.get("form", ""), vern)
             _item(me, "cf", m.get("cfAlts"), m.get("cf", ""), vern)
@@ -139,6 +155,8 @@ def build_flextext(examples: list[dict], opts: dict | None = None) -> str:
         text_media: dict[str, str] = {}
         for ex in exs:
             text = ex["text"]
+            if not text.get("segments"):
+                continue                    # no phrases: nothing for FLEx to import
             pe = ET.SubElement(paras, "paragraph", {"guid": str(uuid.uuid4())})
             phs = ET.SubElement(pe, "phrases")
             seg_k = 0

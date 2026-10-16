@@ -22,6 +22,22 @@ from .flex.lcm import FlexError
 from .notebook import Notebook, inline_tags
 
 
+def safe_filename(name: str) -> str:
+    """`name` with the characters Windows refuses in a filename (\\ / : * ? " < > | and controls)
+    turned into "-", Unicode kept; never empty."""
+    import re
+    out = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "-", name or "").strip().rstrip(".")
+    stem = Path(out).stem.strip(" -.")
+    return out if stem else "untitled" + Path(out).suffix
+
+
+def with_suffix(path: str, ext: str) -> str:
+    """`path`, with `ext` added when it does not already end in it (any case)."""
+    if ext and not str(path).lower().endswith(ext.lower()):
+        return str(path) + ext
+    return str(path)
+
+
 class Api:
     """Only the public METHODS of this object are the API. pywebview inspects every public
     attribute (and recurses into objects), so all state lives in underscored attributes."""
@@ -330,6 +346,13 @@ class Api:
                     for seg in ex["text"].get("segments") or []:
                         seg["begin"] = seg["end"] = None
         xml = build_flextext([ex for _, v in groups for ex in v], wopts)
+        # never hand FLEx a file its importer would fail on (Seth, 2026-10-16: a schema-valid
+        # export stopped FLEx with "Object reference not set…"); say what and where instead
+        from .flex.flextext_check import import_problems
+        problems = import_problems(xml)
+        if problems:
+            raise ValueError("This export would not import into FLEx, so it was not saved: "
+                             + "; ".join(problems[:5]) + (f" (and {len(problems) - 5} more)" if len(problems) > 5 else ""))
         Path(target).write_text(xml, encoding="utf-8", newline="\n")
         return {"path": target, "examples": sum(len(v) for _, v in groups), "texts": [{"ws": k, "examples": len(v)} for k, v in groups], "skipped": len(skipped),
                 "audio": audio_out["path"], "audioMatched": audio_out["matched"], "audioMissing": audio_out["missing"]}
@@ -553,8 +576,23 @@ class Api:
             types.append(f"{a} ({b})")
         return self._dialog("open", allow_multiple=False, file_types=tuple(types))
 
+    _SAVE_TYPES = {".flextext": "FLEx interlinear text", ".html": "Web page", ".md": "Markdown",
+                   ".docx": "Word document", ".zip": "Zip archive", ".wav": "WAV audio"}
+
     def _save_dialog(self, name: str) -> str | None:
-        return self._dialog("save", save_filename=name)
+        """A save dialog suggesting `name`, made safe for a Windows filename, and a path that
+        always ends in the suggested extension (Seth, 2026-10-16: a title with "/" in it saved
+        an export with no .flextext, which FLEx then refused)."""
+        name = safe_filename(name)
+        ext = Path(name).suffix.lower()
+        kw = {"save_filename": name}
+        if ext:
+            kw["file_types"] = (f"{self._SAVE_TYPES.get(ext, ext[1:].upper() + ' file')} (*{ext})",)
+        try:
+            target = self._dialog("save", **kw)
+        except Exception:  # noqa: BLE001 — a backend that refuses the filter: ask without it
+            target = self._dialog("save", save_filename=name)
+        return with_suffix(target, ext) if target else target
 
     @staticmethod
     def _open_url(url: str) -> bool:

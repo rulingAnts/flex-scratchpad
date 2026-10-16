@@ -974,7 +974,8 @@ class FlexiconBackend:
         cls = _t(lambda: tok.ClassName, "")
         if cls == "PunctuationForm":
             form = _t(lambda: tok.Form, None)
-            return model.make_word(_s(_t(lambda: form.Text, "")) or _s(form), punct=True, guid=_guid(tok))
+            txt = _s(_t(lambda: form.Text, "")) or _s(form) or _s(_t(lambda: tok.ShortName, ""))
+            return model.make_word(txt, punct=True, guid=_guid(tok))
         # the wordform behind a WfiGloss / WfiAnalysis / WfiWordform token
         wf = tok if cls == "WfiWordform" else _t(lambda: tok.Wordform, None)
         if wf is None and cls == "WfiGloss":

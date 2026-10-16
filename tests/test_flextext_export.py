@@ -269,3 +269,56 @@ def test_an_examples_note_rides_on_its_first_line(tmp_path):
     notes = [[i.text for i in ph.findall("item[@type='note']")] for ph in phrases]
     # FLEx's own segment note first, then the author's note on the example; later lines get none
     assert notes[0] == ["Segment one has a note.", "Shared subject.\nCompare (3)."] and notes[1] == [] and notes[2] == [], notes
+
+
+def test_no_formless_word_and_the_baseline_ws_comes_first():
+    """Seth's export, 2026-10-16: a punctuation token read with no text became <word/>, and FLEx's
+    importer failed the whole file on it ("Object reference not set…" in
+    UpdatePhraseTextForWordItems, which reads word.Items unchecked and takes the FIRST txt)."""
+    from flex_scratchpad.flex.flextext_writer import build_flextext
+    from flex_scratchpad.flex import model
+    t = model.empty_text("11111111-2222-4333-8444-555555555555", "T", model.make_ws("fau-fonipa", "IPA", "", False), model.make_ws("en", "English", "", False))
+    w = model.make_word("bodi", gls="meet")
+    w["txtAlts"] = {"fau": "bodi", "fau-fonipa": "boɭi"}
+    empty = model.make_word("", punct=True)
+    t["segments"] = [model.make_segment("99999999-8888-4777-8666-555555555555", 1, 1, "boɭi", [w, empty], free="met", k=1)]
+    t["segmentCount"] = 1
+    doc = ET.fromstring(build_flextext([{"text": t}], {"title": "x"}))
+    words = doc.findall(".//word")
+    assert len(words) == 1 and all(x.find("item") is not None for x in words)
+    assert words[0].find("item").get("lang") == "fau-fonipa" and words[0].find("item").text == "boɭi"
+
+
+def test_save_dialog_names_are_windows_safe_and_keep_their_extension(tmp_path, monkeypatch):
+    from flex_scratchpad.api import safe_filename, with_suffix
+    assert safe_filename("7 Shared Subject (Sequence/Concurrent).flextext") == "7 Shared Subject (Sequence-Concurrent).flextext"
+    assert safe_filename('ŋɔ: "a"?.md') == "ŋɔ- -a--.md"
+    assert safe_filename("/.flextext") == "untitled.flextext"
+    assert with_suffix(r"C:\x\examples", ".flextext") == r"C:\x\examples.flextext"
+    assert with_suffix(r"C:\x\e.FLEXTEXT", ".flextext") == r"C:\x\e.FLEXTEXT"
+    api = Api(AppConfig(tmp_path / "cfg.json"), notebook_dir=tmp_path / "nb", demo=True)
+    seen = {}
+
+    class Win:
+        def create_file_dialog(self, kind, **kw):
+            seen.update(kw)
+            return (str(tmp_path / "picked"),)
+    api._window = Win()
+    import sys
+    import types
+    fd = types.SimpleNamespace(FOLDER=0, OPEN=1, SAVE=2)
+    monkeypatch.setitem(sys.modules, "webview", types.SimpleNamespace(FileDialog=fd))
+    assert api._save_dialog("A/B.flextext") == str(tmp_path / "picked") + ".flextext"
+    assert seen["save_filename"] == "A-B.flextext" and seen["file_types"] == ("FLEx interlinear text (*.flextext)",)
+
+
+def test_a_morpheme_line_with_a_missing_form_is_left_out():
+    from flex_scratchpad.flex.flextext_writer import build_flextext
+    from flex_scratchpad.flex import model
+    t = model.empty_text("11111111-2222-4333-8444-555555555555", "T", model.make_ws("kal", "Kalu", "", False), model.make_ws("en", "English", "", False))
+    w = model.make_word("kabiro", gls="dog.PL", morphs=[model.make_morph("kabir", "dog", "n"), model.make_morph("", "PL", "")])
+    t["segments"] = [model.make_segment("99999999-8888-4777-8666-555555555555", 1, 1, "kabiro", [w], k=1)]
+    t["segmentCount"] = 1
+    doc = ET.fromstring(build_flextext([{"text": t}], {"title": "x"}))
+    assert doc.find(".//morphemes") is None and doc.find(".//word/item").text == "kabiro"
+    assert all(m.find("item[@type='txt']") is not None for m in doc.iter("morph"))

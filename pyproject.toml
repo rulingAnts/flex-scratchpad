@@ -23,6 +23,7 @@ flex = [
 dev = [
     "pytest>=8",
     "playwright>=1.45",
+    "lxml>=5",          # tests only: validates exports against FieldWorks' FlexInterlinear.xsd
 ]
 build = [
     "pyinstaller>=6",
