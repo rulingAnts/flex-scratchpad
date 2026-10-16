@@ -46,6 +46,9 @@ def _text_score(q: str, hay: str) -> int:
     return 0
 
 
+LOCATE_GAP = 3   # segments of the text a pasted range may skip between two of its own
+
+
 def _query_score(q: dict, baseline: str, free: str, morphs: str = "", glosses: str = "") -> int:
     """A segment query {bases, morphs, glosses, free} against a segment: the best baseline
     match over the Word rows; without a Word row the Morphemes rows against the segment's own
@@ -443,13 +446,22 @@ class FlexService:
                     continue
                 score, last, k, j = sc, n, 1, i + 1
                 while k < len(queries) and j < len(segs):
-                    s2 = _query_score(queries[k], segs[j][1], segs[j][2], segs[j][3], segs[j][4])
+                    # FLEx's copy can leave segments out (Seth, 2026-10-16: a paste of 12.1, 12.3,
+                    # 13, 14 — no 12.2 — found only 12.1), so the next pasted segment may skip a
+                    # few of the text's; the example's range still runs first to last
+                    s2, step = 0, 0
+                    for step in range(LOCATE_GAP + 1):
+                        if j + step >= len(segs):
+                            break
+                        s2 = _query_score(queries[k], segs[j + step][1], segs[j + step][2], segs[j + step][3], segs[j + step][4])
+                        if s2 > 0:
+                            break
                     if s2 <= 0:
                         break
                     score += s2
-                    last = segs[j][0]
+                    last = segs[j + step][0]
                     k += 1
-                    j += 1
+                    j += step + 1
                 hits.append({"guid": guid, "title": t["title"], "seg": n, "segTo": last, "score": score, "matched": k, "of": len(queries)})
         hits.sort(key=lambda h: (-h["score"], -h["matched"], h["title"]))
         return hits[:limit]

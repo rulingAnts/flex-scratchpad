@@ -122,6 +122,9 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
   matches the baseline; without one, Morphemes rows match the segment's OWN morpheme line
   (Seth, 2026-10-14: morph forms need not spell the surface word), then Lex. Gloss rows its
   gloss line. When nothing matches, the picker tells the user to copy with the Word line showing.
+  A pasted RANGE matches its segments in order but may skip up to `LOCATE_GAP` (3) of the
+  text's segments between two of its own: FLEx's copy can leave segments out (Seth,
+  2026-10-16: 12.1, 12.3, 13, 14 with no 12.2 found only 12.1); the range runs first to last.
   While a pasted example or `silfw://` link is being looked up, `FS.busy` (util.js) shows a
   spinner pill by the caret after 200 ms (a quick answer never flashes it), with "Paste as
   text" / Esc to stop waiting; a late answer after that is ignored (Seth, 2026-10-16).

@@ -412,3 +412,43 @@ def test_locate_without_a_word_line_uses_the_segment_s_own_morphemes_and_glosses
     two = morph_only + "11.6\tMorphemes\tboda\tohodo\t=de\n\tLex. Gloss\tball\tfoot\tERG\n"
     hits = svc.locate(two)
     assert hits and hits[0]["seg"] == 2 and hits[0]["segTo"] == 3 and hits[0]["matched"] == 2, hits
+
+
+def test_locate_a_range_when_flex_left_segments_out_of_the_copy(tmp_path):
+    """Seth, 2026-10-16: a paste of 12.1, 12.3, 13, 14, 15 (FLEx's copy had no 12.2) found only its
+    first segment, because the pasted segments were matched to consecutive ones. Now a range may
+    skip a few of the text's segments between two of its own."""
+    L = "‎"
+    rows = [  # (label, Word, Morphemes, Lex. Gloss, Free) as copied from FLEx's Print view
+        ("12.1", "ə dʉɥa ka ɸu dʒɥa", "ə dʉɥa ka= ɸu =dʒɥ -a", "eh go.around .CMP put .NFIN canoe stand lnk", "On they went putting (fish) in the canoe."),
+        ("12.3", "ɸakau dʒuɭi ataha kuɾiɛtɛ ka ɸu dʒɥa", "ɸakau dʒuɭi ataha kuɾi -ɛ =tɛ ka= ɸu =dʒɥ -a", "type.of.fish thing all take .CMP lnk SEQ put", "fakau fish, all things they caught and put in the boat."),
+        ("13", "bɛɾia ɸu dʒʉɥatɛ natɛɾiɛtɛ ɸu ɸia natɛɾi", "bɛɾɛ ɸu =dʒʉ -ɥa =tɛ natɛɾi -ɛ =tɛ ɸu ɸia natɛɾi", "um canoe stand CMP SEQ leave.behind", "Um... put them in the boat and then left the boat tied up."),
+        ("14", "ti ka ɸu dʒʉa natɛɾi", "ti ka= ɸu =dʒʉ -a natɛɾi", "fish put .NFIN canoe stand lnk leave.behind .CMP", "(They) left the fish in the canoe."),
+    ]
+
+    def paste(labels):
+        out = []
+        for lab, w, m, g, f in (r for r in rows if r[0] in labels):
+            out += [f"{lab}\tWord\t" + "\t".join(w.split()) + "\t", "\tMorphemes\t" + "\t".join(m.split()),
+                    "\tLex. Gloss Eng\t" + "\t".join(g.split()), "\tLex. Gloss Ind\t\t\t.NFIN\tperahu\t",
+                    "\tWord Gloss Ind\t\t\t", "\tWord Cat. Eng\tn\tv\t",
+                    f"{L}Free {L}Eng{L} {L}{L}{f}", f"{L} {L}Ind{L} {L}{L}"]
+        return "\n".join(out) + "\n"
+
+    def seg(n, r):
+        return (n, r[1], r[4], r[2], r[3])
+    gap = ("", "ɛ ɛ", "ɛ ɛ", "eh eh", "A segment the copy left out.")
+    segs = [(1, "a b c", "Before.", "a b c", "x y z"), seg(2, rows[0]), seg(3, gap), seg(4, rows[1]),
+            seg(5, gap), seg(6, rows[2]), seg(7, rows[3])]
+
+    class Fake:
+        kind = "fake"
+
+        def all_baselines(self):
+            return {"g1": {"title": "Fish story", "segments": segs}}
+
+    fs = FlexService(Notebook(tmp_path / "nb"))
+    fs.backend = Fake()
+    for labels, want in ((["12.1", "12.3"], (2, 4)), (["12.3", "13", "14"], (4, 7)), (["12.1", "12.3", "13", "14"], (2, 7))):
+        hits = fs.locate(paste(labels))
+        assert hits and (hits[0]["seg"], hits[0]["segTo"]) == want and hits[0]["matched"] == hits[0]["of"] == len(labels), (labels, hits[:1])
