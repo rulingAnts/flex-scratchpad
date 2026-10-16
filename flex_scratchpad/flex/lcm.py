@@ -266,7 +266,10 @@ class FlexiconBackend:
         if self.project is not None:
             kind = _s(_t(lambda: self.project.project.ProjectId.Type, "")) or _s(_t(lambda: str(self.project.project.ProjectId.Type), ""))
             if kind:
-                out["shared"] = "shared" in kind.lower()
+                # Only a positive answer is trusted. Seth's project (2026-10-16) is shared and
+                # still reads as a plain XML backend here, so "not shared" is never concluded
+                # from this; a real lock error is what says FieldWorks has it unshared.
+                out["shared"] = True if "shared" in kind.lower() else None
                 out["backendType"] = kind
         return out
 
@@ -688,6 +691,7 @@ class FlexiconBackend:
                                         + self._index_lines(seg))
                     index[_guid(t)] = {"title": self._text_title(t), "segments": segs}
                 self._baseline_index = index
+                self.progress("")                  # done: the pill shows the connection again
             return self._baseline_index
         try:
             return self.worker.call(go, timeout=OPEN_TIMEOUT)

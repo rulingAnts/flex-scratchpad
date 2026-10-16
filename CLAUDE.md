@@ -119,10 +119,12 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
   second instance hands the URL to the running one through `open-request.txt` in the local data
   folder (polled; no sockets) and exits; one instance is kept by a lock file. Off Windows the
   registration is a no-op and the link is plain text.
-- Sharing check (`_sharing_status`): `shared` comes from the open cache's `ProjectId.Type`
-  (the shared XML backend is what Project Properties → Sharing switches on) and `flexHasItOpen`
-  from `<project>.fwdata.lock`; both are guesses from the LCM model until confirmed on a real
-  project — the UI treats `null` as unknown and says nothing.
+- Sharing check (`_sharing_status`): `shared` is True only when the open cache's
+  `ProjectId.Type` says shared, else `null` (unknown) — Seth's shared project read as plain XML
+  on 2026-10-16, so "not shared" is NEVER concluded from it; a real lock error is the signal.
+  `flexHasItOpen` from `<project>.fwdata.lock` is a guess too; the UI says nothing on `null`.
+  Progress messages (`py:progress`) show in the pill only while they last; an empty message or
+  20 s of silence restores the state, and the LCM index sends an empty one when done.
 - `flex/lcm.py` has never met a real FieldWorks: it was written from flexicon 4.12's source and
   the LCM model. The first run on Windows will need adjustments — keep every access behind the
   `_t()` guard so one odd object degrades a rendering instead of failing it, and record what you

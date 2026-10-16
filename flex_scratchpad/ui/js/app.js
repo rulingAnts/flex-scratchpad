@@ -177,6 +177,7 @@
     pill.classList.toggle('warn', st.level === 'warn');
     pill.classList.toggle('err', st.level === 'err' || st.level === 'none');
     pill.querySelector('.label').textContent = st.short;
+    pill.classList.remove('busy');
     if (!pill.querySelector('.warn-icon')) pill.appendChild(el('span', { class: 'warn-icon', title: 'There is a problem — click for details' }, '!'));
     pill.title = st.title + (st.level === 'ok' ? '' : ' — click for details');
     renderFlexBanner(st);
@@ -739,7 +740,18 @@
     };
     setInterval(checkDisk, 20000);
     window.addEventListener('focus', () => setTimeout(checkDisk, 300));
-    FS.on('py:progress', (d) => { const pill = $('flex-pill'); pill.querySelector('.label').textContent = d.message || '…'; });
+    // a progress message (opening, "Indexing texts… 40/140") shows in the pill while it lasts;
+    // an empty one, or 20 s of silence, puts the connection state back (Seth, 2026-10-16: the
+    // last progress line stuck in the tile next to the warning icon read as "indexing paused")
+    let progressTimer = null;
+    FS.on('py:progress', (d) => {
+      const pill = $('flex-pill');
+      clearTimeout(progressTimer);
+      if (!d || !d.message) { renderFlexPill(); return; }
+      pill.querySelector('.label').textContent = d.message;
+      pill.classList.add('busy');
+      progressTimer = setTimeout(() => renderFlexPill(), 20000);
+    });
     document.addEventListener('click', (e) => { const a = e.target.closest('a[data-href], a.flex-chip, a.wikilink, a.ext-link'); if (a && !e.target.closest('.blk-body')) { e.preventDefault(); openLink(a.dataset.href || a.getAttribute('href')); } });
   }
 

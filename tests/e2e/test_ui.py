@@ -1795,3 +1795,17 @@ def test_duplicate_note_from_the_menu(app):
     titles = sorted(x["title"] for x in h.api._nb.list_notes())
     assert "Original" in titles and "Original (copy)" in titles
     assert not errors
+
+
+def test_progress_messages_do_not_stick_in_the_pill(app):
+    """Seth, 2026-10-16: "Indexing texts…" stayed in the tile next to a warning icon and read as
+    "indexing paused". A progress message is temporary; an empty one restores the state."""
+    h, page, errors = app
+    label = page.locator("#flex-pill .label")
+    before = label.inner_text()
+    page.evaluate("() => FS.emit('py:progress', { message: 'Indexing texts… 40/140' })")
+    assert label.inner_text() == "Indexing texts… 40/140"
+    assert page.evaluate("() => getComputedStyle(document.querySelector('#flex-pill .warn-icon')).display") == "none"
+    page.evaluate("() => FS.emit('py:progress', { message: '' })")
+    assert label.inner_text() == before
+    assert not errors

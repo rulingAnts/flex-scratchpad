@@ -701,6 +701,7 @@
     return all;
   }
   function openContext(spec, obj) {
+    closeOverlay();                                  // the whole text must not open behind a chip's preview
     const range = spec.seg || (obj && obj.range) || null;
     const m = FS.modal({ title: (obj && obj.title ? obj.title : 'Text') + ' — in context', class: 'context' });
     m.body.appendChild(el('div', { class: 'flex-loading' }, 'Loading the whole text…'));
