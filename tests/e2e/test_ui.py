@@ -1868,3 +1868,49 @@ def test_select_across_blocks_cut_copy_delete_type(app):
     page.wait_for_timeout(900)
     assert body_of(h).strip() == "", body_of(h)
     assert not errors
+
+
+def test_table_insert_above_while_editing_and_paste_rows_from_the_menu(app):
+    """Seth, 2026-10-16: inserting rows above was unreliable (the open cell's text landed in
+    its old row index after the shift) and the menu's Paste rows could not read the clipboard."""
+    h, page, errors = app
+    new_note(page, "Rows")
+    page.locator("#editor .blk-body").first.click()
+    paste(page, "| A | B |\n|---|---|\n| a1 | b1 |\n| a2 | b2 |")
+    page.wait_for_selector("table.md-table")
+    # type into a cell, then (still editing) insert a row above it from the menu
+    cell = page.locator("table.md-table td[data-r='2'][data-c='1']")
+    cell.click()
+    page.wait_for_selector("table.md-table .cell-edit")
+    page.keyboard.press("End")
+    page.keyboard.type("+zz")
+    cell = page.locator("table.md-table td[data-r='2'][data-c='1']")
+    cell.click(button="right")
+    page.locator(".popover .menu-item", has_text="Insert row above").click()
+    page.wait_for_timeout(900)
+    b = body_of(h)
+    assert "| a1 | b1 |\n|  |  |\n| a2 | b2+zz |" in b, b
+    # copy row 2 (gutter), then paste it below row 4 from the menu: the app's own copy serves
+    page.locator("table.md-table th.gutter.row[data-gr='1']").click()
+    page.keyboard.press("Control+c")
+    assert page.evaluate("() => FS.tableClip && FS.tableClip.rows.map((r) => r.join('|')).join(';')") == "a1|b1"
+    page.locator("table.md-table td[data-r='3'][data-c='0']").click(button="right")
+    page.locator(".popover .menu-item", has_text="Paste rows below").click()
+    page.wait_for_timeout(1500)     # the clipboard read gives up after 400 ms, then autosave's 600 ms
+    b = body_of(h)
+    assert b.count("| a1 | b1 |") == 2 and b.index("b2+zz") < b.rindex("| a1 | b1 |"), b
+    # a 2x2 grid pasted while a cell is open fills the cells from that one
+    page.locator("table.md-table td[data-r='1'][data-c='0']").click()
+    page.wait_for_selector("table.md-table .cell-edit")
+    paste(page, "p\tq\nr\ts")
+    page.wait_for_timeout(900)
+    b = body_of(h)
+    assert "| p | q |\n| r | s |" in b, b
+    # "− Row" deletes the row SELECTED in the gutter, not the cell last edited
+    page.locator("table.md-table th.gutter.row[data-gr='3']").click()          # the "a2 | b2+zz" row
+    page.locator("table.md-table").hover()
+    tool(page, "− Row")
+    page.wait_for_timeout(900)
+    b = body_of(h)
+    assert "b2+zz" not in b and "| p | q |" in b, b
+    assert not errors

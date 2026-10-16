@@ -81,6 +81,13 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
   their parent. The block ⋮ menu has "Start numbering at…".
 - A table's indent in the note is `indent N` (1–4) in its style line: Tab / Shift+Tab on the
   focused table, the context menu, Table style. Exports carry it (`indent` on the table block).
+- Table structure ops (`tables.js` `ops.*`) FINISH THE OPEN CELL FIRST (Seth, 2026-10-16: insert
+  row above while typing put the text in the wrong row). The bar under the table acts on the
+  gutter SELECTION when there is one, else on the cell last edited; `deleteRow/deleteCol` take a
+  range. Copying cells also keeps the rows in `FS.tableClip`: the menu's Paste… items read the
+  system clipboard for at most 400 ms (WebView2 / headless Chromium may never answer) and fall
+  back to it. A TSV grid pasted into an open cell fills cells from that one (`pasteOver`) unless
+  it looks like FLEx rows (Word / Morphemes / Free …), which still go to the locator.
 - Selecting across blocks (Seth, 2026-10-16) is ours, because Chromium confines a mouse selection
   to the editable block it started in: `wireMultiSelect` keeps `editor.msel = {a:{b,off}, z:{b,off}}`
   (partial text at the ends, whole blocks between), painted with the CSS highlight API

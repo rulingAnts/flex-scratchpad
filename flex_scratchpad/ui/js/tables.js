@@ -407,8 +407,17 @@
     const ops = widget.ops = {
       insertRow: (i) => { i = Math.max(1, Math.min(i, t.rows.length)); t.rows.splice(i, 0, t.rows[0].map(() => '')); shiftRowStyles(t, i + 1, 1); done(); },
       insertCol: (i) => { i = Math.max(0, Math.min(i, t.rows[0].length)); t.rows.forEach((row) => row.splice(i, 0, '')); t.aligns.splice(i, 0, null); shiftColStyles(t, i + 1, 1); done(); },
-      deleteRow: (r) => { if (t.rows.length <= 1 || r === 0) return; t.rows.splice(r, 1); delete t.style.rows[r + 1]; shiftRowStyles(t, r + 2, -1); done(); },
-      deleteCol: (c) => { if (t.rows[0].length <= 1) return; t.rows.forEach((row) => row.splice(c, 1)); t.aligns.splice(c, 1); delete t.style.cols[c + 1]; shiftColStyles(t, c + 2, -1); done(); },
+      deleteRow: (r, r2) => {
+        // r..r2 (the header never goes; the table keeps at least one body row)
+        r2 = r2 == null ? r : r2;
+        for (let k = r2; k >= Math.max(1, r); k--) { if (t.rows.length <= 2) break; t.rows.splice(k, 1); delete t.style.rows[k + 1]; shiftRowStyles(t, k + 2, -1); }
+        widget.clearSelection(); done();
+      },
+      deleteCol: (c, c2) => {
+        c2 = c2 == null ? c : c2;
+        for (let k = c2; k >= c; k--) { if (t.rows[0].length <= 1) break; t.rows.forEach((row) => row.splice(k, 1)); t.aligns.splice(k, 1); delete t.style.cols[k + 1]; shiftColStyles(t, k + 2, -1); }
+        widget.clearSelection(); done();
+      },
       mergeRight: (r, c) => { if (mergeCell(t, r, c, 'right')) done(); },
       mergeDown: (r, c) => { if (mergeCell(t, r, c, 'down')) done(); },
       mergeRange: (sel) => { if (mergeRange(t, sel)) done(); },
@@ -420,6 +429,10 @@
       // the table's indent within the note (Seth, 2026-10-16), like a list level: `indent N`
       indent: (d) => { const n = Math.max(0, Math.min(4, (t.style.indent || 0) + d)); if (n) t.style.indent = n; else delete t.style.indent; done(); },
     };
+    for (const k of Object.keys(ops)) {
+      const fn = ops[k];
+      ops[k] = (...a) => { if (widget.finishEdit) widget.finishEdit(); return fn(...a); };
+    }
     /* Clipboard and keys for a selection (Seth, 2026-10-12: "paste rows or columns into a
      * table"): with cells selected and no cell open, Ctrl+C / Ctrl+X copy them as TSV + HTML,
      * Delete clears them, and Ctrl+V pastes a grid — over the cells from the top-left corner
@@ -430,24 +443,27 @@
       if (nc > t.rows[0].length) { t.rows.forEach((row) => { while (row.length < nc) row.push(''); }); while (t.aligns.length < nc) t.aligns.push(null); }
     };
     ops.pasteOver = (r, c, rows) => {
+      if (widget.finishEdit) widget.finishEdit();
       grow(r + rows.length, c + Math.max(...rows.map((x) => x.length)));
       rows.forEach((row, i) => row.forEach((v, j) => { t.rows[r + i][c + j] = String(v == null ? '' : v); }));
       done();
     };
     ops.pasteRowsAt = (i, rows) => {
+      if (widget.finishEdit) widget.finishEdit();
       i = Math.max(1, Math.min(i, t.rows.length));
       grow(0, Math.max(...rows.map((x) => x.length)));
       rows.forEach((row, k) => { const nr = t.rows[0].map((_, j) => String(row[j] == null ? '' : row[j])); t.rows.splice(i + k, 0, nr); shiftRowStyles(t, i + k + 1, 1); });
       done();
     };
     ops.pasteColsAt = (i, rows) => {
+      if (widget.finishEdit) widget.finishEdit();
       i = Math.max(0, Math.min(i, t.rows[0].length));
       const m = Math.max(...rows.map((x) => x.length));
       grow(rows.length, 0);
       for (let j = 0; j < m; j++) { t.rows.forEach((row, r) => row.splice(i + j, 0, String(rows[r] && rows[r][j] != null ? rows[r][j] : ''))); t.aligns.splice(i + j, 0, null); shiftColStyles(t, i + j + 1, 1); }
       done();
     };
-    ops.clear = (sel) => { for (let r = sel.r1; r <= sel.r2; r++) for (let c = sel.c1; c <= sel.c2; c++) t.rows[r][c] = ''; done(); };
+    ops.clear = (sel) => { if (widget.finishEdit) widget.finishEdit(); for (let r = sel.r1; r <= sel.r2; r++) for (let c = sel.c1; c <= sel.c2; c++) t.rows[r][c] = ''; done(); };
     widget.selectedRows = () => { const s = widget.sel; if (!s) return []; const out = []; for (let r = s.r1; r <= s.r2; r++) out.push(t.rows[r].slice(s.c1, s.c2 + 1)); return out; };
     widget.wholeRows = () => widget.sel && widget.sel.c1 === 0 && widget.sel.c2 === t.rows[0].length - 1 && !(widget.sel.r1 === 0 && widget.sel.r2 === t.rows.length - 1 && widget.gsel && widget.gsel.kind === 'col');
     widget.wholeCols = () => widget.sel && widget.sel.r1 === 0 && widget.sel.r2 === t.rows.length - 1 && !widget.wholeRows();
@@ -509,12 +525,15 @@
     // the bar under the table; sticks to the bottom of the pane while the table is partly
     // scrolled past it (Seth, 2026-10-12: "reverse sticky")
     const tools = el('div', { class: 'tbl-tools' });
-    const cur = () => widget.focus || { r: t.rows.length - 1, c: 0 };
+    // the bar acts on the SELECTION when there is one (a row picked in the gutter), else on
+    // the cell last edited (Seth, 2026-10-16: "− Row" deleted a row other than the selected one)
+    const cur = () => (widget.sel ? { r: widget.sel.r1, c: widget.sel.c1 } : widget.focus || { r: t.rows.length - 1, c: 0 });
+    const last = () => (widget.sel ? { r: widget.sel.r2, c: widget.sel.c2 } : cur());
     tools.append(
-      el('button', { title: 'Add a row below the current one', onclick: () => ops.insertRow(cur().r + 1) }, '+ Row'),
-      el('button', { title: 'Add a column after the current one', onclick: () => ops.insertCol(cur().c + 1) }, '+ Column'),
-      el('button', { title: 'Delete the current row', onclick: () => ops.deleteRow(cur().r) }, '− Row'),
-      el('button', { title: 'Delete the current column', onclick: () => ops.deleteCol(cur().c) }, '− Column'),
+      el('button', { title: 'Add a row below the current one', onclick: () => ops.insertRow(last().r + 1) }, '+ Row'),
+      el('button', { title: 'Add a column after the current one', onclick: () => ops.insertCol(last().c + 1) }, '+ Column'),
+      el('button', { title: 'Delete the current / selected row(s)', onclick: () => ops.deleteRow(cur().r, last().r) }, '− Row'),
+      el('button', { title: 'Delete the current / selected column(s)', onclick: () => ops.deleteCol(cur().c, last().c) }, '− Column'),
       el('button', { onclick: (e) => colPopover(e.currentTarget, t, cur().c, commit, widget) }, 'Column ▾'),
       el('button', { onclick: (e) => rowPopover(e.currentTarget, t, cur().r, commit, widget) }, 'Row ▾'),
       el('button', { onclick: (e) => cellPopover(e.currentTarget, t, cur(), commit, widget) }, 'Cells ▾'),
@@ -534,8 +553,9 @@
     if (a && a.closest && a.closest('[contenteditable="true"], input, textarea, select')) return null;
     return w;
   };
-  document.addEventListener('copy', (e) => { const w = liveSelection(); if (!w) return; const rows = w.selectedRows(); e.clipboardData.setData('text/plain', tsvOf(rows)); e.clipboardData.setData('text/html', htmlOf(rows)); e.preventDefault(); });
-  document.addEventListener('cut', (e) => { const w = liveSelection(); if (!w) return; const rows = w.selectedRows(); e.clipboardData.setData('text/plain', tsvOf(rows)); e.clipboardData.setData('text/html', htmlOf(rows)); e.preventDefault(); w.ops.clear(w.sel); });
+  const remember = (rows) => { FS.tableClip = { rows: rows.map((r) => r.slice()), tsv: tsvOf(rows), at: Date.now() }; };
+  document.addEventListener('copy', (e) => { const w = liveSelection(); if (!w) return; const rows = w.selectedRows(); remember(rows); e.clipboardData.setData('text/plain', tsvOf(rows)); e.clipboardData.setData('text/html', htmlOf(rows)); e.preventDefault(); });
+  document.addEventListener('cut', (e) => { const w = liveSelection(); if (!w) return; const rows = w.selectedRows(); remember(rows); e.clipboardData.setData('text/plain', tsvOf(rows)); e.clipboardData.setData('text/html', htmlOf(rows)); e.preventDefault(); w.ops.clear(w.sel); });
   document.addEventListener('paste', (e) => { const w = liveSelection(); if (!w) return; const rows = clipGrid(e.clipboardData); if (!rows) return; e.preventDefault(); w.pasteGrid(rows); });
   document.addEventListener('keydown', (e) => {
     const w = liveSelection();
@@ -543,17 +563,30 @@
     if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); w.ops.clear(w.sel); }
     else if (e.key === 'Escape') { w.clearSelection(); }
   });
-  /* The context menu's Paste… items read the clipboard themselves (Chromium asks once). */
+  /* The context menu's Paste… items read the clipboard themselves (Chromium asks once);
+   * where that is refused (WebView2), the app's own copy of the last table copy serves —
+   * unless the system clipboard readably holds something else. */
   async function readClipGrid() {
+    const own = FS.tableClip && FS.tableClip.rows && FS.tableClip.rows.length ? FS.tableClip : null;
+    // the read may wait on a permission prompt that never comes (headless Chromium, WebView2)
+    const fromSystem = await Promise.race([readSystemGrid(), new Promise((res) => setTimeout(() => res(null), 400))]);
+    if (fromSystem && fromSystem.text != null && own && fromSystem.text.replace(/\r\n?/g, '\n').replace(/\n+$/, '') === own.tsv) return own.rows;
+    if (fromSystem && fromSystem.rows) return fromSystem.rows;
+    return own ? own.rows : null;
+  }
+  async function readSystemGrid() {
     try {
       if (navigator.clipboard && navigator.clipboard.read) {
         for (const item of await navigator.clipboard.read()) {
-          if (item.types.includes('text/html')) { const g = htmlGrid(await (await item.getType('text/html')).text()); if (g) return g.rows; }
-          if (item.types.includes('text/plain')) { const text = (await (await item.getType('text/plain')).text()).replace(/\r\n?/g, '\n').replace(/\n+$/, ''); if (text) return text.split('\n').map((l) => l.split('\t')); }
+          let text = null;
+          if (item.types.includes('text/plain')) text = await (await item.getType('text/plain')).text();
+          if (item.types.includes('text/html')) { const g = htmlGrid(await (await item.getType('text/html')).text()); if (g) return { rows: g.rows, text }; }
+          if (text != null) { const tt = text.replace(/\r\n?/g, '\n').replace(/\n+$/, ''); return { rows: tt ? tt.split('\n').map((l) => l.split('\t')) : null, text }; }
         }
       } else if (navigator.clipboard && navigator.clipboard.readText) {
-        const text = (await navigator.clipboard.readText()).replace(/\r\n?/g, '\n').replace(/\n+$/, '');
-        if (text) return text.split('\n').map((l) => l.split('\t'));
+        const text = await navigator.clipboard.readText();
+        const tt = text.replace(/\r\n?/g, '\n').replace(/\n+$/, '');
+        return { rows: tt ? tt.split('\n').map((l) => l.split('\t')) : null, text };
       }
     } catch (err) { /* no permission: fall through */ }
     return null;
@@ -591,7 +624,7 @@
       }
       item('Unmerge', () => ops.unmerge(range), !(mergedInRange || covered.has(key)));
       sep();
-      const copySel = () => { if (!widget.sel) widget.select(at, at); FS.copyText(tsvOf(widget.selectedRows())); };
+      const copySel = () => { if (!widget.sel) widget.select(at, at); const rows = widget.selectedRows(); FS.tableClip = { rows: rows.map((r) => r.slice()), tsv: tsvOf(rows), at: Date.now() }; FS.copyText(tsvOf(rows)); };
       item(multi ? 'Copy cells' : 'Copy cell', copySel);
       item(multi ? 'Cut cells' : 'Cut cell', () => { copySel(); ops.clear(widget.sel); });
       item(multi ? 'Clear cells' : 'Clear cell', () => ops.clear(range));
@@ -880,6 +913,9 @@
             insertAtCaret(ed, (before && !/\s$/.test(before) && !/^\s/.test(t) ? ' ' : '') + t); refresh();   // a chooser result is a token: keep it off the preceding word
           };
           if (opts.onPasteLink && /silfw:|^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(text.trim())) { opts.onPasteLink(text.trim(), (embed) => put(String(embed).replace(/\n/g, ' '))); return; }
+          const flexRows = /^(\d+(\.\d+)?\t)?\s*(Word|Morphemes|Lex\.|Free|Literal|Note)\b/im.test(text);
+          const grid = e.dataTransfer ? clipGrid(e.dataTransfer) : null;
+          if (grid && !flexRows && (grid.length > 1 || grid[0].length > 1)) { widget.ops.pasteOver(r, c, grid); return; }   // cells, from this one
           if (opts.onPasteLocate && /\t/.test(text)) { const plain = () => put(text.replace(/\r\n?/g, '\n').replace(/\n/g, ' ')); opts.onPasteLocate(text, (embed) => put(String(embed).replace(/\n/g, ' ')), plain); return; }
           insertAtCaret(ed, text.replace(/\r\n?/g, '\n')); refresh(); return;
         }
@@ -1222,5 +1258,5 @@
     return fromHtml(html) || fromTsv(dt.getData && dt.getData('text/plain'));
   }
 
-  FS.tables = { spanMap, mergeCell, unmergeCell, mergeRange, unmergeRange, growToSpans, splitAt, mergeTables, htmlGrid, clipGrid, tsvOf, parse, serialize, splitRow, parseStyle, serializeStyle, render, template, fromHtml, fromTsv, fromClipboard, cellMarkdown };
+  FS.tables = { spanMap, mergeCell, unmergeCell, mergeRange, unmergeRange, growToSpans, splitAt, mergeTables, htmlGrid, clipGrid, tsvOf, readClipGrid, parse, serialize, splitRow, parseStyle, serializeStyle, render, template, fromHtml, fromTsv, fromClipboard, cellMarkdown };
 })();
