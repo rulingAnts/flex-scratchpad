@@ -129,7 +129,11 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
   text has them and the first pasted segment's content agrees there (`_place_by_labels`; the
   index rows carry the label as their 6th item): content alone picked the first copy of a
   repeated line, "two lines above" (Seth, 2026-10-16). Unnumbered pastes rank by content, then
-  by fewest skipped segments.
+  by fewest skipped segments. Every hit also carries the located segments' FLEx numbers
+  (`label`/`labelTo`, what the dialog shows) and their GUID anchors (`at`, the index rows' 7th
+  item), and the inserted embed is written with `at=`: an anchor wins over `seg=` when the
+  example is drawn, so a running count that differs between the index and the text can never
+  move the example (Seth, 2026-10-16: the dialog was right, the example two lines above).
   While a pasted example or `silfw://` link is being looked up, `FS.busy` (util.js) shows a
   spinner pill by the caret after 200 ms (a quick answer never flashes it), with "Paste as
   text" / Esc to stop waiting; a late answer after that is ignored (Seth, 2026-10-16).

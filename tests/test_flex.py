@@ -491,3 +491,16 @@ def test_locate_follows_flexs_own_segment_numbers(tmp_path):
     # no numbers on the rows: content matching as before
     h = fs.locate("Word\t" + "\t".join(other[0].split()) + "\n")
     assert h[0]["seg"] in (2, 4) and not h[0].get("byLabel")
+
+
+def test_locate_returns_flex_numbers_and_guid_anchors(tmp_path):
+    """The dialog shows FLEx's numbers; the embed gets the segments' GUID anchors (at=)."""
+    fs = FlexService(Notebook(tmp_path / "nb"))
+    fs.backend = DemoBackend()
+    segs = {s["n"]: s for s in fs.backend.texts[T_STORY]["segments"]}
+    h = fs.locate("2.2\tWord\tKabir\tpemu\tka-nuwa\tlo\n\tWord\tTiket\tka-nuwa-mo\nFree\tThe child slept.")
+    top = h[0]
+    assert (top["seg"], top["segTo"], top["label"], top["labelTo"]) == (4, 5, "2.2", "3.1"), top
+    assert top["at"] == [model.anchor_of(segs[4]["guid"]), model.anchor_of(segs[5]["guid"])]
+    h = fs.locate("Word\tKabir\tlo\nFree\tThe dog.")                 # unnumbered: content, still anchored
+    assert h[0]["seg"] == 6 and h[0]["at"] == [model.anchor_of(segs[6]["guid"])] * 2 and h[0]["label"] == "3.2"

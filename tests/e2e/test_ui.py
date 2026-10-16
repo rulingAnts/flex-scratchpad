@@ -516,7 +516,7 @@ def test_paste_interlinear_lines_locates_the_segment(app):
     new_note(page, "Located")
     paste(page, "Word\tHaŋa\ttiket\tka-sila-mo\tpemu\nWord Gloss\tyesterday\tchild\tsaw\triver\nFree\tYesterday the child saw the river.")
     page.wait_for_selector(".modal")
-    assert "The dog and the river" in page.locator(".modal-body").inner_text() and "segment 2" in page.locator(".modal-body").inner_text()
+    assert "The dog and the river" in page.locator(".modal-body").inner_text() and "segment 1.2" in page.locator(".modal-body").inner_text()   # FLEx's number
     page.locator(".modal .btn.primary", has_text="Insert rendered").click()
     page.wait_for_selector("#editor .text-obj .segment[data-n='2']")
     page.wait_for_timeout(900)
@@ -2281,4 +2281,37 @@ def test_collect_examples_from_a_highlighted_part_or_the_whole_note(app):
     # nothing highlighted: the whole note, entry left out
     page.locator("#editor .blk-body", has_text="Outro").click()
     assert collect("Collect the examples into a new collection") == [1, 2, 4]
+    assert not errors
+
+
+def test_a_pasted_line_lands_on_its_own_segment_even_when_numbering_differs(app):
+    """Seth, 2026-10-16: "The Paste TSV dialog box … shows the correct line number. But then the
+    flex object that's created selects the wrong number(s)" — two lines above. The locator's
+    index and the rendered text can number segments differently, so the embed now carries the
+    located segments' own GUIDs (at=), which win over the number when the example is drawn."""
+    h, page, errors = app
+    be = h.api._flex.backend
+    real = be.all_baselines
+    # an index whose running numbers are two behind the text (as if it had skipped two segments)
+    def shifted():
+        out = {}
+        for g, t in real().items():
+            rows = t["segments"]
+            out[g] = dict(t, segments=[(r[0] - 2,) + tuple(r[1:]) for r in rows[2:]] if g == T_STORY else rows)
+        return out
+    be.all_baselines = shifted
+    try:
+        new_note(page, "Numbering")
+        paste(page, "2.2\tWord\tKabir\tpemu\tka-nuwa\tlo\nFree\tThe dog sleeps by the river.")
+        page.wait_for_selector(".modal")
+        assert "segment 2.2" in page.locator("[data-test='locate-where']").inner_text()   # FLEx's number
+        page.locator(".modal .btn.primary", has_text="Insert rendered").click()
+        page.wait_for_selector("#editor .text-obj .segment")
+        page.wait_for_timeout(1200)
+        shown = page.locator("#editor .text-obj .segment").evaluate_all("(els) => els.map((e) => e.dataset.n)")
+        assert shown == ["4"], shown
+        body = body_of(h)
+        assert re.search(r"seg=4 at=0e1f2a3b1004\b", body), body                         # number healed, GUID kept
+    finally:
+        be.all_baselines = real
     assert not errors

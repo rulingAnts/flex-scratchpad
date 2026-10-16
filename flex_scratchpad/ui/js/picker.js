@@ -10,7 +10,8 @@
   function embedFor(kind, guid, extra) {
     const spec = { kind, guid, seg: null, at: null, lines: null, styles: [], label: '', extra: {} };
     if (extra && extra.seg) spec.seg = extra.seg;
-    if (extra && extra.index && spec.seg) {          // anchor the range to its segments' GUIDs
+    if (extra && extra.at && extra.at[0]) spec.at = [extra.at[0], extra.at[1] || extra.at[0]];   // the located segments' own GUIDs
+    else if (extra && extra.index && spec.seg) {          // anchor the range to its segments' GUIDs
       const at = (n) => { const e = extra.index.find((i) => i.n === n); return e ? e.guid.replace(/-/g, '').slice(-12) : ''; };
       if (at(spec.seg[0])) spec.at = [at(spec.seg[0]), at(spec.seg[1]) || at(spec.seg[0])];
     }
@@ -208,17 +209,20 @@
     const m = FS.modal({ title: 'Found in FieldWorks', class: 'narrow' });
     const lines = text.trim().split('\n').filter((l) => l.trim()).length;
     const pick = { hit: best };
-    m.body.appendChild(el('p', {}, 'These lines match ', el('b', {}, best.title), ', segment' + (best.segTo !== best.seg ? 's ' + best.seg + '\u2013' + best.segTo : ' ' + best.seg) + (best.matched < best.of ? ' (' + best.matched + ' of ' + best.of + ' lines matched)' : '') + '.'));
+    // FLEx's own numbers ("12.3–14") when the index has them: what was copied, as FLEx shows it
+    const where = (h) => (h.label ? (h.labelTo && h.labelTo !== h.label ? h.label + '\u2013' + h.labelTo : h.label) : (h.segTo !== h.seg ? h.seg + '\u2013' + h.segTo : String(h.seg)));
+    const plural = (h) => (h.label ? h.labelTo && h.labelTo !== h.label : h.segTo !== h.seg);
+    m.body.appendChild(el('p', { 'data-test': 'locate-where' }, 'These lines match ', el('b', {}, best.title), ', segment' + (plural(best) ? 's ' : ' ') + where(best) + (best.matched < best.of ? ' (' + best.matched + ' of ' + best.of + ' lines matched)' : '') + '.'));
     if (hits.length > 1) {
       const sel = el('select', { style: { width: '100%' } });
-      hits.forEach((h, i) => sel.appendChild(el('option', { value: i }, h.title + ' \u2014 ' + (h.segTo !== h.seg ? h.seg + '\u2013' + h.segTo : h.seg) + (h.matched < h.of ? ' (' + h.matched + '/' + h.of + ')' : ''))));
+      hits.forEach((h, i) => sel.appendChild(el('option', { value: i }, h.title + ' \u2014 ' + where(h) + (h.matched < h.of ? ' (' + h.matched + '/' + h.of + ')' : ''))));
       sel.addEventListener('change', () => { pick.hit = hits[+sel.value]; });
       m.body.appendChild(el('div', { class: 'form-row' }, el('label', {}, 'Other matches'), sel));
     }
     const row = el('div', { class: 'btn-row' });
     row.appendChild(el('button', { class: 'btn', onclick: () => { m.close(); fallback(); } }, 'Paste as text'));
     row.appendChild(el('button', { class: 'btn', onclick: () => { insert(linkFor('text', pick.hit.guid, pick.hit.title), false); m.close(); } }, 'Insert link'));
-    row.appendChild(el('button', { class: 'btn primary', onclick: () => { insert(embedFor('text', pick.hit.guid, { seg: [pick.hit.seg, pick.hit.segTo] }), true); m.close(); } }, 'Insert rendered'));
+    row.appendChild(el('button', { class: 'btn primary', onclick: () => { insert(embedFor('text', pick.hit.guid, { seg: [pick.hit.seg, pick.hit.segTo], at: pick.hit.at }), true); m.close(); } }, 'Insert rendered'));
     m.body.appendChild(row);
     void lines;
   }

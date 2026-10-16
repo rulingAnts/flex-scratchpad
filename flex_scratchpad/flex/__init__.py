@@ -49,6 +49,20 @@ def _text_score(q: str, hay: str) -> int:
 LOCATE_GAP = 3   # segments of the text a pasted range may skip between two of its own
 
 
+def _pinned(rows: list, i0: int, i1: int) -> dict:
+    """What pins a located range to its segments, whatever the numbering: FLEx's own numbers
+    (for the dialog) and the first and last segment's GUID anchors (for the embed's `at=`,
+    which wins over `seg=` when the example is drawn — Seth, 2026-10-16: the dialog showed the
+    right line but the example came out two lines above)."""
+    out: dict = {}
+    a, b = rows[i0], rows[i1]
+    if len(a) > 5 and len(b) > 5 and a[5] and b[5]:
+        out["label"], out["labelTo"] = str(a[5]), str(b[5])
+    if len(a) > 6 and len(b) > 6 and a[6] and b[6]:
+        out["at"] = [model.anchor_of(a[6]), model.anchor_of(b[6])]
+    return out
+
+
 def _label_key(label: str) -> str:
     """FLEx's segment number as a key: "13" (a paragraph of one segment) is "13.1"."""
     s = str(label or "").strip().rstrip(".")
@@ -457,14 +471,15 @@ class FlexService:
                 placed = self._place_by_labels(queries, segs, labels)
                 if placed:
                     score, i0, i1, k = placed
-                    hits.append({"guid": guid, "title": t["title"], "seg": segs[i0][0], "segTo": segs[i1][0], "score": score, "matched": k, "of": len(queries), "byLabel": True})
+                    hits.append(dict({"guid": guid, "title": t["title"], "seg": segs[i0][0], "segTo": segs[i1][0], "score": score, "matched": k, "of": len(queries), "byLabel": True},
+                                     **_pinned(t["segments"], i0, i1)))
                     by_label.add(guid)
                     continue
             for i, (n, nb, nf, nm, ng) in enumerate(segs):
                 sc = _query_score(queries[0], nb, nf, nm, ng)
                 if sc <= 0:
                     continue
-                score, last, k, j, skipped = sc, n, 1, i + 1, 0
+                score, last, k, j, skipped, li = sc, n, 1, i + 1, 0, i
                 while k < len(queries) and j < len(segs):
                     # FLEx's copy can leave segments out (Seth, 2026-10-16: a paste of 12.1, 12.3,
                     # 13, 14 — no 12.2 — found only 12.1), so the next pasted segment may skip a
@@ -480,10 +495,11 @@ class FlexService:
                         break
                     score += s2
                     skipped += step
-                    last = segs[j + step][0]
+                    last, li = segs[j + step][0], j + step
                     k += 1
                     j += step + 1
-                hits.append({"guid": guid, "title": t["title"], "seg": n, "segTo": last, "score": score, "matched": k, "of": len(queries), "skipped": skipped})
+                hits.append(dict({"guid": guid, "title": t["title"], "seg": n, "segTo": last, "score": score, "matched": k, "of": len(queries), "skipped": skipped},
+                                 **_pinned(t["segments"], i, li)))
         # numbered rows placed by their numbers first; then the best content match, and on a tie
         # the placement that skips the fewest of the text's segments
         hits.sort(key=lambda h: (not h.get("byLabel"), -h["score"], -h["matched"], h.get("skipped", 0), h["title"]))
