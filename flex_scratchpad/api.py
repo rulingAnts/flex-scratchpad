@@ -420,6 +420,12 @@ class Api:
     def flex_refresh(self) -> dict:
         return self._flex.refresh()
 
+    def flex_reload(self) -> dict:
+        """The ↻ on one example: take in what FieldWorks saved since the project was opened,
+        keeping the indexes (Seth, 2026-10-16: ↻ on an example in a collection did not show a
+        fix just made in FLEx — it re-read the backend's in-memory copy, not the disk)."""
+        return self._flex.refresh(indexes=False)
+
     def flex_refresh_all(self) -> dict:
         """Reload the project's data, then re-fetch every example embedded in every note."""
         try:

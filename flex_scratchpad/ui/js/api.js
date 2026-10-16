@@ -109,7 +109,7 @@
       set_tags: async (t) => (config.tags = t), rename_tag: async () => 0, set_setting: async (k, v) => (config.settings[k] = v, config.settings),
       save_attachment: async (name, data) => ({ path: name, fileUrl: data, name }),
       flex_status: async () => status(), flex_projects: async () => ['Kalu Demo'],
-      flex_configure: async () => status(), flex_open: async () => status(), flex_refresh: async () => status(),
+      flex_configure: async () => status(), flex_open: async () => status(), flex_refresh: async () => status(), flex_reload: async () => status(),
       flex_get: async (kind, guid, a, b, _pc, _ws) => { if (kind === 'entry' || kind === 'sense') { const e = demo.entries.find((x) => x.guid === guid || x.senses.some((s) => s.guid === guid)); if (!e) throw new Error('No such entry'); return { ...e, cached: false }; } const t = demo.texts[guid]; if (!t) throw new Error('No such text'); return sliceText(t, a, b); },
       flex_search_entries: async (q) => demo.entries.filter((e) => !q || (e.headword + ' ' + e.senses.map((s) => s.gloss).join(' ')).toLowerCase().includes(q.toLowerCase())).map((e) => ({ guid: e.guid, headword: e.headword, pos: e.pos, gloss: e.senses.map((s) => s.gloss).join('; '), senses: e.senses.length, morphType: e.morphType })),
       flex_texts: async (q) => Object.values(demo.texts).filter((t) => !q || t.title.toLowerCase().includes(q.toLowerCase())).map((t) => ({ guid: t.guid, title: t.title, abbrev: t.abbrev, segmentCount: t.segments.length, hasMedia: false })),

@@ -2360,3 +2360,42 @@ def test_insert_a_new_block_from_the_context_menu(app):
     assert "Insert from FieldWorks" in page.locator(".modal").inner_text()
     page.keyboard.press("Escape")
     assert not errors
+
+
+def test_refresh_in_a_collection_takes_in_changes_saved_in_flex(app):
+    """Seth, 2026-10-16: "I fixed a source and then tried reloading it with the refresh button in
+    an example in a collections note and it doesn't appear to be registering the refresh". The
+    ↻ re-read the backend's in-memory copy; FieldWorks only shows what it saved after a
+    RefreshFromDisk — which "Refresh all" did, and a collection had no Refresh all."""
+    h, page, errors = app
+    be = h.api._flex.backend
+    seg1 = be.texts[T_STORY]["segments"][0]
+    original = seg1["free"]
+    pending, calls = {}, []
+
+    def refresh(indexes=True):          # like LCM: a change saved in FLEx shows only after this
+        calls.append(indexes)
+        if "free" in pending:
+            seg1["free"] = pending.pop("free")
+    be.refresh = refresh
+    try:
+        page.locator("#btn-new-menu").click()
+        page.locator("[data-test='new-collection']").click()
+        page.wait_for_selector("#collection .coll-add")
+        page.locator("#collection .coll-add").click()
+        paste(page, "{{flex:text %s seg=1}}" % T_STORY)
+        page.wait_for_selector("#collection .seg-free")
+        # "fixed in FLEx": the ↻ on the example shows it
+        pending["free"] = "The dog slept soundly."
+        page.locator("#collection .flex-head button[title='Reload from FLEx']").first.click()
+        page.wait_for_function("document.querySelector('#collection .seg-free') && document.querySelector('#collection .seg-free').textContent.includes('soundly')")
+        assert calls == [False]                       # the indexes are kept for one example
+        # and the collection's own Refresh all
+        pending["free"] = "The dog slept very soundly."
+        page.locator("[data-test='coll-refresh']").click()
+        page.wait_for_function("document.querySelector('#collection .seg-free') && document.querySelector('#collection .seg-free').textContent.includes('very soundly')")
+        assert calls[-1] is True
+    finally:
+        seg1["free"] = original
+        del be.refresh
+    assert not errors

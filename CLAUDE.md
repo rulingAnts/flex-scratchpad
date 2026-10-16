@@ -191,6 +191,11 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
   `flexHasItOpen` from `<project>.fwdata.lock` is a guess too; the UI says nothing on `null`.
   Progress messages (`py:progress`) show in the pill only while they last; an empty message or
   20 s of silence restores the state, and the LCM index sends an empty one when done.
+- Refreshing: what FieldWorks saved after the project was opened only shows after LCM's
+  `RefreshFromDisk`. The ↻ on ONE example calls `Api.flex_reload` (RefreshFromDisk, indexes
+  kept so the next paste stays fast) before re-fetching; "Refresh all" (the toolbar, and a
+  collection's header) also drops the indexes and re-fetches every example (Seth, 2026-10-16:
+  ↻ in a collection only re-read the in-memory copy).
 - `flex/lcm.py` has never met a real FieldWorks: it was written from flexicon 4.12's source and
   the LCM model. The first run on Windows will need adjustments — keep every access behind the
   `_t()` guard so one odd object degrades a rendering instead of failing it, and record what you

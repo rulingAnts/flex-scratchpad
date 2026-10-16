@@ -211,11 +211,11 @@ class FlexService:
                     pass
                 self.backend = None
 
-    def refresh(self) -> dict:
+    def refresh(self, indexes: bool = True) -> dict:
         with self.lock:
             if self.backend is not None and hasattr(self.backend, "refresh"):
                 try:
-                    self.backend.refresh()
+                    self.backend.refresh() if indexes else self.backend.refresh(indexes=False)
                 except FlexError as e:
                     self.last_error = e.message
             return self.status()

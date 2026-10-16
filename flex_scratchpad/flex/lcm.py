@@ -229,13 +229,17 @@ class FlexiconBackend:
             pass
         self.worker.stop()
 
-    def refresh(self) -> dict:
+    def refresh(self, indexes: bool = True) -> dict:
+        """Take in what FieldWorks saved since the project was opened (RefreshFromDisk). With
+        indexes=False the lexicon / text / paste indexes are kept — the ↻ on one example, which
+        should not make the next paste rebuild the whole project's index."""
         def go():
             if self.project is not None:
                 _t(lambda: self.project.RefreshFromDisk(), None)
-            self._entry_index = None
-            self._text_index = None
-            self._baseline_index = None
+            if indexes:
+                self._entry_index = None
+                self._text_index = None
+                self._baseline_index = None
             return self._status()
         try:
             return self.worker.call(go)

@@ -966,7 +966,7 @@
         const kind = spec.kind === 'sense' ? 'entry' : spec.kind;
         const obj = await flexGet(kind, spec.guid, spec.kind === 'text' && spec.seg ? spec.seg[0] : null, spec.kind === 'text' && spec.seg ? spec.seg[1] : null, refresh, spec.kind === 'text' ? spec.ws : null, spec.kind === 'text' ? spec.at : null);
         if (syncAnchors(spec, obj, opts)) return;          // the spec changed: the owner re-renders
-        const o = Object.assign({}, opts, { refresh: () => { invalidate(kind, spec.guid); doRender(true); } });
+        const o = Object.assign({}, opts, { refresh: () => reload() });
         const node = kind === 'text' ? renderText(obj, spec, o) : kind === 'wordform' ? renderWordform(obj, spec, o) : renderEntry(obj, spec, o);
         container.innerHTML = '';
         container.appendChild(node);
@@ -975,11 +975,21 @@
         container.innerHTML = '';
         const err = el('div', { class: 'flex-obj' },
           el('div', { class: 'flex-head' }, el('span', { class: 'ttl' }, spec.label || (spec.kind + ' ' + spec.guid.slice(0, 8) + '…')), el('span', { class: 'spacer' }),
-            el('button', { class: 'lnk', onclick: () => doRender(true) }, '↻ Retry'),
+            el('button', { class: 'lnk', onclick: () => reload() }, '↻ Retry'),
             opts.editable && opts.editSource ? el('button', { class: 'lnk', onclick: () => opts.editSource() }, 'Edit source') : null),
           el('div', { class: 'flex-err' }, 'Could not show this FLEx object. ', el('span', { class: 'hint' }, e.message || String(e))));
         container.appendChild(err);
       }
+    };
+    /* ↻: FieldWorks takes in what was saved since the project was opened, then this object is
+     * fetched again — visibly, so the click is seen to register. */
+    const reload = async () => {
+      const kind = spec.kind === 'sense' ? 'entry' : spec.kind;
+      container.innerHTML = '';
+      container.appendChild(el('div', { class: 'flex-obj' }, el('div', { class: 'flex-loading' }, 'Reloading from FLEx\u2026')));
+      try { await FS.api.flex_reload(); } catch (e) { /* fetch anyway: the error, if any, shows there */ }
+      invalidate(kind, spec.guid);
+      await doRender(true);
     };
     await doRender(false);
   }

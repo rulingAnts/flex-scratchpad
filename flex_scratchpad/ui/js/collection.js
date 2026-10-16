@@ -211,6 +211,7 @@
           ? el('button', { class: 'btn', 'data-test': 'coll-all', title: 'Close every group', onclick: () => this.setAllCollapsed(true) }, '\u25b8 Collapse all')
           : el('button', { class: 'btn', 'data-test': 'coll-all', title: 'Open every group', onclick: () => this.setAllCollapsed(false) }, '\u25be Expand all')) : null,
         el('button', { class: 'btn', 'data-test': 'coll-add-group', title: 'A labelled, collapsible block for sorting the examples (not exported)', onclick: () => this.askGroup() }, '➕ Group…'),
+        el('button', { class: 'btn', 'data-test': 'coll-refresh', title: 'Take in what was changed in FieldWorks and reload every example', onclick: (e) => { e.currentTarget.disabled = true; this.opts.onRefreshAll && this.opts.onRefreshAll(); } }, '↻ Refresh all'),
         el('button', { class: 'btn', title: 'Find a text and its segments in the project', onclick: () => this.pick() }, '➕ Add from FLEx…'),
         el('button', { class: 'btn primary', 'data-test': 'coll-export', disabled: !n, title: n ? 'Export these examples as one FLEx text (.flextext)' : 'Add examples first', onclick: () => this.opts.onExport && this.opts.onExport() }, 'Export as FLEx text…'));
       root.appendChild(head);

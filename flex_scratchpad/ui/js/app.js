@@ -340,6 +340,7 @@
     S.coll = new FS.Collection($('collection'), {
       onChange: (md) => { if (!isCollection()) return; S.note.body = md; S.dirty = true; $('save-state').textContent = 'Editing…'; scheduleSave(); },
       onExport: () => exportCollection(),
+      onRefreshAll: () => refreshAll(),
       canLocate: () => !!(S.flex && S.flex.open),
     });
     window.__fsCollection = S.coll;      // for the tests and the console
@@ -567,7 +568,8 @@
       await flushSave();
       const r = await FS.api.flex_refresh_all();
       FS.interlinear.invalidate();
-      if (S.note) {
+      if (S.note && isCollection()) ensureCollection().load(S.note.body || '');   // keeps its scroll
+      else if (S.note) {
         const edEl = $('editor'); const top = edEl.scrollTop;
         ensureEditor().load(S.note.body || '');
         edEl.scrollTop = top;
@@ -576,6 +578,8 @@
       FS.toast('Refreshed ' + r.refreshed + ' of ' + r.objects + ' FLEx object' + (r.objects === 1 ? '' : 's') + (failed ? ' — ' + failed + ' could not be read: ' + r.failed.slice(0, 3).map((f) => f.error).join('; ') : ''), failed ? 'error' : 'ok');
     } catch (e) { FS.toast(e.message, 'error'); }
     btn.disabled = false; btn.textContent = '↻ Refresh all';
+    const cb = document.querySelector('[data-test="coll-refresh"]');
+    if (cb) cb.disabled = false;
   }
   function slashMenu(body, b) {
     FS.popover(body, (pop, close) => {
