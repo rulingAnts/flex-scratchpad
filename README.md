@@ -32,7 +32,7 @@ talking to Python through pywebview's exposed API only.
 
 ## Install (Windows, with FieldWorks)
 
-Requirements: Windows 10/11, FieldWorks 9.x installed, 64-bit Python 3.10–3.12 (match FieldWorks:
+Requirements: Windows 10/11, FieldWorks 9.x installed, 64-bit Python 3.10–3.13 (match FieldWorks:
 x64), the Edge WebView2 runtime (already on Windows 10/11).
 
 ```bat
