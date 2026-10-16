@@ -476,6 +476,49 @@ class FlexService:
         obj["range"] = [obj["segments"][0]["n"], obj["segments"][-1]["n"]] if obj["segments"] else [0, 0]
         return obj
 
+    def clip_audio(self, examples: list[dict], folder: Path, stem: str, linked_root: Path | None = None) -> dict:
+        """One small 16-bit mono WAV per timed segment of these examples, in `folder`, named
+        `<stem>-<paragraph>.<segment>.wav` by the NEW text's numbering (Seth, 2026-10-16:
+        flextext attaches clips to individual lines; small 16-bit mono WAVs into Linked Files).
+        Each segment then points at its own clip from 0 to its length. When the folder sits
+        inside a FieldWorks LinkedFiles folder the locations are written relative to it
+        (`AudioVisual/x.wav`), which is how FLEx itself stores media; else absolute paths.
+        Returns {folder, files, matched, missing}."""
+        from .audio import find_ffmpeg, to_mono16
+        import uuid as _uuid
+        exe = find_ffmpeg(self.nb.config.get("settings", {}).get("ffmpegPath", ""))
+        folder = Path(folder)
+        files: list[str] = []
+        matched = missing = 0
+        for pi, ex in enumerate(examples, 1):
+            text = ex["text"]
+            media = []
+            for k, seg in enumerate(text.get("segments") or [], 1):
+                if seg.get("begin") is None or seg.get("end") is None or seg["end"] <= seg["begin"]:
+                    seg["begin"] = seg["end"] = None
+                    continue
+                info = self.ensure_clip(text["guid"], seg.get("media"), seg["begin"], seg["end"])
+                clip = info.get("clipPath")
+                dst = folder / f"{stem}-{pi}.{k}.wav"
+                length = to_mono16(clip, dst, exe) if clip else None
+                if not length:
+                    missing += 1
+                    seg["begin"] = seg["end"] = None
+                    continue
+                guid = str(_uuid.uuid4())
+                loc = str(dst.resolve())
+                if linked_root is not None:
+                    try:
+                        loc = dst.resolve().relative_to(Path(linked_root).resolve()).as_posix()
+                    except ValueError:
+                        pass
+                media.append({"guid": guid, "uri": loc, "path": loc, "found": True})
+                seg["begin"], seg["end"], seg["media"] = 0, int(length), guid
+                files.append(str(dst))
+                matched += 1
+            text["media"] = media
+        return {"folder": str(folder) if files else "", "files": files, "matched": matched, "missing": missing}
+
     def bundle_audio(self, examples: list[dict], dst: Path, gap_ms: int = 600) -> dict:
         """One recording of every timed segment of these examples, in order (the clips the
         cache already cuts, concatenated with a gap); the segments' offsets and media are

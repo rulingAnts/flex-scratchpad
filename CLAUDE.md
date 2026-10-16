@@ -96,9 +96,13 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
   GUIDs are NEW (an original GUID would make FLEx's import touch the source text); word GUIDs
   are kept so the import reuses the analyses. A Source note per line (title, FLEx number,
   GUIDs) and, optionally, a `flexscratchpad://note/<id>` link and the note's markdown as the
-  text comment. Audio: by default one WAV per exported text next to the file, the segments'
-  cached clips concatenated with 600 ms gaps and offsets rewritten (`audio.concat_clips`,
-  `FlexService.bundle_audio`); `original` keeps the source recordings; `none` drops timing.
+  text comment. Audio (`opts.audio`): `clips` (default) = one small 16-bit mono WAV PER LINE
+  (`audio.to_mono16`, `FlexService.clip_audio`; Seth: flextext attaches clips to individual
+  lines), each phrase pointing at its own `<media>` from 0 to its length, into
+  `<title>-audio/` or a chosen folder — inside a LinkedFiles tree the locations are relative to
+  it (`AudioVisual/x.wav`, as FLEx stores media); `bundle` = one WAV of all the examples with
+  600 ms gaps and rewritten offsets (`audio.concat_clips`); `original` keeps the source
+  recordings and offsets; `none` drops timing.
 - `flexscratchpad://note/<id>` (`links.py`): registered per user (HKCU) at start on Windows; a
   second instance hands the URL to the running one through `open-request.txt` in the local data
   folder (polled; no sockets) and exits; one instance is kept by a lock file. Off Windows the
@@ -111,6 +115,8 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
   the LCM model. The first run on Windows will need adjustments — keep every access behind the
   `_t()` guard so one odd object degrades a rendering instead of failing it, and record what you
   learn in this file.
+- ffmpeg is optional at runtime (`flex/audio.py` falls back to the stdlib for WAV) but a
+  release must ship it or install it on first use (Seth, 2026-10-16) — `plans/BACKLOG.md`.
 - GitHub Actions: public repo, standard runners only, Windows build is `workflow_dispatch`. Never
   add a schedule, a larger runner, LFS or a release step without Seth's say-so.
 - This is Seth's suite: see `flextext-editor/CLAUDE.md` for the house rules on writing about

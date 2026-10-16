@@ -187,3 +187,67 @@ def concat_clips(clips: list[Path], dst: Path, gap_ms: int = 600, ffmpeg: str | 
                 spans.append((int(round(begin * 1000 / rate)), int(round(pos * 1000 / rate))))
         tmp.replace(dst)
     return spans
+
+
+def _wav_to_mono16(src: Path, dst: Path) -> int:
+    """A WAV as 16-bit mono (channels averaged, any PCM width), by hand: Python 3.13 has no
+    audioop. Returns the length in milliseconds."""
+    import array
+    with wave.open(str(src), "rb") as r:
+        nch, width, rate = r.getnchannels(), r.getsampwidth(), r.getframerate()
+        n = r.getnframes()
+        raw = r.readframes(n)
+    out = array.array("h")
+    if width == 2 and nch == 1:
+        out.frombytes(raw)
+        if __import__("sys").byteorder == "big":
+            out.byteswap()
+    else:
+        frame = nch * width
+        for i in range(0, len(raw) - frame + 1, frame):
+            acc = 0
+            for c in range(nch):
+                b = raw[i + c * width:i + (c + 1) * width]
+                if width == 1:
+                    v = (b[0] - 128) << 8
+                else:
+                    v = int.from_bytes(b, "little", signed=True) >> (8 * (width - 2))
+                acc += v
+            v = acc // nch
+            out.append(max(-32768, min(32767, v)))
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dst.with_suffix(dst.suffix + ".tmp")
+    with wave.open(str(tmp), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(out.tobytes())
+    tmp.replace(dst)
+    return int(round(n * 1000 / rate))
+
+
+def to_mono16(src: str | Path, dst: Path, ffmpeg: str | None = None) -> int | None:
+    """Any clip (the FLAC cache, a WAV) as a small 16-bit mono WAV at `dst` (Seth, 2026-10-16:
+    "as long as they use small file size (16-bit wav, mono)"). ffmpeg when there is one, the
+    stdlib for WAVs otherwise. Returns the length in ms, or None when it could not be done."""
+    src = Path(src)
+    exe = ffmpeg or find_ffmpeg()
+    if exe:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        tmp = dst.with_suffix(".tmp.wav")
+        try:
+            subprocess.run([exe, "-y", "-v", "error", "-i", str(src), "-vn", "-ac", "1", "-acodec", "pcm_s16le", str(tmp)], check=True, capture_output=True, timeout=300)
+            tmp.replace(dst)
+            with wave.open(str(dst), "rb") as r:
+                return int(round(r.getnframes() * 1000 / r.getframerate()))
+        except (subprocess.SubprocessError, OSError, wave.Error):
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+    if src.suffix.lower() == ".wav":
+        try:
+            return _wav_to_mono16(src, dst)
+        except (wave.Error, EOFError, OSError):
+            return None
+    return None

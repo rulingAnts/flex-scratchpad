@@ -55,10 +55,13 @@ Interlinear). The writer is `flex/flextext_writer.py`:
 - a `note` item per phrase naming the source text, its FLEx number, the segment and text GUIDs,
   the embed's label and (`opts.includeLink`) the `flexscratchpad://note/<id>` link; the note's
   markdown as the text's `comment` when `opts.includeMarkdown`;
-- audio (`opts.audio`): `bundle` (default) writes `<title>.wav` beside the file — the cached
-  clips of every timed segment concatenated in order with 600 ms gaps, offsets rewritten and a
-  `media-files` block pointing at it; `original` keeps the source recordings and offsets;
-  `none` drops the timing.
+- audio (`opts.audio`): `clips` (default) writes one 16-bit mono WAV per timed line, named
+  `<title>-<paragraph>.<segment>.wav`, into `opts.audioFolder` or `<title>-audio/` beside the
+  file; each phrase points at its own `<media>` entry from 0 to its length. Choose the project's
+  `LinkedFiles\AudioVisual` as the folder and the locations are written relative to
+  `LinkedFiles` (`AudioVisual/x.wav`), the form FLEx stores; elsewhere they are full paths.
+  `bundle` writes one `<title>.wav` — every clip in order with 600 ms gaps, offsets rewritten;
+  `original` keeps the source recordings and offsets; `none` drops the timing.
 
 `flexscratchpad://note/<id>` links (`links.py`): the scheme is registered per user on Windows
 (HKCU, at start and from Settings), a second instance started with a URL writes it to

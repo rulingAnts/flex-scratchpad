@@ -1643,7 +1643,7 @@ def test_export_examples_as_flextext(app):
     page.locator(".popover .menu-item", has_text="FLEx text of the examples").click()
     page.wait_for_selector(".modal")
     assert "2 examples" in page.locator(".modal p").first.inner_text() and "1 entry object skipped" in page.locator(".modal p").first.inner_text()
-    assert page.locator(".modal input[type=text]").input_value() == "SVCs"
+    assert page.locator(".modal input[type=text]").first.input_value() == "SVCs"
     page.keyboard.press("Escape")
     # the export through the API (the dialog's Export… goes through the save dialog)
     out = str(h.tmp / "svcs.flextext")
@@ -1655,7 +1655,7 @@ def test_export_examples_as_flextext(app):
       return await api.export_note_flextext(note.id, items, { title: 'SVCs', includeLink: true, includeMarkdown: true }, out);
     }""", out)
     assert r["examples"] == 2 and r["skipped"] == 1 and r["texts"] == [{"ws": "kal", "examples": 2}]
-    assert r["audio"].endswith("svcs.wav") and r["audioMatched"] == 3 and (h.tmp / "svcs.wav").exists()
+    assert r["audio"].endswith("svcs-audio") and r["audioMatched"] == 3 and (h.tmp / "svcs-audio" / "SVCs-1.1.wav").exists()
     import xml.etree.ElementTree as ET
     root = ET.parse(out).getroot()
     phrases = root.findall(".//phrase")

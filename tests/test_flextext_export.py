@@ -162,7 +162,7 @@ def test_audio_is_bundled_into_one_recording_with_rewritten_offsets(tmp_path):
     api = make(tmp_path)
     n = api.create_note(None, "", "Audio", "x")
     out = tmp_path / "audio.flextext"
-    r = api.export_note_flextext(n["id"], [{"kind": "text", "guid": T_STORY, "seg": [1, 2]}, {"kind": "text", "guid": T_STORY, "seg": [4, 4]}], {"title": "Audio"}, str(out))
+    r = api.export_note_flextext(n["id"], [{"kind": "text", "guid": T_STORY, "seg": [1, 2]}, {"kind": "text", "guid": T_STORY, "seg": [4, 4]}], {"title": "Audio", "audio": "bundle"}, str(out))
     wav = tmp_path / "audio.wav"
     assert r["audio"] == str(wav) and r["audioMatched"] == 3 and r["audioMissing"] == 0 and wav.exists()
     with wave.open(str(wav)) as w:
@@ -185,3 +185,36 @@ def test_audio_is_bundled_into_one_recording_with_rewritten_offsets(tmp_path):
     api.export_note_flextext(n["id"], [{"kind": "text", "guid": T_STORY, "seg": [2, 2]}], {"title": "None", "audio": "none"}, str(tmp_path / "none.flextext"))
     ph = ET.parse(tmp_path / "none.flextext").getroot().find(".//phrase")
     assert ph.get("begin-time-offset") is None and ET.parse(tmp_path / "none.flextext").getroot().find(".//media-files") is None
+
+
+def test_default_audio_is_one_mono_wav_clip_per_line(tmp_path):
+    """Seth, 2026-10-16: flextext attaches clips to individual lines; small 16-bit mono WAVs
+    that go into the project's Linked Files."""
+    import wave
+    api = make(tmp_path)
+    n = api.create_note(None, "", "Clips", "x")
+    out = tmp_path / "clips.flextext"
+    r = api.export_note_flextext(n["id"], [{"kind": "text", "guid": T_STORY, "seg": [1, 2]}, {"kind": "text", "guid": T_STORY, "seg": [4, 4]}], {"title": "Clips"}, str(out))
+    folder = tmp_path / "clips-audio"
+    assert r["audio"] == str(folder) and r["audioMatched"] == 3 and r["audioMissing"] == 0
+    names = sorted(p.name for p in folder.glob("*.wav"))
+    assert names == ["Clips-1.1.wav", "Clips-1.2.wav", "Clips-2.1.wav"]
+    lengths = []
+    for name in names:
+        with wave.open(str(folder / name)) as w:
+            assert w.getnchannels() == 1 and w.getsampwidth() == 2
+            lengths.append(w.getnframes() * 1000 / w.getframerate())
+    assert [round(x) for x in lengths] == [1500, 1700, 1400]
+    root = ET.fromstring(out.read_text(encoding="utf-8"))
+    phrases = root.findall(".//phrase")
+    media = {m.get("guid"): m.get("location") for m in root.findall(".//media-files/media")}
+    assert len(media) == 3
+    for ph, name, length in zip(phrases, names, lengths):
+        assert ph.get("begin-time-offset") == "0" and abs(int(ph.get("end-time-offset")) - length) < 2
+        assert media[ph.get("media-file")] == str((folder / name).resolve())
+    # a folder inside a LinkedFiles tree → locations relative to it, as FLEx stores them
+    lf = tmp_path / "Proj" / "LinkedFiles" / "AudioVisual"
+    r2 = api.export_note_flextext(n["id"], [{"kind": "text", "guid": T_STORY, "seg": [1, 1]}], {"title": "Clips", "audioFolder": str(lf)}, str(tmp_path / "lf.flextext"))
+    assert r2["audioMatched"] == 1 and (lf / "Clips-1.1.wav").exists()
+    loc = ET.parse(tmp_path / "lf.flextext").getroot().find(".//media-files/media").get("location")
+    assert loc == "AudioVisual/Clips-1.1.wav"

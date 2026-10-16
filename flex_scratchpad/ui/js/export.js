@@ -301,9 +301,14 @@
       const src = el('input', { type: 'checkbox', checked: true });
       const wg = el('input', { type: 'checkbox', checked: true });
       const audio = el('select', { style: { width: '100%' } });
-      audio.appendChild(el('option', { value: 'bundle' }, 'one recording of the examples next to the file (clips in order, offsets rewritten)'));
+      audio.appendChild(el('option', { value: 'clips' }, 'a small 16-bit mono WAV per line, each line pointing at its own clip'));
+      audio.appendChild(el('option', { value: 'bundle' }, 'one recording of all the examples next to the file (clips in order, offsets rewritten)'));
       audio.appendChild(el('option', { value: 'original' }, 'point at the original recordings (their offsets, as in FLEx)'));
       audio.appendChild(el('option', { value: 'none' }, 'no audio'));
+      const folder = el('input', { type: 'text', placeholder: 'next to the .flextext (<title>-audio) — or the project\u2019s LinkedFiles\\AudioVisual', style: { flex: '1 1 auto', minWidth: '0' } });
+      const browse = el('button', { class: 'btn', onclick: async () => { try { const f = await FS.api.pick_folder(); if (f) folder.value = f; } catch (e) { FS.toast(e.message, 'error'); } } }, 'Browse…');
+      const folderRow = el('div', { class: 'form-row' }, el('label', {}, 'Clips into'), el('div', { style: { display: 'flex', gap: '6px', flex: '1 1 auto', minWidth: '0' } }, folder, browse));
+      audio.addEventListener('change', () => { folderRow.style.display = audio.value === 'clips' ? '' : 'none'; });
       const only = el('select', { style: { width: '100%' } });
       only.appendChild(el('option', { value: '' }, preview.texts.length > 1 ? 'all — one FLEx text per baseline writing system' : 'all'));
       for (const t of preview.texts) only.appendChild(el('option', { value: t.ws }, t.ws + ' only (' + t.examples + ' example' + (t.examples === 1 ? '' : 's') + ')'));
@@ -315,6 +320,8 @@
         el('div', { class: 'form-row' }, el('label', {}, 'Text title'), title),
         preview.texts.length > 1 ? el('div', { class: 'form-row' }, el('label', {}, 'Baseline'), only) : null,
         el('div', { class: 'form-row' }, el('label', {}, 'Audio'), audio),
+        folderRow,
+        el('p', { class: 'small muted' }, 'Choose the project\u2019s LinkedFiles\\AudioVisual folder and the clips are written there with locations FLEx resolves on import; anywhere else the file points at them by full path.'),
         el('label', { class: 'row', style: { gap: '8px' } }, src, 'Add a Source note on every line (text title, FLEx number, GUIDs)'),
         el('label', { class: 'row', style: { gap: '8px' } }, link, 'Include a link back to this note (flexscratchpad://note/…)'),
         el('label', { class: 'row', style: { gap: '8px' } }, md, 'Attach this note\u2019s markdown as the text\u2019s comment (Info tab)'),
@@ -324,10 +331,10 @@
       const row = el('div', { class: 'btn-row' });
       row.appendChild(el('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'));
       row.appendChild(el('button', { class: 'btn primary', onclick: async () => {
-        const opts = { title: title.value.trim(), includeLink: link.checked, includeMarkdown: md.checked, sourceNotes: src.checked, wordGuids: wg.checked, onlyWs: only.value || '', audio: audio.value };
+        const opts = { title: title.value.trim(), includeLink: link.checked, includeMarkdown: md.checked, sourceNotes: src.checked, wordGuids: wg.checked, onlyWs: only.value || '', audio: audio.value, audioFolder: folder.value.trim() };
         try {
           const r = await FS.api.export_note_flextext(note.id, items, opts);
-          if (r) FS.toast('Saved ' + r.path + ' — ' + r.examples + ' example' + (r.examples === 1 ? '' : 's') + (r.texts.length > 1 ? ' in ' + r.texts.length + ' texts' : '') + (r.skipped ? ', ' + r.skipped + ' skipped' : '') + (r.audio ? '; audio: ' + r.audio + (r.audioMissing ? ' (' + r.audioMissing + ' segment' + (r.audioMissing === 1 ? '' : 's') + ' without a playable clip)' : '') : ''), 'ok');
+          if (r) FS.toast('Saved ' + r.path + ' — ' + r.examples + ' example' + (r.examples === 1 ? '' : 's') + (r.texts.length > 1 ? ' in ' + r.texts.length + ' texts' : '') + (r.skipped ? ', ' + r.skipped + ' skipped' : '') + (r.audio ? '; audio: ' + r.audioMatched + ' clip' + (r.audioMatched === 1 ? '' : 's') + ' in ' + r.audio + (r.audioMissing ? ' (' + r.audioMissing + ' segment' + (r.audioMissing === 1 ? '' : 's') + ' without a playable clip)' : '') : ''), 'ok');
           m.close(); resolve(r);
         } catch (e) { FS.toast('Export failed: ' + e.message, 'error'); }
       } }, 'Export…'));

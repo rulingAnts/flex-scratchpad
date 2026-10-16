@@ -190,3 +190,18 @@ the sheet back into the table block, keeping the style line. The template's macr
 into a cell as a marked block (e.g. a cell starting `⟦flex-tsv⟧` + the rows), and the read-back
 hands such cells to `locate()` exactly as a paste in the app does, replacing them with the embed
 it finds. Needs openpyxl or a minimal xlsx writer/reader (zip + XML — like `docx_writer.py`).
+
+
+## Release: ship ffmpeg, or install it on first use (Seth, 2026-10-16)
+
+> *"If we need ffmpeg, we need to bundle it when we distribute (or auto install it on first run
+> of first use). That's a thing to remember later when we go to building a release."*
+
+What needs it: cutting clips from anything but a plain PCM WAV (`flex/audio.py`: `cut_clip`,
+`to_mono16`, `concat_clips`); the flextext export's per-line clips of MP3/M4A/FLAC sources; the
+FLAC clip cache. Without it the WAV paths still work through the stdlib and the UI records
+other formats while they play. Options for the PyInstaller build (`build/flex-scratchpad.spec`):
+bundle a static `ffmpeg.exe` next to the exe (licence: LGPL build, keep the notice) and have
+`find_ffmpeg` look beside `sys.executable` first; or offer `winget install Gyan.FFmpeg` /
+a download into `%LOCALAPPDATA%\FLEx Scratchpad\ffmpeg` on first use, with the Settings field
+already there for a custom path. Decide at release time; nothing in the code assumes either.
