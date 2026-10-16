@@ -143,6 +143,11 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
   locator against the real project and writes `flex-scratchpad-locate.json`: the rows as read,
   the hits, the best segments per pasted segment, and what the texts holding the pasted numbers
   have there, raw and normalised (`FlexService.explain_locate`) — ask for that file first.
+  Seth's first report (2026-10-16) placed its paste right, and showed the index's Morphemes
+  line read in the wrong writing system (`bete` for `bɛtɛ`) without affix glosses, and "Free Eng
+  …" keeping its `Eng`: the index now reads morph forms in the text's own WS (`_baseline_ws`)
+  through the same `_bundle_form` / `_bundle_gloss` the rendering uses, and the parser drops a
+  WS code after Free (`_paste_ws_codes`).
   While a pasted example or `silfw://` link is being looked up, `FS.busy` (util.js) shows a
   spinner pill by the caret after 200 ms (a quick answer never flashes it), with "Paste as
   text" / Esc to stop waiting; a late answer after that is ignored (Seth, 2026-10-16).
@@ -214,6 +219,8 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
   which pywebview's WinForms backend honours despite its docs), the exe icon (the spec) and the
   `flexscratchpad://` link icon; the process sets its own AppUserModelID so the taskbar does not
   group it under Python. Link registration is keyed on the build, so updates reach the registry.
+- The window starts maximized (Seth, 2026-10-16: the default size hung off his screen); the
+  size it restores to is fitted to the screen (`_fit_to_screen`) and is not saved while maximized.
 - ffmpeg is optional at runtime (`flex/audio.py` falls back to the stdlib for WAV) but a
   release must ship it or install it on first use (Seth, 2026-10-16) — `plans/BACKLOG.md`.
 - GitHub Actions: public repo, standard runners only, Windows build is `workflow_dispatch`. Never

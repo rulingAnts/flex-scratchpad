@@ -688,12 +688,13 @@ class FlexiconBackend:
                         self.progress(f"Indexing texts\u2026 {i}/{len(texts)}")
                     segs = []
                     n = 0
+                    vh = _t(lambda: self._baseline_ws(t)[0], None)     # the text's own WS for the morph forms
                     for pi, para in enumerate(_t(lambda: list(p.Paragraphs.GetAll(t)), []), 1):
                         for k, seg in enumerate(_t(lambda: list(p.Segments.GetAll(para)), []), 1):
                             n += 1
                             segs.append((n, _s(_t(lambda: p.Segments.GetBaselineText(seg), "")),
                                          _s(_t(lambda: p.Segments.GetFreeTranslation(seg), "")))
-                                        + self._index_lines(seg) + (f"{pi}.{k}", _guid(seg)))
+                                        + self._index_lines(seg, vh) + (f"{pi}.{k}", _guid(seg)))
                     index[_guid(t)] = {"title": self._text_title(t), "segments": segs}
                 self._baseline_index = index
                 self.progress("")                  # done: the pill shows the connection again
@@ -703,9 +704,12 @@ class FlexiconBackend:
         except BaseException as e:
             raise _friendly(e, self.project_name)
 
-    def _index_lines(self, seg) -> tuple[str, str]:
+    def _index_lines(self, seg, vh=None) -> tuple[str, str]:
         """The segment's Morphemes and Lex. Gloss lines (forms and glosses of every morph
-        bundle), so rows pasted without a Word line can still be located. Worker thread only."""
+        bundle), so rows pasted without a Word line can still be located. The forms are read in
+        the text's own writing system (`vh`, from `_baseline_ws`) and an affix's gloss falls back
+        to its sense, exactly as the rendered example does (Seth's locate report, 2026-10-16: the
+        index held `bete` for `bɛtɛ` and no `.CMP`). Worker thread only."""
         p = self.project
         forms, glosses = [], []
         try:
@@ -715,11 +719,32 @@ class FlexiconBackend:
                     continue
                 for b in _t(lambda: list(p.WfiMorphBundles.GetAll(analysis)), []):
                     b = self._c(b)
-                    forms.append(_s(_t(lambda: p.WfiMorphBundles.GetForm(b), "")))
-                    glosses.append(_s(_t(lambda: p.WfiMorphBundles.GetGloss(b), "")))
+                    sense = self._c(_t(lambda: p.WfiMorphBundles.GetSense(b), None))
+                    forms.append(self._bundle_form(b, vh))
+                    glosses.append(self._bundle_gloss(b, sense))
         except Exception:  # noqa: BLE001 — the index degrades to baselines for this segment
             pass
         return " ".join(x for x in forms if x), " ".join(x for x in glosses if x)
+
+    def _bundle_form(self, b, hm) -> str:
+        """A morph bundle's form in writing system `hm` (the text's own): its own form, else its
+        allomorph's — vernacular, never analysis."""
+        p = self.project
+        form = self._vern_text(_t(lambda: b.Form, None), hm)
+        if not form:
+            form = _s(_t(lambda: p.WfiMorphBundles.GetForm(b, hm) if hm is not None else p.WfiMorphBundles.GetForm(b), ""))
+        if not form:
+            form = self._vern_text(_t(lambda: self._c(b.MorphRA).Form, None), hm)
+        return form
+
+    def _bundle_gloss(self, b, sense, hmg=None) -> str:
+        """A morph bundle's gloss: the chosen WS of its sense's gloss, else FLEx's own, else the
+        sense's best (an affix often has only that)."""
+        p = self.project
+        mgls = self._anal_text(_t(lambda: sense.Gloss, None), hmg) if (sense is not None and hmg is not None) else ""
+        if not mgls:
+            mgls = _s(_t(lambda: p.WfiMorphBundles.GetGloss(b), "")) or self._anal_text(_t(lambda: sense.Gloss, None))
+        return mgls
 
     def search_texts(self, q: str) -> list[dict]:
         ql = (q or "").casefold()
@@ -982,14 +1007,8 @@ class FlexiconBackend:
                     if ent is not None:
                         cf = (self._vern_text(_t(lambda: ent.HeadWordForWs(hcf), None), None) if hcf is not None else "") \
                             or _s(_t(lambda: p.LexiconGetHeadword(ent), ""))
-                form = self._vern_text(_t(lambda: b.Form, None), hm)
-                if not form:
-                    form = _s(_t(lambda: p.WfiMorphBundles.GetForm(b, hm) if hm is not None else p.WfiMorphBundles.GetForm(b), ""))
-                if not form:   # a bundle with no form of its own shows its allomorph's (vernacular, never analysis)
-                    form = self._vern_text(_t(lambda: self._c(b.MorphRA).Form, None), hm)
-                mgls = self._anal_text(_t(lambda: sense.Gloss, None), hmg) if (sense is not None and hmg is not None) else ""
-                if not mgls:
-                    mgls = _s(_t(lambda: p.WfiMorphBundles.GetGloss(b), "")) or self._anal_text(_t(lambda: sense.Gloss, None))
+                form = self._bundle_form(b, hm)
+                mgls = self._bundle_gloss(b, sense, hmg)
                 # break characters from the morph type (IMoMorphType.Prefix / Postfix: "-" for
                 # affixes, "=" for clitics, "<"/">" for infixes), as FLEx's Morphemes line shows
                 # them; falls back to the characters already on the form or the headword

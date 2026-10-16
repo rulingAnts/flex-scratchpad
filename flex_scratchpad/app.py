@@ -30,6 +30,19 @@ def _own_taskbar_identity() -> None:
         pass
 
 
+def _fit_to_screen(width: int, height: int) -> tuple[int, int]:
+    """The remembered window size, shrunk to fit the primary screen: the size the window
+    restores to when it is un-maximized must never hang off the edge (Seth, 2026-10-16)."""
+    try:
+        import webview
+        scr = webview.screens[0]
+        width = min(width, int(scr.width * 0.9))
+        height = min(height, int(scr.height * 0.9))
+    except Exception:  # noqa: BLE001 — no screen information: keep the remembered size
+        pass
+    return max(width, 760), max(height, 480)
+
+
 def ui_url() -> str:
     """The page as a file:// URL. NEVER a plain path: pywebview treats a plain path as a "local
     URL" and starts its built-in HTTP server on 127.0.0.1 to serve it (pywebview 6.2,
@@ -62,26 +75,43 @@ def run(notebook_dir: str | None = None, demo: bool = False, debug: bool = False
     config = AppConfig()
     api = Api(config, notebook_dir=notebook_dir, demo=demo)
     size = config.data.get("window", {})
+    width, height = _fit_to_screen(int(size.get("width", 1280)), int(size.get("height", 820)))
     window = webview.create_window(
         APP_NAME,
         url=ui_url(),                       # a file:// URL: never a plain path (that starts an HTTP server), never html=
         js_api=api,
-        width=int(size.get("width", 1280)),
-        height=int(size.get("height", 820)),
+        width=width,
+        height=height,
         min_size=(760, 480),
+        maximized=True,                     # Seth, 2026-10-16: the default size hung off his screen
         text_select=True,
     )
     api._window = window
 
+    state = {"maximized": True}
+
+    def on_maximized():
+        state["maximized"] = True
+
+    def on_restored():
+        state["maximized"] = False
+
     def on_closing():
         try:
-            config.data["window"] = {"width": window.width, "height": window.height}
-            config.save()
+            if not state["maximized"]:      # a maximized window's size is the screen's, not a size to restore to
+                config.data["window"] = {"width": window.width, "height": window.height}
+                config.save()
         except Exception:  # noqa: BLE001
             pass
         api._flex.close()
 
     window.events.closing += on_closing
+    for name, fn in (("maximized", on_maximized), ("restored", on_restored)):
+        try:
+            event = getattr(window.events, name)
+            event += fn
+        except Exception:  # noqa: BLE001 — an older pywebview without the event
+            pass
 
     def open_link(url: str):
         other = links.parse_build_line(url)

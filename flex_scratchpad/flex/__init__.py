@@ -466,6 +466,7 @@ class FlexService:
 
         # bidi format marks (U+200E/F and friends) ride along in FLEx's clipboard text
         pasted = "".join(c for c in (pasted or "") if _ud.category(c) != "Cf")
+        ws_codes = self._paste_ws_codes(pasted)
         for raw in pasted.replace("\r\n", "\n").split("\n"):
             line = raw.strip()
             if not line:
@@ -522,6 +523,12 @@ class FlexService:
             prev_free = is_free
             if not words:
                 continue
+            # "Free Eng So concerning…": Eng names the writing system — in a cell of its own
+            # always, glued to the text when the paste names it elsewhere ("Word Gloss Eng")
+            if is_free and len(words) > 1 and re.fullmatch(r"[A-Za-z]{2,3}(-[\w-]+)*", words[0]):
+                words = words[1:]
+            elif is_free and len(words) == 1 and " " in words[0] and words[0].split(" ", 1)[0].casefold() in ws_codes:
+                words = words[0].split(" ", 1)[1:]
             text = " ".join(words)
             if len(text) > 400:
                 return [], norm
@@ -549,6 +556,32 @@ class FlexService:
                 cur["label"] = row_label          # FLEx's own number for this segment ("12.3", "13")
         queries = [q for q in queries if q["bases"] or q["morphs"] or q["glosses"] or q["free"]]
         return queries, norm
+
+    def _paste_ws_codes(self, pasted: str) -> set:
+        """The writing-system codes the pasted rows name ("Word Gloss Eng", a lone "Ind" under a
+        Free row), casefolded, so "Free Eng <translation>" can drop its "Eng" while a translation
+        that merely starts with a short word ("She caught it") keeps it."""
+        keys = sorted(self._ROW_KEEP + self._ROW_DROP, key=len, reverse=True)
+        codes: set = set()
+        for raw in pasted.replace("\r\n", "\n").split("\n"):
+            cells = [c.strip() for c in raw.split("\t") if c.strip()]
+            if not cells:
+                continue
+            if re.fullmatch(r"\d+(\.\d+)?", cells[0]) and len(cells) > 1:
+                cells = cells[1:]
+            head = re.sub(r"^\d+(\.\d+)?\s+", "", cells[0]).casefold()
+            if len(cells) == 1 and re.fullmatch(r"[a-z]{2,3}", head):
+                codes.add(head)
+                continue
+            for k in keys if len(cells) > 1 else ():     # the label in a cell of its own
+                if k == "free":
+                    continue
+                if head.startswith(k + " "):
+                    rest = head[len(k):].split()
+                    if rest and re.fullmatch(r"[a-z]{2,3}(-[\w-]+)*", rest[0]):
+                        codes.add(rest[0])
+                    break
+        return codes
 
     @staticmethod
     def _place_by_labels(queries: list, segs: list, labels: dict):
