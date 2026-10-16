@@ -717,9 +717,10 @@ class FlexiconBackend:
         return [t for t in self.list_texts() if ql in t["title"].casefold() or ql in t["abbrev"].casefold()]
 
     def get_text(self, guid: str, seg_from: int | None = None, seg_to: int | None = None,
-                 max_segments: int = 60, ws: dict | None = None, diag: bool = False, at=None) -> dict:
+                 max_segments: int = 60, ws: dict | None = None, diag: bool = False, at=None, alts: bool = False) -> dict:
         def go():
             self._need()
+            self._alts = alts            # every writing-system alternative rides along (the flextext export)
             obj = self._c(self.project.Object(guid))
             text = self._owning_text(obj)
             if text is None:
@@ -814,6 +815,13 @@ class FlexiconBackend:
         d["abbrev"] = _s(_t(lambda: p.Texts.GetAbbreviation(text), ""))
         d["url"] = self._goto(text, "text")
         d["media"] = self._media(text)
+        if getattr(self, "_alts", False):
+            d["titleAlts"] = self._title_alternatives(text)
+            d["abbrevAlts"] = self._ws_alternatives(_t(lambda: text.Abbreviation, None))
+            d["sourceAlts"] = self._ws_alternatives(_t(lambda: text.Source, None))
+            d["commentAlts"] = self._ws_alternatives(_t(lambda: text.Description, None))
+            lists = d["wsOptions"] or {}
+            d["languages"] = [dict(w, vernacular=True) for w in lists.get("vernacular", [])] + [dict(w, vernacular=False) for w in lists.get("analysis", [])]
         media_by_guid = {m["guid"]: m for m in d["media"]}
         index = self._segment_index(text)
         r = model.resolve_range(index, seg_from, seg_to, at)
@@ -840,6 +848,8 @@ class FlexiconBackend:
         d["segmentCount"] = n
         d["range"] = [a, min(n, b or n)] if n else [0, 0]
         d["anchors"] = model.anchors_for(d["segments"])
+        if getattr(self, "_alts", False):
+            model.fill_alts(d)          # whatever LCM gave no alternative for keeps its one value
         return d
 
     def _segment_dict(self, seg, n: int, para: int, media_by_guid: dict, k: int | None = None) -> dict:
@@ -882,6 +892,10 @@ class FlexiconBackend:
             end=_ms(_t(lambda: seg.EndTimeOffset, "")),
             media=media_guid or None,
         )
+        if getattr(self, "_alts", False):
+            out["freeAlts"] = self._ws_alternatives(_t(lambda: seg.FreeTranslation, None))
+            out["litAlts"] = self._ws_alternatives(_t(lambda: seg.LiteralTranslation, None))
+            out["notesAlts"] = [self._ws_alternatives(_t(lambda: self._c(note).Content, None)) for note in _t(lambda: list(p.Segments.GetNotes(seg)), [])]
         if getattr(self, "_diag", False) and n == 1:
             out["diagnostics"] = self._diagnostics(seg)
         return out
@@ -977,14 +991,27 @@ class FlexiconBackend:
                     pre, post = model.morph_markers(form)
                     if not pre and not post:
                         pre, post = model.morph_markers(cf)
-                morphs.append(model.make_morph(
+                md = model.make_morph(
                     form,
                     mgls,
                     _s(_t(lambda: msa.InterlinearAbbr, "")) if msa is not None else "",
                     cf,
                     prefix=pre, postfix=post,
-                ))
-        return model.make_word(txt, gls=gls, pos=pos, morphs=morphs, guid=_guid(tok))
+                )
+                if getattr(self, "_alts", False):
+                    md["formAlts"] = self._ws_alternatives(_t(lambda: b.Form, None)) or self._ws_alternatives(_t(lambda: self._c(b.MorphRA).Form, None))
+                    md["glsAlts"] = self._ws_alternatives(_t(lambda: sense.Gloss, None)) if sense is not None else {}
+                    ent = self._owning_entry(sense) if sense is not None else None
+                    md["cfAlts"] = (self._ws_alternatives(_t(lambda: ent.CitationForm, None)) or self._ws_alternatives(_t(lambda: self._c(ent.LexemeFormOA).Form, None))) if ent is not None else {}
+                    md["type"] = _s(_t(lambda: self._c(mt.Name).BestAnalysisAlternative, "")) if mt is not None else ""
+                morphs.append(md)
+        wd = model.make_word(txt, gls=gls, pos=pos, morphs=morphs, guid=_guid(tok))
+        if getattr(self, "_alts", False):
+            wd["txtAlts"] = self._ws_alternatives(_t(lambda: wf.Form, None)) if wf is not None else {}
+            wd["glsAlts"] = self._ws_alternatives(_t(lambda: tok.Form, None)) if cls == "WfiGloss" else {}
+            cat = self._c(_t(lambda: analysis.CategoryRA, None)) if analysis is not None else None
+            wd["posAlts"] = self._ws_alternatives(_t(lambda: cat.Abbreviation, None)) if cat is not None else {}
+        return wd
 
     # -- links -------------------------------------------------------------------
 

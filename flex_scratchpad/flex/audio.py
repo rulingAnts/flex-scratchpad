@@ -105,3 +105,85 @@ def store_clip_bytes(dst: Path, data_base64: str) -> Path:
         f.write(raw)
     tmp.replace(dst)
     return dst
+
+
+def _decode_to_wav(src: Path, dst: Path, exe: str, rate: int | None = None, channels: int | None = None) -> Path | None:
+    cmd = [exe, "-y", "-v", "error", "-i", str(src), "-vn", "-acodec", "pcm_s16le"]
+    if rate:
+        cmd += ["-ar", str(rate)]
+    if channels:
+        cmd += ["-ac", str(channels)]
+    cmd.append(str(dst))
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, timeout=300)
+        return dst
+    except (subprocess.SubprocessError, OSError):
+        return None
+
+
+def concat_clips(clips: list[Path], dst: Path, gap_ms: int = 600, ffmpeg: str | None = None) -> list[tuple[int, int]]:
+    """One WAV out of several clips in order, `gap_ms` of silence between them (Seth,
+    2026-10-16: the examples' audio, matched in the flextext export). Returns each clip's
+    (begin, end) in milliseconds within `dst`. Non-WAV clips (the FLAC cache) and WAVs whose
+    sample format differs from the first one are decoded with ffmpeg; without ffmpeg every
+    clip must be a WAV with the same rate / channels / width, else ValueError."""
+    import tempfile
+    exe = ffmpeg or find_ffmpeg()
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    spans: list[tuple[int, int]] = []
+    with tempfile.TemporaryDirectory() as td:
+        tmpdir = Path(td)
+        params = None            # (channels, width, rate) of the output
+        readers = []
+        for i, c in enumerate(clips):
+            c = Path(c)
+            wav = c
+            if c.suffix.lower() != ".wav":
+                if not exe:
+                    raise ValueError(f"{c.name} is not a WAV and ffmpeg was not found")
+                wav = _decode_to_wav(c, tmpdir / f"clip{i}.wav", exe, params[2] if params else None, params[0] if params else None)
+                if not wav:
+                    raise ValueError(f"ffmpeg could not decode {c.name}")
+            with wave.open(str(wav), "rb") as r:
+                these = (r.getnchannels(), r.getsampwidth(), r.getframerate())
+            if params is None:
+                params = these
+            elif these != params:
+                if not exe:
+                    raise ValueError(f"{c.name} has a different sample format and ffmpeg was not found")
+                wav = _decode_to_wav(c, tmpdir / f"clip{i}.wav", exe, params[2], params[0])
+                if not wav:
+                    raise ValueError(f"ffmpeg could not convert {c.name}")
+                with wave.open(str(wav), "rb") as r:
+                    these = (r.getnchannels(), r.getsampwidth(), r.getframerate())
+                if these[2] != params[2] or these[0] != params[0]:
+                    raise ValueError(f"{c.name} could not be matched to the first clip's format")
+                params = (params[0], these[1], params[2]) if these[1] != params[1] and i == 0 else params
+            readers.append(wav)
+        if params is None:
+            raise ValueError("no clips")
+        nch, width, rate = params
+        gap = b"\x00" * int(round(gap_ms / 1000 * rate)) * nch * width
+        tmp = dst.with_suffix(dst.suffix + ".tmp")
+        pos = 0
+        with wave.open(str(tmp), "wb") as w:
+            w.setnchannels(nch)
+            w.setsampwidth(width)
+            w.setframerate(rate)
+            for i, wav in enumerate(readers):
+                if i:
+                    w.writeframes(gap)
+                    pos += len(gap) // (nch * width)
+                with wave.open(str(wav), "rb") as r:
+                    n = r.getnframes()
+                    begin = pos
+                    while n > 0:
+                        chunk = r.readframes(min(n, 65536))
+                        if not chunk:
+                            break
+                        w.writeframes(chunk)
+                        n -= len(chunk) // (nch * width)
+                    pos += r.getnframes()
+                spans.append((int(round(begin * 1000 / rate)), int(round(pos * 1000 / rate))))
+        tmp.replace(dst)
+    return spans

@@ -5,6 +5,8 @@
     flex-scratchpad --demo                use the built-in demo project instead of FieldWorks
     flex-scratchpad --list-projects       print the FieldWorks projects flexicon can see, then exit
     flex-scratchpad --check               report whether flexicon/pythonnet/pywebview import, then exit
+    flex-scratchpad flexscratchpad://note/<id>   open that note (a second instance hands it to the running one)
+    flex-scratchpad --register-links      register the flexscratchpad:// scheme for this user (Windows)
 """
 from __future__ import annotations
 
@@ -21,7 +23,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--project", help="FieldWorks project name (with --dump)")
     ap.add_argument("--dump", metavar="TEXT", help="print the first segments of a text (title, part of a title, or GUID) as JSON and exit — for diagnosing what flexicon returns")
+    ap.add_argument("--register-links", action="store_true", help="register flexscratchpad:// links for this user (Windows) and exit")
+    ap.add_argument("url", nargs="?", help="a flexscratchpad://note/<id> link to open (what Windows passes when such a link is clicked)")
     args = ap.parse_args(argv)
+
+    if args.register_links:
+        from .links import register_scheme
+        ok = register_scheme()
+        print("registered flexscratchpad:// for this user" if ok else "could not register (not Windows, or the registry refused)")
+        return 0 if ok else 1
 
     if args.check:
         return check()
@@ -41,7 +51,7 @@ def main(argv: list[str] | None = None) -> int:
             be.close()
 
     from .app import run
-    return run(notebook_dir=args.notebook, demo=args.demo, debug=args.debug)
+    return run(notebook_dir=args.notebook, demo=args.demo, debug=args.debug, open_url=args.url)
 
 
 def dump(project: str | None, which: str) -> int:

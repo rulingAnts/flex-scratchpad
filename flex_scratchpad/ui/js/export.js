@@ -12,6 +12,7 @@
   const { esc } = FS;
   const MD = FS.markdown;
   const R = FS.flexref;
+  const el = FS.el;
 
   /* ------------------------------------------------------------------ inline → runs */
   function runsOf(text) {
@@ -270,8 +271,74 @@
       + doc.blocks.map(blockHtml).join('\n') + '\n<p style="color:#a8b0ba;font-size:11px;margin-top:40px">Exported from FLEx Scratchpad</p></body></html>';
   }
 
+  /* ------------------------------------------------------------------ examples → .flextext
+   * (Seth, 2026-10-16: "collect and concentrate certain grammatical constructions … and then
+   * have one flex text where I can analyze those in text chart"). The note's text embeds, in
+   * order, wherever they sit (blocks, inline chips, table cells); Python fetches each with
+   * every writing system and writes one FLEx text per baseline writing system. */
+  function flextextItems(editor) {
+    const items = [];
+    for (const b of editor.blocks) {
+      for (const e of R.findEmbeds(b.src || '')) {
+        const sp = e.spec;
+        if (!sp) continue;
+        items.push({ kind: sp.kind, guid: sp.guid, seg: sp.seg, at: sp.at, label: sp.label || '' });
+      }
+    }
+    return items;
+  }
+  async function exportFlextext(note, editor) {
+    const items = flextextItems(editor);
+    const texts = items.filter((i) => i.kind === 'text');
+    if (!texts.length) { FS.toast('This note has no text examples to export.', 'warn'); return null; }
+    let preview = { texts: [], skipped: 0 };
+    try { preview = await FS.api.flextext_preview(items); } catch (e) { /* the dialog still opens */ }
+    return new Promise((resolve) => {
+      const m = FS.modal({ title: 'Export examples as a FLEx text (.flextext)', class: 'narrow', onClose: () => resolve(null) });
+      const title = el('input', { type: 'text', value: note.title || 'Examples', style: { width: '100%' } });
+      const link = el('input', { type: 'checkbox', checked: true });
+      const md = el('input', { type: 'checkbox' });
+      const src = el('input', { type: 'checkbox', checked: true });
+      const wg = el('input', { type: 'checkbox', checked: true });
+      const audio = el('select', { style: { width: '100%' } });
+      audio.appendChild(el('option', { value: 'bundle' }, 'one recording of the examples next to the file (clips in order, offsets rewritten)'));
+      audio.appendChild(el('option', { value: 'original' }, 'point at the original recordings (their offsets, as in FLEx)'));
+      audio.appendChild(el('option', { value: 'none' }, 'no audio'));
+      const only = el('select', { style: { width: '100%' } });
+      only.appendChild(el('option', { value: '' }, preview.texts.length > 1 ? 'all — one FLEx text per baseline writing system' : 'all'));
+      for (const t of preview.texts) only.appendChild(el('option', { value: t.ws }, t.ws + ' only (' + t.examples + ' example' + (t.examples === 1 ? '' : 's') + ')'));
+      const what = texts.length + ' example' + (texts.length === 1 ? '' : 's')
+        + (preview.texts.length > 1 ? ' → ' + preview.texts.length + ' texts: ' + preview.texts.map((t) => t.ws + ' (' + t.examples + ')').join(', ') : preview.texts.length === 1 ? ' → one text, baseline ' + preview.texts[0].ws : '')
+        + (items.length > texts.length ? ' · ' + (items.length - texts.length) + ' entry object' + (items.length - texts.length === 1 ? '' : 's') + ' skipped (not interlinear)' : '');
+      m.body.append(
+        el('p', { class: 'small muted' }, what),
+        el('div', { class: 'form-row' }, el('label', {}, 'Text title'), title),
+        preview.texts.length > 1 ? el('div', { class: 'form-row' }, el('label', {}, 'Baseline'), only) : null,
+        el('div', { class: 'form-row' }, el('label', {}, 'Audio'), audio),
+        el('label', { class: 'row', style: { gap: '8px' } }, src, 'Add a Source note on every line (text title, FLEx number, GUIDs)'),
+        el('label', { class: 'row', style: { gap: '8px' } }, link, 'Include a link back to this note (flexscratchpad://note/…)'),
+        el('label', { class: 'row', style: { gap: '8px' } }, md, 'Attach this note\u2019s markdown as the text\u2019s comment (Info tab)'),
+        el('label', { class: 'row', style: { gap: '8px' } }, wg, 'Keep FLEx\u2019s word analysis GUIDs (the import reuses the same analyses)'),
+        el('p', { class: 'small muted' }, 'Each example becomes a paragraph of the new text; its segments keep every writing system. A FLEx text has one baseline writing system, so examples from texts in different vernacular writing systems become separate texts in the same file. Import with FieldWorks → File → Import → FLExText Interlinear.'),
+      );
+      const row = el('div', { class: 'btn-row' });
+      row.appendChild(el('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'));
+      row.appendChild(el('button', { class: 'btn primary', onclick: async () => {
+        const opts = { title: title.value.trim(), includeLink: link.checked, includeMarkdown: md.checked, sourceNotes: src.checked, wordGuids: wg.checked, onlyWs: only.value || '', audio: audio.value };
+        try {
+          const r = await FS.api.export_note_flextext(note.id, items, opts);
+          if (r) FS.toast('Saved ' + r.path + ' — ' + r.examples + ' example' + (r.examples === 1 ? '' : 's') + (r.texts.length > 1 ? ' in ' + r.texts.length + ' texts' : '') + (r.skipped ? ', ' + r.skipped + ' skipped' : '') + (r.audio ? '; audio: ' + r.audio + (r.audioMissing ? ' (' + r.audioMissing + ' segment' + (r.audioMissing === 1 ? '' : 's') + ' without a playable clip)' : '') : ''), 'ok');
+          m.close(); resolve(r);
+        } catch (e) { FS.toast('Export failed: ' + e.message, 'error'); }
+      } }, 'Export…'));
+      m.body.appendChild(row);
+      title.focus();
+    });
+  }
+
   /* ------------------------------------------------------------------ actions */
   async function exportNote(note, editor, format) {
+    if (format === 'flextext') return exportFlextext(note, editor);
     if (format === 'md') { const p = await FS.api.export_note_markdown(note.id); if (p) FS.toast('Saved ' + p, 'ok'); return p; }
     const doc = await buildDoc(note, editor);
     if (format === 'html') { const p = await FS.api.export_note_html(note.id, toHtml(doc)); if (p) FS.toast('Saved ' + p, 'ok'); return p; }
@@ -290,5 +357,5 @@
     return null;
   }
 
-  FS.exporter = { buildDoc, toHtml, exportNote, runsOf };
+  FS.exporter = { buildDoc, toHtml, exportNote, runsOf, flextextItems, exportFlextext };
 })();

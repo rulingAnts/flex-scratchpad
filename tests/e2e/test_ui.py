@@ -1623,3 +1623,42 @@ def test_paste_of_flex_rows_that_match_nothing_explains_the_word_line(app):
     page.wait_for_timeout(900)
     assert "Morphemes" in body_of(h)                                       # and the rows still landed, as text
     assert not errors
+
+
+def test_export_examples_as_flextext(app):
+    """Seth, 2026-10-16: a note's examples as one FLEx text. The note menu opens the export
+    dialog with the count and the baseline grouping; the export itself writes the file."""
+    h, page, errors = app
+    new_note(page, "SVCs")
+    page.keyboard.type("Serial verbs, in order.")
+    page.keyboard.press("Enter")
+    page.keyboard.type("{{flex:text %s seg=1-2 ex \"first\"}}" % T_STORY)
+    page.keyboard.press("Enter")
+    page.keyboard.type("Compare {{flex:entry 6a5f3a2e-1b1e-4c2a-9f10-0d2c1a7e0001}} and {{flex:text %s seg=4}} inline." % T_STORY)
+    page.wait_for_selector("#editor .text-obj")
+    page.wait_for_selector("#editor .md-embed")
+    page.wait_for_timeout(900)
+    # the note menu → the dialog
+    page.locator(".note-card").first.click(button="right")
+    page.locator(".popover .menu-item", has_text="FLEx text of the examples").click()
+    page.wait_for_selector(".modal")
+    assert "2 examples" in page.locator(".modal p").first.inner_text() and "1 entry object skipped" in page.locator(".modal p").first.inner_text()
+    assert page.locator(".modal input[type=text]").input_value() == "SVCs"
+    page.keyboard.press("Escape")
+    # the export through the API (the dialog's Export… goes through the save dialog)
+    out = str(h.tmp / "svcs.flextext")
+    r = page.evaluate("""async (out) => {
+      const api = window.pywebview.api;
+      const notes = await api.list_notes(); const note = await api.get_note(notes[0].id);
+      const editor = new FS.Editor(document.createElement('div'), {}); editor.load(note.body);
+      const items = FS.exporter.flextextItems(editor);
+      return await api.export_note_flextext(note.id, items, { title: 'SVCs', includeLink: true, includeMarkdown: true }, out);
+    }""", out)
+    assert r["examples"] == 2 and r["skipped"] == 1 and r["texts"] == [{"ws": "kal", "examples": 2}]
+    assert r["audio"].endswith("svcs.wav") and r["audioMatched"] == 3 and (h.tmp / "svcs.wav").exists()
+    import xml.etree.ElementTree as ET
+    root = ET.parse(out).getroot()
+    phrases = root.findall(".//phrase")
+    assert len(phrases) == 3 and [ph.find("item[@type='segnum']").text for ph in phrases] == ["1.1", "1.2", "2.1"]
+    assert any("label: first" in (i.text or "") for i in phrases[0].findall("item[@type='note']"))
+    assert not errors

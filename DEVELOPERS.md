@@ -37,6 +37,34 @@ JavaScript mock with demo data when no bridge is present, so the page runs in an
 5. A click opens the style popover; `flexref.toggleStyle` mutates the spec; the editor writes
    `flexref.serialize(spec)` back into the block source (or the table cell) and autosaves.
 
+## Exporting examples as a FLEx text
+
+`Api.export_note_flextext(note_id, items, opts, path)` turns a note's text embeds (in note
+order, from blocks, inline chips and table cells; the page collects them with
+`FS.exporter.flextextItems`) into a `.flextext` that FieldWorks imports (File → Import → FLExText
+Interlinear). The writer is `flex/flextext_writer.py`:
+
+- one `<interlinear-text>` per baseline writing system (a FLEx text has exactly one), titled
+  `<title> (<ws>)` when there are several; `opts.onlyWs` keeps one;
+- one `<paragraph>` per example, one `<phrase>` per segment, `segnum` = paragraph.segment;
+- every writing-system alternative of every string as its own `<item lang="…">` — the backends
+  attach them under `*Alts` keys only when asked (`alts=True`), ordinary rendering never
+  carries them;
+- new GUIDs for text, paragraphs and phrases; word GUIDs kept (`opts.wordGuids`), morph `type`
+  from the break characters, bare morph glosses (the break characters stay on the forms);
+- a `note` item per phrase naming the source text, its FLEx number, the segment and text GUIDs,
+  the embed's label and (`opts.includeLink`) the `flexscratchpad://note/<id>` link; the note's
+  markdown as the text's `comment` when `opts.includeMarkdown`;
+- audio (`opts.audio`): `bundle` (default) writes `<title>.wav` beside the file — the cached
+  clips of every timed segment concatenated in order with 600 ms gaps, offsets rewritten and a
+  `media-files` block pointing at it; `original` keeps the source recordings and offsets;
+  `none` drops the timing.
+
+`flexscratchpad://note/<id>` links (`links.py`): the scheme is registered per user on Windows
+(HKCU, at start and from Settings), a second instance started with a URL writes it to
+`open-request.txt` in the local data folder and exits, the running instance polls that file
+and opens the note. No sockets, no server.
+
 ## The file format: Markdown with a declared extension vocabulary
 
 Seth asked (2026-10-12) whether the raw format should be HTML under the hood, "tolerating and

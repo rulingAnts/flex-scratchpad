@@ -236,6 +236,104 @@ class Api:
         Path(target).write_bytes(build_docx(doc))
         return target
 
+    def export_note_flextext(self, note_id: str, items: list[dict], opts: dict | None = None, path: str | None = None) -> dict | None:
+        """A note's text examples as one .flextext (Seth, 2026-10-16): `items` are the note's
+        text embeds in order ([{guid, seg, at, label}], from the page's parser); one FLEx text
+        per baseline writing system; options: title, includeLink, includeMarkdown, sourceNotes,
+        wordGuids, onlyWs. Returns {path, examples, texts, skipped} or None when cancelled."""
+        from .flex.flextext_writer import build_flextext, group_by_baseline
+        from .links import note_url
+        opts = dict(opts or {})
+        n = self._nb.get_note(note_id)
+        examples, skipped = [], []
+        for it in items or []:
+            if (it.get("kind") or "text") != "text":
+                skipped.append(it)
+                continue
+            try:
+                text = self._flex.example_text(it["guid"], it.get("seg"), it.get("at"))
+            except FlexError as e:
+                skipped.append(dict(it, error=e.message))
+                continue
+            except Exception as e:  # noqa: BLE001
+                skipped.append(dict(it, error=str(e)))
+                continue
+            if not text.get("segments"):
+                skipped.append(dict(it, error="no segments"))
+                continue
+            examples.append({"text": text, "label": it.get("label") or ""})
+        if not examples:
+            raise RuntimeError("This note has no text examples to export" + (f" ({len(skipped)} could not be read)" if skipped else "") + ".")
+        wopts = {
+            "title": opts.get("title") or n.title or "Examples",
+            "abbrev": opts.get("abbrev") or "",
+            "noteUrl": note_url(note_id) if opts.get("includeLink", True) else "",
+            "markdown": n.body if opts.get("includeMarkdown") else "",
+            "sourceNotes": opts.get("sourceNotes", True),
+            "wordGuids": opts.get("wordGuids", True),
+            "onlyWs": opts.get("onlyWs") or "",
+        }
+        groups = group_by_baseline(examples)
+        if wopts["onlyWs"]:
+            groups = [g for g in groups if g[0] == wopts["onlyWs"]]
+        target = path or self._save_dialog((wopts["title"] or "examples") + ".flextext")
+        if not target:
+            return None
+        # audio (Seth, 2026-10-16: "grab audio segments and match them"): one recording per
+        # exported text next to the file, every example's clip in order, offsets rewritten;
+        # 'original' keeps the source recordings and offsets; 'none' drops the timing
+        audio = opts.get("audio") or "bundle"
+        audio_out = {"path": "", "matched": 0, "missing": 0}
+        if audio == "bundle":
+            kept = [ex for k, v in groups for ex in v]
+            per_text = {}
+            for k, v in groups:
+                suffix = f"-{k}" if len(groups) > 1 else ""
+                dst = Path(target).with_name(Path(target).stem + suffix + ".wav")
+                r = self._flex.bundle_audio(v, dst)
+                per_text[k] = r
+                audio_out["matched"] += r["matched"]
+                audio_out["missing"] += r["missing"]
+                if r["path"]:
+                    audio_out["path"] = (audio_out["path"] + "; " if audio_out["path"] else "") + r["path"]
+            del kept
+        elif audio == "none":
+            for _, v in groups:
+                for ex in v:
+                    for seg in ex["text"].get("segments") or []:
+                        seg["begin"] = seg["end"] = None
+        xml = build_flextext([ex for _, v in groups for ex in v], wopts)
+        Path(target).write_text(xml, encoding="utf-8", newline="\n")
+        return {"path": target, "examples": sum(len(v) for _, v in groups), "texts": [{"ws": k, "examples": len(v)} for k, v in groups], "skipped": len(skipped),
+                "audio": audio_out["path"], "audioMatched": audio_out["matched"], "audioMissing": audio_out["missing"]}
+
+    def flextext_preview(self, items: list[dict]) -> dict:
+        """What an export of these items would produce: the baseline writing systems and
+        their example counts (for the export dialog), without writing anything."""
+        from collections import OrderedDict
+        groups: "OrderedDict[str, int]" = OrderedDict()
+        skipped = 0
+        for it in items or []:
+            if (it.get("kind") or "text") != "text":
+                skipped += 1
+                continue
+            try:
+                obj = self._flex.get_object("text", it["guid"], 1, 1)
+                tag = ((obj.get("ws") or {}).get("vern") or {}).get("tag") or "und"
+            except Exception:  # noqa: BLE001
+                tag = "?"
+            groups[tag] = groups.get(tag, 0) + 1
+        return {"texts": [{"ws": k, "examples": v} for k, v in groups.items()], "skipped": skipped}
+
+    def note_link(self, note_id: str) -> str:
+        from .links import note_url
+        return note_url(note_id)
+
+    def register_links(self) -> bool:
+        """Register flexscratchpad:// for this user (Windows); False where that is not possible."""
+        from .links import register_scheme
+        return bool(register_scheme())
+
     def export_notebook_zip(self, path: str | None = None, include_cache: bool = True) -> str | None:
         target = path or self._save_dialog(self._nb.root.name + ".zip")
         if not target:

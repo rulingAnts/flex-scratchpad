@@ -388,6 +388,7 @@
       item(n.pinned ? 'Unpin' : 'Pin to top', async () => { await FS.api.save_note(n.id, { pinned: !n.pinned }); if (S.note && S.note.id === n.id) S.note.pinned = !n.pinned; await refreshLists(); renderNoteMeta(); });
       item('Move to…', () => moveDialog(n));
       item('Copy markdown', async () => { const full = await FS.api.get_note(n.id); FS.copyText(full.body); FS.toast('Copied'); });
+      item('Copy link to this note', () => { FS.copyText('flexscratchpad://note/' + n.id); FS.toast('Link copied — it opens this note in FLEx Scratchpad'); });
       pop.appendChild(el('hr'));
       pop.appendChild(el('div', { class: 'row', style: { padding: '0 8px' } }, el('b', {}, 'Export')));
       const doExport = async (fmt) => { if (!S.note || S.note.id !== n.id) await openNote(n.id); await flushSave(); try { await FS.exporter.exportNote(S.note, ensureEditor(), fmt); } catch (e) { FS.toast('Export failed: ' + e.message, 'error'); } };
@@ -395,6 +396,7 @@
       item('Web page (.html)', () => doExport('html'));
       item('Word (.docx)', () => doExport('docx'));
       item('PDF (print…)', () => doExport('pdf'));
+      item('FLEx text of the examples (.flextext)…', () => doExport('flextext'));
       if (S.init.canBrowse) item('Show file', () => FS.api.reveal_note(n.id));
       pop.appendChild(el('hr'));
       item('Delete (to trash)', async () => { if (!confirm('Move “' + (n.title || 'Untitled') + '” to the trash?')) return; await FS.api.delete_note(n.id); if (S.note && S.note.id === n.id) { S.note = null; $('editor-pane').classList.add('no-note'); } await refreshLists(); }, 'danger');
@@ -550,6 +552,9 @@
     ffRow.appendChild(el('div', { style: { display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' } }, ffIn, ffSt));
     fx.appendChild(ffRow);
     ffCheck();
+    // flexscratchpad://note/<id> links (from FLEx notes, documents, the browser) open the note here
+    const lkSt = el('span', { class: 'small muted' }, 'A “Copy link to this note” link opens the note in this app once the scheme is registered (done at start on Windows).');
+    fx.appendChild(el('div', { class: 'form-row' }, el('label', {}, 'Note links'), el('div', { style: { display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' } }, el('button', { class: 'btn', onclick: async () => { try { const ok = await FS.api.register_links(); lkSt.textContent = ok ? '✓ flexscratchpad:// links are registered for this user' : '○ could not register here (Windows only)'; } catch (e) { lkSt.textContent = e.message; } } }, 'Register flexscratchpad:// links'), lkSt)));
     const st0 = flexState();
     if (st0.level !== 'ok') { const ex = el('div', { class: 'flex-explain' }, el('div', { class: 'small' }, el('b', {}, (st0.level === 'warn' ? '⚠ ' : st0.level === 'err' ? '✖ ' : '') + st0.title), ' ', st0.text || '')); if (st0.fix) ex.appendChild(el('div', { class: 'fix' }, el('b', {}, 'How to fix it'), el('ol', {}, ...st0.fix.map((x) => el('li', {}, x))))); fx.appendChild(ex); }
     fx.appendChild(el('p', { class: 'muted small' }, 'Reading the project directly needs FieldWorks installed on this computer plus the flexicon and pythonnet packages (pip install "flex-scratchpad[flex]"). If FLEx is open at the same time, turn on Project Properties → Sharing → “Share project contents with programs on this computer”.'));
@@ -735,6 +740,9 @@
 
   /* ------------------------------------------------------------------ welcome note */
   FS.flexUi = { flexState, flexPrompt, renderFlexPill, setFlex: (f) => { S.flex = f; renderFlexPill(); } };
+  // a flexscratchpad://note/<id> link handed over by Python (see links.py)
+  FS.openNoteById = async (id) => { try { await openNote(id); await refreshLists(); } catch (e) { FS.toast('That note is not in this notebook', 'warn'); } };
+  FS.bringToFront = () => { try { window.focus(); } catch (e) { /* nothing to do */ } };
   FS.welcomeNote = () => [
     '# Welcome to FLEx Scratchpad',
     '',

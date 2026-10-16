@@ -205,7 +205,7 @@ class FlexService:
     # -- objects ----------------------------------------------------------------
 
     def get_object(self, kind: str, guid: str, seg_from: int | None = None, seg_to: int | None = None,
-                   prefer_cache: bool = False, ws: dict | None = None, at: list | None = None) -> dict:
+                   prefer_cache: bool = False, ws: dict | None = None, at: list | None = None, alts: bool = False) -> dict:
         """Live object (snapshotted on the way through) or the snapshot when live fails.
         `ws` pins a writing system per interlinear line ({"txt": "fau-fonipa", "gls": "id"});
         such a selection is snapshotted under its own variant key."""
@@ -213,6 +213,8 @@ class FlexService:
         guid = (guid or "").lower()
         ws = {k: v for k, v in (ws or {}).items() if v} or None
         variant = guid if not ws else guid + "~" + "-".join(k + "_" + v for k, v in sorted(ws.items())).lower()
+        if alts:
+            variant += "~alts"          # every writing system: its own snapshot, never the lean one
         with self.lock:
             live_err = None
             if not prefer_cache:
@@ -222,7 +224,7 @@ class FlexService:
                         obj = be.get_entry(guid)
                         self.cache.put(self.project_name, "entry", guid, obj)
                     elif kind == "text":
-                        obj = be.get_text(guid, seg_from, seg_to, ws=ws, at=at)
+                        obj = be.get_text(guid, seg_from, seg_to, ws=ws, at=at, alts=alts) if alts else be.get_text(guid, seg_from, seg_to, ws=ws, at=at)
                         self.cache.merge_text(self.project_name, variant, obj)
                     elif kind == "wordform":
                         obj = be.get_wordform(guid)
@@ -451,6 +453,64 @@ class FlexService:
                 hits.append({"guid": guid, "title": t["title"], "seg": n, "segTo": last, "score": score, "matched": k, "of": len(queries)})
         hits.sort(key=lambda h: (-h["score"], -h["matched"], h["title"]))
         return hits[:limit]
+
+    def example_text(self, guid: str, seg: list | None, at: list | None) -> dict:
+        """A text carrying exactly an example's segments with every writing system — the whole
+        text when the embed has no range (fetched in pages; the backends cap a slice)."""
+        if seg or at:
+            obj = self.get_object("text", guid, seg[0] if seg else None, seg[1] if seg else None, False, None, at, alts=True)
+            return obj
+        page = 60
+        a = 1
+        obj = None
+        while True:
+            part = self.get_object("text", guid, a, a + page - 1, False, None, None, alts=True)
+            if obj is None:
+                obj = dict(part)
+                obj["segments"] = []
+            obj["segments"].extend(part.get("segments") or [])
+            total = part.get("segmentCount") or 0
+            a += page
+            if not part.get("segments") or a > total:
+                break
+        obj["range"] = [obj["segments"][0]["n"], obj["segments"][-1]["n"]] if obj["segments"] else [0, 0]
+        return obj
+
+    def bundle_audio(self, examples: list[dict], dst: Path, gap_ms: int = 600) -> dict:
+        """One recording of every timed segment of these examples, in order (the clips the
+        cache already cuts, concatenated with a gap); the segments' offsets and media are
+        rewritten to it. Returns {path, matched, missing}; no file when nothing was timed."""
+        from .audio import concat_clips, find_ffmpeg
+        import uuid as _uuid
+        clips, slots = [], []
+        missing = 0
+        for ex in examples:
+            text = ex["text"]
+            for seg in text.get("segments") or []:
+                if seg.get("begin") is None or seg.get("end") is None or seg["end"] <= seg["begin"]:
+                    continue
+                info = self.ensure_clip(text["guid"], seg.get("media"), seg["begin"], seg["end"])
+                if info.get("clipPath"):
+                    clips.append(Path(info["clipPath"]))
+                    slots.append(seg)
+                else:
+                    missing += 1
+        if not clips:
+            for ex in examples:
+                for seg in ex["text"].get("segments") or []:
+                    seg["begin"] = seg["end"] = None      # no recording to point at
+            return {"path": "", "matched": 0, "missing": missing}
+        spans = concat_clips(clips, Path(dst), gap_ms, find_ffmpeg(self.nb.config.get("settings", {}).get("ffmpegPath", "")))
+        bundle_guid = str(_uuid.uuid4())
+        matched = {id(seg) for seg in slots}
+        for ex in examples:
+            ex["text"]["media"] = [{"guid": bundle_guid, "uri": Path(dst).name, "path": str(Path(dst).resolve()), "found": True}]
+            for seg in ex["text"].get("segments") or []:
+                if id(seg) not in matched:
+                    seg["begin"] = seg["end"] = None
+        for seg, (a, b) in zip(slots, spans):
+            seg["begin"], seg["end"], seg["media"] = a, b, bundle_guid
+        return {"path": str(dst), "matched": len(slots), "missing": missing}
 
     def resolve_link(self, text: str) -> dict | None:
         """A pasted FLEx hyperlink or bare GUID → {kind, guid, title, seg?, sense?, database?}."""

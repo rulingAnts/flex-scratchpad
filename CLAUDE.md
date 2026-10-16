@@ -88,6 +88,21 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
   matches the baseline; without one, Morphemes rows match the segment's OWN morpheme line
   (Seth, 2026-10-14: morph forms need not spell the surface word), then Lex. Gloss rows its
   gloss line. When nothing matches, the picker tells the user to copy with the Word line showing.
+- Exporting a note's examples as a `.flextext` (`flex/flextext_writer.py`, `Api.export_note_flextext`,
+  Seth, 2026-10-16): one `<interlinear-text>` PER BASELINE WRITING SYSTEM (a FLEx text has one
+  vernacular WS), one paragraph per example, one phrase per segment, every writing-system
+  alternative as its own `<item lang>` (backends attach `*Alts` only when asked: `get_text(…,
+  alts=True)` / `get_object(…, alts=True)`, see `model.fill_alts`). Text / paragraph / phrase
+  GUIDs are NEW (an original GUID would make FLEx's import touch the source text); word GUIDs
+  are kept so the import reuses the analyses. A Source note per line (title, FLEx number,
+  GUIDs) and, optionally, a `flexscratchpad://note/<id>` link and the note's markdown as the
+  text comment. Audio: by default one WAV per exported text next to the file, the segments'
+  cached clips concatenated with 600 ms gaps and offsets rewritten (`audio.concat_clips`,
+  `FlexService.bundle_audio`); `original` keeps the source recordings; `none` drops timing.
+- `flexscratchpad://note/<id>` (`links.py`): registered per user (HKCU) at start on Windows; a
+  second instance hands the URL to the running one through `open-request.txt` in the local data
+  folder (polled; no sockets) and exits; one instance is kept by a lock file. Off Windows the
+  registration is a no-op and the link is plain text.
 - Sharing check (`_sharing_status`): `shared` comes from the open cache's `ProjectId.Type`
   (the shared XML backend is what Project Properties → Sharing switches on) and `flexHasItOpen`
   from `<project>.fwdata.lock`; both are guesses from the LCM model until confirmed on a real

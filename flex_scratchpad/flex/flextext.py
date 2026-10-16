@@ -21,6 +21,16 @@ def _items(el: ET.Element, typ: str) -> list[ET.Element]:
     return [c for c in el if c.tag == "item" and c.get("type") == typ]
 
 
+def _alts(items: list[ET.Element]) -> dict:
+    """{lang: text} for every item of one type (every writing system the file carries)."""
+    out: dict = {}
+    for it in items:
+        txt = (it.text or "").strip()
+        if txt:
+            out[it.get("lang") or "und"] = txt
+    return out
+
+
 def _pick(items: list[ET.Element], lang: str) -> ET.Element | None:
     if not items:
         return None
@@ -85,6 +95,13 @@ class FlextextFile:
         title = _text(_pick(_items(it, "title"), self.vern_lang)) or _text(_pick(_items(it, "title"), self.anal_lang))
         text = model.empty_text(guid, title, self._ws(self.vern_lang), self._ws(self.anal_lang))
         text["abbrev"] = _text(_pick(_items(it, "title-abbreviation"), self.vern_lang))
+        text["source"] = _text(_pick(_items(it, "source"), self.anal_lang))
+        text["comment"] = _text(_pick(_items(it, "comment"), self.anal_lang))
+        text["titleAlts"] = _alts(_items(it, "title"))
+        text["abbrevAlts"] = _alts(_items(it, "title-abbreviation"))
+        text["sourceAlts"] = _alts(_items(it, "source"))
+        text["commentAlts"] = _alts(_items(it, "comment"))
+        text["languages"] = [{"tag": lg.get("lang") or "", "font": lg.get("font") or "", "vernacular": lg.get("vernacular") == "true", "rtl": lg.get("RightToLeft") == "true"} for lg in self.root.iter("language")]
         text["source"] = "flextext"
         langs = [self._ws(lg.get("lang") or "") for lg in self.root.iter("language")]
         text["wsOptions"] = {"vernacular": [w for w, lg in zip(langs, self.root.iter("language")) if lg.get("vernacular") == "true"],
@@ -160,17 +177,23 @@ class FlextextFile:
                     words.append(self._parse_word(w))
         if not baseline:
             baseline = model.baseline_from_words(words)
-        return model.make_segment(
+        seg = model.make_segment(
             guid, n, para, baseline, words, k=k, free=free, lit=lit, notes=notes,
             begin=_ms(ph.get("begin-time-offset")), end=_ms(ph.get("end-time-offset")),
             media=(ph.get("media-file") or None),
         )
+        seg["freeAlts"] = _alts(gls_after or gls_any)
+        seg["litAlts"] = _alts([i for i in kids if i.tag == "item" and i.get("type") == "lit"])
+        seg["notesAlts"] = [_alts([i]) for i in kids if i.tag == "item" and i.get("type") == "note" and _text(i)]
+        return seg
 
     def _parse_word(self, w: ET.Element) -> dict:
         items = [c for c in w if c.tag == "item"]
         punct = _pick([i for i in items if i.get("type") == "punct"], self.vern_lang)
         if punct is not None:
-            return model.make_word(_text(punct), punct=True, guid=(w.get("guid") or "").lower())
+            pw = model.make_word(_text(punct), punct=True, guid=(w.get("guid") or "").lower())
+            pw["txtAlts"] = _alts([i for i in items if i.get("type") == "punct"])
+            return pw
         txt = _text(_pick([i for i in items if i.get("type") == "txt"], self.vern_lang))
         gls = _text(_pick([i for i in items if i.get("type") == "gls"], self.anal_lang))
         pos = _text(_pick([i for i in items if i.get("type") == "pos"], self.anal_lang))
@@ -178,15 +201,26 @@ class FlextextFile:
         for ms in w.findall("morphemes"):
             for m in ms.findall("morph"):
                 mi = [c for c in m if c.tag == "item"]
-                morphs.append(model.make_morph(
+                md = model.make_morph(
                     form=_text(_pick([i for i in mi if i.get("type") == "txt"], self.vern_lang)),
                     gls=_text(_pick([i for i in mi if i.get("type") == "gls"], self.anal_lang)),
                     msa=_text(_pick([i for i in mi if i.get("type") == "msa"], self.anal_lang)),
                     cf=_text(_pick([i for i in mi if i.get("type") == "cf"], self.vern_lang)),
-                ))
+                )
+                md["formAlts"] = _alts([i for i in mi if i.get("type") == "txt"])
+                md["glsAlts"] = _alts([i for i in mi if i.get("type") == "gls"])
+                md["msaAlts"] = _alts([i for i in mi if i.get("type") == "msa"])
+                md["cfAlts"] = _alts([i for i in mi if i.get("type") == "cf"])
+                if m.get("type"):
+                    md["type"] = m.get("type")
+                morphs.append(md)
         if not txt and morphs:
             txt = "".join(re.sub(r"^[-=~]+|[-=~]+$", "", m["form"]) for m in morphs)
-        return model.make_word(txt, gls=gls, pos=pos, morphs=morphs, guid=(w.get("guid") or "").lower())
+        wd = model.make_word(txt, gls=gls, pos=pos, morphs=morphs, guid=(w.get("guid") or "").lower())
+        wd["txtAlts"] = _alts([i for i in items if i.get("type") == "txt"])
+        wd["glsAlts"] = _alts([i for i in items if i.get("type") == "gls"])
+        wd["posAlts"] = _alts([i for i in items if i.get("type") == "pos"])
+        return wd
 
 
 class FlextextBackend:
@@ -219,11 +253,11 @@ class FlextextBackend:
                 for t in self.texts.values()]
 
     def get_text(self, guid: str, seg_from: int | None = None, seg_to: int | None = None,
-                 max_segments: int = 60, ws=None, diag=False, at=None) -> dict:
+                 max_segments: int = 60, ws=None, diag=False, at=None, alts: bool = False) -> dict:
         t = self.texts.get((guid or "").lower())
         if not t:
             raise KeyError(f"No text with guid {guid} in the .flextext file(s).")
-        return slice_text(t, seg_from, seg_to, max_segments, at=at)
+        return slice_text(t, seg_from, seg_to, max_segments, at=at, alts=alts)
 
     def search_texts(self, q: str) -> list[dict]:
         ql = (q or "").casefold()
@@ -254,7 +288,7 @@ class FlextextBackend:
 
 
 def slice_text(text: dict, seg_from: int | None, seg_to: int | None, max_segments: int = 60, ws=None, diag=False,
-               at: list | None = None) -> dict:
+               at: list | None = None, alts: bool = False) -> dict:
     """A copy of the text carrying only segments seg_from..seg_to (1-based, inclusive), capped;
     with `at` anchors the range follows the anchored segments (see model.resolve_range)."""
     segs = text["segments"]
@@ -265,8 +299,15 @@ def slice_text(text: dict, seg_from: int | None, seg_to: int | None, max_segment
     b = min(total, r["to"] if seg_to or at else total)
     if b - a + 1 > max_segments:
         b = a + max_segments - 1
-    out = dict(text)
-    out["segments"] = [dict(s) for s in segs[a - 1:b]]
+    import copy
+    out = copy.deepcopy(dict(text))
+    out["segments"] = copy.deepcopy(segs[a - 1:b])
+    # every writing-system alternative rides only when asked for (the flextext export);
+    # ordinary rendering and snapshots carry the one value per line
+    if alts:
+        model.fill_alts(out)
+    else:
+        model.strip_alts(out)
     out["segmentCount"] = total
     out["range"] = [a, b] if total else [0, 0]
     out["index"] = index

@@ -38,7 +38,10 @@ Where it goes: the embed's ⋯ menu (and the overlay's bar) gets *Copy as → FL
 ## Reverse links (FLEx → note)
 
 `flexscratchpad://note/<id>` registered per user, a second instance handing the URL to the
-running one through a file in the app data folder (no sockets). Deferred from the first plan.
+running one through a file in the app data folder (no sockets). **Done 2026-10-16**
+(`links.py`): the flextext export writes the link into each phrase's Source note and the
+text's source field, and "Copy link to this note" is on the note menu. Still open: inserting
+such a link into a FLEx field from here (a write — see below).
 
 ## Several FLEx projects in one notebook (Seth, 2026-10-12)
 

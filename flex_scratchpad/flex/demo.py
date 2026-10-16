@@ -113,6 +113,10 @@ def _story() -> dict:
             f"9b1c2d3e-4f50-4a6b-8c7d-0e1f2a3b1{i:03d}", i, para, base, words, free=free, k=kk[para],
             begin=b, end=e, media=MEDIA_STORY, notes=["Segment one has a note."] if i == 1 else []))
     t["segmentCount"] = len(t["segments"])
+    # a second analysis writing system on the first segment (what a real project carries)
+    t["segments"][0]["freeAlts"] = {"en": "The dog slept.", "id": "Anjing itu tidur."}
+    t["segments"][0]["words"][0]["glsAlts"] = {"en": "dog", "id": "anjing"}
+    t["wsOptions"]["analysis"].append(model.make_ws("id", "Indonesian", "", False))
     return t
 
 
@@ -224,12 +228,12 @@ class DemoBackend:
         ql = (q or "").casefold()
         return [t for t in self.list_texts() if ql in t["title"].casefold()]
 
-    def get_text(self, guid: str, seg_from=None, seg_to=None, max_segments: int = 60, ws=None, diag=False, at=None) -> dict:
+    def get_text(self, guid: str, seg_from=None, seg_to=None, max_segments: int = 60, ws=None, diag=False, at=None, alts: bool = False) -> dict:
         from .flextext import slice_text
         t = self.texts.get((guid or "").lower())
         if not t:
             raise KeyError(f"No text with guid {guid}")
-        return slice_text(t, seg_from, seg_to, max_segments, at=at)
+        return slice_text(t, seg_from, seg_to, max_segments, at=at, alts=alts)
 
     def all_baselines(self) -> dict:
         return {g: {"title": t["title"], "segments": [(sg["n"], sg["baseline"], sg.get("free", "")) + model.index_lines(sg) for sg in t["segments"]]}

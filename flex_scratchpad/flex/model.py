@@ -147,6 +147,89 @@ def make_morph(form: str, gls: str = "", msa: str = "", cf: str = "", prefix: st
             "msa": msa, "cf": with_markers(cf, prefix, postfix)}
 
 
+def strip_markers(text: str, form: str) -> str:
+    """`text` without the break characters `form` wears (a gloss `-PST` → `PST`), for formats
+    that keep glosses bare (flextext)."""
+    pre, post = morph_markers(form or "")
+    t = text or ""
+    if pre and t.startswith(pre) and len(t) > len(pre):
+        t = t[len(pre):]
+    if post and t.endswith(post) and len(t) > len(post):
+        t = t[:-len(post)]
+    return t
+
+
+def morph_type_of(form: str) -> str:
+    """FLEx's morph type name from the break characters on a form: `ka-` prefix, `-mo` suffix,
+    `=lo` enclitic, `lo=` proclitic, `<in>` infix, `~` reduplication, else stem."""
+    pre, post = morph_markers(form or "")
+    if pre.startswith("<") or post.endswith(">"):
+        return "infix"
+    if pre.startswith("=") and post.endswith("="):
+        return "clitic"
+    if pre.startswith("="):
+        return "enclitic"
+    if post.endswith("="):
+        return "proclitic"
+    if pre.startswith("-") and post.endswith("-"):
+        return "infix"
+    if pre.startswith("-"):
+        return "suffix"
+    if post.endswith("-"):
+        return "prefix"
+    if "~" in pre or "~" in post:
+        return "stem"
+    return "stem"
+
+
+ALT_KEYS = ("titleAlts", "abbrevAlts", "sourceAlts", "commentAlts", "freeAlts", "litAlts", "notesAlts",
+            "txtAlts", "glsAlts", "posAlts", "formAlts", "msaAlts", "cfAlts")
+
+
+def fill_alts(text: dict) -> dict:
+    """Give every string of a text its writing-system alternatives ({tag: text}) where a
+    backend has none: the one value under the text's own vernacular / analysis tag. The
+    flextext writer walks these to put a `lang` on each item. Existing alts are kept."""
+    vt = ((text.get("ws") or {}).get("vern") or {}).get("tag") or "und"
+    at = ((text.get("ws") or {}).get("anal") or {}).get("tag") or "en"
+    one = lambda v, tag: ({tag: v} if v else {})  # noqa: E731
+    text.setdefault("titleAlts", dict(text.get("titleAlternatives") or {}) or one(text.get("title", ""), at))
+    text.setdefault("abbrevAlts", one(text.get("abbrev", ""), at))
+    text.setdefault("sourceAlts", one(text.get("source", ""), at))
+    text.setdefault("commentAlts", one(text.get("comment", ""), at))
+    for seg in text.get("segments") or []:
+        seg.setdefault("freeAlts", one(seg.get("free", ""), at))
+        seg.setdefault("litAlts", one(seg.get("lit", ""), at))
+        seg.setdefault("notesAlts", [one(n, at) for n in (seg.get("notes") or [])])
+        for w in seg.get("words") or []:
+            w.setdefault("txtAlts", one(w.get("txt", ""), vt))
+            if not w.get("punct"):
+                w.setdefault("glsAlts", one(w.get("gls", ""), at))
+                w.setdefault("posAlts", one(w.get("pos", ""), at))
+            for m in w.get("morphs") or []:
+                m.setdefault("formAlts", one(m.get("form", ""), vt))
+                m.setdefault("glsAlts", one(strip_markers(m.get("gls", ""), m.get("form", "")), at))
+                m.setdefault("msaAlts", one(m.get("msa", ""), at))
+                m.setdefault("cfAlts", one(m.get("cf", ""), vt))
+    return text
+
+
+def strip_alts(text: dict) -> dict:
+    """The same text without the alternatives (what ordinary rendering and snapshots carry)."""
+    for k in ALT_KEYS:
+        text.pop(k, None)
+    for seg in text.get("segments") or []:
+        for k in ALT_KEYS:
+            seg.pop(k, None)
+        for w in seg.get("words") or []:
+            for k in ALT_KEYS:
+                w.pop(k, None)
+            for m in w.get("morphs") or []:
+                for k in ALT_KEYS:
+                    m.pop(k, None)
+    return text
+
+
 def empty_entry(guid: str, headword: str = "") -> dict:
     return {
         "kind": "entry", "guid": guid, "headword": headword, "lexemeForm": "", "citationForm": "",
