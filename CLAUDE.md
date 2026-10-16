@@ -81,6 +81,12 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
   their parent. The block ⋮ menu has "Start numbering at…".
 - A table's indent in the note is `indent N` (1–4) in its style line: Tab / Shift+Tab on the
   focused table, the context menu, Table style. Exports carry it (`indent` on the table block).
+- Selecting across blocks (Seth, 2026-10-16) is ours, because Chromium confines a mouse selection
+  to the editable block it started in: `wireMultiSelect` keeps `editor.msel = {a:{b,off}, z:{b,off}}`
+  (partial text at the ends, whole blocks between), painted with the CSS highlight API
+  (`::highlight(fs-msel)`) plus `.msel-block` on whole blocks. Drag out of a block, Shift+click,
+  Shift+Arrow Up/Down extend it; Ctrl+A twice takes the note; cut / copy / paste / delete /
+  type-over / Enter act on it (`deleteSelection` joins the two ends into one block).
 - `beforeinput` is whitelisted; Enter/paste/bold/undo are ours. Chromium must never inject HTML.
 - Undo is our own snapshot stack (innerHTML rebuilds break native undo).
 

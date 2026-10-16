@@ -1638,10 +1638,10 @@ def test_export_examples_as_flextext(app):
     page.wait_for_selector("#editor .text-obj")
     page.wait_for_selector("#editor .md-embed")
     page.wait_for_timeout(900)
-    # the note menu → the dialog
-    page.locator(".note-card").first.click(button="right")
+    # the current note's own menu → the dialog
+    page.locator("#btn-note-menu").click()
     page.locator(".popover .menu-item", has_text="FLEx text of the examples").click()
-    page.wait_for_selector(".modal")
+    page.wait_for_selector(".modal", timeout=15000)
     assert "2 examples" in page.locator(".modal p").first.inner_text() and "1 entry object skipped" in page.locator(".modal p").first.inner_text()
     assert page.locator(".modal input[type=text]").first.input_value() == "SVCs"
     page.keyboard.press("Escape")
@@ -1808,4 +1808,63 @@ def test_progress_messages_do_not_stick_in_the_pill(app):
     assert page.evaluate("() => getComputedStyle(document.querySelector('#flex-pill .warn-icon')).display") == "none"
     page.evaluate("() => FS.emit('py:progress', { message: '' })")
     assert label.inner_text() == before
+    assert not errors
+
+
+def test_select_across_blocks_cut_copy_delete_type(app):
+    """Seth, 2026-10-16: select, cut, copy, paste or delete multiple lines — text, tables, FLEx
+    objects and lists — with partial blocks at the ends."""
+    h, page, errors = app
+    new_note(page, "Multi")
+    page.locator("#editor .blk-body").first.click()
+    paste(page, "First line of text\n\n{{flex:text %s seg=1}}\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n1. one\n2. two\n\nLast line here" % T_STORY)
+    page.wait_for_selector("#editor .text-obj")
+    page.wait_for_timeout(600)
+    bodies = page.locator("#editor .blk-body")
+    first, last = bodies.first.bounding_box(), page.locator("#editor .blk-body", has_text="Last line here").bounding_box()
+    # drag from the end of the first paragraph to the start of the last one
+    page.mouse.move(first["x"] + first["width"] - 2, first["y"] + first["height"] / 2)
+    page.mouse.down()
+    page.mouse.move(last["x"] + 2, last["y"] + last["height"] / 2, steps=10)
+    page.mouse.up()
+    page.wait_for_timeout(200)
+    md = page.evaluate("() => window.__fsEditor.selectionMarkdown()")
+    assert md.strip().startswith("{{flex:text") and "| a | b |" in md and "1. one" in md and "Last line" not in md, md
+    assert page.locator("#editor .blk.msel-block").count() >= 3                       # the flex block, the table, the list
+    # Ctrl+C copies the markdown of the selection
+    page.evaluate("() => { window.__copied = null; FS.copyText = (t) => { window.__copied = t; return Promise.resolve(true); }; }")
+    page.keyboard.press("Control+c")
+    copied = page.evaluate("() => window.__copied")
+    assert copied and "{{flex:text" in copied and "| 1 | 2 |" in copied and "2. two" in copied, copied
+    # Delete joins what is left of the first and last paragraphs into one block
+    page.keyboard.press("Delete")
+    page.wait_for_timeout(900)
+    assert body_of(h) == "First line of textLast line here", body_of(h)
+    assert page.locator("#editor .blk").count() == 2                                  # the joined paragraph + the trailing empty one
+    # undo brings it all back
+    page.keyboard.press("Control+z")
+    page.wait_for_timeout(900)
+    assert "{{flex:text" in body_of(h) and "| a | b |" in body_of(h)
+    # Shift+click selects from the caret to another block; typing replaces the selection
+    page.locator("#editor .blk-body").first.click()
+    page.keyboard.press("Home")
+    for _ in range(5): page.keyboard.press("ArrowRight")                             # after "First"
+    box = page.locator("table.md-table td[data-r='1'][data-c='1']").bounding_box()
+    page.keyboard.down("Shift")
+    page.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    page.keyboard.up("Shift")
+    page.wait_for_timeout(200)
+    assert page.evaluate("() => !!window.__fsEditor.msel")
+    page.keyboard.type("!")
+    page.wait_for_timeout(900)
+    b = body_of(h)
+    assert b.startswith("First!") and "{{flex:text" not in b and "| a | b |" not in b and "1. one" in b, b
+    # Ctrl+A twice takes the whole note; Backspace empties it
+    page.keyboard.press("Control+a")
+    page.keyboard.press("Control+a")
+    page.wait_for_timeout(100)
+    assert page.evaluate("() => !!window.__fsEditor.msel")
+    page.keyboard.press("Backspace")
+    page.wait_for_timeout(900)
+    assert body_of(h).strip() == "", body_of(h)
     assert not errors

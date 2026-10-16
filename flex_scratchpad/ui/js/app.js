@@ -307,6 +307,7 @@
       },
       onSlash: (body, b) => slashMenu(body, b),
     });
+    window.__fsEditor = S.editor;        // for the tests and the console
     return S.editor;
   }
   async function openNote(id) {

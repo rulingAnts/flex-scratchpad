@@ -147,6 +147,216 @@
       root.addEventListener('click', (e) => { if (e.target === root) this.focusBlock(this.blocks.length - 1, 'end', true); });
       root.addEventListener('focusin', (e) => { const w = e.target.closest('.widget'); this.activeTable = w && w._table ? w._table : null; if (w && w._table) this.active = this.blocks.find((b) => b.el === w) || this.active; });
       this.wireDrag(root);
+      this.wireMultiSelect(root);
+    }
+
+    /* -- selecting across blocks (Seth, 2026-10-16) --------------------------------------
+     * Chromium keeps a mouse selection inside the editable block it started in, so a selection
+     * that spans blocks is ours: {a: {b, off}, z: {b, off}} in document order — partial text at
+     * either end, whole blocks (text, tables, examples, lists) between — painted with the CSS
+     * highlight API (no DOM change) plus a class on fully covered blocks. Cut / copy / delete /
+     * type-over / paste / Enter act on it; Shift+click and Shift+Arrow Up/Down extend it;
+     * Ctrl+A with a whole block already selected takes the whole note. */
+    wireMultiSelect(root) {
+      this.msel = null;
+      let drag = null;
+      const skip = (t) => t.closest && t.closest('.blk-handle, .widget-bar, .drag-handle, .col-resizer, .row-resizer, .tbl-grip, th.gutter, button, a, input, select, textarea, .popover, .flex-overlay, .modal');
+      root.addEventListener('mousedown', (e) => {
+        if (e.button !== 0 || skip(e.target)) return;
+        const pt = this.pointAtEvent(e);
+        if (e.shiftKey && pt) {
+          const anchor = this.msel ? this.msel.anchor : this.caretPoint();
+          if (anchor && anchor.b !== pt.b) { e.preventDefault(); e.stopPropagation(); this.setMsel(anchor, pt); return; }
+        }
+        this.clearMsel();
+        if (pt) drag = { anchor: pt, started: false };
+      }, true);
+      document.addEventListener('mousemove', (e) => {
+        if (!drag) return;
+        if (!(e.buttons & 1)) { drag = null; return; }
+        const pt = this.pointAtEvent(e);
+        if (!pt) return;
+        if (!drag.started && pt.b === drag.anchor.b) return;          // inside the first block: the native selection
+        drag.started = true;
+        e.preventDefault();
+        this.setMsel(drag.anchor, pt);
+      });
+      document.addEventListener('mouseup', () => { drag = null; });
+      root.addEventListener('keydown', (e) => this.onMselKey(e), true);
+      root.addEventListener('copy', (e) => { if (!this.msel) return; e.preventDefault(); e.stopPropagation(); e.clipboardData.setData('text/plain', this.selectionMarkdown()); }, true);
+      root.addEventListener('cut', (e) => { if (!this.msel) return; e.preventDefault(); e.stopPropagation(); e.clipboardData.setData('text/plain', this.selectionMarkdown()); this.deleteSelection(); }, true);
+      root.addEventListener('paste', (e) => {
+        if (!this.msel) return;
+        e.preventDefault(); e.stopPropagation();
+        const dt = e.clipboardData;
+        const html = dt && dt.getData('text/html'), text = (dt && dt.getData('text/plain')) || '';
+        const at = this.deleteSelection();
+        if (!at) return;
+        const table = FS.tables.fromHtml(html);
+        if (table) this.insertBlockSourceAtCaret(at.body, at.b, table); else if (text) this.pasteText(at.body, at.b, text.replace(/\r\n?/g, '\n'));
+      }, true);
+      root.addEventListener('beforeinput', (e) => { if (this.msel && /^(insertText|insertCompositionText)$/.test(e.inputType)) { e.preventDefault(); const at = this.deleteSelection(); if (at && e.data) this.insertTextAtCaret(at.body, at.b, e.data); } }, true);
+    }
+    /* The block and text offset under a mouse event; a widget counts whole (off 0 / Infinity
+     * decided by its side in setMsel). Outside every block: the nearest one by height. */
+    pointAtEvent(e) {
+      const hit = document.elementFromPoint(e.clientX, e.clientY);
+      let blkEl = hit && hit.closest ? hit.closest('.blk') : null;
+      if (blkEl && !this.root.contains(blkEl)) blkEl = null;
+      let b = blkEl && this.blocks.find((x) => x.el === blkEl);
+      if (!b) {
+        if (!hit || !this.root.contains(hit)) return null;
+        let best = null, dist = Infinity;
+        for (const x of this.blocks) { if (!x.el) continue; const r = x.el.getBoundingClientRect(); const d = e.clientY < r.top ? r.top - e.clientY : e.clientY > r.bottom ? e.clientY - r.bottom : 0; if (d < dist) { dist = d; best = x; } }
+        if (!best) return null;
+        const r = best.el.getBoundingClientRect();
+        return { b: best, off: e.clientY < r.top + r.height / 2 ? 0 : Infinity };
+      }
+      if (TEXT_TYPES.has(b.type)) {
+        const body = b.el.querySelector('.blk-body');
+        const r = document.caretRangeFromPoint ? document.caretRangeFromPoint(e.clientX, e.clientY) : null;
+        if (r && body.contains(r.startContainer)) { const rr = r.cloneRange(); rr.setStart(body, 0); return { b, off: rr.toString().length }; }
+        const br = body.getBoundingClientRect();
+        return { b, off: e.clientY < br.top + br.height / 2 ? 0 : body.textContent.length };
+      }
+      const r = b.el.getBoundingClientRect();
+      return { b, off: e.clientY < r.top + r.height / 2 ? 0 : Infinity };
+    }
+    caretPoint() {
+      const b = this.active;
+      if (!b || !this.blocks.includes(b)) return null;
+      if (!TEXT_TYPES.has(b.type)) return { b, off: 0 };
+      const body = b.el && b.el.querySelector('.blk-body');
+      return body ? { b, off: getCaret(body) } : null;
+    }
+    setMsel(p, q) {
+      const ip = this.blocks.indexOf(p.b), iq = this.blocks.indexOf(q.b);
+      if (ip < 0 || iq < 0) return;
+      if (ip === iq && TEXT_TYPES.has(p.b.type)) {                       // one text block: the native selection does it
+        this.clearMsel();
+        const body = p.b.el.querySelector('.blk-body');
+        body.focus(); setCaret(body, Math.min(p.off, q.off), Math.max(p.off, q.off));
+        return;
+      }
+      let a = p, z = q;
+      if (ip > iq || (ip === iq && p.off > q.off)) { a = q; z = p; }
+      a = { b: a.b, off: TEXT_TYPES.has(a.b.type) ? Math.max(0, Math.min(a.off, a.b.src.length)) : 0 };
+      z = { b: z.b, off: TEXT_TYPES.has(z.b.type) ? Math.max(0, Math.min(z.off, z.b.src.length)) : Infinity };
+      this.msel = { anchor: p, a, z };
+      const sel = window.getSelection();
+      if (sel) sel.removeAllRanges();
+      this.paintMsel();
+    }
+    paintMsel() {
+      this.root.querySelectorAll('.msel-block').forEach((x) => x.classList.remove('msel-block'));
+      const m = this.msel;
+      const canHL = typeof CSS !== 'undefined' && CSS.highlights && typeof Highlight !== 'undefined';
+      if (!m) { if (canHL) CSS.highlights.delete('fs-msel'); return; }
+      const ia = this.blocks.indexOf(m.a.b), iz = this.blocks.indexOf(m.z.b);
+      const ranges = [];
+      for (let i = ia; i <= iz; i++) {
+        const b = this.blocks[i];
+        if (!b.el) continue;
+        const text = TEXT_TYPES.has(b.type);
+        const body = text ? b.el.querySelector('.blk-body') : null;
+        const from = i === ia && text ? m.a.off : 0;
+        const to = i === iz && text ? m.z.off : Infinity;
+        if (!text || (from === 0 && to >= b.src.length)) b.el.classList.add('msel-block');
+        if (!canHL || !body) continue;
+        try {
+          const r = document.createRange();
+          const s = pointAt(body, Math.min(from, body.textContent.length)), e = pointAt(body, Math.min(to, body.textContent.length));
+          r.setStart(s.node, s.offset); r.setEnd(e.node, e.offset);
+          ranges.push(r);
+        } catch (err) { /* a range that cannot be built is just not painted */ }
+      }
+      if (canHL) CSS.highlights.set('fs-msel', new Highlight(...ranges));
+    }
+    clearMsel() {
+      if (!this.msel) return;
+      this.msel = null;
+      this.paintMsel();
+    }
+    selectAll() {
+      if (!this.blocks.length) return;
+      const last = this.blocks[this.blocks.length - 1];
+      this.setMsel({ b: this.blocks[0], off: 0 }, { b: last, off: TEXT_TYPES.has(last.type) ? last.src.length : Infinity });
+    }
+    /* The selected markdown: the ends partial (text), everything between whole. */
+    selectionMarkdown() {
+      const m = this.msel;
+      if (!m) return '';
+      const ia = this.blocks.indexOf(m.a.b), iz = this.blocks.indexOf(m.z.b);
+      const out = [];
+      for (let i = ia; i <= iz; i++) {
+        const b = this.blocks[i];
+        let src = b.src;
+        if (TEXT_TYPES.has(b.type)) {
+          const from = i === ia ? m.a.off : 0, to = i === iz ? m.z.off : src.length;
+          src = src.slice(from, to);
+        }
+        out.push(src);
+      }
+      return out.join('\n\n');
+    }
+    /* Remove the selection; the text before it and after it meet in one block. Returns the
+     * caret {body, b, off} there, or null. */
+    deleteSelection() {
+      const m = this.msel;
+      if (!m) return null;
+      const ia = this.blocks.indexOf(m.a.b), iz = this.blocks.indexOf(m.z.b);
+      const prefix = TEXT_TYPES.has(m.a.b.type) ? m.a.b.src.slice(0, m.a.off) : '';
+      const suffix = TEXT_TYPES.has(m.z.b.type) ? m.z.b.src.slice(Math.min(m.z.off, m.z.b.src.length)) : '';
+      const joined = prefix + suffix;
+      let parts = MD.splitBlocks(joined).map((x) => Object.assign({ id: FS.uid() }, x));
+      if (!parts.length) parts = [{ id: FS.uid(), type: 'p', src: '' }];
+      if (parts.length === 1 && TEXT_TYPES.has(parts[0].type)) parts[0].src = joined;   // keep the exact text, spaces and all
+      this.blocks.splice(ia, iz - ia + 1, ...parts);
+      this.msel = null;
+      this.renderAll();
+      this.paintMsel();
+      this.changed({ force: true });
+      const b = parts[0];
+      const i = this.blocks.indexOf(b);
+      if (TEXT_TYPES.has(b.type)) { this.focusBlock(i, prefix.length); return { body: b.el.querySelector('.blk-body'), b, off: prefix.length }; }
+      this.focusBlock(i, 0);
+      return null;
+    }
+    onMselKey(e) {
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && e.key.toLowerCase() === 'a' && !e.shiftKey && !e.altKey) {
+        // Ctrl+A: the block first (native), the whole note the second time or from a focused
+        // widget; never inside a table cell's editor or a form field (theirs)
+        if (e.target.closest && e.target.closest('.cell-edit, input, textarea, select')) return;
+        const b = this.active;
+        const body = b && b.el && b.el.querySelector('.blk-body');
+        const whole = body && getCaret(body) === 0 && getCaretEnd(body) === body.textContent.length && body.textContent.length > 0;
+        const onWidget = b && b.el && e.target === b.el;
+        if (this.msel || whole || onWidget) { e.preventDefault(); e.stopPropagation(); this.selectAll(); }
+        return;
+      }
+      if (!this.msel) return;
+      if (e.key === 'Escape') { e.preventDefault(); this.clearMsel(); return; }
+      if (e.key === 'Backspace' || e.key === 'Delete') { e.preventDefault(); e.stopPropagation(); this.deleteSelection(); return; }
+      if (mod && e.key.toLowerCase() === 'c' && !e.shiftKey) { e.preventDefault(); e.stopPropagation(); FS.copyText(this.selectionMarkdown()); return; }
+      if (mod && e.key.toLowerCase() === 'x' && !e.shiftKey) { e.preventDefault(); e.stopPropagation(); FS.copyText(this.selectionMarkdown()); this.deleteSelection(); return; }
+      if (mod && e.key.toLowerCase() === 'v') return;                          // the paste handler takes it
+      if (mod && (e.key.toLowerCase() === 'z' || e.key.toLowerCase() === 'y')) { this.clearMsel(); return; }
+      if (e.shiftKey && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+        e.preventDefault(); e.stopPropagation();
+        const m = this.msel;
+        const moving = (m.anchor.b === m.a.b && m.anchor.off === m.a.off) ? 'z' : 'a';
+        const cur = m[moving];
+        const i = this.blocks.indexOf(cur.b) + (e.key === 'ArrowDown' ? 1 : -1);
+        if (i < 0 || i >= this.blocks.length) return;
+        const nb = this.blocks[i];
+        const pt = { b: nb, off: e.key === 'ArrowDown' ? (TEXT_TYPES.has(nb.type) ? nb.src.length : Infinity) : 0 };
+        this.setMsel(m.anchor, pt);
+        return;
+      }
+      if (e.key === 'Enter' && !mod) { e.preventDefault(); e.stopPropagation(); const at = this.deleteSelection(); if (at) this.enter(at.body, at.b); return; }
+      if (e.key.startsWith('Arrow') || e.key === 'Home' || e.key === 'End' || e.key === 'PageUp' || e.key === 'PageDown' || e.key === 'Tab') { this.clearMsel(); return; }
+      if (e.key.length === 1 && !mod && !e.altKey) { e.preventDefault(); e.stopPropagation(); const at = this.deleteSelection(); if (at) this.insertTextAtCaret(at.body, at.b, e.key); }
     }
 
     /* -- dragging FLEx objects around the note (Seth, 2026-10-16) ------------------------
