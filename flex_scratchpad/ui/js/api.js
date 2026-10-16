@@ -70,9 +70,9 @@
     const folders = { Notes: [], Grammar: ['Verbs', 'Verbs/Aspect'] };
     let seq = 0;
     const now = () => new Date().toISOString().slice(0, 19);
-    function mk(tab, folder, title, body, tags) {
+    function mk(tab, folder, title, body, tags, kind) {
       const id = 'n_' + (++seq).toString(16).padStart(10, '0');
-      notes[id] = { id, title, tab, folder, tags: tags || [], created: now(), updated: now(), pinned: false, body, path: '' };
+      notes[id] = { id, title, tab, folder, tags: tags || [], created: now(), updated: now(), pinned: false, kind: kind || '', body, path: '' };
       return notes[id];
     }
     mk('Notes', '', 'Welcome to FLEx Scratchpad', FS.welcomeNote ? FS.welcomeNote() : '# Welcome\n\nThis is the in-browser demo.', ['todo']);
@@ -91,7 +91,9 @@
       init: async () => init(),
       list_notes: async () => list(), folders: async () => folders, tags: async () => tags(),
       get_note: async (id) => ({ ...notes[id], inlineTags: summary(notes[id]).inlineTags }),
-      create_note: async (tab, folder, title, body) => ({ ...mk(tab || 'Notes', folder || '', title || '', body || '') }),
+      create_note: async (tab, folder, title, body, kind) => ({ ...mk(tab || 'Notes', folder || '', title || '', body || '', null, kind || '') }),
+      list_collections: async () => Object.values(notes).filter((n) => n.kind === 'examples').sort((a, b) => b.updated.localeCompare(a.updated)).map((n) => ({ id: n.id, title: n.title, tab: n.tab, folder: n.folder, updated: n.updated, count: (n.body.match(/^\s*\{\{flex:text\b[^\n]*\}\}\s*$/gm) || []).length })),
+      add_to_collection: async (id, embeds) => { const n = notes[id]; if (!n || n.kind !== 'examples') throw new Error('Not an example collection'); const add = (embeds || []).map((e) => String(e).trim()).filter(Boolean); if (add.length) { const b = n.body.replace(/\n+$/, ''); n.body = (b.trim() ? b + '\n\n' : '') + add.join('\n\n') + '\n'; n.updated = now(); } return summary(n); },
       save_note: async (id, patch) => { const n = notes[id]; for (const k of ['title', 'body', 'tags', 'pinned']) if (patch[k] != null) n[k] = patch[k]; n.updated = now(); return summary(n); },
       move_note: async (id, tab, folder) => { notes[id].tab = tab; notes[id].folder = folder || ''; return summary(notes[id]); },
       delete_note: async (id) => { delete notes[id]; return true; },

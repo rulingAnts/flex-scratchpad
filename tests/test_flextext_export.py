@@ -2,6 +2,9 @@
 import json
 import threading
 import xml.etree.ElementTree as ET
+from pathlib import Path
+
+import pytest
 
 from flex_scratchpad import links
 from flex_scratchpad.api import Api
@@ -22,7 +25,7 @@ ITEMS = [{"kind": "text", "guid": T_STORY, "seg": [1, 2], "at": None, "label": "
 
 def test_export_is_one_flex_text_with_a_paragraph_per_example(tmp_path):
     api = make(tmp_path)
-    n = api.create_note(None, "", "SVCs", "Collected serial verbs.\n\n{{flex:text %s seg=1-2 \"SVC a\"}}\n\n{{flex:text %s seg=4}}" % (T_STORY, T_STORY))
+    n = api.create_note(None, "", "SVCs", "Collected serial verbs.\n\n{{flex:text %s seg=1-2 \"SVC a\"}}\n\n{{flex:text %s seg=4}}" % (T_STORY, T_STORY), "examples")
     out = tmp_path / "svcs.flextext"
     r = api.export_note_flextext(n["id"], ITEMS, {"title": "SVCs", "includeLink": True, "includeMarkdown": True}, str(out))
     assert r["path"] == str(out) and r["examples"] == 2 and r["skipped"] == 1 and r["texts"] == [{"ws": "kal", "examples": 2}]
@@ -70,7 +73,7 @@ def test_export_is_one_flex_text_with_a_paragraph_per_example(tmp_path):
 
 def test_export_round_trips_through_our_own_flextext_reader(tmp_path):
     api = make(tmp_path)
-    n = api.create_note(None, "", "Round trip", "x")
+    n = api.create_note(None, "", "Round trip", "x", "examples")
     out = tmp_path / "rt.flextext"
     api.export_note_flextext(n["id"], ITEMS, {"sourceNotes": False, "includeLink": False}, str(out))
     be = FlextextBackend([str(out)])
@@ -89,7 +92,7 @@ def test_export_round_trips_through_our_own_flextext_reader(tmp_path):
 
 def test_mixed_baselines_become_separate_texts_and_only_ws_filters(tmp_path):
     api = make(tmp_path)
-    n = api.create_note(None, "", "Mixed", "x")
+    n = api.create_note(None, "", "Mixed", "x", "examples")
     items = [{"kind": "text", "guid": T_STORY, "seg": [1, 1]}, {"kind": "text", "guid": T_ARAB, "seg": None, "at": None}, {"kind": "text", "guid": T_STORY, "seg": [2, 2]}]
     assert api.flextext_preview(items) == {"texts": [{"ws": "kal", "examples": 2}, {"ws": "kal-Arab", "examples": 1}], "skipped": 0}
     out = tmp_path / "mixed.flextext"
@@ -160,7 +163,7 @@ def test_word_guids_are_kept_unless_asked_not_to():
 def test_audio_is_bundled_into_one_recording_with_rewritten_offsets(tmp_path):
     import wave
     api = make(tmp_path)
-    n = api.create_note(None, "", "Audio", "x")
+    n = api.create_note(None, "", "Audio", "x", "examples")
     out = tmp_path / "audio.flextext"
     r = api.export_note_flextext(n["id"], [{"kind": "text", "guid": T_STORY, "seg": [1, 2]}, {"kind": "text", "guid": T_STORY, "seg": [4, 4]}], {"title": "Audio", "audio": "bundle"}, str(out))
     wav = tmp_path / "audio.wav"
@@ -192,7 +195,7 @@ def test_default_audio_is_one_mono_wav_clip_per_line(tmp_path):
     that go into the project's Linked Files."""
     import wave
     api = make(tmp_path)
-    n = api.create_note(None, "", "Clips", "x")
+    n = api.create_note(None, "", "Clips", "x", "examples")
     out = tmp_path / "clips.flextext"
     r = api.export_note_flextext(n["id"], [{"kind": "text", "guid": T_STORY, "seg": [1, 2]}, {"kind": "text", "guid": T_STORY, "seg": [4, 4]}], {"title": "Clips"}, str(out))
     folder = tmp_path / "clips-audio"
@@ -218,3 +221,33 @@ def test_default_audio_is_one_mono_wav_clip_per_line(tmp_path):
     assert r2["audioMatched"] == 1 and (lf / "Clips-1.1.wav").exists()
     loc = ET.parse(tmp_path / "lf.flextext").getroot().find(".//media-files/media").get("location")
     assert loc == "AudioVisual/Clips-1.1.wav"
+
+
+def test_only_an_example_collection_exports_and_collections_round_trip(tmp_path):
+    """Seth, 2026-10-16: a special note type that is JUST the examples, and only it exports."""
+    api = make(tmp_path)
+    plain = api.create_note(None, "", "Plain", "{{flex:text %s seg=1}}" % T_STORY)
+    with pytest.raises(Exception) as e:
+        api.export_note_flextext(plain["id"], ITEMS, {"title": "x"}, str(tmp_path / "x.flextext"))
+    assert "example collection" in str(e.value)
+    assert "kind:" not in Path(plain["path"]).read_text(encoding="utf-8")        # ordinary files are unchanged
+    col = api.create_note(None, "", "SVCs", "", "examples")
+    assert col["kind"] == "examples" and "kind: examples" in Path(col["path"]).read_text(encoding="utf-8")
+    # examples are appended at the end, one paragraph each
+    api.add_to_collection(col["id"], ["{{flex:text %s seg=1}}" % T_STORY])
+    s = api.add_to_collection(col["id"], ["{{flex:text %s seg=4}}" % T_STORY, "  "])
+    assert api.get_note(col["id"])["body"] == "{{flex:text %s seg=1}}\n\n{{flex:text %s seg=4}}\n" % (T_STORY, T_STORY)
+    assert s["kind"] == "examples"
+    with pytest.raises(Exception):
+        api.add_to_collection(plain["id"], ["{{flex:text %s seg=1}}" % T_STORY])
+    cols = api.list_collections()
+    assert [c["id"] for c in cols] == [col["id"]] and cols[0]["count"] == 2
+    # the kind survives a rescan from disk and a duplicate
+    api2 = make(tmp_path)
+    assert api2.get_note(col["id"])["kind"] == "examples" and api2.get_note(plain["id"])["kind"] == ""
+    dup = api2.duplicate_note(col["id"])
+    assert dup["kind"] == "examples"
+    r = api2.export_note_flextext(col["id"], [{"kind": "text", "guid": T_STORY, "seg": [1, 1]}, {"kind": "text", "guid": T_STORY, "seg": [4, 4]}], {"title": "SVCs"}, str(tmp_path / "c.flextext"))
+    assert r["examples"] == 2
+    with pytest.raises(Exception):
+        api2.create_note(None, "", "Odd", "", "nonsense")

@@ -1626,8 +1626,9 @@ def test_paste_of_flex_rows_that_match_nothing_explains_the_word_line(app):
 
 
 def test_export_examples_as_flextext(app):
-    """Seth, 2026-10-16: a note's examples as one FLEx text. The note menu opens the export
-    dialog with the count and the baseline grouping; the export itself writes the file."""
+    """Seth, 2026-10-16: a note's examples as one FLEx text — and only an EXAMPLE COLLECTION
+    exports (\"have just that special note type be the one that can export\"). An ordinary note
+    collects its examples into a new collection, whose Export button opens the dialog."""
     h, page, errors = app
     new_note(page, "SVCs")
     page.keyboard.type("Serial verbs, in order.")
@@ -1638,29 +1639,114 @@ def test_export_examples_as_flextext(app):
     page.wait_for_selector("#editor .text-obj")
     page.wait_for_selector("#editor .md-embed")
     page.wait_for_timeout(900)
-    # the current note's own menu → the dialog
+    # an ordinary note offers no FLEx text export, only collecting its examples
     page.locator("#btn-note-menu").click()
-    page.locator(".popover .menu-item", has_text="FLEx text of the examples").click()
+    assert page.locator(".popover .menu-item", has_text=".flextext").count() == 0
+    page.locator(".popover .menu-item", has_text="Collect the examples into a new collection").click()
+    page.wait_for_selector("#collection .coll-item .text-obj")
+    assert page.locator("#note-title").input_value() == "SVCs \u2014 examples"
+    assert page.locator("#collection .coll-item").count() == 2            # the entry is not an example
+    assert page.locator("#editor-pane.is-collection #toolbar").is_hidden()
+    # the collection's own Export button → the dialog
+    page.locator("[data-test='coll-export']").click()
     page.wait_for_selector(".modal", timeout=15000)
-    assert "2 examples" in page.locator(".modal p").first.inner_text() and "1 entry object skipped" in page.locator(".modal p").first.inner_text()
-    assert page.locator(".modal input[type=text]").first.input_value() == "SVCs"
+    assert "2 examples" in page.locator(".modal p").first.inner_text()
+    assert page.locator(".modal input[type=text]").first.input_value() == "SVCs \u2014 examples"
     page.keyboard.press("Escape")
+    page.wait_for_timeout(700)
     # the export through the API (the dialog's Export… goes through the save dialog)
     out = str(h.tmp / "svcs.flextext")
     r = page.evaluate("""async (out) => {
       const api = window.pywebview.api;
-      const notes = await api.list_notes(); const note = await api.get_note(notes[0].id);
-      const editor = new FS.Editor(document.createElement('div'), {}); editor.load(note.body);
-      const items = FS.exporter.flextextItems(editor);
-      return await api.export_note_flextext(note.id, items, { title: 'SVCs', includeLink: true, includeMarkdown: true }, out);
+      const cols = await api.list_collections();
+      const items = FS.exporter.flextextItems(window.__fsCollection.asEditor());
+      return await api.export_note_flextext(cols[0].id, items, { title: 'SVCs', includeLink: true, includeMarkdown: true }, out);
     }""", out)
-    assert r["examples"] == 2 and r["skipped"] == 1 and r["texts"] == [{"ws": "kal", "examples": 2}]
+    assert r["examples"] == 2 and r["skipped"] == 0 and r["texts"] == [{"ws": "kal", "examples": 2}]
     assert r["audio"].endswith("svcs-audio") and r["audioMatched"] == 3 and (h.tmp / "svcs-audio" / "SVCs-1.1.wav").exists()
     import xml.etree.ElementTree as ET
     root = ET.parse(out).getroot()
     phrases = root.findall(".//phrase")
     assert len(phrases) == 3 and [ph.find("item[@type='segnum']").text for ph in phrases] == ["1.1", "1.2", "2.1"]
     assert any("label: first" in (i.text or "") for i in phrases[0].findall("item[@type='note']"))
+    # the ordinary note itself is refused by the API too
+    plain = page.evaluate("""async () => { const api = window.pywebview.api; const ns = await api.list_notes();
+      const n = ns.find((x) => x.title === 'SVCs'); try { await api.export_note_flextext(n.id, [], {}, 'x'); return 'exported'; } catch (e) { return e.message; } }""")
+    assert "example collection" in plain, plain
+    assert not errors
+
+
+def test_example_collection_add_reorder_remove_and_undo(app):
+    """Seth, 2026-10-16: "a special notes type that is JUST IGT examples concatenated/expanded"."""
+    h, page, errors = app
+    # an ordinary note with an example to send over
+    new_note(page, "Reading notes")
+    page.keyboard.type("{{flex:text %s seg=4}}" % T_STORY)
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#editor .text-obj")
+    # a new collection from the New menu, filled by pasting FLEx rows into its paste box
+    page.locator("#btn-new-menu").click()
+    page.locator("[data-test='new-collection']").click()
+    page.wait_for_selector("#collection .coll-add")
+    page.locator("#note-title").fill("Serial verbs")
+    page.locator("#note-title").press("Enter")
+    page.locator("#collection .coll-add").click()
+    paste(page, "Word\tHa\u014ba\ttiket\tka-sila-mo\tpemu\nWord Gloss\tyesterday\tchild\tsaw\triver\nFree\tYesterday the child saw the river.")
+    page.wait_for_selector(".modal")
+    page.locator(".modal .btn.primary", has_text="Insert rendered").click()
+    page.wait_for_selector("#collection .coll-item .text-obj")
+    # an embed line pasted there keeps its styling but not its layout keys
+    page.locator("#collection .coll-add").click()
+    paste(page, "{{flex:text %s seg=1 hl=1.1 ex indent=2 collapsed}}" % T_STORY)
+    page.wait_for_function("document.querySelectorAll('#collection .coll-item').length === 2")
+    page.wait_for_timeout(900)
+    def body():
+        cols = h.api.list_collections()
+        return h.api.get_note(cols[0]["id"])["body"]
+    b = body()
+    assert b.index("seg=2") < b.index("seg=1 ") and "hl=1.1" in b and " ex" not in b and "indent" not in b and "collapsed" not in b, b
+    # reorder with the arrows
+    page.locator("#collection .coll-item").nth(1).hover()
+    page.locator("#collection .coll-item").nth(1).locator("button[title='Move up']").click()
+    page.wait_for_timeout(900)
+    assert body().index("seg=1 ") < body().index("seg=2"), body()
+    assert page.locator("#collection .coll-num").all_inner_texts() == ["(1)", "(2)"]
+    # remove, then undo
+    page.locator("#collection .coll-item").first.hover()
+    page.locator("#collection .coll-item").first.locator("[data-test='coll-remove']").click()
+    page.wait_for_selector("#collection .coll-undo")
+    page.wait_for_timeout(900)
+    assert "seg=1 " not in body()
+    page.locator("#collection .coll-undo button", has_text="Undo").click()
+    page.wait_for_timeout(900)
+    assert body().index("seg=1 ") < body().index("seg=2"), body()
+    # drag the second card's grip above the first
+    first = page.locator("#collection .coll-item").first.bounding_box()
+    page.evaluate("""([x, y]) => {
+      const dt = new DataTransfer();
+      const grip = document.querySelectorAll('#collection .coll-grip')[1];
+      grip.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: dt }));
+      const t = document.elementFromPoint(x, y);
+      t.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt, clientX: x, clientY: y }));
+      t.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt, clientX: x, clientY: y }));
+      grip.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: dt }));
+    }""", [first["x"] + 60, first["y"] + 8])
+    page.wait_for_timeout(900)
+    assert body().index("seg=2") < body().index("seg=1 "), body()
+    # back in the ordinary note: "Add to an example collection…" from the example's ⋯ menu
+    page.locator(".note-card", has_text="Reading notes").click()
+    page.wait_for_selector("#editor .text-obj")
+    page.locator("#editor .text-obj .flex-head button[title='Options']").first.click()
+    page.locator("[data-test='add-to-collection']").click()
+    page.locator(".popover .menu-item", has_text="Serial verbs").click()
+    page.wait_for_timeout(900)
+    assert "seg=4" in body().rstrip().split("\n\n")[-1], body()
+    # the list shows it as a collection with its count; reopening draws the three examples
+    card = page.locator(".note-card", has_text="Serial verbs")
+    assert "IGT" in card.inner_text() and "3 examples" in card.inner_text()
+    card.click()
+    page.wait_for_function("document.querySelectorAll('#collection .coll-item .text-obj').length === 3")
+    assert page.locator("[data-test='coll-count']").inner_text() == "3 examples"
     assert not errors
 
 

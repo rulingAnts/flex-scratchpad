@@ -18,6 +18,10 @@ A note file is a small front-matter header followed by the markdown body:
     ---
     body…
 
+An EXAMPLE COLLECTION (Seth, 2026-10-16) is a note whose header also says `kind: examples`: its
+body is nothing but interlinear examples, one `{{flex:text …}}` per paragraph, in order, and it
+is the one kind of note that exports as a FLEx text. Ordinary notes carry no `kind` line.
+
 Only a YAML *subset* is written and read (scalars, `[a, b]` lists, JSON-quoted strings), so there
 is no PyYAML dependency. Everything is UTF-8 with `\n` newlines; user text is never normalised or
 folded on save (only the search index normalises, in memory).
@@ -37,6 +41,8 @@ from pathlib import Path
 from typing import Callable, Iterable
 
 CONFIG_NAME = "notebook.json"
+NOTE_KINDS = ("", "examples")
+EXAMPLE_LINE_RE = re.compile(r"^\s*\{\{flex:text\b[^\n]*\}\}\s*$", re.M)
 PRIVATE_DIR = ".scratchpad"
 DEFAULT_TAB = "Notes"
 NOTE_SUFFIX = ".md"
@@ -160,6 +166,7 @@ class Note:
     created: str = ""
     updated: str = ""
     pinned: bool = False
+    kind: str = ""           # '' = an ordinary note; 'examples' = an example collection
     body: str = ""
     path: Path | None = None
 
@@ -172,6 +179,8 @@ class Note:
     def summary(self, excerpt_len: int = 160) -> dict:
         d = self.meta()
         d["excerpt"] = excerpt(self.body, excerpt_len)
+        if self.kind == "examples":
+            d["exampleCount"] = len(EXAMPLE_LINE_RE.findall(self.body))
         d["inlineTags"] = inline_tags(self.body)
         return d
 
@@ -405,6 +414,7 @@ class Notebook:
             created=str(meta.get("created") or datetime.fromtimestamp(stat.st_ctime).replace(microsecond=0).isoformat()),
             updated=str(meta.get("updated") or datetime.fromtimestamp(stat.st_mtime).replace(microsecond=0).isoformat()),
             pinned=bool(meta.get("pinned", False)),
+            kind=str(meta.get("kind") or ""),
             body=body.replace("\r\n", "\n"),
             path=path,
         )
@@ -501,6 +511,8 @@ class Notebook:
             "id": note.id, "title": note.title, "tags": note.tags,
             "created": note.created, "updated": note.updated, "pinned": note.pinned,
         }
+        if note.kind:                       # only collections carry it: ordinary files are unchanged
+            meta["kind"] = note.kind
         target = self._note_path(note)
         target.parent.mkdir(parents=True, exist_ok=True)
         _atomic_write(target, dump_front_matter(meta) + note.body)
@@ -512,14 +524,16 @@ class Notebook:
         note.path = target
         self._reindex(note)
 
-    def create_note(self, tab: str | None = None, folder: str = "", title: str = "", body: str = "") -> Note:
+    def create_note(self, tab: str | None = None, folder: str = "", title: str = "", body: str = "", kind: str = "") -> Note:
+        if kind not in NOTE_KINDS:
+            raise ValueError(f"Unknown kind of note: {kind}")
         with self.lock:
             tab = tab or (self.tab_dirs()[0] if self.tab_dirs() else DEFAULT_TAB)
             if tab not in self.tab_dirs():
                 self.add_tab(tab)
             ts = now_iso()
             note = Note(id=new_id(), title=title or "", tab=tab, folder=folder or "",
-                        created=ts, updated=ts, body=body)
+                        created=ts, updated=ts, body=body, kind=kind)
             self.notes[note.id] = note
             self._write_note(note)
             return note
@@ -532,7 +546,7 @@ class Notebook:
             src = self.get_note(note_id)
             same_place = (tab is None or tab == src.tab) and (folder is None or (folder or "") == (src.folder or ""))
             new_title = title if title is not None else ((src.title + " (copy)") if same_place and src.title else src.title)
-            copy = self.create_note(tab or src.tab, src.folder if folder is None else (folder or ""), new_title, src.body)
+            copy = self.create_note(tab or src.tab, src.folder if folder is None else (folder or ""), new_title, src.body, src.kind)
             if src.tags:
                 copy = self.save_note(copy.id, tags=list(src.tags))
             return copy
@@ -558,6 +572,29 @@ class Notebook:
                 note.updated = now_iso()
                 self._write_note(note)
             return note
+
+    def append_examples(self, note_id: str, embeds: list[str]) -> Note:
+        """Add examples to the END of an example collection, one paragraph each (the "Add to
+        collection" of an example in any note). Only collections take them."""
+        with self.lock:
+            note = self.get_note(note_id)
+            if note.kind != "examples":
+                raise ValueError(f"“{note.title or 'Untitled'}” is not an example collection")
+            add = [e.strip() for e in embeds or [] if str(e).strip()]
+            if not add:
+                return note
+            body = note.body.rstrip("\n")
+            body = (body + "\n\n" if body.strip() else "") + "\n\n".join(add) + "\n"
+            return self.save_note(note_id, body=body)
+
+    def collections(self) -> list[dict]:
+        """Every example collection, most recently edited first, with its example count."""
+        with self.lock:
+            out = [{"id": n.id, "title": n.title, "tab": n.tab, "folder": n.folder, "updated": n.updated,
+                    "count": len(EXAMPLE_LINE_RE.findall(n.body))}
+                   for n in self.notes.values() if n.kind == "examples"]
+        out.sort(key=lambda d: d["updated"], reverse=True)
+        return out
 
     def move_note(self, note_id: str, tab: str, folder: str = "") -> Note:
         with self.lock:

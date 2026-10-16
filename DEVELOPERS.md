@@ -37,12 +37,26 @@ JavaScript mock with demo data when no bridge is present, so the page runs in an
 5. A click opens the style popover; `flexref.toggleStyle` mutates the spec; the editor writes
    `flexref.serialize(spec)` back into the block source (or the table cell) and autosaves.
 
-## Exporting examples as a FLEx text
+## Example collections and the FLEx text export
 
-`Api.export_note_flextext(note_id, items, opts, path)` turns a note's text embeds (in note
-order, from blocks, inline chips and table cells; the page collects them with
-`FS.exporter.flextextItems`) into a `.flextext` that FieldWorks imports (File → Import → FLExText
-Interlinear). The writer is `flex/flextext_writer.py`:
+An **example collection** (Seth, 2026-10-16) is a note with `kind: examples` in its front matter
+whose body is only interlinear examples, one `{{flex:text …}}` per paragraph. It is the one kind
+of note that exports as a FLEx text: `Api.export_note_flextext` refuses any other note. The
+page draws it with `ui/js/collection.js` (`FS.Collection`) instead of the block editor: numbered
+cards, ↑ ↓ and a `⠿` grip to reorder, ✕ with an Undo row, a paste box (FLEx rows → the locator,
+a FLEx link → the link chooser, an embed line as is) and the picker. Examples arrive stripped of
+the layout keys a collection decides itself (`ex`, `indent`, `collapsed`, `expanded`;
+`FS.collection.cleanEmbed`), styling kept. Other ways in: `Api.add_to_collection(note_id,
+embeds)` (the *Add to an example collection…* item on any example, `FS.addToCollection`), and
+*Collect the examples into a new collection…* on an ordinary note. `Api.list_collections()`
+lists them with counts; note summaries carry `kind` and, for collections, `exampleCount`.
+Anything else found in a collection's body (a hand-edited file) is kept, shown muted, and left
+out of the numbering and the export.
+
+`Api.export_note_flextext(note_id, items, opts, path)` turns the collection's examples (in
+order; the page collects them with `FS.exporter.flextextItems(collection.asEditor())`) into a
+`.flextext` that FieldWorks imports (File → Import → FLExText Interlinear). The writer is
+`flex/flextext_writer.py`:
 
 - one `<interlinear-text>` per baseline writing system (a FLEx text has exactly one), titled
   `<title> (<ws>)` when there are several; `opts.onlyWs` keeps one;

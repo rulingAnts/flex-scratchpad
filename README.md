@@ -84,6 +84,8 @@ elsewhere (marked *cached*).
 | Search | The box at the top left (**Ctrl+Shift+F**); `tag:todo`, `tab:Grammar`, `"exact phrase"`; **Ctrl+F** finds in the open note |
 | Tags | `+ tag` on the note, or type `#tag` anywhere in the text |
 | Move a note | Drag it onto a tab or folder, or `⋯ → Move to…` |
+| Collect examples for FLEx | `+ New ▾` → *New example collection*: a note that is only interlinear examples, numbered in order. Paste FLEx rows into its paste box, use *Add from FLEx…*, or choose *Add to an example collection…* on any example (its `⋯`, or *＋ Collection* on a chip's preview). Reorder with the arrows or the `⠿` grip |
+| Export a FLEx text | Only an example collection exports: *Export as FLEx text…* at its top. An ordinary note's `⋯ → Collect the examples into a new collection…` copies its examples into one |
 
 ### What a note looks like on disk
 

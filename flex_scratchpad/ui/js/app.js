@@ -253,9 +253,9 @@
     if (!list.length) { host.appendChild(el('div', { class: 'empty' }, el('b', {}, S.results ? 'Nothing found' : 'No notes here'), S.results ? 'Try other words, or clear the tag filter.' : 'Press Ctrl+N to write one.')); return; }
     for (const n of list) {
       const card = el('div', { class: 'note-card' + (S.note && S.note.id === n.id ? ' active' : ''), draggable: 'true', dataset: { id: n.id } });
-      card.appendChild(el('div', { class: 't' }, n.pinned ? el('span', { class: 'pin' }, '📌') : null, n.title || 'Untitled'));
+      card.appendChild(el('div', { class: 't' }, n.pinned ? el('span', { class: 'pin' }, '📌') : null, n.kind === 'examples' ? el('span', { class: 'kind-badge', title: 'Example collection: exports as a FLEx text' }, 'IGT') : null, n.title || 'Untitled'));
       const x = el('div', { class: 'x' });
-      if (n.snippet != null) x.innerHTML = markSnippet(n.snippet, n.snippetMarks); else x.textContent = n.excerpt || '';
+      if (n.snippet != null) x.innerHTML = markSnippet(n.snippet, n.snippetMarks); else x.textContent = n.kind === 'examples' ? (n.exampleCount || 0) + ' example' + (n.exampleCount === 1 ? '' : 's') : (n.excerpt || '');
       card.appendChild(x);
       const meta = el('div', { class: 'm' }, FS.relTime(n.updated));
       if (S.results || S.tag) meta.appendChild(el('span', {}, '· ' + (S.config.tabs.find((t) => t.dir === n.tab) || {}).name + (n.folder ? ' / ' + n.folder : '')));
@@ -297,7 +297,7 @@
   function ensureEditor() {
     if (S.editor) return S.editor;
     S.editor = new FS.Editor($('editor'), {
-      onChange: (md) => { if (!S.note) return; S.note.body = md; S.dirty = true; $('save-state').textContent = 'Editing…'; scheduleSave(); },
+      onChange: (md) => { if (!S.note || isCollection()) return; S.note.body = md; S.dirty = true; $('save-state').textContent = 'Editing…'; scheduleSave(); },
       openLink: openLink,
       onPasteLink: (text, insert) => FS.picker.pasteChooser(text, insert),
       onPasteLocate: (text, insert, fallback) => (S.flex && S.flex.open) ? FS.picker.locateChooser(text, insert, fallback) : fallback(),
@@ -319,13 +319,90 @@
     localStorage.setItem('fs:lastNote', id);
     $('editor-pane').classList.remove('no-note');
     $('note-title').value = n.title || '';
-    ensureEditor().load(n.body || '');
+    const coll = n.kind === 'examples';
+    $('editor-pane').classList.toggle('is-collection', coll);
+    $('editor').hidden = coll; $('collection').hidden = !coll;
+    $('note-title').placeholder = coll ? 'Untitled collection' : 'Untitled note';
+    closeFind();
+    if (coll) { ensureEditor().load(''); ensureCollection().load(n.body || ''); }
+    else ensureEditor().load(n.body || '');
     renderNoteMeta();
     renderList();
     $('save-state').textContent = '';
-    closeFind();
-    if (!n.title) $('note-title').focus(); else S.editor.focusBlock(0, 0);
+    if (!n.title) $('note-title').focus(); else if (!coll) S.editor.focusBlock(0, 0);
   }
+  /* Example collections (Seth, 2026-10-16): a note that is JUST interlinear examples, the one
+   * kind of note that exports as a FLEx text. collection.js draws it; this wires it in. */
+  function isCollection() { return !!(S.note && S.note.kind === 'examples'); }
+  function ensureCollection() {
+    if (S.coll) return S.coll;
+    S.coll = new FS.Collection($('collection'), {
+      onChange: (md) => { if (!isCollection()) return; S.note.body = md; S.dirty = true; $('save-state').textContent = 'Editing…'; scheduleSave(); },
+      onExport: () => exportCollection(),
+      canLocate: () => !!(S.flex && S.flex.open),
+    });
+    window.__fsCollection = S.coll;      // for the tests and the console
+    return S.coll;
+  }
+  async function exportCollection() {
+    if (!isCollection()) return;
+    await flushSave();
+    try { await FS.exporter.exportNote(S.note, S.coll.asEditor(), 'flextext'); } catch (e) { FS.toast('Export failed: ' + e.message, 'error'); }
+  }
+  async function newCollection(title, body) {
+    await flushSave();
+    try {
+      const n = await FS.api.create_note(S.tab, S.folder || '', title || '', body || '', 'examples');
+      clearSearch();
+      await refreshLists();
+      await openNote(n.id);
+      return n;
+    } catch (e) { FS.toast(e.message, 'error'); return null; }
+  }
+  /* "Collect the examples into a new collection…": every interlinear example in a note (blocks,
+   * inline chips, table cells), in order, copied into a new collection next to it. */
+  async function collectExamples(n) {
+    await flushSave();
+    const full = await FS.api.get_note(n.id);
+    const srcs = FS.flexref.findEmbeds(full.body || '').filter((e) => e.spec && e.spec.kind === 'text').map((e) => FS.collection.cleanEmbed(FS.flexref.serialize(e.spec))).filter(Boolean);
+    if (!srcs.length) { FS.toast('This note has no interlinear examples to collect.', 'warn'); return; }
+    const c = await newCollection((n.title || 'Untitled') + ' \u2014 examples', srcs.join('\n\n') + '\n');
+    if (c) FS.toast(srcs.length + ' example' + (srcs.length === 1 ? '' : 's') + ' collected — export it with \u201cExport as FLEx text\u2026\u201d', 'ok');
+  }
+  /* "Add to an example collection…" on any example: a pick of the collections, or a new one. */
+  FS.addToCollection = (anchor, src) => {
+    const clean = FS.collection.cleanEmbed(src);
+    if (!clean) return;
+    FS.popover(anchor, async (pop, close) => {
+      pop.appendChild(el('div', { class: 'row' }, el('b', {}, 'Add this example to')));
+      const host = el('div', {}, el('div', { class: 'muted small', style: { padding: '4px 8px' } }, 'Loading…'));
+      pop.appendChild(host);
+      const add = async (c) => {
+        close();
+        try {
+          const s = await FS.api.add_to_collection(c.id, [clean]);
+          FS.toast('Added to \u201c' + (c.title || 'Untitled collection') + '\u201d (' + (s.exampleCount || 0) + ' example' + (s.exampleCount === 1 ? '' : 's') + ')', 'ok');
+          await refreshLists();
+        } catch (e) { FS.toast(e.message, 'error'); }
+      };
+      let cols = [];
+      try { cols = await FS.api.list_collections(); } catch (e) { cols = []; }
+      host.innerHTML = '';
+      for (const c of cols) host.appendChild(el('button', { class: 'menu-item', onclick: () => add(c) }, (c.title || 'Untitled collection') + '  ', el('span', { class: 'muted small' }, '(' + c.count + ')')));
+      if (cols.length) host.appendChild(el('hr'));
+      host.appendChild(el('button', { class: 'menu-item', onclick: async () => {
+        close();
+        const title = prompt('Name of the new example collection', 'Examples');
+        if (title == null) return;
+        await flushSave();
+        try {
+          const n = await FS.api.create_note(S.tab, S.folder || '', title.trim(), clean + '\n', 'examples');
+          await refreshLists();
+          FS.toast('Added to the new collection \u201c' + (n.title || 'Untitled collection') + '\u201d', 'ok');
+        } catch (e) { FS.toast(e.message, 'error'); }
+      } }, '\u2795 New example collection\u2026'));
+    });
+  };
   function renderNoteMeta() {
     const n = S.note;
     if (!n) return;
@@ -391,16 +468,18 @@
       item('Move to…', () => moveDialog(n));
       item('Duplicate', async () => { await flushSave(); const c = await FS.api.duplicate_note(n.id); await refreshLists(); openNote(c.id); FS.toast('Duplicated — this is the copy'); });
       item('Copy to…', () => moveDialog(n, true));
+      if (n.kind !== 'examples') item('Collect the examples into a new collection…', () => collectExamples(n));
       item('Copy markdown', async () => { const full = await FS.api.get_note(n.id); FS.copyText(full.body); FS.toast('Copied'); });
       item('Copy link to this note', () => { FS.copyText('flexscratchpad://note/' + n.id); FS.toast('Link copied — it opens this note in FLEx Scratchpad'); });
       pop.appendChild(el('hr'));
       pop.appendChild(el('div', { class: 'row', style: { padding: '0 8px' } }, el('b', {}, 'Export')));
-      const doExport = async (fmt) => { if (!S.note || S.note.id !== n.id) await openNote(n.id); await flushSave(); try { await FS.exporter.exportNote(S.note, ensureEditor(), fmt); } catch (e) { FS.toast('Export failed: ' + e.message, 'error'); } };
+      const doExport = async (fmt) => { if (!S.note || S.note.id !== n.id) await openNote(n.id); await flushSave(); try { await FS.exporter.exportNote(S.note, isCollection() ? ensureCollection().asEditor() : ensureEditor(), fmt); } catch (e) { FS.toast('Export failed: ' + e.message, 'error'); } };
+      // only an example collection exports as a FLEx text (Seth, 2026-10-16)
+      if (n.kind === 'examples') item('FLEx text (.flextext)…', () => doExport('flextext'));
       item('Markdown (.md)', () => doExport('md'));
       item('Web page (.html)', () => doExport('html'));
       item('Word (.docx)', () => doExport('docx'));
       item('PDF (print…)', () => doExport('pdf'));
-      item('FLEx text of the examples (.flextext)…', () => doExport('flextext'));
       if (S.init.canBrowse) item('Show file', () => FS.api.reveal_note(n.id));
       pop.appendChild(el('hr'));
       item('Delete (to trash)', async () => { if (!confirm('Move “' + (n.title || 'Untitled') + '” to the trash?')) return; await FS.api.delete_note(n.id); if (S.note && S.note.id === n.id) { S.note = null; $('editor-pane').classList.add('no-note'); } await refreshLists(); }, 'danger');
@@ -670,6 +749,10 @@
     $('search').addEventListener('input', runSearch);
     $('search').addEventListener('keydown', (e) => { if (e.key === 'Escape') { clearSearch(); renderRail(); renderList(); } });
     $('btn-new-note').addEventListener('click', newNote);
+    $('btn-new-menu').addEventListener('click', (e) => FS.popover(e.currentTarget, (pop, close) => {
+      pop.appendChild(el('button', { class: 'menu-item', onclick: () => { close(); newNote(); } }, 'New note', el('span', { class: 'muted small' }, '  Ctrl+N')));
+      pop.appendChild(el('button', { class: 'menu-item', 'data-test': 'new-collection', title: 'A note that is just interlinear examples, numbered in order — the kind that exports as a FLEx text', onclick: () => { close(); newCollection('', ''); } }, 'New example collection'));
+    }));
     $('btn-add-tab').addEventListener('click', addTab);
     $('btn-add-folder').addEventListener('click', () => newFolder(S.tab, S.folder || ''));
     $('btn-edit-tags').addEventListener('click', openSettings);
@@ -680,7 +763,7 @@
     $('flex-banner-hide').addEventListener('click', () => { sessionStorage.setItem('fs:flexBannerHidden', '1'); $('flex-banner').hidden = true; });
     $('btn-sort').addEventListener('click', (e) => FS.popover(e.currentTarget, (pop, close) => { for (const [v, l] of [['updated', 'Last edited'], ['created', 'Date created'], ['title', 'Title']]) pop.appendChild(el('button', { class: 'menu-item' + (S.sort === v ? ' on' : ''), onclick: () => { S.sort = v; close(); renderList(); } }, (S.sort === v ? '✓ ' : '') + l)); }));
     $('note-title').addEventListener('input', () => { if (S.note) { S.note.title = $('note-title').value; S.dirty = true; scheduleSave(); } });
-    $('note-title').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); ensureEditor().focusBlock(0, 0); } });
+    $('note-title').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); if (!isCollection()) ensureEditor().focusBlock(0, 0); else e.target.blur(); } });
     $('btn-pin').addEventListener('click', () => { if (!S.note) return; S.note.pinned = !S.note.pinned; saveMeta({ pinned: S.note.pinned }); refreshLists(); });
     $('btn-note-menu').addEventListener('click', (e) => { if (S.note) noteMenu(e.currentTarget, S.note); });
     $('btn-insert-flex').addEventListener('click', insertFlex);
@@ -705,7 +788,7 @@
         const ae = document.activeElement;
         const native = ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.classList.contains('cell-edit'));
         const own = ae && (ae.closest('.blk-body') || ae.classList.contains('widget'));
-        if (!native && !own && S.note && S.editor) {
+        if (!native && !own && S.note && S.editor && !isCollection()) {
           e.preventDefault();
           if (e.key.toLowerCase() === 'y' || e.shiftKey) S.editor.redoStep(); else S.editor.undoStep();
           return;
@@ -713,10 +796,10 @@
       }
       if (mod && e.key.toLowerCase() === 'n' && !e.shiftKey) { e.preventDefault(); newNote(); }
       else if (mod && e.shiftKey && e.key.toLowerCase() === 'f') { e.preventDefault(); $('search').focus(); $('search').select(); }
-      else if (mod && !e.shiftKey && e.key.toLowerCase() === 'f') { if (S.note) { e.preventDefault(); openFind(); } }
-      else if (mod && e.shiftKey && e.key.toLowerCase() === 'l') { if (S.note) { e.preventDefault(); insertFlex(); } }
+      else if (mod && !e.shiftKey && e.key.toLowerCase() === 'f') { if (S.note && !isCollection()) { e.preventDefault(); openFind(); } }
+      else if (mod && e.shiftKey && e.key.toLowerCase() === 'l') { if (S.note) { e.preventDefault(); if (isCollection()) ensureCollection().pick(); else insertFlex(); } }
       else if (mod && e.key.toLowerCase() === 's') { e.preventDefault(); flushSave().then(() => FS.toast('Saved')); }
-      else if (mod && e.altKey && /^[1-3]$/.test(e.key)) { e.preventDefault(); ensureEditor().linePrefix('h', +e.key); }
+      else if (mod && e.altKey && /^[1-3]$/.test(e.key)) { if (!isCollection()) { e.preventDefault(); ensureEditor().linePrefix('h', +e.key); } }
       else if (mod && e.key === ',') { e.preventDefault(); openSettings(); }
       else if (mod && (e.key === '\\' || e.code === 'Backslash')) { e.preventDefault(); toggleNav(); }
     });

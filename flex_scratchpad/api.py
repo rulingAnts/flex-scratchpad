@@ -118,9 +118,17 @@ class Api:
         d["inlineTags"] = inline_tags(n.body)
         return d
 
-    def create_note(self, tab: str | None = None, folder: str = "", title: str = "", body: str = "") -> dict:
-        n = self._nb.create_note(tab, folder, title, body)
+    def create_note(self, tab: str | None = None, folder: str = "", title: str = "", body: str = "", kind: str = "") -> dict:
+        n = self._nb.create_note(tab, folder, title, body, kind or "")
         return self.get_note(n.id)
+
+    def list_collections(self) -> list[dict]:
+        """The example collections, for "Add to collection…" (newest first, with counts)."""
+        return self._nb.collections()
+
+    def add_to_collection(self, note_id: str, embeds: list[str]) -> dict:
+        """Append examples (embed sources) to an example collection; returns its summary."""
+        return self._nb.append_examples(note_id, list(embeds or [])).summary()
 
     def save_note(self, note_id: str, patch: dict) -> dict:
         patch = patch or {}
@@ -249,6 +257,9 @@ class Api:
         from .links import note_url
         opts = dict(opts or {})
         n = self._nb.get_note(note_id)
+        # Seth, 2026-10-16: only an example collection exports as a FLEx text
+        if n.kind != "examples":
+            raise ValueError("Only an example collection exports as a FLEx text. Use “Collect the examples into a new collection…” on this note first.")
         examples, skipped = [], []
         for it in items or []:
             if (it.get("kind") or "text") != "text":
