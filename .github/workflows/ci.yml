@@ -1,0 +1,58 @@
+# Tests on every push (ubuntu-latest, a standard free runner on a public repo) and a Windows
+# PyInstaller build ONLY on manual dispatch (windows-latest, also standard). No schedules, no
+# releases, no larger runners — see CLAUDE.md "GitHub costs".
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      build_windows:
+        description: "Also build the Windows bundle (PyInstaller --onedir) and upload it as an artifact"
+        type: boolean
+        default: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+          python -m playwright install --with-deps chromium
+      - name: Unit tests (Python)
+        run: python -m pytest tests --ignore=tests/e2e -q
+      - name: Unit tests (JS logic, node:test)
+        run: node --test tests/js
+      - name: End-to-end (Playwright, no server — file:// + bridged js_api)
+        run: python -m pytest tests/e2e -q
+
+  build-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.build_windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          architecture: x64
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[build]" pywebview
+      - name: Build (onedir)
+        run: pyinstaller build/flex-scratchpad.spec --distpath build/dist --workpath build/work --noconfirm
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FLEx-Scratchpad-windows-x64
+          path: build/dist/FLEx Scratchpad
+          if-no-files-found: error
