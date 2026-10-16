@@ -592,3 +592,20 @@ table.md-table td.drop-target, table.md-table th.drop-target { outline: 2px soli
 .coll-add { margin-top: 14px; min-height: 44px; padding: 12px 14px; border: 2px dashed var(--border); border-radius: var(--radius); color: var(--muted); outline: none; caret-color: transparent; }
 .coll-add:empty::before { content: attr(data-placeholder); }
 .coll-add:focus { border-color: var(--accent); background: var(--accent-soft); }
+/* groups and notes in a collection */
+.coll-group { display: flex; align-items: center; gap: 8px; padding: 8px 10px; margin-top: 8px; border-radius: var(--radius); background: var(--panel); border: 1px solid var(--border-soft); }
+.coll-group .coll-tools { flex-direction: row; }
+.coll-group:hover .coll-tools { opacity: 1; }
+.coll-group-label { font-weight: 650; cursor: text; }
+.coll-group-input { font: inherit; font-weight: 650; min-width: 220px; }
+.coll-toggle { border: 0; background: none; font-size: 14px; width: 22px; color: var(--muted); cursor: pointer; padding: 0; }
+.coll-toggle:hover { color: var(--text); }
+.coll-group.dragging { opacity: 0.45; }
+.coll-group.drop-before { box-shadow: 0 -3px 0 var(--accent); }
+.coll-group.drop-after { box-shadow: 0 3px 0 var(--accent); }
+.coll-group.drop-into { outline: 2px solid var(--accent); }
+.coll-item.in-group { margin-left: 22px; }
+.coll-ex { min-width: 0; }
+.coll-note { display: block; width: 100%; box-sizing: border-box; margin: 6px 0 2px; padding: 6px 10px; resize: none; overflow: hidden; font: inherit; font-size: 13.5px; line-height: 1.45; color: var(--text); background: var(--paper); border: 1px solid var(--border-soft); border-left: 3px solid var(--accent); border-radius: 6px; }
+.coll-note:focus { outline: none; border-color: var(--accent); }
+.coll-note[hidden] { display: none; }

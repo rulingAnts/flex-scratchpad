@@ -288,7 +288,7 @@
     return items;
   }
   async function exportFlextext(note, editor) {
-    const items = flextextItems(editor);
+    const items = editor.flextextItems ? editor.flextextItems() : flextextItems(editor);   // a collection brings its notes
     const texts = items.filter((i) => i.kind === 'text');
     if (!texts.length) { FS.toast('This note has no text examples to export.', 'warn'); return null; }
     let preview = { texts: [], skipped: 0 };

@@ -255,3 +255,17 @@ def test_only_an_example_collection_exports_and_collections_round_trip(tmp_path)
     assert r["examples"] == 2
     with pytest.raises(Exception):
         api2.create_note(None, "", "Odd", "", "nonsense")
+
+
+def test_an_examples_note_rides_on_its_first_line(tmp_path):
+    """Seth, 2026-10-16: notes on the examples of a collection are included in the export."""
+    api = make(tmp_path)
+    col = api.create_note(None, "", "Notes", "", "examples")
+    items = [{"kind": "text", "guid": T_STORY, "seg": [1, 2], "note": "Shared subject.\nCompare (3)."},
+             {"kind": "text", "guid": T_STORY, "seg": [4, 4], "note": ""}]
+    out = tmp_path / "n.flextext"
+    api.export_note_flextext(col["id"], items, {"title": "Notes", "sourceNotes": False, "audio": "none"}, str(out))
+    phrases = ET.fromstring(out.read_text(encoding="utf-8")).findall(".//phrase")
+    notes = [[i.text for i in ph.findall("item[@type='note']")] for ph in phrases]
+    # FLEx's own segment note first, then the author's note on the example; later lines get none
+    assert notes[0] == ["Segment one has a note.", "Shared subject.\nCompare (3)."] and notes[1] == [] and notes[2] == [], notes

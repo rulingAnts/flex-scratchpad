@@ -107,7 +107,7 @@ def _languages(doc_texts: list[dict]) -> dict:
 
 
 def build_flextext(examples: list[dict], opts: dict | None = None) -> str:
-    """`examples`: [{text: <text dict with the example's segments, alts filled>, label}] in note
+    """`examples`: [{text: <text dict with the example's segments, alts filled>, label, note}] in note
     order. opts: title, abbrev, noteUrl, markdown, sourceNotes (True), wordGuids (True),
     onlyWs (a vernacular tag, to keep one baseline only)."""
     opts = dict(opts or {})
@@ -167,6 +167,10 @@ def build_flextext(examples: list[dict], opts: dict | None = None) -> str:
                 else:
                     for n in seg.get("notes") or []:
                         _item(ph, "note", None, n, anal)
+                if seg_k == 1 and (ex.get("note") or "").strip():
+                    # the author's own note on this example (a collection's "> " lines), on its
+                    # first line, always — it is part of the analysis, not provenance
+                    _item(ph, "note", None, ex["note"].strip(), anal)
                 if source_notes:
                     _item(ph, "note", None, _source_note(ex, seg, note_url), anal)
                 used_langs.update(i.get("lang") for i in ph.iter("item"))

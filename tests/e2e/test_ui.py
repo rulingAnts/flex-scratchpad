@@ -2110,3 +2110,94 @@ def test_a_running_window_says_when_another_build_is_installed(app):
     page.locator(".modal.other-build .btn.primary").click()
     assert page.locator(".modal.other-build").count() == 0
     assert not errors
+
+
+def test_collection_groups_and_example_notes(app):
+    """Seth, 2026-10-16: "expandable/collapsible, labeled blocks of examples within the collection
+    type. Those won't export in the flextext … Also the ability to add notes … to flex objects
+    that WOULD get included in the flextext export." """
+    h, page, errors = app
+    page.locator("#btn-new-menu").click()
+    page.locator("[data-test='new-collection']").click()
+    page.wait_for_selector("#collection .coll-add")
+    page.locator("#note-title").fill("SVC sorting")
+    for seg in (1, 2, 4):
+        page.locator("#collection .coll-add").click()
+        paste(page, "{{flex:text %s seg=%d}}" % (T_STORY, seg))
+    page.wait_for_function("document.querySelectorAll('#collection .coll-item').length === 3")
+    def body():
+        return h.api.get_note(h.api.list_collections()[0]["id"])["body"]
+    # a group, added at the end, then the last example moved into it with ↓
+    page.once("dialog", lambda d: d.accept("Shared subject"))
+    page.locator("[data-test='coll-add-group']").click()
+    page.wait_for_selector("#collection .coll-group")
+    third = page.locator("#collection .coll-item").nth(2)
+    third.hover()
+    third.locator("button[title='Move down']").click()
+    page.wait_for_timeout(900)
+    assert body().split("## Shared subject")[1].count("{{flex:text") == 1 and "seg=4" in body().split("## Shared subject")[1], body()
+    assert "1 example" in page.locator("#collection .coll-group").inner_text()
+    # numbering runs straight through the groups
+    assert page.locator("#collection .coll-num").all_inner_texts() == ["(1)", "(2)", "(3)"]
+    # a note on the second example
+    second = page.locator("#collection .coll-item").nth(1)
+    second.hover()
+    second.locator("[data-test='coll-note-btn']").click()
+    page.keyboard.type("Both verbs share the subject.")
+    page.wait_for_timeout(900)
+    assert "seg=2" in body() and "> Both verbs share the subject." in body(), body()
+    # collapse: its example is hidden and the file says so; the count stays
+    page.locator("[data-test='coll-toggle']").click()
+    page.wait_for_timeout(900)
+    assert page.locator("#collection .coll-item").count() == 2 and "## Shared subject {collapsed}" in body()
+    assert page.locator("[data-test='coll-count']").inner_text() == "3 examples"
+    # drag the first example onto the collapsed group's heading: into the group
+    head = page.locator("#collection .coll-group").bounding_box()
+    page.evaluate("""([x, y]) => {
+      const dt = new DataTransfer();
+      const grip = document.querySelector('#collection .coll-item .coll-grip');
+      grip.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: dt }));
+      const t = document.elementFromPoint(x, y);
+      t.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt, clientX: x, clientY: y }));
+      t.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt, clientX: x, clientY: y }));
+      grip.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: dt }));
+    }""", [head["x"] + 200, head["y"] + head["height"] / 2])
+    page.wait_for_timeout(900)
+    tail = body().split("## Shared subject")[1]
+    assert tail.count("{{flex:text") == 2 and tail.index("seg=4") < tail.index("seg=1"), body()   # appended to the group
+    assert "2 examples" in page.locator("#collection .coll-group").inner_text()
+    # expand, rename by double-click
+    page.locator("[data-test='coll-toggle']").click()
+    page.locator("#collection .coll-group-label").dblclick()
+    page.keyboard.press("Control+a")
+    page.keyboard.type("Same subject")
+    page.keyboard.press("Enter")
+    page.wait_for_timeout(900)
+    assert "## Same subject\n" in body() and "{collapsed}" not in body(), body()
+    # the export carries the note, on the example's first line; the group is not exported
+    items = page.evaluate("() => window.__fsCollection.flextextItems()")
+    assert [i["seg"] for i in items] == [[2, 2], [4, 4], [1, 1]] and items[0]["note"] == "Both verbs share the subject."
+    out = str(h.tmp / "groups.flextext")
+    page.evaluate("""async ([items, out]) => { const cols = await window.pywebview.api.list_collections();
+      return await window.pywebview.api.export_note_flextext(cols[0].id, items, { title: 'SVC sorting', sourceNotes: false, audio: 'none' }, out); }""", [items, out])
+    import xml.etree.ElementTree as ET
+    root = ET.parse(out).getroot()
+    assert "Same subject" not in ET.tostring(root, encoding="unicode")
+    first = root.findall(".//phrase")[0]
+    assert [i.text for i in first.findall("item[@type='note']")] == ["Both verbs share the subject."]
+    # one button closes every group, then opens them again
+    page.locator("[data-test='coll-all']", has_text="Collapse all").click()
+    page.wait_for_timeout(900)
+    assert "## Same subject {collapsed}" in body() and page.locator("#collection .coll-item").count() == 1
+    page.locator("[data-test='coll-all']", has_text="Expand all").click()
+    page.wait_for_timeout(900)
+    assert "{collapsed}" not in body()
+    # removing the group keeps its examples; Undo brings the heading back
+    page.locator("#collection .coll-group").hover()
+    page.locator("[data-test='coll-ungroup']").click()
+    page.wait_for_timeout(900)
+    assert "## Same subject" not in body() and body().count("{{flex:text") == 3
+    page.locator("#collection .coll-undo button", has_text="Undo").click()
+    page.wait_for_timeout(900)
+    assert "## Same subject" in body()
+    assert not errors

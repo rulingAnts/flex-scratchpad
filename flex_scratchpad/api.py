@@ -276,7 +276,7 @@ class Api:
             if not text.get("segments"):
                 skipped.append(dict(it, error="no segments"))
                 continue
-            examples.append({"text": text, "label": it.get("label") or ""})
+            examples.append({"text": text, "label": it.get("label") or "", "note": it.get("note") or ""})
         if not examples:
             raise RuntimeError("This note has no text examples to export" + (f" ({len(skipped)} could not be read)" if skipped else "") + ".")
         wopts = {

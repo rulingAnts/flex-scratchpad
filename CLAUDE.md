@@ -131,7 +131,12 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
   `{{flex:text …}}` per paragraph. `ui/js/collection.js` draws it in place of the editor (the
   hidden editor must never write into it: `isCollection()` guards in app.js). Only a collection
   exports a `.flextext` — the API refuses other notes; ordinary notes get "Collect the examples
-  into a new collection…", every example gets "Add to an example collection…".
+  into a new collection…", every example gets "Add to an example collection…". The body format
+  (`FS.collection.parse/serialize`, pinned by `tests/js/collection.test.js`): `## Label` is a
+  GROUP (` {collapsed}` when closed) — it only organises the view and is NOT exported; `> `
+  lines after an example are its NOTE, which IS exported (a `note` item on the example's first
+  phrase, after FLEx's own notes, whatever the Source-note option); anything else is kept as
+  is. Numbering runs straight through the groups (it is the export order).
 - Exporting a collection's examples as a `.flextext` (`flex/flextext_writer.py`, `Api.export_note_flextext`,
   Seth, 2026-10-16): one `<interlinear-text>` PER BASELINE WRITING SYSTEM (a FLEx text has one
   vernacular WS), one paragraph per example, one phrase per segment, every writing-system

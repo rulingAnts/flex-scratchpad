@@ -53,6 +53,13 @@ lists them with counts; note summaries carry `kind` and, for collections, `examp
 Anything else found in a collection's body (a hand-edited file) is kept, shown muted, and left
 out of the numbering and the export.
 
+Inside a collection, `## Label` starts a **group**: a labelled, collapsible block for sorting
+(` {collapsed}` at the end of the heading when it is closed). Groups are a view: they are not
+exported, and the numbering runs straight through them. `> ` lines right after an example are
+its **note**, which is exported as a `note` item on the example's first phrase (after FLEx's own
+segment notes). `FS.collection.parse` / `serialize` read and write that format;
+`collection.flextextItems()` hands the export each example with its note.
+
 `Api.export_note_flextext(note_id, items, opts, path)` turns the collection's examples (in
 order; the page collects them with `FS.exporter.flextextItems(collection.asEditor())`) into a
 `.flextext` that FieldWorks imports (File → Import → FLExText Interlinear). The writer is
