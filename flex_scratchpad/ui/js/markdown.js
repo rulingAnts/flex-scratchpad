@@ -217,9 +217,16 @@
    * list), deeper levels restarting under each item, everything restarting after a line that
    * is not part of the list. `ctx.counters` carries the state from block to block. */
   function listLevel(pre) { return Math.min(4, Math.round((pre.indent || 0) / 2)); }
+  /* The typed number COUNTS at the start of a list (Seth, 2026-10-16: "change the starting
+   * number on a list, like if it needs to start with 2 or 3 or 1 again"): the first numbered
+   * TOP-LEVEL item of a block (a block = the lines between blank lines) sets the number when it
+   * is not simply the next one — so `3.` starts at 3, and `1.` after a blank line starts over;
+   * every other typed number is ignored, as Markdown does (nested items typed in running order,
+   * "2." under "1.", still count 1 under their parent — Seth's first complaint). */
   function numberLines(lines, blockType, ctx) {
     ctx = ctx || { counters: [] };
     if (!ctx.counters) ctx.counters = [];
+    const seen = new Set();                                       // levels already numbered in THIS block
     return lines.map((line) => {
       const pre = linePrefix(line, blockType);
       if (!pre || (pre.cls !== 'md-num' && pre.cls !== 'md-bullet')) {
@@ -229,6 +236,12 @@
       const level = listLevel(pre);
       ctx.counters.length = level + 1;
       if (pre.cls !== 'md-num') return null;
+      const typed = parseInt((line.match(/^\s*(\d+)[.)]/) || [])[1], 10);
+      const next = (ctx.counters[level] || 0) + 1;
+      // a restart at 1, or a jump forward; a smaller number is a stale one (an item was added
+      // above it) and the count simply continues. Nested items always count under their parent.
+      if (level === 0 && !seen.has(0) && typed > 0 && typed !== next && (typed === 1 || typed > next)) ctx.counters[0] = typed - 1;
+      seen.add(level);
       ctx.counters[level] = (ctx.counters[level] || 0) + 1;
       return ctx.counters[level];
     });

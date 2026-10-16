@@ -938,6 +938,7 @@
         const i = this.blocks.indexOf(b);
         if (e.key === 'Backspace' || e.key === 'Delete') { e.preventDefault(); this.deleteBlock(b); }
         else if (e.key === 'Tab' && b.type === 'flex') { e.preventDefault(); this.indentFlex(b, e.shiftKey ? -1 : 1); }
+        else if (e.key === 'Tab' && b.type === 'table' && wrap._table && wrap._table.ops) { e.preventDefault(); wrap._table.ops.indent(e.shiftKey ? -1 : 1); }
         else if (e.key === 'ArrowUp' && i > 0) { e.preventDefault(); this.focusBlock(i - 1, 'end'); }
         else if (e.key === 'ArrowDown') { e.preventDefault(); this.focusBlock(i + 1, 0, true); }
         else if (e.key === 'Enter') { e.preventDefault(); if (b.type === 'table') { const cell = wrap.querySelector('.cell-view'); if (cell) cell.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); } else if (b.type === 'chart') FS.charts.editDialog(b.src, (src) => { b.src = src; this.changed(); this.rerender(b); }); else this.insertBlockAfter(b, { type: 'p', src: '' }, true); }
@@ -1057,6 +1058,13 @@
       ta.addEventListener('blur', done);
       ta.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); ta.blur(); } e.stopPropagation(); });
     }
+    setBlockSrc(b, src) {
+      b.src = src;
+      const body = b.el && b.el.querySelector('.blk-body');
+      if (body) this.decorateInto(body, b); else this.rerender(b);
+      this.renumberAfter(b);
+      this.changed();
+    }
     blockMenu(anchor, b) {
       FS.popover(anchor, (pop, close) => {
         const item = (label, fn, cls) => pop.appendChild(el('button', { class: 'menu-item ' + (cls || ''), onclick: () => { close(); fn(); } }, label));
@@ -1067,6 +1075,19 @@
           item('Turn into paragraph', () => { b.src = b.src.replace(/^(#{1,6}\s+|\s*([-*+]|\d+[.)])\s+(\[[ xX]\]\s+)?|\s*>\s?)/gm, ''); b.type = 'p'; this.rerender(b); this.changed(); });
           item('Turn into heading', () => { this.active = b; this.focusBlock(this.blocks.indexOf(b), 0); this.linePrefix('h', 2); });
           item('Turn into checklist', () => { this.active = b; this.focusBlock(this.blocks.indexOf(b), 0); this.linePrefix('task'); });
+          if (/^\s*\d+[.)]\s/.test(b.src)) {
+            // the first item's typed number is where the list starts (markdown.numberLines)
+            item('Start numbering at…', () => {
+              const m = /^(\s*)(\d+)([.)]\s)/.exec(b.src);
+              const cur = MD.numberLines(b.src.split('\n'), b.type, this.numCtxFor(b)).find((n) => n != null);
+              const v = window.prompt('Start this list at:', String(cur || m[2]));
+              const n = parseInt(v, 10);
+              if (!(n >= 0)) return;
+              this.setBlockSrc(b, b.src.replace(/^(\s*)\d+([.)]\s)/, '$1' + n + '$2'));
+            });
+            const prev = this.numCtxFor(b).counters;
+            if (prev.length) item('Continue numbering from the list above', () => this.setBlockSrc(b, b.src.replace(/^(\s*)\d+([.)]\s)/, '$1' + ((prev[0] || 0) + 1) + '$2')));
+          }
         } else {
           pop.appendChild(el('hr'));
           item('Edit source', () => this.editSource(b));

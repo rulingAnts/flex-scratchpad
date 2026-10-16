@@ -1724,3 +1724,57 @@ def test_drag_objects_between_text_cells_and_blocks(app):
     b = body_of(h)
     assert b.count("seg=2") == 2 and b.split("\n")[0].startswith("Compare the word here. {{flex:text"), b
     assert not errors
+
+
+def test_table_indent(app):
+    """Seth, 2026-10-16: a table's indent within the note — Tab / Shift+Tab on the focused
+    table, the context menu, the Table style popover; saved as `indent N` in the style line."""
+    h, page, errors = app
+    new_note(page, "Indent table")
+    page.locator("#editor .blk-body").first.click()
+    paste(page, "| a | b |\n|---|---|\n| 1 | 2 |")
+    page.wait_for_selector("table.md-table")
+    page.locator("#editor .blk-table").focus()
+    page.keyboard.press("Tab")
+    page.keyboard.press("Tab")
+    page.wait_for_timeout(900)
+    assert "{table: indent 2}" in body_of(h), body_of(h)
+    assert page.locator(".tbl-frame.tbl-indent2").count() == 1
+    page.locator("#editor .blk-table").focus()
+    page.keyboard.press("Shift+Tab")
+    page.wait_for_timeout(900)
+    assert "{table: indent 1}" in body_of(h), body_of(h)
+    # the context menu outdents back to the margin, and the style line loses the key
+    page.locator("table.md-table td[data-r='1'][data-c='0']").click(button="right")
+    page.locator(".popover .menu-item", has_text="Outdent table").click()
+    page.wait_for_timeout(900)
+    assert "indent" not in body_of(h), body_of(h)
+    assert page.locator(".tbl-frame[class*='tbl-indent']").count() == 0
+    assert not errors
+
+
+def test_list_start_number(app):
+    h, page, errors = app
+    new_note(page, "Start at")
+    page.locator("#editor .blk-body").first.click()
+    paste(page, "3. third\n4. fourth\n\n1. again\n2. more")
+    page.wait_for_timeout(400)
+    shown = page.evaluate("() => [...document.querySelectorAll('#editor .md-num[data-num]')].map((n) => n.dataset.num)")
+    assert shown == ["3.", "4.", "1.", "2."], shown
+    # Enter after "fourth" continues with 5
+    page.locator("#editor .blk-list .blk-body").first.click()
+    page.keyboard.press("Control+End")
+    page.keyboard.press("Enter")
+    page.keyboard.type("fifth")
+    page.wait_for_timeout(600)
+    assert "5. fifth" in body_of(h), body_of(h)
+    # the block menu sets the start of the second list
+    page.once("dialog", lambda d: d.accept("7"))
+    page.locator("#editor .blk-list").nth(1).hover()
+    page.locator("#editor .blk-list").nth(1).locator(".blk-handle button").dispatch_event("mousedown")
+    page.locator(".popover .menu-item", has_text="Start numbering at").click()
+    page.wait_for_timeout(600)
+    assert "7. again\n2. more" in body_of(h), body_of(h)
+    shown = page.evaluate("() => [...document.querySelectorAll('#editor .md-num[data-num]')].map((n) => n.dataset.num)")
+    assert shown[-2:] == ["7.", "8."], shown
+    assert not errors

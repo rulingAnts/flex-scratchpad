@@ -52,8 +52,10 @@
         const fr = /^freeze\s+(rows?|cols?|columns?)\s+(\d+)$/i.exec(p);
         const mh = /^(?:max-?height|height)\s+(\S+)$/i.exec(p);
         const fw = /^frame-?width\s+(\S+)$/i.exec(p);
+        const ind = /^indent\s+(\d)$/i.exec(p);
         const sp = /^span\s+(\d+)\.(\d+)\s*:\s*(\d+)\s*[x×]\s*(\d+)$/i.exec(p);
         if (fm) st.flags.add('borders-' + fm[1].toLowerCase());
+        else if (ind) st.indent = Math.max(0, Math.min(4, +ind[1]));
         else if (sp) { if (+sp[3] > 1 || +sp[4] > 1) st.spans[sp[1] + '.' + sp[2]] = { rows: Math.max(1, +sp[3]), cols: Math.max(1, +sp[4]) }; }
         else if (fr) st[fr[1].toLowerCase().startsWith('r') ? 'freezeRows' : 'freezeCols'] = +fr[2];
         else if (mh) st.maxHeight = mh[1];
@@ -93,6 +95,7 @@
     if (st.freezeCols) parts.push('freeze cols ' + st.freezeCols);
     if (st.maxHeight) parts.push('max-height ' + st.maxHeight);
     if (st.frameWidth) parts.push('frame-width ' + st.frameWidth);
+    if (st.indent) parts.push('indent ' + st.indent);
     for (const [k, v] of Object.entries(st.spans || {})) parts.push('span ' + k + ': ' + v.rows + 'x' + v.cols);
     for (const [i, o] of Object.entries(st.cols)) { const s = serializeProps(o); if (s) parts.push('col ' + i + ': ' + s); }
     for (const [i, o] of Object.entries(st.rows)) { const s = serializeProps(o); if (s) parts.push('row ' + i + ': ' + s); }
@@ -223,7 +226,7 @@
    * column styles and the flags; row styles and spans follow their rows. Returns [top, bottom]. */
   function splitAt(t, r) {
     if (r <= 0 || r >= t.rows.length) return null;
-    const clone = (rows) => ({ rows: rows.map((x) => x.slice()), aligns: t.aligns.slice(), style: { flags: new Set(t.style.flags), cols: JSON.parse(JSON.stringify(t.style.cols)), rows: {}, spans: {}, freezeRows: t.style.freezeRows, freezeCols: t.style.freezeCols, maxHeight: t.style.maxHeight, frameWidth: t.style.frameWidth } });
+    const clone = (rows) => ({ rows: rows.map((x) => x.slice()), aligns: t.aligns.slice(), style: { flags: new Set(t.style.flags), cols: JSON.parse(JSON.stringify(t.style.cols)), rows: {}, spans: {}, freezeRows: t.style.freezeRows, freezeCols: t.style.freezeCols, maxHeight: t.style.maxHeight, frameWidth: t.style.frameWidth, indent: t.style.indent } });
     const top = clone(t.rows.slice(0, r)), bottom = clone([t.rows[0], ...t.rows.slice(r)]);
     for (const [k, v] of Object.entries(t.style.rows)) { const n = +k; if (n <= r) top.style.rows[n] = v; else bottom.style.rows[n - r + 1] = v; }
     for (const [k, v] of Object.entries(t.style.spans || {})) {
@@ -238,7 +241,7 @@
   function mergeTables(a, b) {
     const same = b.rows[0].length === a.rows[0].length && b.rows[0].every((x, i) => (x || '').trim() === (a.rows[0][i] || '').trim());
     const w = Math.max(a.rows[0].length, b.rows[0].length);
-    const t = { rows: a.rows.map((x) => x.slice()), aligns: a.aligns.slice(), style: { flags: new Set(a.style.flags), cols: JSON.parse(JSON.stringify(a.style.cols)), rows: JSON.parse(JSON.stringify(a.style.rows)), spans: JSON.parse(JSON.stringify(a.style.spans || {})), freezeRows: a.style.freezeRows, freezeCols: a.style.freezeCols, maxHeight: a.style.maxHeight, frameWidth: a.style.frameWidth } };
+    const t = { rows: a.rows.map((x) => x.slice()), aligns: a.aligns.slice(), style: { flags: new Set(a.style.flags), cols: JSON.parse(JSON.stringify(a.style.cols)), rows: JSON.parse(JSON.stringify(a.style.rows)), spans: JSON.parse(JSON.stringify(a.style.spans || {})), freezeRows: a.style.freezeRows, freezeCols: a.style.freezeCols, maxHeight: a.style.maxHeight, frameWidth: a.style.frameWidth, indent: a.style.indent } };
     const skip = same ? 1 : 0, base = a.rows.length;
     for (const row of b.rows.slice(skip)) t.rows.push(row.slice());
     for (const r of t.rows) while (r.length < w) r.push('');
@@ -394,7 +397,7 @@
     const framed = frozen || !!t.style.maxHeight || !!t.style.frameWidth;
     const wrap = el('div', { class: 'tbl-wrap' + (frozen ? ' frozen' : '') + (framed ? ' framed' : '') }, table);
     if (framed) { wrap.style.maxHeight = t.style.maxHeight || (frozen ? '60vh' : ''); if (t.style.frameWidth) { wrap.style.width = t.style.frameWidth; wrap.style.maxWidth = '100%'; } }
-    const frame = el('div', { class: 'tbl-frame' + (framed ? ' framed' : '') }, wrap);
+    const frame = el('div', { class: 'tbl-frame' + (framed ? ' framed' : '') + (t.style.indent ? ' tbl-indent' + t.style.indent : '') }, wrap);
     frame.appendChild(frameGrip(wrap, t, widget, commit));
     container.appendChild(frame);
     if (frozen) requestAnimationFrame(() => applyFreeze(table, t));
@@ -414,6 +417,8 @@
       freezeTop: () => { t.style.freezeRows = 1; done(); },
       freezeFirst: () => { t.style.freezeCols = 1; done(); },
       unfreeze: () => { t.style.freezeRows = 0; t.style.freezeCols = 0; done(); },
+      // the table's indent within the note (Seth, 2026-10-16), like a list level: `indent N`
+      indent: (d) => { const n = Math.max(0, Math.min(4, (t.style.indent || 0) + d)); if (n) t.style.indent = n; else delete t.style.indent; done(); },
     };
     /* Clipboard and keys for a selection (Seth, 2026-10-12: "paste rows or columns into a
      * table"): with cells selected and no cell open, Ctrl+C / Ctrl+X copy them as TSV + HTML,
@@ -602,6 +607,9 @@
       item('Freeze top row', () => ops.freezeTop());
       item('Freeze first column', () => ops.freezeFirst());
       item('Unfreeze panes', () => ops.unfreeze(), !frozen);
+      sep();
+      item('Indent table', () => ops.indent(1), (t.style.indent || 0) >= 4);
+      item('Outdent table', () => ops.indent(-1), !(t.style.indent));
       if (opts && (opts.onSplit || opts.onMerge)) {
         sep();
         if (opts.onSplit) item('Split table above this row', () => opts.onSplit(at.r), at.r === 0);
@@ -1067,6 +1075,10 @@
       const render = () => {
         pop.innerHTML = '';
         pop.appendChild(el('div', { class: 'row' }, el('b', {}, 'Table')));
+        const lvl = el('span', { class: 'muted small' }, 'level ' + (t.style.indent || 0));
+        pop.appendChild(el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Indent'),
+          el('button', { class: 'btn small', title: 'Outdent (Shift+Tab on the table)', onclick: () => { widget.ops.indent(-1); render(); } }, '◂'),
+          el('button', { class: 'btn small', title: 'Indent (Tab on the table)', onclick: () => { widget.ops.indent(1); render(); } }, '▸'), lvl));
         if (opts.onSplit || opts.onMerge) {
           const row = el('div', { class: 'row' });
           const r = widget.focus ? widget.focus.r : 0;

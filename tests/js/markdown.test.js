@@ -146,11 +146,14 @@ test('outline numbers are computed per level and carry across loose-list blocks'
   const MD = FS.markdown;
   const ctx = { counters: [] };
   assert.deepEqual(MD.numberLines(['1. one', '  2. sub a', '  3. sub b', '9. two'], 'list', ctx), [1, 1, 2, 2]);
-  // a blank line between items (a separate block) continues the count; a bullet resets deeper levels
-  assert.deepEqual(MD.numberLines(['5. three', '  - bullet', '  1. sub'], 'list', ctx), [3, null, 1]);
-  // a paragraph resets
+  // a blank line between items (a separate block) continues the count ("3." would show 3); a
+  // typed jump forward goes there (Seth, 2026-10-16); a bullet resets deeper levels
+  assert.deepEqual(MD.numberLines(['3. three', '  - bullet', '  1. sub'], 'list', ctx), [3, null, 1]);
+  assert.deepEqual(MD.numberLines(['6. six'], 'list', ctx), [6]);
+  // a paragraph resets; the next list starts at its own first number
   MD.numberLines(['prose'], 'p', ctx);
-  assert.deepEqual(MD.numberLines(['7. again'], 'list', ctx), [1]);
+  assert.deepEqual(MD.numberLines(['7. again'], 'list', ctx), [7]);
+  assert.deepEqual(MD.numberLines(['1. again'], 'list', { counters: [] }), [1]);
   // decorate shows the computed number and keeps the typed text intact
   const html = MD.decorate('1. one\n  2. sub', 'list', { counters: [] });
   assert.equal((html.match(/data-num="1\."/g) || []).length, 4);          // on the line AND on the number span
@@ -176,4 +179,24 @@ test('tables: a row height round-trips through the style line', () => {
   assert.equal(t.style.rows[2].height, '48px');
   assert.equal(t.style.cols[1].width, '120px');
   assert.match(FS.tables.serialize(t), /row 2: height 48px/);
+});
+
+test('tables: the indent level round-trips through the style line', () => {
+  const t = FS.tables.parse('| a | b |\n|---|---|\n| 1 | 2 |\n{table: striped; indent 2}');
+  assert.equal(t.style.indent, 2);
+  assert.match(FS.tables.serialize(t), /indent 2/);
+  t.style.indent = 0;
+  assert.doesNotMatch(FS.tables.serialize(t), /indent/);
+});
+
+test('a list starts at its first typed number; a new block restarts when its number is not the next', () => {
+  const ctx = { counters: [] };
+  assert.deepEqual(MD.numberLines(['3. a', '7. b', '  1. c', '9. d'], 'list', ctx), [3, 4, 1, 5]);   // start at 3; typed digits inside the block are ignored
+  assert.deepEqual(MD.numberLines(['6. e'], 'list', ctx), [6]);        // the next number continues the loose list
+  assert.deepEqual(MD.numberLines(['1. f'], 'list', ctx), [1]);        // "1 again" after a blank line starts over
+  assert.deepEqual(MD.numberLines(['2. g'], 'list', ctx), [2]);
+  assert.deepEqual(MD.numberLines(['10. h'], 'list', ctx), [10]);      // a jump forward goes there
+  assert.deepEqual(MD.numberLines(['4. i'], 'list', ctx), [11]);       // a smaller number is stale (something was added above): the count continues
+  const c2 = { counters: [] };
+  assert.deepEqual(MD.numberLines(['1. a', '1. b', '1. c'], 'list', c2), [1, 2, 3]);   // the "1." style still counts
 });

@@ -75,6 +75,12 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
   it must never add or remove text (the node tests check this). Empty lines render a `<br>`.
   Outline numbers are COMPUTED (`markdown.numberLines`, per level, carried across blocks by the
   editor's `numCtx`) and shown over the typed number via `data-num`; the typed digits stay.
+  The typed number of a block's first TOP-LEVEL item restarts the count when it is `1.` or
+  jumps forward (`3.` starts at 3, `1.` after a blank line starts over); a smaller typed number
+  is stale (an item was added above) and the count continues; nested items always count under
+  their parent. The block ⋮ menu has "Start numbering at…".
+- A table's indent in the note is `indent N` (1–4) in its style line: Tab / Shift+Tab on the
+  focused table, the context menu, Table style. Exports carry it (`indent` on the table block).
 - `beforeinput` is whitelisted; Enter/paste/bold/undo are ours. Chromium must never inject HTML.
 - Undo is our own snapshot stack (innerHTML rebuilds break native undo).
 

@@ -156,7 +156,7 @@
           }
           rows.push(cells);
         }
-        blocks.push({ type: 'table', rows, aligns: t.aligns, header: true, style: { flags: [...t.style.flags], cols: t.style.cols, rows: t.style.rows, spans: t.style.spans } });
+        blocks.push({ type: 'table', rows, aligns: t.aligns, header: true, style: { flags: [...t.style.flags], cols: t.style.cols, rows: t.style.rows, spans: t.style.spans }, indent: t.style.indent || 0 });
       } else if (b.type === 'chart') {
         const canvas = b.el && b.el.querySelector('canvas');
         if (canvas) blocks.push({ type: 'image', png: canvas.toDataURL('image/png'), width: canvas.clientWidth, height: canvas.clientHeight, alt: 'chart' });

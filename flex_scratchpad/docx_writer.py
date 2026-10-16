@@ -131,7 +131,10 @@ class Docx:
         elif t == "hr":
             self.body.append('<w:p><w:pPr><w:pBdr><w:bottom w:val="single" w:sz="6" w:space="1" w:color="BBBBBB"/></w:pBdr></w:pPr></w:p>')
         elif t == "table":
-            self.body.append(self.table(block))
+            xml = self.table(block)
+            if block.get("indent"):
+                xml = self._indent(xml, 360 * int(block["indent"]))
+            self.body.append(xml)
             self.body.append("<w:p/>")
         elif t in ("interlinear", "entry"):
             parts = self.interlinear(block) if t == "interlinear" else self.entry(block)

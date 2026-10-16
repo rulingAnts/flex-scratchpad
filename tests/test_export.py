@@ -62,6 +62,13 @@ def test_docx_numbered_indented_examples():
     assert '<w:ind w:left="360"/>' in xml and '<w:ind w:left="720"/>' in xml  # entry head / sense (level 0) + 1
 
 
+def test_docx_indented_table():
+    doc = {"title": "T", "blocks": [dict(DOC["blocks"][3], indent=2)]}
+    xml = zipfile.ZipFile(__import__("io").BytesIO(build_docx(doc))).read("word/document.xml").decode("utf-8")
+    ET.fromstring(xml)
+    assert '<w:tblInd w:w="720" w:type="dxa"/>' in xml
+
+
 def test_zip_export_import_round_trip(tmp_path):
     cfg = AppConfig(tmp_path / "cfg.json")
     api = Api(cfg, notebook_dir=tmp_path / "nb", demo=True)
