@@ -1662,3 +1662,65 @@ def test_export_examples_as_flextext(app):
     assert len(phrases) == 3 and [ph.find("item[@type='segnum']").text for ph in phrases] == ["1.1", "1.2", "2.1"]
     assert any("label: first" in (i.text or "") for i in phrases[0].findall("item[@type='note']"))
     assert not errors
+
+
+def dnd(page, src_sel, x, y, ctrl=False):
+    """Synthetic HTML5 drag from the element at src_sel to the point (x, y)."""
+    page.evaluate("""([src, x, y, ctrl]) => {
+      const dt = new DataTransfer();
+      const s = document.querySelector(src);
+      s.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: dt }));
+      const t = document.elementFromPoint(x, y);
+      t.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt, clientX: x, clientY: y, ctrlKey: ctrl }));
+      t.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt, clientX: x, clientY: y, ctrlKey: ctrl }));
+      s.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: dt }));
+    }""", [src_sel, x, y, ctrl])
+    page.wait_for_timeout(900)
+
+
+def test_drag_objects_between_text_cells_and_blocks(app):
+    """Seth, 2026-10-16: drag objects inline with text, between table cells, out of and into
+    tables, or to re-order them."""
+    h, page, errors = app
+    new_note(page, "Drag")
+    page.locator("#editor .blk-body").first.click()
+    paste(page, "Compare the word here.\n\n{{flex:entry 6a5f3a2e-1b1e-4c2a-9f10-0d2c1a7e0001}}\n\n| Form | Example |\n|---|---|\n| a | b |\n| c | d |\n\n{{flex:text %s seg=1}}\n\n{{flex:text %s seg=2}}" % (T_STORY, T_STORY))
+    page.wait_for_selector("#editor .blk-flex .entry-card")
+    page.wait_for_selector("#editor .text-obj")
+    page.wait_for_timeout(600)
+    body = page.locator("#editor .blk-p .blk-body").first
+    # 1. a block object → the end of the first paragraph: it becomes an inline chip, the block is gone
+    box = body.bounding_box()
+    dnd(page, "#editor .blk-flex .entry-card .drag-handle", box["x"] + box["width"] - 6, box["y"] + box["height"] / 2)
+    assert body_of(h).split("\n")[0] == "Compare the word here. {{flex:entry 6a5f3a2e-1b1e-4c2a-9f10-0d2c1a7e0001}}", body_of(h)
+    assert page.locator("#editor .md-embed").count() == 1 and page.locator("#editor .entry-card").count() == 0
+    # 2. the inline chip → a table cell: the cell gets it, the paragraph loses it
+    cell = page.locator("table.md-table td[data-r='1'][data-c='1']")
+    cb = cell.bounding_box()
+    dnd(page, "#editor .md-embed", cb["x"] + cb["width"] / 2, cb["y"] + cb["height"] / 2)
+    assert body_of(h).split("\n")[0] == "Compare the word here.", body_of(h)
+    assert "| a | b {{flex:entry 6a5f3a2e-1b1e-4c2a-9f10-0d2c1a7e0001}} |" in body_of(h), body_of(h)
+    page.wait_for_selector("table.md-table td[data-r='1'][data-c='1'] .flex-collapsed")
+    # 3. the object in the cell → below the table (a block of its own); the cell keeps its text
+    tbl = page.locator("#editor .blk-table")
+    tb = tbl.bounding_box()
+    dnd(page, "table.md-table td[data-r='1'][data-c='1'] .flex-collapsed", tb["x"] + tb["width"] / 2, tb["y"] + tb["height"] - 3)
+    b = body_of(h)
+    assert "| a | b |" in b and b.count("{{flex:entry") == 1, b
+    i_tbl, i_ent, i_t1 = b.index("{table") if "{table" in b else b.index("| c | d |"), b.index("{{flex:entry"), b.index("{{flex:text %s seg=1" % T_STORY)
+    assert i_tbl < i_ent < i_t1, b
+    # 4. re-order: the second example's handle onto the top half of the first → it comes first
+    first = page.locator("#editor .blk-flex .text-obj").first
+    fb = first.bounding_box()
+    handles = page.evaluate("() => { const hs = [...document.querySelectorAll('#editor .blk-flex .text-obj .drag-handle')]; hs.forEach((h, i) => h.setAttribute('data-test', 'h' + i)); return hs.length; }")
+    assert handles == 2
+    dnd(page, "#editor .drag-handle[data-test='h1']", fb["x"] + fb["width"] / 2, fb["y"] + 4)
+    b = body_of(h)
+    assert b.index("seg=2") < b.index("seg=1"), b
+    # 5. Ctrl-drag copies: the first example into the paragraph, and it stays below too
+    box = page.locator("#editor .blk-p .blk-body").first.bounding_box()
+    page.evaluate("() => { [...document.querySelectorAll('#editor .blk-flex .text-obj .drag-handle')].forEach((h, i) => h.setAttribute('data-test', 'h' + i)); }")
+    dnd(page, "#editor .drag-handle[data-test='h0']", box["x"] + box["width"] - 6, box["y"] + box["height"] / 2, ctrl=True)
+    b = body_of(h)
+    assert b.count("seg=2") == 2 and b.split("\n")[0].startswith("Compare the word here. {{flex:text"), b
+    assert not errors

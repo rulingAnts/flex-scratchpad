@@ -146,6 +146,180 @@
       root.classList.add('editor-root');
       root.addEventListener('click', (e) => { if (e.target === root) this.focusBlock(this.blocks.length - 1, 'end', true); });
       root.addEventListener('focusin', (e) => { const w = e.target.closest('.widget'); this.activeTable = w && w._table ? w._table : null; if (w && w._table) this.active = this.blocks.find((b) => b.el === w) || this.active; });
+      this.wireDrag(root);
+    }
+
+    /* -- dragging FLEx objects around the note (Seth, 2026-10-16) ------------------------
+     * Sources: a block object (its ⠿ handle or chip), an inline chip in text, an object in a
+     * table cell. Targets: a spot in a line of text (inline), a table cell, or between blocks
+     * (a block of its own; dropping on a block's top/bottom half re-orders). A drag MOVES;
+     * Ctrl (or Alt) copies. Everything is string surgery on the markdown, then a redraw. */
+    wireDrag(root) {
+      root.addEventListener('dragstart', (e) => {
+        const h = e.target && e.target.closest ? e.target.closest('.md-embed, .flex-collapsed, .drag-handle') : null;
+        if (!h || !root.contains(h)) return;
+        const from = this.dragSourceOf(h);
+        if (!from) return;
+        FS.drag = from;
+        e.dataTransfer.effectAllowed = 'copyMove';
+        e.dataTransfer.setData('application/x-flex-embed', from.src);
+        e.dataTransfer.setData('text/plain', from.src);
+        (h.closest('.flex-obj') || h).classList.add('dragging');
+      });
+      root.addEventListener('dragend', () => { this.clearDropMarks(); document.querySelectorAll('.dragging').forEach((x) => x.classList.remove('dragging')); FS.drag = null; });
+      root.addEventListener('dragover', (e) => {
+        if (!this.dragPayload(e)) return;
+        const to = this.dropTargetAt(e);
+        if (!to) { this.clearDropMarks(); return; }
+        e.preventDefault();
+        e.dataTransfer.dropEffect = (e.ctrlKey || e.altKey) ? 'copy' : 'move';
+        this.markDrop(to);
+      });
+      root.addEventListener('dragleave', (e) => { if (!e.relatedTarget || !root.contains(e.relatedTarget)) this.clearDropMarks(); });
+      root.addEventListener('drop', (e) => {
+        const payload = this.dragPayload(e, true);
+        if (!payload) return;
+        const to = this.dropTargetAt(e);
+        this.clearDropMarks();
+        if (!to) return;
+        e.preventDefault(); e.stopPropagation();
+        const from = FS.drag && FS.drag.src === payload ? FS.drag : null;
+        this.moveEmbed(from, to, payload, !!(e.ctrlKey || e.altKey));
+        FS.drag = null;
+      });
+    }
+    dragPayload(e, final) {
+      if (FS.drag && FS.drag.src) return FS.drag.src;
+      const types = e.dataTransfer ? [...(e.dataTransfer.types || [])] : [];
+      if (!types.includes('application/x-flex-embed')) return null;
+      return final ? (e.dataTransfer.getData('application/x-flex-embed') || null) : '{{flex:…}}';   // data is unreadable until the drop
+    }
+    dragSourceOf(h) {
+      const blkEl = h.closest('.blk');
+      const b = blkEl && this.blocks.find((x) => x.el === blkEl);
+      if (!b) return null;
+      const inline = h.closest('.md-embed');
+      const td = h.closest('td[data-r], th[data-r]');
+      if (td && b.type === 'table') {
+        const wrap = h.closest('.flex-inline');
+        const src = inline ? inline.dataset.src : wrap ? wrap.dataset.src : null;
+        return src ? { type: 'cell', b, r: +td.dataset.r, c: +td.dataset.c, src } : null;
+      }
+      if (inline) return { type: 'inline', b, src: inline.dataset.src };
+      if (b.type === 'flex') return { type: 'block', b, src: b.src.trim() };
+      return null;
+    }
+    dropTargetAt(e) {
+      const el0 = e.target && e.target.nodeType === 1 ? e.target : (e.target && e.target.parentNode);
+      if (!el0 || !el0.closest) return null;
+      const blkEl = el0.closest('.blk');
+      const b = blkEl && this.blocks.find((x) => x.el === blkEl);
+      const td = el0.closest('td[data-r], th[data-r]');
+      const pointRange = () => (document.caretRangeFromPoint ? document.caretRangeFromPoint(e.clientX, e.clientY) : null);
+      if (td && b && b.type === 'table') {
+        const ed = td.querySelector('.cell-edit');
+        let caret = null;
+        if (ed) { const r = pointRange(); if (r && ed.contains(r.startContainer)) { const rr = r.cloneRange(); rr.setStart(ed, 0); caret = rr.toString().length; } }
+        return { type: 'cell', b, r: +td.dataset.r, c: +td.dataset.c, caret, el: td };
+      }
+      if (b && TEXT_TYPES.has(b.type) && b.type !== 'code') {
+        const body = blkEl.querySelector('.blk-body');
+        let offset = body.textContent.length;
+        const r = pointRange();
+        if (r && body.contains(r.startContainer)) {
+          const rr = r.cloneRange(); rr.setStart(body, 0); offset = rr.toString().length;
+          const n = r.startContainer.nodeType === 3 ? r.startContainer.parentNode : r.startContainer;
+          const chip = n.closest ? n.closest('.md-embed') : null;
+          if (chip && body.contains(chip)) { const r2 = document.createRange(); r2.setStart(body, 0); r2.setEndAfter(chip); offset = r2.toString().length; }
+        }
+        return { type: 'text', b, offset, el: body };
+      }
+      if (b) {
+        const rect = blkEl.getBoundingClientRect();
+        const after = e.clientY > rect.top + rect.height / 2;
+        return { type: 'between', index: this.blocks.indexOf(b) + (after ? 1 : 0), el: blkEl, after };
+      }
+      if (el0 === this.root) return { type: 'between', index: this.blocks.length, el: this.blocks.length ? this.blocks[this.blocks.length - 1].el : null, after: true };
+      return null;
+    }
+    markDrop(to) {
+      this.clearDropMarks();
+      if (to.type === 'cell') to.el.classList.add('drop-target');
+      else if (to.type === 'text') to.el.classList.add('drop-text');
+      else if (to.el) to.el.classList.add(to.after ? 'drop-after' : 'drop-before');
+    }
+    clearDropMarks() {
+      this.root.querySelectorAll('.drop-target, .drop-text, .drop-before, .drop-after').forEach((x) => x.classList.remove('drop-target', 'drop-text', 'drop-before', 'drop-after'));
+    }
+    redrawText(b) {
+      const body = b.el && b.el.querySelector('.blk-body');
+      if (body) { this.decorateInto(body, b); this.renumberAfter(b); }
+    }
+    /* Take an embed out of `from` (unless copying) and put it at `to`. */
+    moveEmbed(from, to, src, copy) {
+      src = String((from && from.src) || src || '').trim();
+      if (!FS.flexref.isEmbedLine(src)) return;
+      const target = Object.assign({}, to);
+      const cut = (s, i) => {                    // remove src at i, closing the gap it leaves; → [text, removed length]
+        let before = s.slice(0, i), after = s.slice(i + src.length), removed = src.length;
+        if (/[ \t]$/.test(before) && /^[ \t]/.test(after)) { after = after.replace(/^[ \t]/, ''); removed += 1; }
+        else if (/[ \t]$/.test(before) && (after === '' || after.startsWith('\n'))) { before = before.replace(/[ \t]+$/, ''); removed += s.slice(0, i).length - before.length; }
+        return [before + after, removed];
+      };
+      let blocksChanged = false;
+      if (from && !copy) {
+        if (from.type === 'block') {
+          const i = this.blocks.indexOf(from.b);
+          if (i >= 0) {
+            if (target.type === 'between' && target.index > i) target.index -= 1;
+            this.blocks.splice(i, 1);
+            if (from.b.el) from.b.el.remove();
+            blocksChanged = true;
+          }
+        } else if (from.type === 'inline') {
+          const i = from.b.src.indexOf(src);
+          if (i >= 0) {
+            const [next, removed] = cut(from.b.src, i);
+            from.b.src = next;
+            if (target.type === 'text' && target.b === from.b && target.offset > i) target.offset = Math.max(i, target.offset - removed);
+            if (!(target.type === 'text' && target.b === from.b)) this.redrawText(from.b);
+          }
+        } else if (from.type === 'cell') {
+          const w = from.b.el && from.b.el._table;
+          const cur = w ? (w.t.rows[from.r][from.c] || '') : '';
+          const i = cur.indexOf(src);
+          if (w && i >= 0) {
+            const [next, removed] = cut(cur, i);
+            w.t.rows[from.r][from.c] = next.trim() === '' ? '' : next;
+            const sameCell = target.type === 'cell' && target.b === from.b && target.r === from.r && target.c === from.c;
+            if (sameCell && target.caret != null && target.caret > i) target.caret = Math.max(i, target.caret - removed);
+            if (!(target.type === 'cell' && target.b === from.b)) w.setCell(from.r, from.c, w.t.rows[from.r][from.c]);
+          }
+        }
+      }
+      if (target.type === 'text') {
+        const s = target.b.src;
+        const a = Math.max(0, Math.min(target.offset, s.length));
+        const padL = a > 0 && !/\s$/.test(s.slice(0, a)) ? ' ' : '';
+        const padR = a < s.length && !/^\s/.test(s.slice(a)) ? ' ' : '';
+        target.b.src = s.slice(0, a) + padL + src + padR + s.slice(a);
+        this.redrawText(target.b);
+        this.changed({ force: true });
+        if (blocksChanged) this.renderAll();
+        this.resplit(target.b);                    // an embed alone on its line becomes a block
+        return;
+      }
+      if (target.type === 'cell') {
+        const w = target.b.el && target.b.el._table;
+        if (w) w.insertInto(target.r, target.c, src, target.caret);
+        if (blocksChanged) { this.renderAll(); }
+        this.changed({ force: true });
+        return;
+      }
+      const nb = { id: FS.uid(), type: 'flex', src };
+      this.blocks.splice(Math.max(0, Math.min(target.index, this.blocks.length)), 0, nb);
+      this.renderAll();
+      this.changed({ force: true });
     }
 
     /* -- model ------------------------------------------------------------------ */

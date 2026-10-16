@@ -174,6 +174,13 @@
     return a;
   }
 
+  /* The grip an object is dragged by (Seth, 2026-10-16: move objects inline, between cells,
+   * out of and into tables, or re-order them). The editor's drag handler does the rest. */
+  function dragHandle(opts) {
+    if (!opts.editable || opts.overlay || opts.context) return null;
+    return el('span', { class: 'drag-handle', draggable: 'true', title: 'Drag to move this object (Ctrl: copy)' }, '⠿');
+  }
+
   function renderText(obj, spec, opts, root) {
     const vern = (obj.ws && obj.ws.vern) || {}, anal = (obj.ws && obj.ws.anal) || {};
     const lines = spec.lines && spec.lines.length ? spec.lines : R.DEFAULT_LINES;
@@ -190,6 +197,7 @@
     const rangeLabel = segs.length ? (range[0] === range[1] ? 'segment ' + flexRange : 'segments ' + flexRange) + (first && first.label && first.label !== String(first.n) ? ' (' + range[0] + (range[0] === range[1] ? '' : '–' + range[1]) + ' of ' + obj.segmentCount + ')' : ' of ' + obj.segmentCount) : 'no segments';
 
     const head = el('div', { class: 'flex-head' + (opts.inCell ? ' compact' : '') },
+      dragHandle(opts),
       el('span', Object.assign({ class: 'ttl vern' }, wsAttrs(vern)), obj.title || '(untitled text)'),
       el('span', { class: 'badge' }, rangeLabel),
       obj.cached ? el('span', { class: 'badge warn', title: obj.liveError || 'Shown from the notebook cache' }, 'cached' + (obj.cachedAt ? ' ' + obj.cachedAt.slice(0, 10) : '')) : null,
@@ -625,7 +633,7 @@
     const hw = el('span', Object.assign({ class: 'headword' }, wsAttrs(vern)), obj.headword || obj.lexemeForm || '?');
     if (obj.homograph) hw.appendChild(el('sub', {}, String(obj.homograph)));
     const F = new Set(R.entryFields(spec));
-    const head = el('div', { class: 'flex-head' + (opts.inCell ? ' compact' : '') }, hw);
+    const head = el('div', { class: 'flex-head' + (opts.inCell ? ' compact' : '') }, dragHandle(opts), hw);
     if (!F.has('hn')) hw.querySelectorAll('sub').forEach((x) => x.remove());
     if (F.has('cf') && obj.citationForm && obj.citationForm !== obj.headword && obj.citationForm !== obj.lexemeForm) head.appendChild(el('span', Object.assign({ class: 'ecf', title: 'citation form' }, wsAttrs(vern)), obj.citationForm));
     if (F.has('lf') && obj.lexemeForm && obj.lexemeForm !== obj.headword) head.appendChild(el('span', Object.assign({ class: 'ecf', title: 'lexeme form' }, wsAttrs(vern)), obj.lexemeForm));
@@ -665,7 +673,7 @@
   function renderWordform(obj, spec, opts) {
     const vern = (obj.ws && obj.ws.vern) || {};
     const box = el('div', { class: 'flex-obj wordform-card' + (obj.cached ? ' cached' : '') });
-    const head = el('div', { class: 'flex-head' }, el('span', Object.assign({ class: 'wf' }, wsAttrs(vern)), obj.form || '?'), el('span', { class: 'badge' }, 'wordform'), el('span', { class: 'spacer' }));
+    const head = el('div', { class: 'flex-head' }, dragHandle(opts), el('span', Object.assign({ class: 'wf' }, wsAttrs(vern)), obj.form || '?'), el('span', { class: 'badge' }, 'wordform'), el('span', { class: 'spacer' }));
     if (obj.url) head.appendChild(el('a', { href: obj.url, onclick: (e) => { e.preventDefault(); openInFlex(obj.url); } }, 'Open in FLEx ↗'));
     box.appendChild(head);
     box.appendChild(el('div', { class: 'il-gls' }, (obj.glosses || []).join('; ') || '(no glosses)'));
@@ -755,7 +763,7 @@
   function renderChip(container, spec, opts) {
     container.innerHTML = '';
     const icon = spec.kind === 'text' ? '¶' : spec.kind === 'wordform' ? 'ω' : '📖';
-    const chip = el('span', { class: 'flex-collapsed kind-' + spec.kind, tabindex: 0, title: 'Click to preview; ⤡ to expand' });
+    const chip = el('span', { class: 'flex-collapsed kind-' + spec.kind, tabindex: 0, title: 'Click to preview; ⤡ to expand; drag to move', draggable: opts.editable ? 'true' : null });
     const ttl = el('span', { class: 'cttl' }, chipTitle(spec, null));
     chip.appendChild(el('span', { class: 'cicon' }, icon));
     chip.appendChild(ttl);
@@ -942,7 +950,6 @@
         findAnchor: () => (opts.findAnchor ? opts.findAnchor(src) : null),
       };
       const open = (e) => { e.preventDefault(); e.stopPropagation(); openOverlay(span, spec, o, { pinned: true }); };
-      span.addEventListener('mousedown', (e) => { if (e.button === 0) e.preventDefault(); });   // keep the caret where it is
       span.addEventListener('click', open);
       let hoverTimer = null;
       span.addEventListener('mouseenter', () => { if (overlay.current && overlay.current.pinned) return; hoverTimer = setTimeout(() => openOverlay(span, spec, o, { pinned: false }), 380); });

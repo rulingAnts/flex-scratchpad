@@ -164,7 +164,7 @@ test('an embed inside a line of text becomes a chip span whose text is still the
   const src = 'see {{flex:entry ' + g + '}} and {{flex:text ' + g + ' seg=2-3 "label"}} here';
   const html = MD.decorate(src, 'p');
   assert.equal(html.replace(/<[^>]+>/g, '').replace(/&quot;/g, '"'), src);
-  assert.match(html, /<span class="md-embed" contenteditable="false" data-src="\{\{flex:entry [^"]+\}\}" data-icon="📖" data-title="entry 6a5f3a2e…">/);
+  assert.match(html, /<span class="md-embed" contenteditable="false" draggable="true" data-src="\{\{flex:entry [^"]+\}\}" data-icon="📖" data-title="entry 6a5f3a2e…">/);
   assert.match(html, /data-icon="¶" data-title="label" data-range="2–3"/);
   // a whole-line embed is not inline (it is a block of its own)
   assert.equal(MD.splitBlocks('{{flex:entry ' + g + '}}')[0].type, 'flex');

@@ -65,6 +65,12 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
 - Example layout keys on a block embed (`spec.extra`): `ex` = numbered (1), (2)… through the
   note (`renumberExamples` on every change), `indent=N` (1–4) steps it in like a list level.
   Tab / Shift+Tab on the focused block, or the ⋯ menu. Exports carry `exNum` / `indent`.
+- Objects are dragged (Seth, 2026-10-16): the ⠿ handle on a block object, a collapsed chip, an
+  inline `.md-embed`, or an object in a cell; dropped into a line of text (inline, at the point),
+  a table cell, or between blocks (on a block's top/bottom half = before/after, which re-orders).
+  One delegated handler on the editor root (`wireDrag` → `dragSourceOf` / `dropTargetAt` /
+  `moveEmbed`): string surgery on the markdown, a move unless Ctrl/Alt (copy). `FS.drag` holds
+  the source during the drag; the `application/x-flex-embed` type marks our drags.
 - A text block's `textContent` **is** the markdown. `decorate()` only wraps characters in spans;
   it must never add or remove text (the node tests check this). Empty lines render a `<br>`.
   Outline numbers are COMPUTED (`markdown.numberLines`, per level, carried across blocks by the

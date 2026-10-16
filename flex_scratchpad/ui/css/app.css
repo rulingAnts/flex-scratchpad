@@ -537,3 +537,14 @@ kbd { font-family: var(--font); font-size: 11px; border: 1px solid var(--border)
 
 @media (max-width: 900px) { :root { --rail-w: 200px; --list-w: 240px; } .note-head, .toolbar, #editor { padding-left: 18px; padding-right: 18px; } }
 @media print { #rail, #list, .toolbar, .widget-bar, .blk-handle, .note-foot { display: none !important; } #app { display: block; } #editor { overflow: visible; padding: 0; } .md-marker { display: none; } }
+
+/* ---------- dragging FLEx objects (Seth, 2026-10-16) ---------- */
+.drag-handle { cursor: grab; color: var(--faint); user-select: none; font-size: 14px; line-height: 1; padding: 0 2px; }
+.drag-handle:hover { color: var(--text); }
+.flex-collapsed[draggable="true"], .md-embed[draggable="true"] { cursor: grab; }
+.dragging { opacity: 0.45; }
+.blk.drop-before::before, .blk.drop-after::after { content: ""; position: absolute; left: 0; right: 0; height: 3px; background: var(--accent); border-radius: 2px; pointer-events: none; }
+.blk.drop-before::before { top: -3px; }
+.blk.drop-after::after { bottom: -4px; }
+table.md-table td.drop-target, table.md-table th.drop-target { outline: 2px solid var(--accent); outline-offset: -2px; background: var(--accent-soft); }
+.blk-body.drop-text { outline: 1px dashed var(--accent); outline-offset: 2px; border-radius: 4px; }

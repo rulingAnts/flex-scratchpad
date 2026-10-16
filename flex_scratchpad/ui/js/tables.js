@@ -331,6 +331,7 @@
     const thead = el('thead'), tbody = el('tbody');
     const commit = () => opts.onChange && opts.onChange(serialize(t));
     /* Put text into a cell that is not being edited (the picker closed the cell editor). */
+    widget.setCell = (r, c, text) => { t.rows[r][c] = text; commit(); widget.refresh(); };
     widget.insertInto = (r, c, text, caret) => {
       const s = t.rows[r][c] || '';
       const at = caret == null ? s.length : Math.min(caret, s.length);
