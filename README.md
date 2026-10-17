@@ -145,6 +145,7 @@ elsewhere (marked *cached*).
 | Chart | *Chart* button; double-click the chart or use *Edit chart* |
 | Search | The box at the top left (**Ctrl+Shift+F**); `tag:todo`, `tab:Grammar`, `"exact phrase"`; **Ctrl+F** finds in the open note |
 | Tags | `+ tag` on the note, or type `#tag` anywhere in the text |
+| Headings | `#`…`######` or the toolbar's H ▾ (Ctrl+Alt+1…6); ▾ in the margin collapses a section. The headings above the part of the note in view stay at the top of the window; their ▾ collapses that section in place and goes to the heading (switch it off in the H ▾ menu or Settings) |
 | Insert a block | Right-click an example, a table cell, or the space between blocks (or the ⋮ beside any block) → *Insert a new block*: paragraph, heading, list, checklist, quote, table, FLEx example or divider, above or below |
 | A paste lands wrong | `flex-scratchpad --project NAME --locate clip` with the rows still copied writes `flex-scratchpad-locate.json`, which shows what the app read and what the project holds there |
 | Folders | A folder shows the notes directly in it; tick *Show notes in subfolders* under the list title to see everything below it |

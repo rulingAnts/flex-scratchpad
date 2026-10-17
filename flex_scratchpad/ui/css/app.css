@@ -136,7 +136,7 @@ body.resizing * { pointer-events: none; }
 .chip .x:hover { opacity: 1; }
 
 /* ---------- editor pane ---------- */
-#editor-pane { display: flex; flex-direction: column; min-width: 0; background: var(--paper); overflow: hidden; }
+#editor-pane { position: relative; display: flex; flex-direction: column; min-width: 0; background: var(--paper); overflow: hidden; }   /* #sticky-heads is placed over #editor */
 .note-head { padding: 14px 28px 0; display: flex; flex-direction: column; gap: 8px; }
 .note-head .row { display: flex; align-items: center; gap: 8px; }
 .title-input { flex: 1; font-size: 26px; font-weight: 700; border: 0; background: none; outline: none; padding: 2px 0; letter-spacing: -0.2px; min-width: 0; }
@@ -640,6 +640,16 @@ table.md-table td.drop-target, table.md-table th.drop-target { outline: 2px soli
 .fold-hidden { display: none !important; }
 .fold-more { display: inline-block; margin: 2px 0 4px 4px; border: 1px solid var(--border-soft); background: var(--panel); color: var(--muted); border-radius: 999px; padding: 0 10px; font-size: 12px; line-height: 20px; cursor: pointer; }
 .fold-more:hover { color: var(--text); border-color: var(--border); }
+/* the sticky headings strip over the top of the note (editor.js updateSticky): the headings that
+ * govern the first block in view, outermost first, each with its own ▾ */
+#sticky-heads { position: absolute; left: 0; right: 0; z-index: 6; background: var(--paper); border-bottom: 1px solid var(--border-soft); box-shadow: 0 6px 10px -9px rgba(0, 0, 0, 0.45); padding: 0 28px; }
+.sh-row { display: flex; align-items: center; gap: 5px; line-height: 26px; min-height: 26px; font-weight: 650; color: var(--text); white-space: nowrap; }
+.sh-l1 { font-size: 15.5px; } .sh-l2 { font-size: 14.5px; } .sh-l3, .sh-l4, .sh-l5, .sh-l6 { font-size: 13.5px; }
+.sh-row + .sh-row { border-top: 1px dotted var(--border-soft); }
+.sh-fold { flex: none; width: 22px; height: 22px; margin-left: -27px; border: 0; background: none; color: var(--faint); border-radius: 4px; font-size: 15px; line-height: 22px; padding: 0; cursor: pointer; }
+.sh-fold:hover { background: var(--panel-2); color: var(--text); }
+.sh-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; padding: 0 4px; cursor: pointer; }
+.sh-title:hover { color: var(--accent); }
 .menu-row { display: flex; align-items: center; gap: 4px; padding: 4px 8px; flex-wrap: wrap; }
 .menu-row .menu-label { color: var(--muted); font-size: 12.5px; margin-right: 4px; }
 .menu-row .tog { min-width: 30px; }

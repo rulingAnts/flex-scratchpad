@@ -46,6 +46,13 @@
     if (btn) { btn.classList.toggle('on', !hide); btn.title = (hide ? 'Markdown markers are hidden — click to show them' : 'Markdown markers are shown — click to hide them') + ' (**bold**, # heading, - list)'; }
     if (FS.editor && FS.editor.revealMarkers) FS.editor.revealMarkers();
   }
+  /* Sticky headings (Seth, 2026-10-17): on unless turned off in Settings or the H ▾ menu. */
+  function stickyOn() { return (S.config && S.config.settings || {}).stickyHeadings !== false; }
+  function applySticky() { if (S.editor) S.editor.setSticky(stickyOn()); }
+  async function toggleSticky() {
+    try { S.config.settings = await FS.api.set_setting('stickyHeadings', !stickyOn()); } catch (e) { FS.toast(e.message, 'error'); return; }
+    applySticky();
+  }
   async function toggleMarkers() {
     const hide = !((S.config.settings || {}).hideMarkers);
     try { S.config.settings = await FS.api.set_setting('hideMarkers', hide); } catch (e) { FS.toast(e.message, 'error'); return; }
@@ -60,6 +67,7 @@
     FS.tagstyles.setConfig(S.config.tagStyles);
     if (S.flex && S.flex.open) FS.tagstyles.loadList(true);
     applyMarkers();
+    applySticky();
     if (!S.tab || !S.config.tabs.some((t) => t.dir === S.tab)) S.tab = (S.config.tabs[0] || {}).dir || null;
     renderRail();
     renderList();
@@ -354,6 +362,7 @@
       onInsertFlex: () => insertFlex(),
     });
     window.__fsEditor = S.editor;        // for the tests and the console
+    applySticky();
     return S.editor;
   }
   async function openNote(id) {
@@ -766,6 +775,8 @@
       pop.appendChild(FS.el('hr'));
       pop.appendChild(FS.el('button', { class: 'menu-item', 'data-test': 'fold-all', onmousedown: act(() => ed.setAllFolds(true)) }, '\u25b8 Collapse all headings'));
       pop.appendChild(FS.el('button', { class: 'menu-item', 'data-test': 'unfold-all', onmousedown: act(() => ed.setAllFolds(false)) }, '\u25be Expand all headings'));
+      pop.appendChild(FS.el('hr'));
+      pop.appendChild(FS.el('button', { class: 'menu-item', 'data-test': 'sticky-toggle', title: 'Keep the headings above the part of the note in view at the top of the window; their \u25be collapses the section in place', onmousedown: act(toggleSticky) }, (stickyOn() ? '\u2713 ' : '\u2003 ') + 'Sticky headings'));
     }, { class: 'heading-menu' });
   }
 
@@ -796,6 +807,9 @@
     const mk = el('input', { type: 'checkbox', checked: !!(S.config.settings || {}).hideMarkers });
     mk.addEventListener('change', async () => { S.config.settings = await FS.api.set_setting('hideMarkers', mk.checked); applyMarkers(); });
     nb.appendChild(el('label', { class: 'small', style: { display: 'flex', gap: '6px', marginTop: '8px' } }, mk, 'Hide Markdown markers while editing (**bold**, # heading, - list) — the toolbar still formats, and typing the markers still works'));
+    const sh = el('input', { type: 'checkbox', checked: stickyOn(), 'data-test': 'setting-sticky' });
+    sh.addEventListener('change', async () => { S.config.settings = await FS.api.set_setting('stickyHeadings', sh.checked); applySticky(); });
+    nb.appendChild(el('label', { class: 'small', style: { display: 'flex', gap: '6px', marginTop: '8px' } }, sh, 'Sticky headings: keep the headings above the part of the note in view at the top of the window (their \u25be collapses the section in place)'));
     body.appendChild(nb);
     // FLEx
     body.appendChild(el('div', { class: 'setting-block' }, el('h3', {}, 'Backup & storage'),

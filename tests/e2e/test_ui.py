@@ -2534,6 +2534,65 @@ def test_headings_have_levels_and_fold_their_sections(app):
     assert not errors
 
 
+def test_sticky_headings_follow_the_view_and_fold_in_place(app):
+    """Seth, 2026-10-17: "make whatever headings apply to the current viewport be sticky (optionally,
+    give the user the ability to turn this feature on and off)"; "they can collapse the sticky heading
+    even if they're not scrolled up to the top, in place"; "When they do collapse a sticky heading,
+    scroll to that heading, instead of skipping ahead or going to the start or end of the note"."""
+    h, page, errors = app
+    new_note(page, "Sticky")
+    page.locator("#editor .blk-body").first.click()
+    filler = lambda tag, n: "\n\n".join("%s paragraph %d, long enough to take a line of its own." % (tag, k) for k in range(n))   # noqa: E731
+    paste(page, "# Chapter\n\nintro\n\n## Part A\n\n" + filler("A", 14) + "\n\n### Deep\n\n" + filler("deep", 14) + "\n\n## Part B\n\n" + filler("B", 14) + "\n\n# Next\n\nlast")
+    page.wait_for_timeout(300)
+    blk = lambda t: page.locator("#editor .blk", has=page.locator(".blk-body", has_text=t)).first   # noqa: E731
+    strip = page.locator("#sticky-heads")
+    rows = lambda: page.evaluate("() => [...document.querySelectorAll('#sticky-heads .sh-title')].map((x) => x.textContent.trim())")   # noqa: E731
+    top_of = lambda t: page.evaluate("(t) => { const b = [...document.querySelectorAll('#editor .blk-body')].find((x) => x.textContent.includes(t)); return b.getBoundingClientRect().top - document.getElementById('editor').getBoundingClientRect().top; }", t)   # noqa: E731
+    # at the top nothing is stuck; scrolled into "### Deep", the chain Chapter › Part A › Deep is
+    page.evaluate("() => { document.getElementById('editor').scrollTop = 0; }")
+    page.wait_for_timeout(200)
+    assert strip.is_hidden()
+    page.evaluate("() => { const t = [...document.querySelectorAll('#editor .blk-body')].find((x) => x.textContent === 'deep paragraph 6, long enough to take a line of its own.'); t.scrollIntoView({ block: 'start' }); }")
+    page.wait_for_timeout(200)
+    assert rows() == ["Chapter", "Part A", "Deep"], rows()
+    # the strip never covers a block it names: the first block under it is a "deep" paragraph
+    assert page.evaluate("() => { const s = document.getElementById('sticky-heads').getBoundingClientRect(); const e = document.getElementById('editor').getBoundingClientRect(); return s.top === e.top && s.width === e.width; }")
+    # fold "Part A" from the strip: its section closes in place and the view moves to that heading,
+    # under the "Chapter" row (not to the start or the end of the note)
+    strip.locator(".sh-fold").nth(1).dispatch_event("mousedown")
+    page.wait_for_timeout(250)
+    assert not blk("deep paragraph 6").is_visible() and not blk("Deep").is_visible()
+    assert blk("Part A").locator(".fold-more").inner_text() == "⋯ 29 blocks"
+    assert rows() == ["Chapter"], rows()
+    strip_h = strip.bounding_box()["height"]
+    assert abs(top_of("## Part A") - strip_h) < 6, (top_of("## Part A"), strip_h)
+    page.wait_for_timeout(900)
+    assert "## Part A {collapsed}\n\nA paragraph 0" in body_of(h)
+    # a click on a sticky title goes to that heading
+    page.evaluate("() => { const t = [...document.querySelectorAll('#editor .blk-body')].find((x) => x.textContent === 'B paragraph 9, long enough to take a line of its own.'); t.scrollIntoView({ block: 'start' }); }")
+    page.wait_for_timeout(200)
+    assert rows() == ["Chapter", "Part B"], rows()
+    strip.locator(".sh-title").first.dispatch_event("mousedown")
+    page.wait_for_timeout(250)
+    assert strip.is_hidden() and page.evaluate("() => document.getElementById('editor').scrollTop") == 0   # the first block: the top of the note
+    # off in the H ▾ menu: no strip, remembered in the settings; on again from Settings
+    page.evaluate("() => { const t = [...document.querySelectorAll('#editor .blk-body')].find((x) => x.textContent === 'B paragraph 9, long enough to take a line of its own.'); t.scrollIntoView({ block: 'start' }); }")
+    page.wait_for_timeout(200)
+    assert rows() == ["Chapter", "Part B"]
+    page.locator("[data-test=tb-heading]").dispatch_event("mousedown")
+    page.locator("[data-test=sticky-toggle]").dispatch_event("mousedown")
+    page.wait_for_timeout(200)
+    assert strip.is_hidden()
+    assert h.api._nb.config["settings"]["stickyHeadings"] is False
+    page.click("#btn-settings")
+    page.locator("[data-test=setting-sticky]").check()
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(300)
+    assert rows() == ["Chapter", "Part B"], rows()
+    assert not errors
+
+
 def test_collection_groups_nest_by_level_and_fold(app):
     """Seth, 2026-10-16: collapsible headings of several levels in a collection too; they
     organise the view and are never exported."""

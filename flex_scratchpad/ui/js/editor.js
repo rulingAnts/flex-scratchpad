@@ -150,6 +150,12 @@
       this.findQuery = '';
       this.activeTable = null;      // the table widget whose cell is being edited
       root.classList.add('editor-root');
+      // the sticky headings strip lies over the top of the scroller (stickyHeadings below)
+      this.sticky = el('div', { id: 'sticky-heads', 'data-test': 'sticky-heads', hidden: true });
+      if (root.parentNode) root.parentNode.insertBefore(this.sticky, root);
+      this.stickyOn = true;
+      root.addEventListener('scroll', () => this.scheduleSticky(), { passive: true });
+      if (typeof ResizeObserver === 'function') new ResizeObserver(() => this.scheduleSticky()).observe(root);
       // A click on the page's background (Seth, 2026-10-16: "if I click outside the table, it
       // scrolls to the same position, but deselects the cell/table"): only BELOW the last block
       // does it put the caret at the end of the note; anywhere else it lets go of the cell, the
@@ -754,6 +760,114 @@
         if (n > 0 && !more) { more = el('button', { class: 'fold-more', contenteditable: 'false', title: 'Expand this section', onmousedown: (e) => { e.preventDefault(); this.setFold(b, false); } }); b.el.appendChild(more); }
         if (more) { if (n > 0) more.textContent = '\u22ef ' + n + (n === 1 ? ' block' : ' blocks'); else more.remove(); }
       });
+      this.scheduleSticky();
+    }
+    /* -- sticky headings (Seth, 2026-10-17: "make whatever headings apply to the current viewport
+     * be sticky", with a way to turn it off) ------------------------------------------------
+     * The headings that govern the first block under the top of the view — its nearest heading
+     * above, that one's nearest heading of a higher level, and so on — are shown in a strip over
+     * the top of the scroller once they have scrolled out of it, outermost first. Each row folds
+     * its heading IN PLACE ("they can collapse the sticky heading even if they're not scrolled up
+     * to the top") and then scrolls to that heading ("instead of skipping ahead or going to the
+     * start or end of the note"); a click on the title scrolls to it. The strip is recomputed on
+     * scroll, resize and every redraw; `scroll-padding-top` keeps focus moves from landing under it. */
+    setSticky(on) {
+      this.stickyOn = on !== false;
+      if (!this.stickyOn) { this.sticky.hidden = true; this.sticky.innerHTML = ''; this._stickyKey = null; this.root.style.scrollPaddingTop = ''; }
+      this.scheduleSticky();
+    }
+    scheduleSticky() {
+      if (this._stickyReq || !this.stickyOn) return;
+      this._stickyReq = requestAnimationFrame(() => { this._stickyReq = 0; this.updateSticky(); });
+    }
+    /* The chain of headings for the first block whose bottom lies under the line `top` (a page
+     * coordinate), innermost last; a heading counts only once its own top has passed the line. */
+    stickyChain(top) {
+      const blocks = this.blocks;
+      let i = -1;
+      for (let k = 0; k < blocks.length; k++) {
+        const b = blocks[k];
+        if (!b.el || this.isHidden(b)) continue;
+        if (b.el.getBoundingClientRect().bottom > top) { i = k; break; }
+      }
+      if (i < 0) return [];
+      const chain = [];
+      let lvl = 7;
+      for (let j = i; j >= 0; j--) {
+        const b = blocks[j], hl = MD.headingLevel(b);
+        if (!hl || hl >= lvl || b.folded) { if (hl && hl < lvl && b.folded) lvl = hl; continue; }
+        if (j === i && !(b.el.getBoundingClientRect().top < top - 1)) { lvl = hl; continue; }
+        chain.unshift(b);
+        lvl = hl;
+        if (lvl === 1) break;
+      }
+      return chain;
+    }
+    updateSticky() {
+      const strip = this.sticky;
+      if (!this.stickyOn || !strip || !this.root.isConnected || !this.blocks.length) return;
+      const sc = this.root, rr = sc.getBoundingClientRect();
+      strip.style.top = sc.offsetTop + 'px';
+      if (rr.height < 1) { strip.hidden = true; return; }
+      // the strip's own height moves the line it measures against: settle in at most three passes
+      let chain = [], h = strip.hidden ? 0 : strip.offsetHeight;
+      for (let pass = 0; pass < 3; pass++) {
+        chain = this.stickyChain(rr.top + h);
+        const key = chain.map((b) => b.id + ':' + b.src).join('\n');
+        if (key !== this._stickyKey) {
+          this._stickyKey = key;
+          strip.innerHTML = '';
+          chain.forEach((b, depth) => {
+            const lvl = MD.headingLevel(b);
+            const row = el('div', { class: 'sh-row sh-l' + lvl, dataset: { id: b.id }, 'data-test': 'sticky-row', style: { paddingInlineStart: depth ? (depth * 14) + 'px' : '' } },
+              el('button', { class: 'sh-fold', title: 'Collapse this section', 'data-test': 'sticky-fold', onmousedown: (e) => { e.preventDefault(); this.foldFromSticky(b); } }, '\u25be'),
+              el('span', { class: 'sh-title', dir: 'auto', title: 'Go to this heading', onmousedown: (e) => { e.preventDefault(); this.scrollToHeading(b); } }, MD.plainText(b.src) || '\u00a0'));
+            strip.appendChild(row);
+          });
+          strip.hidden = !chain.length;
+        }
+        const nh = strip.hidden ? 0 : strip.offsetHeight;
+        if (nh === h) break;
+        h = nh;
+      }
+      sc.style.scrollPaddingTop = h ? h + 'px' : '';
+    }
+    /* Scroll so heading `b` sits right under the strip rows of the headings above it. */
+    scrollToHeading(b) {
+      if (!b || !b.el || this.isHidden(b)) return;
+      const sc = this.root;
+      const chainAbove = this.stickyOn ? this.ancestorsOf(b) : [];
+      // the rows for its ancestors stay; measure what they will take by the rows now in the strip
+      let above = 0;
+      if (this.stickyOn && !this.sticky.hidden) {
+        for (const row of this.sticky.children) if (chainAbove.some((a) => a.id === row.dataset.id)) above += row.offsetHeight;
+        if (!above && chainAbove.length) above = this.sticky.offsetHeight / Math.max(1, this.sticky.children.length) * chainAbove.length;
+      } else if (chainAbove.length) {
+        above = 30 * chainAbove.length;
+      }
+      const delta = b.el.getBoundingClientRect().top - (sc.getBoundingClientRect().top + above);
+      sc.scrollTop = Math.max(0, sc.scrollTop + delta);
+      this.updateSticky();
+      // a second pass once the strip has its final rows
+      const d2 = b.el.getBoundingClientRect().top - (sc.getBoundingClientRect().top + (this.sticky.hidden ? 0 : this.sticky.offsetHeight));
+      if (Math.abs(d2) > 1) { sc.scrollTop = Math.max(0, sc.scrollTop + d2); this.updateSticky(); }
+    }
+    /* The headings above `b` in the outline: its nearest heading of a higher level, and so on. */
+    ancestorsOf(b) {
+      const i = this.blocks.indexOf(b), out = [];
+      let lvl = MD.headingLevel(b) || 7;
+      for (let j = i - 1; j >= 0 && lvl > 1; j--) {
+        const hl = MD.headingLevel(this.blocks[j]);
+        if (hl && hl < lvl) { out.unshift(this.blocks[j]); lvl = hl; }
+      }
+      return out;
+    }
+    foldFromSticky(b) {
+      if (!b || b.type !== 'h') return;
+      const act = document.activeElement;
+      if (act && act.blur && this.root.contains(act)) act.blur();   // setFold would otherwise move the caret (and the view) to the heading's end
+      this.setFold(b, true);
+      this.scrollToHeading(b);
     }
     isHidden(b) { return !!(b && b.el && b.el.classList.contains('fold-hidden')); }
     setFold(b, folded) {

@@ -170,6 +170,19 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   section, Find opens what hides a hit, and an edit that leaves the caret in a hidden block opens
   its section. The toolbar's H ▾ picks levels 1–6 (Ctrl+Alt+1…6) and folds all; the ⋮ menu of a
   heading has its levels and the folds. Word export maps levels 1–6 to Heading 1–6.
+  STICKY HEADINGS (Seth, 2026-10-17: "make whatever headings apply to the current viewport be
+  sticky (optionally, give the user the ability to turn this feature on and off)"): the editor's
+  `updateSticky` (on scroll, resize and every `applyFolds`, one rAF) finds the first block whose
+  bottom is under the top of the view and shows its outline chain — the nearest heading above it,
+  that one's nearest heading of a higher level, … (`stickyChain`; a heading counts once its own top
+  has passed the line, a folded heading never) — in `#sticky-heads`, a strip laid over the top of
+  `#editor` (a sibling in `#editor-pane`, NOT inside the root: `renderAll` empties the root),
+  outermost first, each row stepped in by depth. Its ▾ folds the heading IN PLACE and the view
+  then goes TO THAT HEADING, under the rows of its ancestors (`foldFromSticky` → `scrollToHeading`;
+  Seth: "instead of skipping ahead or going to the start or end of the note"); the title scrolls
+  to it. `scroll-padding-top` on the scroller equals the strip's height, so focus moves and Find
+  never land under it. Off/on: `settings.stickyHeadings` (default on) in Settings and the H ▾ menu
+  (`applySticky` → `setSticky`). Collections' groups do not have it yet.
 - `beforeinput` is whitelisted; Enter/paste/bold/undo are ours. Chromium must never inject HTML.
 - A `<br>` (a line break in a table cell, or typed in text) deletes WHOLE (Seth, 2026-10-17: one
   Backspace "deletes part and leaves the text behind"): a document-level keydown (capture) in
