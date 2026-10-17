@@ -3240,3 +3240,37 @@ def test_styling_inside_a_preview_keeps_the_preview_where_it_was(app):
     page.wait_for_timeout(900)
     assert "hl[#ffd6a5]=5.1" in h.api.get_note(n["id"])["body"]
     assert not [e for e in errors if "Failed to load resource" not in e], errors
+
+
+def test_one_backspace_or_delete_removes_a_whole_br(app):
+    """Seth, 2026-10-17: "Deleting <br> with one backspace just deletes part and leaves the text
+    behind (should delete the line break altogether)"."""
+    h, page, errors = app
+    tab = h.api.init()["config"]["tabs"][0]["dir"]
+    n = h.api.create_note(tab, "", "Breaks", "one<br>two\n\n| a | b |\n|---|---|\n| x<br>y | z |\n")
+    page.reload()
+    page.wait_for_selector(".note-card")
+    page.locator(".note-card", has_text="Breaks").click()
+    page.wait_for_selector("#editor .blk-body")
+    body = page.locator("#editor .blk-body").first
+    body.click()
+    # Backspace just after the break, in a paragraph
+    page.evaluate("() => { const b = document.querySelector('#editor .blk-body'); b.focus(); FS.editor.setCaret(b, 'one<br>'.length); }")
+    page.keyboard.press("Backspace")
+    page.wait_for_function("() => document.querySelector('#editor .blk-body').textContent === 'onetwo'", timeout=3000)
+    page.keyboard.type("<br>")
+    # Delete just before it
+    page.evaluate("() => { const b = document.querySelector('#editor .blk-body'); FS.editor.setCaret(b, 'one'.length); }")
+    page.keyboard.press("Delete")
+    page.wait_for_function("() => document.querySelector('#editor .blk-body').textContent === 'onetwo'", timeout=3000)
+    # inside a table cell, the caret inside the token
+    page.locator("table.md-table td .cell-view").first.click()
+    page.wait_for_selector(".cell-edit")
+    page.evaluate("() => { const c = document.querySelector('.cell-edit'); FS.editor.setCaret(c, 'x<b'.length); }")
+    page.keyboard.press("Backspace")
+    page.wait_for_function("() => document.querySelector('.cell-edit') && document.querySelector('.cell-edit').textContent === 'xy'", timeout=3000)
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(1200)
+    saved = h.api.get_note(n["id"])["body"]
+    assert "onetwo" in saved and "| xy |" in saved and "<b" not in saved and "br>" not in saved, saved
+    assert not [e for e in errors if "Failed to load resource" not in e], errors

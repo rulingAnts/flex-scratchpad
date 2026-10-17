@@ -143,6 +143,11 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
   its section. The toolbar's H ▾ picks levels 1–6 (Ctrl+Alt+1…6) and folds all; the ⋮ menu of a
   heading has its levels and the folds. Word export maps levels 1–6 to Heading 1–6.
 - `beforeinput` is whitelisted; Enter/paste/bold/undo are ours. Chromium must never inject HTML.
+- A `<br>` (a line break in a table cell, or typed in text) deletes WHOLE (Seth, 2026-10-17: one
+  Backspace "deletes part and leaves the text behind"): a document-level keydown (capture) in
+  editor.js selects the whole token when Backspace is just after it, Delete just before it, or
+  either is pressed inside it, in a `.blk-body` or `.cell-edit`; the key's own deletion then
+  removes it through the usual input handling (`brAround`).
 - Undo is our own snapshot stack (innerHTML rebuilds break native undo).
 
 ## Working here

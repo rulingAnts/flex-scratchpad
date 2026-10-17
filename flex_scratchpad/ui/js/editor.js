@@ -1878,5 +1878,30 @@
   }
 
   FS.Editor = Editor;
-  FS.editor = { getCaret, getCaretEnd, setCaret, pointAt, wrapLines, revealMarkers, TEXT_TYPES };
+  /* A line break written `<br>` (in a table cell, or typed in text) is ONE thing to delete (Seth,
+   * 2026-10-17: "Deleting <br> with one backspace just deletes part and leaves the text … behind"):
+   * Backspace just after it, Delete just before it, or either with the caret inside it, first
+   * selects the whole `<br>` — the key's own deletion then takes it in one go, through each
+   * editable's usual input handling (text blocks and table cells alike). */
+  const BR_TOKEN = /<br\s*\/?>/gi;
+  function brAround(text, caret, back) {
+    BR_TOKEN.lastIndex = 0;
+    let m;
+    while ((m = BR_TOKEN.exec(text))) {
+      const a = m.index, z = a + m[0].length;
+      if (back ? (caret > a && caret <= z) : (caret >= a && caret < z)) return [a, z];
+      if (a > caret) break;
+    }
+    return null;
+  }
+  document.addEventListener('keydown', (e) => {
+    if ((e.key !== 'Backspace' && e.key !== 'Delete') || e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return;
+    const host = e.target && e.target.closest ? e.target.closest('.blk-body, .cell-edit') : null;
+    const sel = window.getSelection();
+    if (!host || !sel || !sel.rangeCount || !sel.isCollapsed || !host.contains(sel.anchorNode)) return;
+    const span = brAround(host.textContent, getCaret(host), e.key === 'Backspace');
+    if (span) setCaret(host, span[0], span[1]);
+  }, true);
+
+  FS.editor = { getCaret, getCaretEnd, setCaret, pointAt, wrapLines, revealMarkers, TEXT_TYPES, brAround };
 })();
