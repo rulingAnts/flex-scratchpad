@@ -211,6 +211,52 @@ a download into `%LOCALAPPDATA%\FLEx Scratchpad\ffmpeg` on first use, with the S
 already there for a custom path. Decide at release time; nothing in the code assumes either.
 
 
+## Readable without the app: a plain-text copy of every FLEx object IN the note (Seth, 2026-10-17 — "near future … soon")
+
+> *"Make sure that our FLEx links save cached interlinear text (and text reference) so that a
+> markdown file IS actually readable elsewhere. So that it doesn't 100% require our app to make
+> heads or tails out of (though it would be enclosed in brackets such that our app won't render
+> literal tab separated text lines, but rather just save them on refresh so that markdown readers
+> or text editors see meaningful data)."*
+
+Today a note holds only `{{flex:text <guid> seg=3-5 …}}`; the words live in the snapshot cache
+(`.scratchpad/flex-cache/`), which only the app reads. The idea: beside each object, the note keeps
+a plain-text COPY: the text title and FLEx number (e.g. *The dog and the river 1.2*), its
+`silfw://` link, and the interlinear lines (Word / Morphemes / Gloss / Free), so that a text editor,
+GitHub, Obsidian or a Markdown export shows the example without the app. The app treats the copy as
+OUTPUT ONLY: it never draws it and never reads it back (the embed stays the one source), and it
+rewrites it whenever the object is fetched fresh from FLEx and the result has changed.
+
+A sketch, to be settled by the questions below: a fenced block right after the embed,
+
+    {{flex:text 9b1c… seg=3-4 at=… ex}}
+    ```flex-copy
+    The dog and the river 1.2 · silfw://localhost/link?…
+    Haŋa       tiket   ka-sila-mo     pemu
+    yesterday  child   3SG-see-PST    river
+    ‘Yesterday the child saw the river.’
+    ```
+
+It is visible in renderers and editors, keeps its columns (monospace, padded with spaces; tabs do
+not line up in most renderers), and is one unit the app can find, hide and replace.
+`ui/js/flexref.js` would treat the block as part of the embed (hidden, carried along on drag, cut
+and copy), and excerpts and search would skip it (search already reads the snapshot).
+
+Open questions (asked 2026-10-17):
+1. **Where the copy sits.** A fenced block right after the embed (above), or INSIDE the embed's own
+   braces (`{{flex:text … ⏎ lines… ⏎ }}`, multi-line, so the grammar gains an optional body: an
+   additive change)? Or an HTML comment, which editors show but Markdown renderers hide?
+2. **Inline chips and table cells.** These are one line, with no room for interlinear rows. Just
+   the reference and the free translation (`[The dog and the river 1.2: ‘Yesterday the child saw
+   the river.’]`)? Or nothing?
+3. **Which lines.** Whatever the example shows (`lines=`), or always the full set? Do highlights
+   show in the copy (`**word**`), or does it stay plain?
+4. **Entries too?** A dictionary-style line for lexical entries (headword, POS, glosses), not just
+   texts?
+5. **When it is written.** Only when the drawn object has CHANGED, so opening a note never rewrites
+   its file (that would touch backups and sync folders), and old notes fill in at their next
+   refresh, or all at once with a "write readable copies" command?
+
 ## Dekereke objects in notes (Seth, 2026-10-17 — "near future")
 
 > *"I'd also like our app to be able to have Dekereke objects (linked to Dekereke XML line/ref
