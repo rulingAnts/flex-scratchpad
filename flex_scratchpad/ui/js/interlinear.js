@@ -16,9 +16,22 @@
   const flexGet = async (kind, guid, a, b, refresh, ws, at) => {
     const k = keyOf(kind, guid, a, b, ws, at);
     if (!refresh && mem.has(k)) return mem.get(k);
-    const p = FS.api.flex_get(kind, guid, a || null, b || null, false, ws || null, at || null).then((obj) => { mem.set(k, obj); return obj; }, (e) => { mem.delete(k); throw e; });
+    const p = FS.api.flex_get(kind, guid, a || null, b || null, false, ws || null, at || null).then((obj) => { mem.set(k, obj); if (FS.flexcopy) FS.flexcopy.fetched(); return obj; }, (e) => { mem.delete(k); throw e; });
     mem.set(k, p);
     return p;
+  };
+  /* The object an embed was last drawn from, if it has been fetched (never fetches): what the
+   * note's plain-text copies are written from (flexcopy.js). */
+  const peek = (spec) => {
+    if (!spec || spec.kind === 'file') return null;
+    const kind = spec.kind === 'sense' ? 'entry' : spec.kind;
+    const t = spec.kind === 'text';
+    const a = t && spec.seg ? spec.seg[0] : null, b = t && spec.seg ? spec.seg[1] : null, at = t ? spec.at : null;
+    for (const ws of t && spec.ws ? [spec.ws, null] : [null]) {
+      const v = mem.get(keyOf(kind, spec.guid, a, b, ws, at));
+      if (v && typeof v.then !== 'function') return v;
+    }
+    return null;
   };
   const invalidate = (kind, guid) => { for (const k of [...mem.keys()]) if (!kind || k.startsWith((kind === 'sense' ? 'entry' : kind) + '|' + (guid || ''))) mem.delete(k); };
 
@@ -1235,5 +1248,5 @@
     });
   }
 
-  FS.interlinear = { blankSeg, nowPlaying, render, renderText, renderEntry, renderWordform, renderChip, hydrateInline, openContext, wholeText, openOverlay, closeOverlay, isCollapsed, setCollapsed, styled, styledParts, invalidate, flexGet, openInFlex, labelOf, numberFor, flexTsv, HL_COLORS };
+  FS.interlinear = { blankSeg, peek, nowPlaying, render, renderText, renderEntry, renderWordform, renderChip, hydrateInline, openContext, wholeText, openOverlay, closeOverlay, isCollapsed, setCollapsed, styled, styledParts, invalidate, flexGet, openInFlex, labelOf, numberFor, flexTsv, HL_COLORS };
 })();

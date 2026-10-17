@@ -213,6 +213,8 @@ already there for a custom path. Decide at release time; nothing in the code ass
 
 ## Readable without the app: a plain-text copy of every FLEx object IN the note (Seth, 2026-10-17 — "near future … soon")
 
+**DONE 2026-10-17** (`ui/js/flexcopy.js`; see CLAUDE.md "READABLE WITHOUT THE APP"). Kept below as the record of the decisions.
+
 > *"Make sure that our FLEx links save cached interlinear text (and text reference) so that a
 > markdown file IS actually readable elsewhere. So that it doesn't 100% require our app to make
 > heads or tails out of (though it would be enclosed in brackets such that our app won't render

@@ -200,6 +200,21 @@ FOLD_MARK = re.compile(r"^(#{1,6}\s.*?)\s+\{collapsed\}[ \t]*$", re.M)
 
 def without_fold_marks(body: str) -> str:
     return FOLD_MARK.sub(r"\1", body or "")
+
+
+# The plain-text copy written after each FLEx object so a file reads without the app
+# (ui/js/flexcopy.js, which writes it; Seth, 2026-10-17): a block form (a "flex-copy" link line,
+# then an optional ```flex-copy fence) or an inline one (the link right after the object). The app
+# never shows it, so excerpts, search and tags leave it out too. Keep in step with flexcopy.js.
+_COPY_EMB = r"\{\{\s*flex:[^{}]*\}\}"
+_COPY_LINK = r'\[((?:\\.|[^\]\\\n])*)\]\(([^\s()]*) "flex-copy"\)'
+FLEX_COPY_BLOCK = re.compile("(" + _COPY_EMB + r")[ \t]*\n[ \t]*" + _COPY_LINK
+                             + r"[ \t]*(?:\n[ \t]*```flex-copy[ \t]*\n([\s\S]*?)\n[ \t]*```[ \t]*)?(?=\n|$)")
+FLEX_COPY_INLINE = re.compile("(" + _COPY_EMB + ")" + _COPY_LINK)
+
+
+def without_flex_copies(body: str) -> str:
+    return FLEX_COPY_INLINE.sub(r"\1", FLEX_COPY_BLOCK.sub(r"\1", body or ""))
 _INLINE_TAG = re.compile(r"(?<![\w#/&])#([\w][\w\-]*)", re.UNICODE)
 
 
@@ -215,7 +230,7 @@ def _file_word(m: re.Match) -> str:
 
 
 def excerpt(body: str, n: int = 160) -> str:
-    s = _EMBED.sub(" ", _FILE_EMBED.sub(_file_word, without_fold_marks(body)))
+    s = _EMBED.sub(" ", _FILE_EMBED.sub(_file_word, without_fold_marks(without_flex_copies(body))))
     s = re.sub(r"```[\s\S]*?```", " ", s)
     s = _MD_NOISE.sub("", s)
     s = re.sub(r"[*_`~=]{1,3}", "", s)
@@ -225,7 +240,7 @@ def excerpt(body: str, n: int = 160) -> str:
 
 def inline_tags(body: str) -> list[str]:
     """`#tag` written in the body counts as a tag (Seth, 2026-10-12). Not inside code/embeds."""
-    s = re.sub(r"```[\s\S]*?```|`[^`\n]*`", " ", body or "")
+    s = re.sub(r"```[\s\S]*?```|`[^`\n]*`", " ", without_flex_copies(body))
     s = _EMBED.sub(" ", s)
     out: list[str] = []
     for m in _INLINE_TAG.finditer(s):
@@ -450,7 +465,7 @@ class Notebook:
             extra = self.extra_text(note.body) or ""
         except Exception:  # a cache problem must never break note loading
             extra = ""
-        blob = "\n".join([note.title, without_fold_marks(note.body), " ".join(note.tags), note.folder, note.tab, extra])
+        blob = "\n".join([note.title, without_fold_marks(without_flex_copies(note.body)), " ".join(note.tags), note.folder, note.tab, extra])
         self._index[note.id] = normalize(blob)
         self._index_marks[note.id] = normalize(blob, strip_marks=True)
 

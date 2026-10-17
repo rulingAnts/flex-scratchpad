@@ -13,6 +13,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent))
 from bridge import Harness  # noqa: E402
 from flex_scratchpad.flex.demo import T_ARAB, T_STORY  # noqa: E402
+from flex_scratchpad.notebook import without_flex_copies  # noqa: E402
 
 pw = pytest.importorskip("playwright.sync_api")
 
@@ -60,7 +61,9 @@ def body_of(h):
     Welcome note when the test made another, since edit times tie within a second."""
     notes = h.api._nb.list_notes()
     own = [n for n in notes if n["title"] != "Welcome to FLEx Scratchpad"] or notes
-    return h.api.get_note(own[0]["id"])["body"]
+    # what the user edited: the file also carries a plain-text copy after each FLEx object
+    # (flexcopy.js), which test_flex_objects_get_a_readable_copy_in_the_file checks on its own
+    return without_flex_copies(h.api.get_note(own[0]["id"])["body"])
 
 
 def tool(page, text, nth=0):
@@ -3282,3 +3285,66 @@ def test_one_backspace_or_delete_removes_a_whole_br(app):
     saved = h.api.get_note(n["id"])["body"]
     assert "onetwo" in saved and "| xy |" in saved and "<b" not in saved and "br>" not in saved, saved
     assert not [e for e in errors if "Failed to load resource" not in e], errors
+
+
+def test_flex_objects_get_a_readable_copy_in_the_file(app):
+    """Seth, 2026-10-17: the note's file carries a plain-text copy of each FLEx object ("so that a
+    markdown file IS actually readable elsewhere"), never shown in the app; a block after an object
+    on its own line, one link in a table cell, switching when the object moves; written when the
+    example changes, never just because a note was opened."""
+    import time
+    h, page, errors = app
+    tab = h.api.init()["config"]["tabs"][0]["dir"]
+    E1 = "6a5f3a2e-1b1e-4c2a-9f10-0d2c1a7e0001"
+    n = h.api.create_note(tab, "", "Readable", "Intro\n\n{{flex:text %s seg=1-2 at=0e1f2a3b1001-0e1f2a3b1002}}\n\n| a | b |\n|---|---|\n| x | {{flex:entry %s}} |\n" % (T_STORY, E1))
+    path = Path(h.api._nb.get_note(n["id"]).path)
+    page.reload()
+    page.wait_for_selector(".note-card")
+    page.locator(".note-card", has_text="Readable").click()
+    page.wait_for_selector("#editor .text-obj .segment")
+    page.wait_for_selector("table.md-table td .flex-collapsed, table.md-table td .entry-card")
+    before = path.read_text(encoding="utf-8")
+    page.wait_for_timeout(1500)
+    assert path.read_text(encoding="utf-8") == before and "flex-copy" not in before   # opening never rewrites
+    # an edit saves the note, and the file gets its copies
+    page.locator("#editor .blk-body").first.click()
+    page.keyboard.press("End")
+    page.keyboard.type(" here")
+    page.wait_for_function("() => document.getElementById('save-state').textContent === 'Saved'", timeout=5000)
+    body = path.read_text(encoding="utf-8")
+    block = body.split("{{flex:text %s seg=1-2" % T_STORY)[1].split("\n```\n")[0] + "\n```"
+    assert '\n[The dog and the river 1.1–1.2](silfw://localhost/link?' in block and '"flex-copy")\n```flex-copy\n1.1  Kabir' in block, block
+    assert "‘The dog slept.’" in block and block.rstrip().endswith("```"), block
+    row = next(l for l in body.split("\n") if l.startswith("| x |"))
+    assert re.search(r"\{\{flex:entry %s\}\}\[kabir.*\]\(silfw://[^ )]+ \"flex-copy\"\) \|$" % E1, row), row
+    # none of it is shown: the editor has the same blocks, and no copy text anywhere
+    shown = page.locator("#editor").inner_text()
+    assert "flex-copy" not in shown and "silfw://" not in shown
+    srcs = page.evaluate("() => window.__fsEditor.blocks.map((b) => b.src)")
+    assert not any("flex-copy" in s for s in srcs) and len(srcs) == 3, srcs
+    # reopened, still hidden, and the file untouched by the opening
+    saved = path.read_text(encoding="utf-8")
+    page.reload()
+    page.wait_for_selector(".note-card")
+    page.locator(".note-card", has_text="Readable").click()
+    page.wait_for_selector("#editor .text-obj .segment")
+    page.wait_for_timeout(1500)
+    assert path.read_text(encoding="utf-8") == saved
+    assert "flex-copy" not in page.locator("#editor").inner_text()
+    # the example changes in FLEx: ↻ redraws it, and the copy follows without an edit
+    h.api._flex.backend.texts[T_STORY]["segments"][0]["free"] = "The dog fell asleep."
+    page.locator("#editor .text-obj .flex-head .lnk[title='Reload from FLEx']").first.click()
+    deadline = time.time() + 6
+    while time.time() < deadline and "‘The dog fell asleep.’" not in path.read_text(encoding="utf-8"):
+        page.wait_for_timeout(200)
+    assert "‘The dog fell asleep.’" in path.read_text(encoding="utf-8")
+    # dragged out of its cell to below the table: the entry gets the block form, the cell none
+    tb = page.locator("#editor .blk-table").bounding_box()
+    dnd(page, "table.md-table td .flex-collapsed, table.md-table td .entry-card .drag-handle", tb["x"] + tb["width"] / 2, tb["y"] + tb["height"] - 3)
+    deadline = time.time() + 6
+    while time.time() < deadline and "| x | |" not in path.read_text(encoding="utf-8").replace("| x |  |", "| x | |"):
+        page.wait_for_timeout(200)
+    body = path.read_text(encoding="utf-8")
+    assert re.search(r"\n\{\{flex:entry %s\}\}\n\[kabir[^\n]*\]\(silfw://[^ )]+ \"flex-copy\"\)\n```flex-copy\n1\. " % E1, body), body
+    assert "flex-copy" not in next(l for l in body.split("\n") if l.startswith("| x |"))
+    assert not errors

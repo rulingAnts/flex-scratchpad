@@ -354,6 +354,7 @@
     await flushSave();
     let n;
     try { n = await FS.api.get_note(id); } catch (e) { FS.toast(e.message, 'error'); return; }
+    n.body = FS.flexcopy.strip(n.body || '', n.id);   // the plain-text copies of its FLEx objects are never shown (flexcopy.js)
     S.note = n; S.dirty = false;
     localStorage.setItem('fs:lastNote', id);
     $('editor-pane').classList.remove('no-note');
@@ -393,7 +394,7 @@
   async function newCollection(title, body) {
     await flushSave();
     try {
-      const n = await FS.api.create_note(S.tab, S.folder || '', title || '', body || '', 'examples');
+      const n = await FS.api.create_note(S.tab, S.folder || '', title || '', FS.flexcopy.attach(body || ''), 'examples');
       clearSearch();
       await refreshLists();
       await openNote(n.id);
@@ -449,7 +450,7 @@
       const add = async (c) => {
         close();
         try {
-          const s = await FS.api.add_to_collection(c.id, [clean]);
+          const s = await FS.api.add_to_collection(c.id, [FS.flexcopy.attach(clean)]);
           FS.toast('Added to \u201c' + (c.title || 'Untitled collection') + '\u201d (' + (s.exampleCount || 0) + ' example' + (s.exampleCount === 1 ? '' : 's') + ')', 'ok');
           await refreshLists();
         } catch (e) { FS.toast(e.message, 'error'); }
@@ -465,7 +466,7 @@
         if (title == null) return;
         await flushSave();
         try {
-          const n = await FS.api.create_note(S.tab, S.folder || '', title.trim(), clean + '\n', 'examples');
+          const n = await FS.api.create_note(S.tab, S.folder || '', title.trim(), FS.flexcopy.attach(clean) + '\n', 'examples');
           await refreshLists();
           FS.toast('Added to the new collection \u201c' + (n.title || 'Untitled collection') + '\u201d', 'ok');
         } catch (e) { FS.toast(e.message, 'error'); }
@@ -501,12 +502,21 @@
     try { const s = await FS.api.save_note(S.note.id, patch); S.note.updated = s.updated; S.note.inlineTags = s.inlineTags; const i = S.notes.findIndex((n) => n.id === S.note.id); if (i >= 0) S.notes[i] = s; renderList(); renderNoteMeta(); } catch (e) { FS.toast(e.message, 'error'); }
   }
   const scheduleSave = FS.debounce(() => saveNow(), 600);
+  /* What FLEx says now differs from a plain-text copy the note's file holds (or the note was saved
+   * this session and an object has no copy yet): save, so the file stays readable without the app
+   * (Seth, 2026-10-17). Opening a note alone never rewrites it. */
+  FS.flexcopy.onFetched(() => {
+    // a save already pending writes the copies anyway: never postpone it
+    if (!S.note || S.dirty || S.saving || !FS.flexcopy.stale(S.note.body || '', S.note.id)) return;
+    S.dirty = true;
+    scheduleSave();
+  });
   async function saveNow() {
     if (!S.note || !S.dirty || S.saving) return;
     S.saving = true;
     const n = S.note;
     try {
-      const s = await FS.api.save_note(n.id, { body: n.body, title: $('note-title').value });
+      const s = await FS.api.save_note(n.id, { body: FS.flexcopy.attach(n.body, n.id), title: $('note-title').value });
       S.dirty = false;
       n.updated = s.updated; n.title = s.title; n.inlineTags = s.inlineTags;
       const i = S.notes.findIndex((x) => x.id === n.id);
@@ -996,7 +1006,7 @@
         if (S.note && !S.dirty) {
           const fresh = await FS.api.note_changed_on_disk(S.note.id, S.note.updated);
           if (fresh && fresh.deleted) { S.note = null; $('editor-pane').classList.add('no-note'); FS.toast('This note was removed on disk'); }
-          else if (fresh) { S.note = fresh; $('note-title').value = fresh.title || ''; ensureEditor().load(fresh.body || ''); renderNoteMeta(); FS.toast('Note updated from disk'); }
+          else if (fresh) { fresh.body = FS.flexcopy.strip(fresh.body || '', fresh.id); S.note = fresh; $('note-title').value = fresh.title || ''; ensureEditor().load(fresh.body || ''); renderNoteMeta(); FS.toast('Note updated from disk'); }
         } else if (S.note && S.dirty) { await flushSave(); }
         await refreshLists();
       } catch (e) { /* offline folder or a transient read error: try again next tick */ }

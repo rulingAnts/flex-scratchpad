@@ -26,7 +26,7 @@ project database and linked back to FLEx.
 - **Charts** (bar, stacked, horizontal, line, area, pie, donut) from a small readable block.
 - **Search** the whole notebook, including the vernacular words and glosses of embedded FLEx
   objects; diacritics-insensitive; filters by tab, folder and tag; find-in-note.
-- **Plain files**: the notebook is a folder of markdown files; tabs and folders are directories.
+- **Plain files**: the notebook is a folder of markdown files; tabs and folders are directories. Each FLEx example and entry is also written into the file as plain text, with a link that opens it in FLEx, so a note reads in any text editor or Markdown viewer; the app itself never shows that copy.
 - **Attached files**: drop a file on a note (or 📎 Attach): a chip that opens it in its own program; web
   pages, PDFs, pictures, audio and video preview in the window. Copied into the notebook's
   `attachments/` folder, or linked where it is.

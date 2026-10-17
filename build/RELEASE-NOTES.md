@@ -9,6 +9,7 @@ FLEx Scratchpad is a notebook for FieldWorks: notes in tabs and folders that sho
 - **Examples stay on their lines** when you split, merge or delete lines in FLEx, and are found again by their text when a paragraph is rebuilt.
 - **Playback** lights the line that is playing and follows it; the player stays in view, and a bar at the bottom of the window can always pause or stop whatever is playing.
 - **Exporting a collection as a FLEx text** now writes one audio file for the text by default: each example's audio in order, with a click between examples, named like the .flextext and saved beside it (the FlexText Audio Segmenter pairs them by name). One small file per line is still a choice. Examples whose texts use different baseline writing systems become one .flextext each, with their own audio.
+- **Notes read without the program**: each FLEx example and entry is also saved in the note's file as plain text (the lines the example shows, and a link that opens it in FLEx), so a note makes sense in any text editor or Markdown viewer. The program itself never shows that copy, and keeps it up to date when the example changes in FLEx.
 - Examples in a collection fold to chips; empty FLEx lines (left by Shift+Enter) are left out; **Texts used** lists the FLEx texts a note, a selection or a folder draws on.
 - Fixes: one Backspace removes a whole line break; styling inside a preview no longer jumps to the top; closing the program no longer ends in an error message.
 
