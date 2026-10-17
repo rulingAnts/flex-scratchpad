@@ -22,6 +22,11 @@ def build_id() -> str:
         import hashlib
         from pathlib import Path
         root = Path(__file__).resolve().parent
+        # a packaged build has no .py files to hash: the spec wrote the source's fingerprint
+        stamp = root / "BUILD_ID"
+        if stamp.is_file():
+            _BUILD = stamp.read_text(encoding="utf-8").strip()[:7]
+            return _BUILD
         h = hashlib.sha1()
         for f in sorted(root.rglob("*")):
             if f.is_file() and f.suffix in (".py", ".js", ".css", ".html") and "__pycache__" not in f.parts:

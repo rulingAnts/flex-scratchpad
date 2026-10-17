@@ -17,6 +17,7 @@
     tableStyle: /^\s*\{table\b[^}]*\}\s*$/,
     hr: /^\s{0,3}([-*_])(\s*\1){2,}\s*$/,
     heading: /^(#{1,6})\s/,
+    folded: /\s+\{collapsed\}\s*$/,
     list: /^(\s*)([-*+]|\d+[.)])\s/,
     task: /^(\s*)([-*+])\s\[([ xX])\]\s?/,
     quote: /^\s*>/,
@@ -60,7 +61,14 @@
       if (FS.flexref.isEmbedLine(line)) { push('flex', i, i + 1); i++; continue; }
       if (RE.image.test(line)) { push('image', i, i + 1); i++; continue; }
       if (RE.hr.test(line)) { push('hr', i, i + 1); i++; continue; }
-      if (RE.heading.test(line)) { push('h', i, i + 1, { level: RE.heading.exec(line)[1].length }); i++; continue; }
+      if (RE.heading.test(line)) {
+        // a folded heading carries " {collapsed}" in the file (as a collection's groups do); in
+        // the editor it is the block's `folded` flag, never text the user sees or types into
+        const folded = RE.folded.test(line);
+        if (folded) lines[i] = line.replace(RE.folded, '');
+        push('h', i, i + 1, { level: RE.heading.exec(line)[1].length, folded });
+        i++; continue;
+      }
       if (RE.list.test(line)) {
         let j = i + 1;
         while (j < lines.length && lines[j].trim() && (RE.list.test(lines[j]) || /^\s{2,}/.test(lines[j]))) j++;
@@ -84,7 +92,36 @@
   }
 
   function joinBlocks(blocks) {
-    return blocks.map((b) => b.src.replace(/\s+$/, '')).filter((s) => s !== '').join('\n\n');
+    return blocks.map((b) => b.src.replace(/\s+$/, '') + (b.type === 'h' && b.folded && b.src.trim() ? ' {collapsed}' : ''))
+      .filter((s) => s !== '').join('\n\n');
+  }
+  /* A heading block's level (1-6), or 0 for anything else. */
+  function headingLevel(b) {
+    if (!b || b.type !== 'h') return 0;
+    const m = RE.heading.exec(b.src || '');
+    return m ? m[1].length : 0;
+  }
+  /* Which blocks a folded heading hides: everything after it up to the next heading of the same
+   * or a higher level (Seth, 2026-10-16). Returns a boolean per block; a folded heading inside a
+   * hidden section hides nothing more than its parent already does. */
+  function hiddenByFolds(blocks) {
+    const out = [];
+    let fold = 0;
+    for (const b of blocks) {
+      const lvl = headingLevel(b);
+      if (fold && lvl && lvl <= fold) fold = 0;
+      out.push(!!fold);
+      if (!fold && lvl && b.folded) fold = lvl;
+    }
+    return out;
+  }
+  /* The index of the last block of the section `i` heads (itself when it is not a heading). */
+  function sectionEnd(blocks, i) {
+    const lvl = headingLevel(blocks[i]);
+    if (!lvl) return i;
+    let j = i + 1;
+    while (j < blocks.length && !(headingLevel(blocks[j]) && headingLevel(blocks[j]) <= lvl)) j++;
+    return j - 1;
   }
 
   function classify(src) {
@@ -107,7 +144,7 @@
     const taken = new Uint8Array(n);      // chars already claimed by code/embeds/links
     // 1. embeds and code spans (atomic)
     let m;
-    const embedRe = /\{\{\s*flex:[^{}]*\}\}/g;
+    const embedRe = /\{\{\s*(?:flex:|file\s)[^{}]*\}\}/g;
     while ((m = embedRe.exec(text))) {
       addRange(m.index, m.index + m[0].length, 'embed');
       out.embeds.push({ start: offset + m.index, end: offset + m.index + m[0].length, src: m[0] });
@@ -301,6 +338,10 @@
    * fills in from the object once it is known. */
   function embedAttrs(src) {
     const spec = FS.flexref && FS.flexref.parse ? FS.flexref.parse(src) : null;
+    if (spec && spec.kind === 'file') {          // an attached file: its own icon, its label or name
+      const f = FS.files ? FS.files.chipInfo(spec) : { icon: '📄', title: spec.label || spec.ref };
+      return ' contenteditable="false" draggable="true" data-src="' + esc(src) + '" data-kind="file" data-icon="' + f.icon + '" data-title="' + esc(f.title) + '"';
+    }
     const icon = !spec ? '?' : spec.kind === 'text' ? '¶' : spec.kind === 'wordform' ? 'ω' : '📖';
     const title = !spec ? 'FLEx object' : spec.label || (spec.kind + ' ' + spec.guid.slice(0, 8) + '…');
     return ' contenteditable="false" draggable="true" data-src="' + esc(src) + '" data-icon="' + icon + '" data-title="' + esc(title) + '"' + (spec && spec.kind === 'text' && spec.seg ? ' data-range="' + spec.seg[0] + (spec.seg[1] !== spec.seg[0] ? '–' + spec.seg[1] : '') + '"' : '');
@@ -365,5 +406,5 @@
       .replace(/^\s*([-*+]|\d+[.)])\s+(\[[ xX]\]\s*)?/gm, '').replace(/[*_~=]{1,2}/g, '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').trim();
   }
 
-  FS.markdown = { RE, splitBlocks, joinBlocks, classify, decorate, renderInline, plainText, linePrefix, markInline, numberLines, listLevel };
+  FS.markdown = { RE, splitBlocks, joinBlocks, headingLevel, hiddenByFolds, sectionEnd, classify, decorate, renderInline, plainText, linePrefix, markInline, numberLines, listLevel };
 })();

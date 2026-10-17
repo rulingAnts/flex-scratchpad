@@ -27,12 +27,30 @@ project database and linked back to FLEx.
 - **Search** the whole notebook, including the vernacular words and glosses of embedded FLEx
   objects; diacritics-insensitive; filters by tab, folder and tag; find-in-note.
 - **Plain files**: the notebook is a folder of markdown files; tabs and folders are directories.
+- **Attached files**: drop a file on a note (or 📎 Attach): a chip that opens it in its own program; web
+  pages, PDFs, pictures, audio and video preview in the window. Copied into the notebook's
+  `attachments/` folder, or linked where it is.
+- **Backup & storage**: back the notebook up to a OneDrive, Google Drive or Dropbox folder (found for
+  you), or to S3-compatible storage (Amazon S3, Cloudflare R2, Backblaze B2, Wasabi, MinIO…) through
+  the bundled rclone, optionally encrypted; the keys live in the Windows Credential Manager. Every
+  backup keeps dated older versions; see what the notebook and its backup take, and clean up.
   Readable without the app, syncable, git-friendly.
 
 No web server, no cloud: a native window (pywebview / WebView2) over local HTML + JavaScript,
 talking to Python through pywebview's exposed API only.
 
-## Install (Windows, with FieldWorks)
+## Download (Windows)
+
+**The easiest way: the Setup .exe or the portable zip from the
+[latest release](https://github.com/rulingAnts/flex-scratchpad/releases)** (a pre-release for now).
+Nothing else to install: Python, flexicon and ffmpeg are inside. It needs Windows 10/11 (64-bit),
+FieldWorks 9 on the same computer to read a project, and the Edge WebView2 runtime (Windows 11 has
+it; Setup says when it is missing). It isn't signed yet: on "Windows protected your PC" choose
+**More info → Run anyway**. Setup installs per user (no administrator), a newer Setup upgrades in
+place, and uninstalling keeps your notebooks. `FLEx Scratchpad.exe --selftest report.json` reports
+what a copy can and cannot find. The user-facing page is [`docs/index.html`](docs/index.html).
+
+## Install from source (Windows, with FieldWorks)
 
 Requirements: Windows 10/11, FieldWorks 9.x installed, 64-bit Python 3.10–3.13 (match FieldWorks:
 x64), the Edge WebView2 runtime (already on Windows 10/11). Installing from GitHub or a clone also
@@ -135,6 +153,8 @@ elsewhere (marked *cached*).
 | Sort a collection | *＋ Group…* adds a labelled block; ▸ / ▾ collapses it (or *Collapse all*); double-click its label to rename; drag examples onto it or use ↑ ↓. Groups are for sorting only and are not exported |
 | Note on an example | ✎ beside the example in a collection. The note IS exported: FLEx shows it as a note on the example's first line |
 | Export a FLEx text | Only an example collection exports: *Export as FLEx text…* at its top. An ordinary note's `⋯ → Collect the examples into a new collection…` copies its examples into one: the examples in the highlighted part of the note if you selected some, else all of them |
+| Audio in the export | The export dialog's *Audio*: **one audio file for the text** (the default: each example's audio in order, a click between examples, named like the .flextext and saved beside it) or **one small file per line**; or into a folder you choose — pick the project's `LinkedFiles\AudioVisual` and FLEx finds it on import. Examples from texts in different baseline writing systems become one .flextext each, with its own audio |
+| Audio in the export | The export dialog's *Audio*: **one audio file for the text** (the default: every line's clip in order, a click at each join, as the text's media file) or **one small file per line**; either into a folder you choose — pick the project's `LinkedFiles\AudioVisual` and FLEx finds it on import |
 
 ### What a note looks like on disk
 

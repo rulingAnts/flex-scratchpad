@@ -200,3 +200,54 @@ test('a list starts at its first typed number; a new block restarts when its num
   const c2 = { counters: [] };
   assert.deepEqual(MD.numberLines(['1. a', '1. b', '1. c'], 'list', c2), [1, 2, 3]);   // the "1." style still counts
 });
+
+test('collapsible headings: the fold rides in the file, not in the text; sections end at the same or a higher level', () => {
+  // Seth, 2026-10-16: "headings to be collapsible (with material between that heading and the
+  // NEXT heading of the same or higher level)"
+  const md = ['# Chapter {collapsed}', '', 'intro', '', '## Part A', '', 'a text', '', '### Deep {collapsed}', '', 'deep text', '', '## Part B', '', 'b text', '', '# Next'].join('\n');
+  const b = MD.splitBlocks(md);
+  assert.deepEqual(b.map((x) => x.src), ['# Chapter', 'intro', '## Part A', 'a text', '### Deep', 'deep text', '## Part B', 'b text', '# Next']);
+  assert.deepEqual(b.map((x) => !!x.folded), [true, false, false, false, true, false, false, false, false]);
+  assert.equal(MD.joinBlocks(b), md);                                     // round-trips exactly
+  assert.deepEqual(b.map((x) => MD.headingLevel(x)), [1, 0, 2, 0, 3, 0, 2, 0, 1]);
+  // the closed chapter hides everything up to "# Next"; the closed ### inside it adds nothing
+  assert.deepEqual(MD.hiddenByFolds(b), [false, true, true, true, true, true, true, true, false]);
+  b[0].folded = false;
+  // now only "### Deep" is closed: it hides "deep text", and "## Part B" (higher level) ends it
+  assert.deepEqual(MD.hiddenByFolds(b), [false, false, false, false, false, true, false, false, false]);
+  assert.equal(MD.sectionEnd(b, 0), 7);
+  assert.equal(MD.sectionEnd(b, 2), 5);
+  assert.equal(MD.sectionEnd(b, 4), 5);
+  assert.equal(MD.sectionEnd(b, 8), 8);
+  assert.equal(MD.sectionEnd(b, 1), 1);                                   // not a heading
+  assert.ok(!/collapsed/.test(MD.joinBlocks(b).split('\n')[0]));
+});
+
+test('an attached file in a line is a chip too (its own icon and name), alone on a line a block', () => {
+  const F = load(['util', 'flexref', 'markdown', 'files']);
+  const src = 'the survey {{file attachments/Survey%20ŋa.html}} and {{file C:/x/rec.wav "Recording 3"}} here';
+  const html = F.markdown.decorate(src, 'p');
+  assert.equal(html.replace(/<[^>]+>/g, '').replace(/&quot;/g, '"'), src);
+  assert.match(html, /data-kind="file" data-icon="🌐" data-title="Survey ŋa\.html"/);
+  assert.match(html, /data-kind="file" data-icon="🔊" data-title="Recording 3"/);
+  assert.equal(F.markdown.splitBlocks('{{file attachments/a.pdf}}')[0].type, 'flex');
+  assert.equal(F.files.kindOf('a/b/Notes.HTM'), 'html');
+  assert.equal(F.files.kindOf('setup.exe'), 'program');
+  assert.equal(F.files.kindOf('README'), 'file');
+  // a picture or a video shows in the note when it has a line of its own; anything else is a card
+  assert.equal(F.files.embedFor({ ref: 'attachments/photo 1.jpg', kind: 'image' }), '{{file attachments/photo%201.jpg preview}}');
+  assert.equal(F.files.embedFor({ ref: 'attachments/clip.mp4' }), '{{file attachments/clip.mp4 preview}}');
+  assert.equal(F.files.embedFor({ ref: 'attachments/a.pdf', kind: 'pdf' }), '{{file attachments/a.pdf}}');
+  assert.ok(F.files.isLinked('C:\\x\\y.pdf') && F.files.isLinked('\\\\server\\share\\y.pdf') && !F.files.isLinked('attachments/y.pdf'));
+});
+
+test('a blank FLEx line (Shift+Enter, spaces, nothing to read) is left out; punctuation or a translation is not blank', () => {
+  const F = load(['util', 'flexref', 'markdown', 'interlinear']);
+  const b = F.interlinear.blankSeg;
+  assert.ok(b({ baseline: ' ', words: [] }));
+  assert.ok(b({ baseline: '  ​﻿', words: [{ txt: ' ', punct: true }], free: ' ', notes: [''] }));
+  assert.ok(!b({ baseline: '', words: [], free: 'A translation' }));
+  assert.ok(!b({ baseline: '', words: [], notes: ['a note'] }));
+  assert.ok(!b({ baseline: '.', words: [{ txt: '.', punct: true }] }));
+  assert.ok(!b({ baseline: 'Kabir', words: [{ txt: 'Kabir' }] }));
+});

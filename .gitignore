@@ -3,6 +3,11 @@ __pycache__/
 *.egg-info/
 build/dist/
 build/work/
+build/ffmpeg/
+build/rclone/
+build/dist-console/
+build/work-console/
+flex_scratchpad/BUILD_ID
 dist/
 .pytest_cache/
 .venv/

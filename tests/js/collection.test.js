@@ -55,3 +55,34 @@ test('a > line with no example before it is kept as other text', () => {
   const items = C.parse('> loose quote\n\n{{flex:text ' + G + ' seg=1}}\n');
   assert.deepEqual(items.map((i) => i.t), ['other', 'ex']);
 });
+
+test('groups have levels: a group holds sub-groups up to the next group of its level or higher', () => {
+  // Seth, 2026-10-16: "I'd like collapsible headings to be allowed in the collection type,
+  // though the headings won't export in the flextext"
+  const body = ['# Clause chaining', '', '## Same subject {collapsed}', '', '{{flex:text ' + G + ' seg=1}}', '', '### Sequence', '', '{{flex:text ' + G + ' seg=2}}', '',
+    '## Different subject', '', '{{flex:text ' + G + ' seg=3}}', '', '# Questions', '', '{{flex:text ' + G + ' seg=4}}', ''].join('\n');
+  const items = C.parse(body);
+  assert.deepEqual(items.map((i) => i.t === 'group' ? i.level : 'ex'), [1, 2, 'ex', 3, 'ex', 2, 'ex', 1, 'ex']);
+  assert.equal(C.serialize(items), body);                                 // levels round-trip
+  // the closed "## Same subject" hides its example AND its sub-group, not "## Different subject"
+  assert.deepEqual(C.hiddenItems(items), [false, false, true, true, true, false, false, false, false]);
+  items[0].collapsed = true;                                              // the chapter: all up to "# Questions"
+  assert.deepEqual(C.hiddenItems(items), [false, true, true, true, true, true, true, false, false]);
+  // an old file's "## Group" is level 2
+  assert.equal(C.parse('## Old\n')[0].level, 2);
+});
+
+test('the view: a group block includes its sub-groups; moving and levels', () => {
+  const body = ['## A', '', '{{flex:text ' + G + ' seg=1}}', '', '### A1', '', '{{flex:text ' + G + ' seg=2}}', '', '## B', '', '{{flex:text ' + G + ' seg=3}}', ''].join('\n');
+  const c = new FS.Collection({ innerHTML: '', appendChild() {}, querySelector() { return null; }, scrollTop: 0 }, {});
+  c.render = () => {};
+  c.items = C.parse(body);
+  assert.deepEqual(c.blockOf(0), [0, 4]);                                 // ## A … through ### A1's example
+  assert.deepEqual(c.blockOf(2), [2, 4]);
+  assert.deepEqual(c.groupsAround(3), [2, 0]);                            // A1's example sits in A1 inside A
+  c.step(4, -1);                                                          // ## B moves up past ## A, sub-group and all
+  assert.deepEqual(c.items.map((i) => i.t === 'group' ? i.label : i.spec.seg), ['B', [3, 3], 'A', [1, 1], 'A1', [2, 2]].map((x) => typeof x === 'string' ? x : x));
+  c.setLevel(4, -1);                                                      // A1 becomes a level-2 group of its own
+  assert.equal(c.items[4].level, 2);
+  assert.deepEqual(c.blockOf(2), [2, 4]);
+});

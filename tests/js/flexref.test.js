@@ -127,3 +127,27 @@ test('example layout flags ride in extra and round-trip: ex, indent=N', () => {
   delete spec.extra.ex; spec.extra.indent = '1';
   assert.equal(R.serialize(spec), '{{flex:text 9b1c2d3e-4f50-4a6b-8c7d-0e1f2a3b0001 seg=1-2 indent=1}}');
 });
+
+test('an attached file is an embed: {{file <ref> …}} round-trips, Unicode readable, spaces encoded', () => {
+  const src = '{{file attachments/Survey%20notes%20ŋa.pdf preview h=480 indent=1 "Survey"}}';
+  const spec = R.parse(src);
+  assert.equal(spec.kind, 'file');
+  assert.equal(spec.ref, 'attachments/Survey notes ŋa.pdf');
+  assert.equal(spec.label, 'Survey');
+  assert.equal(spec.extra.preview, true);
+  assert.equal(spec.extra.h, '480');
+  assert.equal(spec.extra.indent, '1');
+  assert.equal(R.serialize(spec), src);
+  // a linked file: an absolute Windows path; % " { } | are encoded so the embed stays one token
+  const link = R.serialize({ kind: 'file', ref: 'C:\\Recordings\\100% "best" {x}|y.wav', label: '', extra: {} });
+  assert.equal(link, '{{file C:\\Recordings\\100%25%20%22best%22%20%7Bx%7D%7Cy.wav}}');
+  assert.equal(R.parse(link).ref, 'C:\\Recordings\\100% "best" {x}|y.wav');
+  assert.ok(R.isEmbedLine('  ' + src + ' '));
+  assert.ok(R.isEmbedLine('{{file a.txt}}'));
+  assert.ok(!R.isEmbedLine('{{filex a.txt}}'));
+  assert.equal(R.parse('{{file "label only"}}'), null);
+  const found = R.findEmbeds('See ' + src + ' and {{flex:text ' + G + ' seg=1}}.');
+  assert.deepEqual(found.map((e) => e.spec.kind), ['file', 'text']);
+  // a FLEx embed is untouched by the new kind
+  assert.equal(R.parse('{{flex:entry ' + G + '}}').kind, 'entry');
+});

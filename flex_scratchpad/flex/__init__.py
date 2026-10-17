@@ -247,8 +247,9 @@ class FlexService:
                         obj = be.get_entry(guid)
                         self.cache.put(self.project_name, "entry", guid, obj)
                     elif kind == "text":
-                        obj = be.get_text(guid, seg_from, seg_to, ws=ws, at=at, alts=alts) if alts else be.get_text(guid, seg_from, seg_to, ws=ws, at=at)
-                        self.cache.merge_text(self.project_name, variant, obj)
+                        obj = self._tracked_text(be, guid, seg_from, seg_to, ws, at, alts)
+                        if not obj.get("lost"):
+                            self.cache.merge_text(self.project_name, variant, obj)
                     elif kind == "wordform":
                         obj = be.get_wordform(guid)
                         self.cache.put(self.project_name, "wordform", guid, obj)
@@ -284,6 +285,50 @@ class FlexService:
             if live_err:
                 raise live_err
             raise FlexError("Not in the FLEx project and not cached.", "", "missing")
+
+    def _tracked_text(self, be, guid: str, seg_from, seg_to, ws, at, alts: bool) -> dict:
+        """The text range an embed asks for, kept on ITS lines when FLEx has changed the text
+        (flex/tracking.py): the backend first follows the `at=` anchors; the ledger then
+        widens / narrows / re-finds the range for split, merged, deleted or rebuilt segments
+        and says how each of the embed's old segments maps now (`track`), so the page can move
+        the embed's highlights with them. Lines that cannot be found come back as the saved
+        copy, marked `lost`, never as whatever now has their numbers."""
+        from . import tracking
+
+        def get(a, b, anchors):
+            return be.get_text(guid, a, b, ws=ws, at=anchors, alts=alts) if alts else be.get_text(guid, a, b, ws=ws, at=anchors)
+
+        obj = get(seg_from, seg_to, at)
+        ledger = tracking.Ledger(self.cache.ledger_path(self.project_name, guid))
+        tr = None
+        if seg_from and ledger.orders:
+            texts = (lambda: be.text_baselines(guid)) if hasattr(be, "text_baselines") else (lambda: {})
+            try:
+                seen = {model.anchor_of(x.get("guid", "")): x.get("baseline", "") for x in obj.get("segments") or []}
+                tr = tracking.track(ledger, obj.get("index") or [], texts, seg_from, seg_to, at, seen)
+            except Exception:  # noqa: BLE001 — tracking must never stop a text from showing
+                tr = None
+        if tr:
+            if tr["change"] == "lost":
+                saved = [x for x in tr.get("saved") or [] if x]
+                obj = dict(obj)
+                obj["segments"] = saved
+                obj["range"] = [int(seg_from), int(seg_to or seg_from)]
+                obj["anchors"] = list(at or [])
+                obj["lost"] = True
+                obj["rangeMoved"] = False
+            elif tr["change"] in ("reshaped", "found") and [tr["from"], tr["to"]] != list(obj.get("range") or []):
+                obj = get(tr["from"], tr["to"], None)
+            if tr["change"] in ("moved", "reshaped", "found"):
+                obj["rangeMoved"] = [int(seg_from), int(seg_to or seg_from)] != list(obj.get("range") or [])
+            obj["track"] = {k: tr[k] for k in ("change", "how", "map", "oldWords")}
+        if not obj.get("lost"):
+            try:
+                ledger.record(obj.get("index") or [], obj.get("segments") or [])
+                ledger.save()
+            except OSError:
+                pass
+        return obj
 
     def refresh_all(self, bodies: list[str]) -> dict:
         """Re-fetch every FLEx object embedded anywhere in the notebook from the live project
@@ -466,6 +511,7 @@ class FlexService:
 
         # bidi format marks (U+200E/F and friends) ride along in FLEx's clipboard text
         pasted = "".join(c for c in (pasted or "") if _ud.category(c) != "Cf")
+        ws_codes = self._paste_ws_codes(pasted)
         for raw in pasted.replace("\r\n", "\n").split("\n"):
             line = raw.strip()
             if not line:
@@ -522,6 +568,12 @@ class FlexService:
             prev_free = is_free
             if not words:
                 continue
+            # "Free Eng So concerning…": Eng names the writing system — in a cell of its own
+            # always, glued to the text when the paste names it elsewhere ("Word Gloss Eng")
+            if is_free and len(words) > 1 and re.fullmatch(r"[A-Za-z]{2,3}(-[\w-]+)*", words[0]):
+                words = words[1:]
+            elif is_free and len(words) == 1 and " " in words[0] and words[0].split(" ", 1)[0].casefold() in ws_codes:
+                words = words[0].split(" ", 1)[1:]
             text = " ".join(words)
             if len(text) > 400:
                 return [], norm
@@ -549,6 +601,32 @@ class FlexService:
                 cur["label"] = row_label          # FLEx's own number for this segment ("12.3", "13")
         queries = [q for q in queries if q["bases"] or q["morphs"] or q["glosses"] or q["free"]]
         return queries, norm
+
+    def _paste_ws_codes(self, pasted: str) -> set:
+        """The writing-system codes the pasted rows name ("Word Gloss Eng", a lone "Ind" under a
+        Free row), casefolded, so "Free Eng <translation>" can drop its "Eng" while a translation
+        that merely starts with a short word ("She caught it") keeps it."""
+        keys = sorted(self._ROW_KEEP + self._ROW_DROP, key=len, reverse=True)
+        codes: set = set()
+        for raw in pasted.replace("\r\n", "\n").split("\n"):
+            cells = [c.strip() for c in raw.split("\t") if c.strip()]
+            if not cells:
+                continue
+            if re.fullmatch(r"\d+(\.\d+)?", cells[0]) and len(cells) > 1:
+                cells = cells[1:]
+            head = re.sub(r"^\d+(\.\d+)?\s+", "", cells[0]).casefold()
+            if len(cells) == 1 and re.fullmatch(r"[a-z]{2,3}", head):
+                codes.add(head)
+                continue
+            for k in keys if len(cells) > 1 else ():     # the label in a cell of its own
+                if k == "free":
+                    continue
+                if head.startswith(k + " "):
+                    rest = head[len(k):].split()
+                    if rest and re.fullmatch(r"[a-z]{2,3}(-[\w-]+)*", rest[0]):
+                        codes.add(rest[0])
+                    break
+        return codes
 
     @staticmethod
     def _place_by_labels(queries: list, segs: list, labels: dict):
@@ -636,41 +714,62 @@ class FlexService:
             text["media"] = media
         return {"folder": str(folder) if files else "", "files": files, "matched": matched, "missing": missing}
 
-    def bundle_audio(self, examples: list[dict], dst: Path, gap_ms: int = 600) -> dict:
-        """One recording of every timed segment of these examples, in order (the clips the
-        cache already cuts, concatenated with a gap); the segments' offsets and media are
-        rewritten to it. Returns {path, matched, missing}; no file when nothing was timed."""
+    def bundle_audio(self, examples: list[dict], dst: Path, linked_root: Path | None = None) -> dict:
+        """One recording of these examples, in order, as the text's ONE media file (Seth,
+        2026-10-17: "concatenate the audio as a single audio file stored in the text media file
+        … with a generated click inserted at join points"). The unit is the EXAMPLE, not the line
+        ("an example that's multiple lines long … treated as a unit. So per flex object"): each
+        example's audio is cut once, from its first timed line's begin to its last one's end
+        (a run of lines on another recording is its own piece), so its lines keep their own
+        timing inside it; the click (`audio.concat_clips`) goes only between examples. Offsets and
+        media are rewritten to the new file. Inside a FieldWorks LinkedFiles folder the location
+        is relative to it, as for clips. Returns {path, matched, missing}; no file when nothing
+        was timed."""
         from .audio import concat_clips, find_ffmpeg
         import uuid as _uuid
-        clips, slots = [], []
+        clips: list[Path] = []
+        runs: list[tuple[int, list[dict]]] = []          # (begin in the source, its segments)
         missing = 0
         for ex in examples:
             text = ex["text"]
-            for seg in text.get("segments") or []:
-                if seg.get("begin") is None or seg.get("end") is None or seg["end"] <= seg["begin"]:
-                    continue
-                info = self.ensure_clip(text["guid"], seg.get("media"), seg["begin"], seg["end"])
+            timed = [seg for seg in text.get("segments") or []
+                     if seg.get("begin") is not None and seg.get("end") is not None and seg["end"] > seg["begin"]]
+            pieces: list[list[dict]] = []
+            for seg in timed:                            # consecutive lines on one recording
+                if pieces and pieces[-1][-1].get("media") == seg.get("media"):
+                    pieces[-1].append(seg)
+                else:
+                    pieces.append([seg])
+            for piece in pieces:
+                begin, end = min(x["begin"] for x in piece), max(x["end"] for x in piece)
+                info = self.ensure_clip(text["guid"], piece[0].get("media"), begin, end)
                 if info.get("clipPath"):
                     clips.append(Path(info["clipPath"]))
-                    slots.append(seg)
+                    runs.append((begin, piece))
                 else:
-                    missing += 1
-        if not clips:
-            for ex in examples:
-                for seg in ex["text"].get("segments") or []:
-                    seg["begin"] = seg["end"] = None      # no recording to point at
-            return {"path": "", "matched": 0, "missing": missing}
-        spans = concat_clips(clips, Path(dst), gap_ms, find_ffmpeg(self.nb.config.get("settings", {}).get("ffmpegPath", "")))
-        bundle_guid = str(_uuid.uuid4())
-        matched = {id(seg) for seg in slots}
+                    missing += len(piece)
+        kept = {id(seg) for _, piece in runs for seg in piece}
         for ex in examples:
-            ex["text"]["media"] = [{"guid": bundle_guid, "uri": Path(dst).name, "path": str(Path(dst).resolve()), "found": True}]
             for seg in ex["text"].get("segments") or []:
-                if id(seg) not in matched:
-                    seg["begin"] = seg["end"] = None
-        for seg, (a, b) in zip(slots, spans):
-            seg["begin"], seg["end"], seg["media"] = a, b, bundle_guid
-        return {"path": str(dst), "matched": len(slots), "missing": missing}
+                if id(seg) not in kept:
+                    seg["begin"] = seg["end"] = None      # no recording to point at
+        if not clips:
+            return {"path": "", "matched": 0, "missing": missing}
+        spans = concat_clips(clips, Path(dst), ffmpeg=find_ffmpeg(self.nb.config.get("settings", {}).get("ffmpegPath", "")))
+        bundle_guid = str(_uuid.uuid4())
+        loc = str(Path(dst).resolve())
+        if linked_root is not None:
+            try:
+                loc = Path(dst).resolve().relative_to(Path(linked_root).resolve()).as_posix()
+            except ValueError:
+                pass
+        for ex in examples:
+            ex["text"]["media"] = [{"guid": bundle_guid, "uri": loc, "path": loc, "found": True}]
+        for (src_begin, piece), (a, z) in zip(runs, spans):
+            for seg in piece:
+                b0 = min(z, a + seg["begin"] - src_begin)
+                seg["begin"], seg["end"], seg["media"] = b0, max(b0 + 1, min(z, a + seg["end"] - src_begin)), bundle_guid
+        return {"path": str(dst), "matched": len(kept), "missing": missing}
 
     def resolve_link(self, text: str) -> dict | None:
         """A pasted FLEx hyperlink or bare GUID → {kind, guid, title, seg?, sense?, database?}."""
@@ -700,6 +799,43 @@ class FlexService:
                 out["database"] = info.get("database", "")
                 out["url"] = s
             return out
+
+    # -- which texts a note draws on (Seth, 2026-10-16) ----------------------------------
+
+    def texts_used(self, sources: list[tuple[str, str, str]]) -> list[dict]:
+        """The FLEx TEXTS that the examples in `sources` [(note id, note title, markdown)] come from —
+        not the examples themselves (three from one text and two from another: two rows). Each row
+        {guid, title, examples, links, notes: [{id, title}], url}: `examples` counts the rendered
+        examples ({{flex:text …}}, blocks and inline), `links` the plain links to the text, `url`
+        is its FLEx hyperlink. Titles come from the snapshot cache, else the open project, else
+        "(a text not in this project)"; sorted by title."""
+        rows: dict[str, dict] = {}
+        for note_id, note_title, body in sources:
+            for rx, key in ((EMBED_RE, "examples"), (LINK_RE, "links")):
+                for m in rx.finditer(body or ""):
+                    if m.group(1).lower() != "text":
+                        continue
+                    g = m.group(2).lower()
+                    r = rows.setdefault(g, {"guid": g, "examples": 0, "links": 0, "notes": []})
+                    r[key] += 1
+                    if not any(n["id"] == note_id for n in r["notes"]):
+                        r["notes"].append({"id": note_id, "title": note_title})
+        if not rows:
+            return []
+        live: dict[str, str] | None = None
+        for g, r in rows.items():
+            snap = self.cache.get(self.project_name, "text", g) or self.cache.find("text", g)
+            title = (snap or {}).get("title") or ""
+            if not title:
+                if live is None:
+                    try:
+                        live = {t["guid"].lower(): t.get("title", "") for t in self.list_texts()}
+                    except Exception:  # noqa: BLE001 — no project open: the cache is all there is
+                        live = {}
+                title = live.get(g, "")
+            r["title"] = title or "(a text not in this project)"
+            r["url"] = (snap or {}).get("url") or model.goto_url(self.project_name, "text", g)
+        return sorted(rows.values(), key=lambda r: (r["title"].casefold(), r["guid"]))
 
     # -- search index support -----------------------------------------------------
 

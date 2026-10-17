@@ -6,6 +6,7 @@ the page is a `file://` document and talks to Python only through the exposed `j
 from __future__ import annotations
 
 import sys
+import threading
 from pathlib import Path
 
 from . import APP_NAME
@@ -28,6 +29,19 @@ def _own_taskbar_identity() -> None:
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("FLExScratchpad.App")
     except Exception:  # noqa: BLE001 — cosmetic; never a reason not to start
         pass
+
+
+def _fit_to_screen(width: int, height: int) -> tuple[int, int]:
+    """The remembered window size, shrunk to fit the primary screen: the size the window
+    restores to when it is un-maximized must never hang off the edge (Seth, 2026-10-16)."""
+    try:
+        import webview
+        scr = webview.screens[0]
+        width = min(width, int(scr.width * 0.9))
+        height = min(height, int(scr.height * 0.9))
+    except Exception:  # noqa: BLE001 — no screen information: keep the remembered size
+        pass
+    return max(width, 760), max(height, 480)
 
 
 def ui_url() -> str:
@@ -62,26 +76,58 @@ def run(notebook_dir: str | None = None, demo: bool = False, debug: bool = False
     config = AppConfig()
     api = Api(config, notebook_dir=notebook_dir, demo=demo)
     size = config.data.get("window", {})
+    width, height = _fit_to_screen(int(size.get("width", 1280)), int(size.get("height", 820)))
     window = webview.create_window(
         APP_NAME,
         url=ui_url(),                       # a file:// URL: never a plain path (that starts an HTTP server), never html=
         js_api=api,
-        width=int(size.get("width", 1280)),
-        height=int(size.get("height", 820)),
+        width=width,
+        height=height,
         min_size=(760, 480),
+        maximized=True,                     # Seth, 2026-10-16: the default size hung off his screen
         text_select=True,
     )
     api._window = window
 
+    state = {"maximized": True}
+
+    def on_maximized():
+        state["maximized"] = True
+
+    def on_restored():
+        state["maximized"] = False
+
     def on_closing():
+        # The backup on close (Seth, 2026-10-17: a progress bar "when they exit" too): the window
+        # stays open while it runs, the page showing its progress with "Close now, finish in the
+        # background" and "Close without backing up"; then it closes itself. Skipped when nothing
+        # changed since the last good backup.
+        if state.get("closing") and api._backup.running:
+            api.backup_close_choice("background")   # ✕ again while it runs: close now, finish quietly
+            return False
+        if not state.get("closing"):
+            try:
+                if api._backup.needed() and not api._backup.running:
+                    state["closing"] = True
+                    threading.Thread(target=lambda: backup_then_close(api, window.destroy), daemon=True).start()
+                    return False            # not yet: the page shows the backup
+            except Exception:  # noqa: BLE001 — a backup problem must never stop the app closing
+                pass
         try:
-            config.data["window"] = {"width": window.width, "height": window.height}
-            config.save()
+            if not state["maximized"]:      # a maximized window's size is the screen's, not a size to restore to
+                config.data["window"] = {"width": window.width, "height": window.height}
+                config.save()
         except Exception:  # noqa: BLE001
             pass
         api._flex.close()
 
     window.events.closing += on_closing
+    for name, fn in (("maximized", on_maximized), ("restored", on_restored)):
+        try:
+            event = getattr(window.events, name)
+            event += fn
+        except Exception:  # noqa: BLE001 — an older pywebview without the event
+            pass
 
     def open_link(url: str):
         other = links.parse_build_line(url)
@@ -104,9 +150,16 @@ def run(notebook_dir: str | None = None, demo: bool = False, debug: bool = False
             pass
 
     def on_loaded():
+        # A file dropped from Explorer: only pywebview's own drop handler learns its full path
+        # (the page sees a name and bytes), which "link instead of copy" needs (Seth, 2026-10-17).
+        try:
+            from webview.dom import DOMEventHandler
+            window.dom.document.events.drop += DOMEventHandler(api._on_drop, False, False)
+        except Exception:  # noqa: BLE001 — an older pywebview: dropped files are copied from their bytes
+            pass
         if open_url:
             open_link(open_url)
-        links.watch_requests(open_link)
+        state["watcher"] = links.watch_requests(open_link)
         # the per-user scheme registration is cheap and idempotent; once per version is plenty
         try:
             # keyed on the build, not the version (which stays 0.1.0), so a new icon or launch
@@ -128,5 +181,89 @@ def run(notebook_dir: str | None = None, demo: bool = False, debug: bool = False
         webview.start(debug=debug, private_mode=False, storage_path=str(storage), http_server=False,
                       icon=str(ICON) if ICON.exists() else None)
     finally:
+        shut_down(api, state.get("watcher"))
         lock.release()
     return 0
+
+
+def shut_down(api, watcher=None, wait: float = 5.0) -> None:
+    """After the window is gone, before the process ends (Seth, 2026-10-17: closing the app
+    printed "Unhandled Exception: Python.Runtime.InternalPythonnetException: Failed to create
+    Python type for System.ComponentModel.InvalidAsynchronousStateException"). A thread still
+    calling into .NET then — an event pushed to the page, a page call's answer, the link poller —
+    reaches the window's ended UI thread (InvalidAsynchronousStateException) while Python is
+    already shutting pythonnet down, and the process dies on it. So: nothing is pushed to the
+    page any more, the poller stops, FLEx is closed, an Api call still writing (the last autosave)
+    may finish, and `exit_now` ends the process without that shutdown."""
+    api._window = None                  # Api._emit is a no-op from here on
+    if watcher is not None and getattr(watcher, "stop", None) is not None:
+        watcher.stop.set()
+    try:
+        api._flex.close()               # idempotent: on_closing usually did it already
+    except Exception:  # noqa: BLE001
+        pass
+    if api._lock.acquire(timeout=wait):
+        api._lock.release()
+
+
+def exit_now(code: int = 0) -> None:
+    """End the process now, without Python's interpreter shutdown (see `shut_down`): daemon
+    threads must not run into pythonnet's teardown. Everything worth keeping is on disk by now."""
+    import os
+    import sys
+    for f in (sys.stdout, sys.stderr):
+        try:
+            f.flush()
+        except Exception:  # noqa: BLE001 — a windowed build has no console
+            pass
+    os._exit(code)
+
+
+def _start_backup_process(notebook: str) -> None:
+    """`<this program> --backup --notebook <dir>`, detached and windowless. It reads the settings
+    and the secrets itself: nothing secret is on its command line."""
+    import subprocess
+    import sys
+    args = [sys.executable] + ([] if getattr(sys, "frozen", False) else ["-m", "flex_scratchpad"]) + ["--backup", "--notebook", notebook]
+    flags = 0
+    if sys.platform == "win32":
+        flags = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+    subprocess.Popen(args, creationflags=flags, close_fds=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def backup_then_close(api, destroy, start_process=None) -> str:
+    """Back up while the window stays open, then close it (what closing the app does when a
+    backup is due). The page shows the progress and answers through `Api.backup_close_choice`:
+    'background' starts a quiet process to finish and closes, 'skip' closes; after a failure it
+    waits for 'retry' or 'close'. Returns how it ended: ok | background | skipped | failed."""
+    start_process = start_process or _start_backup_process
+    notebook = str(api._nb.root)
+    how = "failed"
+    try:
+        while True:
+            api._close_choice = None
+            api._close_evt.clear()
+            api._emit("backupClosing", {"state": "running"})
+            r = api._backup.run("close")
+            choice = api._close_choice
+            if choice == "background":
+                start_process(notebook)
+                how = "background"
+                break
+            if choice == "skip":
+                how = "skipped"
+                break
+            if r.get("ok") or r.get("busy"):
+                how = "ok"
+                break
+            api._emit("backupClosing", {"state": "failed", "message": r.get("message", "")})
+            api._close_evt.wait()
+            if api._close_choice != "retry":
+                break
+    except Exception:  # noqa: BLE001 — whatever happens, the window closes
+        pass
+    try:
+        destroy()
+    except Exception:  # noqa: BLE001
+        pass
+    return how

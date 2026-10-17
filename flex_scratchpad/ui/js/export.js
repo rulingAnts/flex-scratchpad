@@ -82,7 +82,7 @@
     const index = R.resolveStyles(spec, obj);
     const vern = obj.ws && obj.ws.vern || {};
     const vbase = { color: '#00379c', font: vern.font || undefined, rtl: !!vern.rtl };
-    const segs = (obj.segments || []).map((seg) => {
+    const segs = (obj.segments || []).filter((seg) => !FS.interlinear.blankSeg(seg)).map((seg) => {   // blank lines are left out
       const words = (seg.words || []).filter((w) => !w.punct);
       const lineModels = [];
       const add = (name, cellsFn) => { const cells = words.map((w, i) => cellsFn(w, i + 1)); if (cells.some((c) => c.some((r) => r.text))) lineModels.push({ name, cells }); };
@@ -137,7 +137,8 @@
           const x = spec.extra || {};
           const layout = { exNum: x.ex ? '(' + (++exNum) + ')' : '', indent: Math.max(0, Math.min(4, parseInt(x.indent, 10) || 0)) };
           let blk;
-          try { blk = await flexBlock(spec); } catch (e) { blk = { type: 'p', runs: [{ text: '[FLEx object unavailable: ' + (e.message || e) + ']', color: '#c0392b' }] }; }
+          if (spec.kind === 'file') blk = { type: 'p', runs: [await fileRun(spec)] };
+          else try { blk = await flexBlock(spec); } catch (e) { blk = { type: 'p', runs: [{ text: '[FLEx object unavailable: ' + (e.message || e) + ']', color: '#c0392b' }] }; }
           blocks.push(Object.assign(blk, layout));
         }
       } else if (b.type === 'table') {
@@ -168,16 +169,34 @@
     return { title: note.title || 'Untitled', blocks };
   }
 
-  /* Text that may contain {{flex …}} embeds: split into runs parts and object blocks. */
+  /* An attached file in an export (Seth, 2026-10-17): a Word / HTML / PDF file cannot hold it,
+   * so it is 📎 and its label, LINKED to the file (it opens on this computer; elsewhere it is
+   * the name). */
+  async function fileRun(spec) {
+    const ci = FS.files.chipInfo(spec);
+    let href = '';
+    try { const inf = await FS.files.info(spec.ref); if (inf.exists) href = inf.fileUrl || ''; } catch (e) { /* the name, unlinked */ }
+    const r = { text: '📎 ' + ci.title, color: '#1f4f8f' };
+    if (href) r.href = href;
+    return r;
+  }
+
+  /* Text that may contain {{flex …}} embeds: split into runs parts and object blocks. An
+   * attached file stays IN its line, as a linked run. */
   async function textWithEmbeds(text) {
     const parts = [];
-    let pos = 0;
+    let pos = 0, runs = [];
+    const flush = () => { if (runs.length) parts.push({ runs }); runs = []; };
     for (const e of R.findEmbeds(text)) {
-      if (e.start > pos) parts.push({ runs: runsOf(text.slice(pos, e.start)) });
-      try { parts.push(await flexBlock(e.spec)); } catch (err) { parts.push({ runs: [{ text: '[FLEx object unavailable]', color: '#c0392b' }] }); }
+      if (e.start > pos) runs.push(...runsOf(text.slice(pos, e.start)));
       pos = e.end;
+      if (e.spec.kind === 'file') { runs.push(await fileRun(e.spec)); continue; }
+      flush();
+      try { parts.push(await flexBlock(e.spec)); } catch (err) { parts.push({ runs: [{ text: '[FLEx object unavailable]', color: '#c0392b' }] }); }
     }
-    if (pos < text.length || !parts.length) parts.push({ runs: runsOf(text.slice(pos)) });
+    if (pos < text.length) runs.push(...runsOf(text.slice(pos)));
+    flush();
+    if (!parts.length) parts.push({ runs: [] });
     return parts.filter((p) => p.type || p.runs.some((r) => r.text.trim()) || parts.length === 1);
   }
 
@@ -215,6 +234,7 @@
     if (r.i) s = '<i>' + s + '</i>';
     if (r.u) s = '<u>' + s + '</u>';
     if (r.s) s = '<s>' + s + '</s>';
+    if (r.href) s = '<a href="' + esc(r.href) + '">' + s + '</a>';
     return css.length ? '<span style="' + css.join(';') + '">' + s + '</span>' : s;
   }
   const runsHtml = (runs) => (runs || []).map(runHtml).join('');
@@ -281,7 +301,7 @@
     for (const b of editor.blocks) {
       for (const e of R.findEmbeds(b.src || '')) {
         const sp = e.spec;
-        if (!sp) continue;
+        if (!sp || sp.kind === 'file') continue;
         items.push({ kind: sp.kind, guid: sp.guid, seg: sp.seg, at: sp.at, label: sp.label || '' });
       }
     }
@@ -301,40 +321,49 @@
       const src = el('input', { type: 'checkbox', checked: true });
       const wg = el('input', { type: 'checkbox', checked: true });
       const audio = el('select', { style: { width: '100%' } });
-      audio.appendChild(el('option', { value: 'clips' }, 'a small 16-bit mono WAV per line, each line pointing at its own clip'));
-      audio.appendChild(el('option', { value: 'bundle' }, 'one recording of all the examples next to the file (clips in order, offsets rewritten)'));
+      // Seth, 2026-10-17: concatenated (the default) or one clip per line — the user's choice
+      audio.appendChild(el('option', { value: 'bundle' }, 'one audio file for the text: each example\u2019s audio in order, a click between examples'));
+      audio.appendChild(el('option', { value: 'clips' }, 'one small audio file per line, each line pointing at its own clip'));
       audio.appendChild(el('option', { value: 'original' }, 'point at the original recordings (their offsets, as in FLEx)'));
       audio.appendChild(el('option', { value: 'none' }, 'no audio'));
-      const folder = el('input', { type: 'text', placeholder: 'next to the .flextext (<title>-audio) — or the project\u2019s LinkedFiles\\AudioVisual', style: { flex: '1 1 auto', minWidth: '0' } });
+      audio.value = 'bundle';
+      const folder = el('input', { type: 'text', placeholder: 'next to the .flextext — or the project\u2019s LinkedFiles\\AudioVisual', style: { flex: '1 1 auto', minWidth: '0' } });
       const browse = el('button', { class: 'btn', onclick: async () => { try { const f = await FS.api.pick_folder(); if (f) folder.value = f; } catch (e) { FS.toast(e.message, 'error'); } } }, 'Browse…');
-      const folderRow = el('div', { class: 'form-row' }, el('label', {}, 'Clips into'), el('div', { style: { display: 'flex', gap: '6px', flex: '1 1 auto', minWidth: '0' } }, folder, browse));
-      audio.addEventListener('change', () => { folderRow.style.display = audio.value === 'clips' ? '' : 'none'; });
+      const folderRow = el('div', { class: 'form-row' }, el('label', {}, 'Audio into'), el('div', { style: { display: 'flex', gap: '6px', flex: '1 1 auto', minWidth: '0' } }, folder, browse));
+      const folderNote = el('p', { class: 'small muted' }, 'One audio file is named like its .flextext (the Audio Segmenter pairs them by name); clips per line go into a <name>-audio folder. Choose the project\u2019s LinkedFiles\\AudioVisual folder and the audio is written there with locations FLEx resolves on import; anywhere else the file points at it by full path. 16-bit mono WAV.');
+      const showFolder = () => { const on = audio.value === 'clips' || audio.value === 'bundle'; folderRow.style.display = on ? '' : 'none'; folderNote.style.display = on ? '' : 'none'; };
+      audio.addEventListener('change', showFolder);
+      showFolder();
+      // Seth, 2026-10-17: one text per baseline writing system, each in its own file by default
+      const oneFile = el('input', { type: 'checkbox' });
       const only = el('select', { style: { width: '100%' } });
       only.appendChild(el('option', { value: '' }, preview.texts.length > 1 ? 'all — one FLEx text per baseline writing system' : 'all'));
       for (const t of preview.texts) only.appendChild(el('option', { value: t.ws }, t.ws + ' only (' + t.examples + ' example' + (t.examples === 1 ? '' : 's') + ')'));
       const what = texts.length + ' example' + (texts.length === 1 ? '' : 's')
         + (preview.texts.length > 1 ? ' → ' + preview.texts.length + ' texts: ' + preview.texts.map((t) => t.ws + ' (' + t.examples + ')').join(', ') : preview.texts.length === 1 ? ' → one text, baseline ' + preview.texts[0].ws : '')
         + (items.length > texts.length ? ' · ' + (items.length - texts.length) + ' entry object' + (items.length - texts.length === 1 ? '' : 's') + ' skipped (not interlinear)' : '');
-      m.body.append(
+      // Element.append writes a null child as the text "null" (FS.el skips it; append does not)
+      m.body.append(...[
         el('p', { class: 'small muted' }, what),
         el('div', { class: 'form-row' }, el('label', {}, 'Text title'), title),
         preview.texts.length > 1 ? el('div', { class: 'form-row' }, el('label', {}, 'Baseline'), only) : null,
+        preview.texts.length > 1 ? el('label', { class: 'row', style: { gap: '8px' } }, oneFile, 'Put the texts in one file (else one .flextext per writing system, each with its own audio)') : null,
         el('div', { class: 'form-row' }, el('label', {}, 'Audio'), audio),
         folderRow,
-        el('p', { class: 'small muted' }, 'Choose the project\u2019s LinkedFiles\\AudioVisual folder and the clips are written there with locations FLEx resolves on import; anywhere else the file points at them by full path.'),
+        folderNote,
         el('label', { class: 'row', style: { gap: '8px' } }, src, 'Add a Source note on every line (text title, FLEx number, GUIDs)'),
         el('label', { class: 'row', style: { gap: '8px' } }, link, 'Include a link back to this note (flexscratchpad://note/…)'),
         el('label', { class: 'row', style: { gap: '8px' } }, md, 'Attach this note\u2019s markdown as the text\u2019s comment (Info tab)'),
         el('label', { class: 'row', style: { gap: '8px' } }, wg, 'Keep FLEx\u2019s word analysis GUIDs (the import reuses the same analyses)'),
-        el('p', { class: 'small muted' }, 'Each example becomes a paragraph of the new text; its segments keep every writing system. A FLEx text has one baseline writing system, so examples from texts in different vernacular writing systems become separate texts in the same file. Import with FieldWorks → File → Import → FLExText Interlinear.'),
-      );
+        el('p', { class: 'small muted' }, 'Each example becomes a paragraph of the new text; its segments keep every writing system. A FLEx text has one baseline writing system, so examples from texts in different vernacular writing systems become separate texts, each in its own file (or together in one, if you tick that). Import with FieldWorks → File → Import → FLExText Interlinear.'),
+      ].filter(Boolean));
       const row = el('div', { class: 'btn-row' });
       row.appendChild(el('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'));
       row.appendChild(el('button', { class: 'btn primary', onclick: async () => {
-        const opts = { title: title.value.trim(), includeLink: link.checked, includeMarkdown: md.checked, sourceNotes: src.checked, wordGuids: wg.checked, onlyWs: only.value || '', audio: audio.value, audioFolder: folder.value.trim() };
+        const opts = { title: title.value.trim(), includeLink: link.checked, includeMarkdown: md.checked, sourceNotes: src.checked, wordGuids: wg.checked, onlyWs: only.value || '', audio: audio.value, audioFolder: folder.value.trim(), oneFile: oneFile.checked };
         try {
           const r = await FS.api.export_note_flextext(note.id, items, opts);
-          if (r) FS.toast('Saved ' + r.path + ' — ' + r.examples + ' example' + (r.examples === 1 ? '' : 's') + (r.texts.length > 1 ? ' in ' + r.texts.length + ' texts' : '') + (r.skipped ? ', ' + r.skipped + ' skipped' : '') + (r.audio ? '; audio: ' + r.audioMatched + ' clip' + (r.audioMatched === 1 ? '' : 's') + ' in ' + r.audio + (r.audioMissing ? ' (' + r.audioMissing + ' segment' + (r.audioMissing === 1 ? '' : 's') + ' without a playable clip)' : '') : ''), 'ok');
+          if (r) FS.toast('Saved ' + (r.paths || [r.path]).join('; ') + ' — ' + r.examples + ' example' + (r.examples === 1 ? '' : 's') + (r.texts.length > 1 ? ' in ' + r.texts.length + ' texts' : '') + (r.skipped ? ', ' + r.skipped + ' skipped' : '') + (r.audio ? '; audio: ' + r.audioMatched + ' line' + (r.audioMatched === 1 ? '' : 's') + (opts.audio === 'bundle' ? ' in ' : ' clipped in ') + r.audio + (r.audioMissing ? ' (' + r.audioMissing + ' segment' + (r.audioMissing === 1 ? '' : 's') + ' without a playable clip)' : '') : ''), 'ok');
           m.close(); resolve(r);
         } catch (e) { FS.toast('Export failed: ' + e.message, 'error'); }
       } }, 'Export…'));

@@ -34,13 +34,84 @@
   /* After a fetch: a text embed records its anchors the first time, and follows them when
    * FLEx has renumbered its segments — rewriting `seg=` in the note (silently, via onSpecChange). */
   function syncAnchors(spec, obj, opts) {
-    if (spec.kind !== 'text' || !obj || obj.kind !== 'text' || !opts.onSpecChange || !spec.seg) return false;
+    if (spec.kind !== 'text' || !obj || obj.kind !== 'text' || !opts.onSpecChange || !spec.seg || obj.lost) return false;
     const anchors = obj.anchors && obj.anchors[0] ? obj.anchors : null;
     let changed = false;
-    if (obj.rangeMoved && obj.range && obj.range[0]) { spec.seg = [obj.range[0], obj.range[1]]; changed = true; }
+    if (obj.rangeMoved && obj.range && obj.range[0]) {
+      remapStyles(spec, obj);               // the highlights go with their lines, not with the numbers
+      spec.seg = [obj.range[0], obj.range[1]];
+      changed = true;
+    }
     if (anchors && (!spec.at || (obj.rangeMoved && (spec.at[0] !== anchors[0] || spec.at[1] !== anchors[1])))) { spec.at = anchors; changed = true; }
-    if (changed) { opts.onSpecChange(spec); if (obj.rangeMoved) FS.toast('Segments renumbered in FLEx — the example now reads ' + labelOf(obj, spec.seg[0]) + '–' + labelOf(obj, spec.seg[1])); }
+    if (changed) {
+      opts.onSpecChange(spec);
+      if (obj.rangeMoved) {
+        const tr = obj.track || {}, now = labelOf(obj, spec.seg[0]) + (spec.seg[1] !== spec.seg[0] ? '–' + labelOf(obj, spec.seg[1]) : '');
+        const what = { split: 'a line was split', merged: 'lines were merged', deleted: 'a line was deleted', inserted: 'lines were added' };
+        if (tr.change === 'found') FS.toast('These lines were rebuilt in FLEx and found again by their text — the example now reads ' + now + '. Worth a look.', 'warn');
+        else if (tr.change === 'reshaped') FS.toast('In FLEx, ' + (tr.how || []).map((h) => what[h] || h).join(' and ') + ' — the example follows its lines and now reads ' + now + '.');
+        else FS.toast('Lines renumbered in FLEx — the example now reads ' + now);
+      }
+    }
     return changed;
+  }
+  /* The embed's highlight / bold / underline targets name segments by NUMBER (`hl=5.2`): when the
+   * example's lines moved, each target follows its own line (obj.track.map: old position in the
+   * range → new number; a deleted line's targets go), and a word target follows its WORD when the
+   * line's words changed (obj.track.oldWords) — or goes, rather than mark another word. */
+  function remapStyles(spec, obj) {
+    const tr = obj.track;
+    if (!tr || !tr.map || !spec.seg || !(spec.styles || []).length) {
+      if (spec.seg && obj.range && !tr) shiftStyles(spec, obj.range[0] - spec.seg[0]);   // an older backend: a plain shift
+      return;
+    }
+    const base = spec.seg[0];
+    const inRange = (n) => n - base >= 0 && n - base < tr.map.length;
+    const mapSeg = (n) => (inRange(n) ? tr.map[n - base] : n);
+    const wordsOf = (n) => { const sg = (obj.segments || []).find((x) => x.n === n); return sg ? (sg.words || []).filter((w) => !w.punct).map((w) => FS.normalize(w.txt || '', true)) : null; };
+    for (const g of spec.styles) {
+      g.targets = g.targets.filter((t) => {
+        if (t.text != null || t.seg == null) return true;               // "text" targets find themselves
+        const k = t.seg - base, ns = mapSeg(t.seg);
+        if (ns == null) return false;
+        if (t.word != null && inRange(t.seg) && tr.oldWords && tr.oldWords[k]) {
+          const ow = tr.oldWords[k][t.word - 1], nw = wordsOf(ns);
+          if (ow != null && nw) {
+            const want = FS.normalize(ow, true);
+            let best = -1;
+            nw.forEach((w, i) => { if (w === want && (best < 0 || Math.abs(i - (t.word - 1)) < Math.abs(best - (t.word - 1)))) best = i; });
+            if (best < 0) return false;
+            const d = best + 1 - t.word;
+            t.word += d;
+            if (t.wordEnd != null && (t.segEnd == null || t.segEnd === t.seg)) t.wordEnd += d;
+          }
+        }
+        if (t.segEnd != null) { const ne = mapSeg(t.segEnd); t.segEnd = ne == null ? ns : ne; }
+        t.seg = ns;
+        return true;
+      });
+    }
+    spec.styles = spec.styles.filter((g) => g.targets.length);
+  }
+  function shiftStyles(spec, d) {
+    if (!d) return;
+    for (const g of spec.styles || []) for (const t of g.targets) { if (t.seg != null) t.seg += d; if (t.segEnd != null) t.segEnd += d; }
+  }
+
+  /* A BLANK line (Seth, 2026-10-17: FLEx "has data on 1.1 and then if it's a SHIFT+ENTER then it
+   * has a blank 1.2 (and sometimes more empty lines) that don't show up in FLEx baseline or gloss,
+   * but that do get skipped in numbering"): no word and no text — only spaces, the line break
+   * Shift+Enter leaves (U+2028) or other invisible characters — and no free / literal translation
+   * or note. It is left out wherever lines are shown or written; the others keep FLEx's own
+   * numbers, so 1.1 is followed by 1.3 as in FLEx. A line with only punctuation is not blank. */
+  const INVISIBLE = /[\s\u200b-\u200d\u2060\ufeff]/g;
+  const visible = (t) => String(t || '').replace(INVISIBLE, '');
+  function blankSeg(seg) {
+    if (!seg) return true;
+    if (visible(seg.baseline)) return false;
+    if ((seg.words || []).some((w) => visible(w.txt))) return false;
+    if (visible(seg.free) || visible(seg.lit)) return false;
+    return !(seg.notes || []).some((n) => visible(n));
   }
 
   /* ------------------------------------------------------------------ styled text */
@@ -115,6 +186,7 @@
       cancelAnimationFrame(c.raf);
       this.current = null;
       if (c.onEnd) c.onEnd();
+      nowPlaying.update();
     },
     /* Play [begin,end] ms of src (both in ms of the file). Resolves when started. */
     async play(src, begin, end, handlers) {
@@ -130,18 +202,73 @@
         if (c.onTick) c.onTick(t);
         if (t >= end - 15 || a.ended) {
           if (c.loop) { a.currentTime = begin / 1000; }
-          else { a.pause(); this.current = null; if (c.onEnd) c.onEnd(); return; }
+          else { a.pause(); this.current = null; if (c.onEnd) c.onEnd(); nowPlaying.update(); return; }
         }
         c.raf = requestAnimationFrame(tick);
       };
       try { await a.play(); } catch (e) { this.current = null; throw e; }
       c.raf = requestAnimationFrame(tick);
+      nowPlaying.update();
       return c;
     },
     seek(t) { const c = this.current; if (c) c.el.currentTime = Math.min(c.end, Math.max(c.begin, t)) / 1000; },
-    pause() { const c = this.current; if (c) { c.el.pause(); cancelAnimationFrame(c.raf); } },
-    resume() { const c = this.current; if (c) { c.el.play(); const tick = () => { if (this.current !== c) return; const t = c.el.currentTime * 1000; if (c.onTick) c.onTick(t); if (t >= c.end - 15) { if (c.loop) c.el.currentTime = c.begin / 1000; else { c.el.pause(); this.current = null; if (c.onEnd) c.onEnd(); return; } } c.raf = requestAnimationFrame(tick); }; c.raf = requestAnimationFrame(tick); } },
+    pause() { const c = this.current; if (c) { c.el.pause(); cancelAnimationFrame(c.raf); c.paused = true; if (c.onPause) c.onPause(true); nowPlaying.update(); } },
+    resume() { const c = this.current; if (c) { c.paused = false; if (c.onPause) c.onPause(false); c.el.play(); const tick = () => { if (this.current !== c) return; const t = c.el.currentTime * 1000; if (c.onTick) c.onTick(t); if (t >= c.end - 15) { if (c.loop) c.el.currentTime = c.begin / 1000; else { c.el.pause(); this.current = null; if (c.onEnd) c.onEnd(); nowPlaying.update(); return; } } c.raf = requestAnimationFrame(tick); }; c.raf = requestAnimationFrame(tick); nowPlaying.update(); } },
+    toggle() { const c = this.current; if (!c) return; if (c.paused) this.resume(); else this.pause(); },
   };
+
+  /* NOW PLAYING (Seth, 2026-10-17: "Any time something is playing, there should be a play control
+   * and the ability to stop it playing" — a collapsed example's preview closed under a playing
+   * clip and took its player with it). Whenever something plays and the example's own player is
+   * not on screen (its preview closed, the example scrolled away or redrawn), this bar at the
+   * bottom of the window has pause / resume, ■ Stop, the progress, and which text and line is
+   * playing (a click goes to it when it is still open). Esc stops playback too. */
+  const nowPlaying = (() => {
+    let node = null, playBtn, ttl, bar, timeEl, timer = 0;
+    const onScreen = (elx) => {
+      if (!elx || !elx.isConnected || !elx.offsetParent) return false;
+      const r = elx.getBoundingClientRect();
+      return r.bottom > 0 && r.top < window.innerHeight && r.width > 0;
+    };
+    function build() {
+      playBtn = el('button', { class: 'np-play on', title: 'Pause', 'data-test': 'np-play', onclick: () => audio.toggle() }, '❚❚');
+      ttl = el('button', { class: 'np-ttl', title: 'Show where it is playing', 'data-test': 'np-title', onclick: () => { const c = audio.current; const box = c && c.box; if (box && box.isConnected) box.scrollIntoView({ block: 'center', behavior: 'smooth' }); else FS.toast('That example is no longer open; ■ stops it.'); } });
+      bar = el('div', { class: 'np-bar', onclick: (e) => { const c = audio.current; if (!c) return; const r = bar.getBoundingClientRect(); audio.seek(c.begin + (e.clientX - r.left) / r.width * (c.end - c.begin)); } }, el('i'));
+      timeEl = el('span', { class: 'np-t' });
+      node = el('div', { class: 'now-playing', id: 'now-playing', 'data-test': 'now-playing', role: 'region', 'aria-label': 'Now playing', hidden: true },
+        el('span', { class: 'np-ico', 'aria-hidden': 'true' }, '♪'), playBtn,
+        el('button', { class: 'np-stop', title: 'Stop (Esc)', 'data-test': 'np-stop', onclick: () => audio.stop() }, '■'),
+        ttl, bar, timeEl);
+      document.body.appendChild(node);
+    }
+    let last = 0;
+    function update(fromTick) {
+      const c = audio.current;
+      if (!c) { if (node) node.hidden = true; clearInterval(timer); timer = 0; return; }
+      const now = performance.now();
+      if (fromTick === true && now - last < 150) return;    // the playhead ticks every frame; a few looks a second do
+      last = now;
+      if (!timer) timer = setInterval(() => update(), 300);   // paused clips do not tick: look anyway
+      if (!node) build();
+      const own = onScreen(c.transport);
+      node.hidden = own;
+      if (own) return;
+      const t = c.el.currentTime * 1000, f = Math.min(1, Math.max(0, (t - c.begin) / Math.max(1, c.end - c.begin)));
+      bar.firstChild.style.width = (f * 100) + '%';
+      timeEl.textContent = FS.fmtTime(t - c.begin) + ' / ' + FS.fmtTime(c.end - c.begin);
+      playBtn.textContent = c.paused ? '▶' : '❚❚';
+      playBtn.title = c.paused ? 'Play' : 'Pause';
+      playBtn.classList.toggle('on', !c.paused);
+      const line = c.lineAt ? c.lineAt(t) : '';
+      ttl.textContent = (c.title || 'Playing') + (line ? ' · ' + line : '');
+    }
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape' || !audio.current || e.defaultPrevented) return;
+      if (document.querySelector('.modal-backdrop, .popover, .flex-overlay')) return;   // Esc closes those first
+      audio.stop();
+    });
+    return { update };
+  })();
   FS.audio = audio;
 
   /* Capture a played range with MediaRecorder when Python could not cut the clip itself. */
@@ -201,15 +328,16 @@
       el('span', Object.assign({ class: 'ttl vern' }, wsAttrs(vern)), obj.title || '(untitled text)'),
       el('span', { class: 'badge' }, rangeLabel),
       obj.cached ? el('span', { class: 'badge warn', title: obj.liveError || 'Shown from the notebook cache' }, 'cached' + (obj.cachedAt ? ' ' + obj.cachedAt.slice(0, 10) : '')) : null,
+      obj.lost ? el('span', { class: 'badge warn', 'data-test': 'lines-lost', title: 'These lines are no longer in the text as they were' }, 'lines changed in FLEx') : null,
       spec.label ? el('span', { class: 'badge' }, spec.label) : null,
       el('span', { class: 'spacer' }),
     );
     const anyTimed = segs.some((s) => s.begin != null && s.end != null);
-    if (anyTimed && segs.length > 1) {
-      head.appendChild(el('button', { class: 'lnk', title: 'Play this range', onclick: () => playRange(box, obj, segs, mediaByGuid, opts) }, '▶ Play ' + flexRange));
+    if (anyTimed && segs.filter((x) => !blankSeg(x)).length > 1) {
+      head.appendChild(el('button', { class: 'lnk play-range', title: 'Play this range', onclick: () => playRange(box, obj, segs.filter((x) => !blankSeg(x)), mediaByGuid, opts) }, '▶ Play ' + flexRange));
     }
     head.appendChild(el('button', { class: 'lnk', title: 'Reload from FLEx', onclick: () => opts.refresh && opts.refresh() }, '↻'));
-    if (opts.editable && !opts.overlay && !opts.collection) head.appendChild(el('button', { class: 'lnk', title: 'Collapse to a chip', onclick: () => setCollapsed(spec, opts, true) }, '⤡'));
+    if (opts.editable && !opts.overlay) head.appendChild(el('button', { class: 'lnk', 'data-test': 'collapse-obj', title: 'Collapse to a chip', onclick: () => setCollapsed(spec, opts, true) }, '⤡'));
     if (opts.editable && opts.inCell && opts.editCell && !opts.overlay) head.appendChild(el('button', { class: 'lnk', title: 'Edit the cell\u2019s text (type before or after this example, add another)', onclick: () => opts.editCell() }, '✎'));
     if (opts.editable && !opts.overlay && opts.duplicate) head.appendChild(el('button', { class: 'lnk', title: 'Duplicate this object', onclick: () => opts.duplicate() }, '⧉'));
     if (opts.editable && !opts.overlay && opts.remove) head.appendChild(el('button', { class: 'lnk danger', title: 'Remove this object…', onclick: (e) => removeObject(e.currentTarget, spec, opts) }, '🗑'));
@@ -218,10 +346,16 @@
     if (obj.url) head.appendChild(el('a', { href: obj.url, title: 'Open in FieldWorks', onclick: (e) => { e.preventDefault(); openInFlex(obj.url); } }, 'Open in FLEx ↗'));
     if (opts.editable) head.appendChild(el('button', { class: 'lnk', title: 'Options', onclick: (e) => embedMenu(e.currentTarget, spec, opts, obj) }, '⋯'));
     box.appendChild(head);
+    if (obj.lost) box.appendChild(el('div', { class: 'flex-lost', 'data-test': 'flex-lost' },
+      '⚠ These lines are no longer in the text as they were — changed or deleted in FLEx, and not found again by their text. This is the copy saved when the example was last shown. ',
+      el('button', { class: 'lnk', onclick: () => openContext(spec, null) }, '⊡ See the text as it is now'),
+      opts.editable && opts.editSource ? el('button', { class: 'lnk', onclick: () => opts.editSource() }, '✎ Edit the range') : null));
 
+    const shown = segs.filter((x) => !blankSeg(x));
     if (!segs.length) box.appendChild(el('div', { class: 'seg-empty' }, 'No segments in this range.'));
+    else if (!shown.length) box.appendChild(el('div', { class: 'seg-empty' }, segs.length === 1 ? 'This line is empty in FLEx.' : 'These lines are empty in FLEx.'));
     const sel = { anchor: null };
-    for (const seg of segs) {
+    for (const seg of shown) {
       box.appendChild(renderSegment(seg, obj, spec, lines, index, vern, anal, mediaByGuid, opts, box, sel));
     }
     return box;
@@ -322,6 +456,39 @@
     return row;
   }
 
+  /* ------------------------------------------------------------------ following the playing line
+   * (Seth, 2026-10-17: "highlight the line that's playing … and auto-scroll to it if the user is
+   * not manually grabbing the scroll bar or clicking something in the preview pane"). The line
+   * under the playhead wears .playing-line; when it changes and is out of view it is scrolled
+   * into view — unless the user is busy: a wheel or touch scroll, a scrolling key, a press on a
+   * scroll bar (until it is let go), or a click inside an example or preview (other than its
+   * play controls) holds the following off for a few seconds. */
+  const follow = (() => {
+    let quietUntil = 0, grabbing = false;
+    const hush = (ms) => { quietUntil = Math.max(quietUntil, Date.now() + ms); };
+    document.addEventListener('wheel', () => hush(4000), { passive: true, capture: true });
+    document.addEventListener('touchmove', () => hush(4000), { passive: true, capture: true });
+    document.addEventListener('keydown', (e) => { if (/^(PageUp|PageDown|ArrowUp|ArrowDown|Home|End)$/.test(e.key)) hush(4000); }, true);
+    document.addEventListener('pointerdown', (e) => {
+      const t = e.target;
+      if (!t || t.nodeType !== 1) return;
+      // a press on a scroll bar lands on the scrolling element itself, past its content box
+      if ((t.scrollHeight > t.clientHeight || t.scrollWidth > t.clientWidth) && (e.offsetX > t.clientWidth || e.offsetY > t.clientHeight)) { grabbing = true; return; }
+      if (t.closest('.seg-play, .play-range, .transport')) return;      // starting / steering playback is not "busy"
+      if (t.closest('.text-obj, .flex-overlay, .context-text')) hush(4000);
+    }, true);
+    document.addEventListener('pointerup', () => { if (grabbing) { grabbing = false; hush(1500); } }, true);
+    return {
+      to(row) {
+        if (!row || !row.isConnected || grabbing || Date.now() < quietUntil) return;
+        row.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+      },
+      _state: () => ({ grabbing, quiet: Date.now() < quietUntil }),
+      _reset: () => { quietUntil = 0; grabbing = false; },
+    };
+  })();
+  FS.follow = follow;
+
   /* ------------------------------------------------------------------ audio in a text box */
   async function playRange(box, obj, segs, mediaByGuid, opts, btn) {
     const timed = segs.filter((s) => s.begin != null && s.end != null);
@@ -345,10 +512,27 @@
     if (info.needsCapture && !FS.isMock()) {
       try { capture = captureClip(a, begin, end, obj.guid); } catch (e) { capture = null; }
     }
+    // which line is playing: the file time under the playhead, against each line's span
+    let lit = null;
+    const light = (n) => {
+      if (lit && lit.dataset.n === String(n)) return;
+      if (lit) lit.classList.remove('playing-line');
+      lit = n == null ? null : box.querySelector('.segment[data-n="' + n + '"]');
+      if (lit) { lit.classList.add('playing-line'); follow.to(lit); }
+    };
+    const lineAt = (t) => {
+      const ft = info.clipUrl ? begin + t : t;
+      let hit = null;
+      for (const s2 of timed) if (ft >= s2.begin - 5 && ft < s2.end) hit = s2;
+      return hit ? hit.n : null;
+    };
     try {
+      const labelOf2 = (n) => { const sg = segs.find((x) => x.n === n); return sg ? (sg.label || String(sg.n)) : ''; };
       await audio.play(src, offBegin, offEnd, {
-        onTick: (t) => transport.tick(t),
-        onEnd: () => { transport.done(); if (btn) btn.classList.remove('playing'); if (captureClip.active) { try { captureClip.active.stop(); } catch (e) { /* ignore */ } captureClip.active = null; } },
+        title: obj.title || '', box, transport: transport.el, onPause: (p) => transport.showPaused(p),
+        lineAt: (t) => { const n = lineAt(t); return n == null ? '' : labelOf2(n); },
+        onTick: (t) => { transport.tick(t); const n = lineAt(t); if (n != null) light(n); nowPlaying.update(true); },
+        onEnd: () => { light(null); transport.done(); if (btn) btn.classList.remove('playing'); if (captureClip.active) { try { captureClip.active.stop(); } catch (e) { /* ignore */ } captureClip.active = null; } },
       });
       if (btn) btn.classList.add('playing');
       box.querySelectorAll('.seg-play.playing').forEach((b) => { if (b !== btn) b.classList.remove('playing'); });
@@ -375,19 +559,19 @@
     const t = el('div', { class: 'transport' }, playBtn, loopBtn, bar, time,
       el('span', { class: 'muted small' }, FS.fmtTime(begin) + '–' + FS.fmtTime(end)));
     box.appendChild(t);
-    let paused = false, finished = false;
+    let finished = false;
+    const showPaused = (p) => { playBtn.textContent = p ? '▶' : '❚❚'; playBtn.title = p ? 'Play' : 'Pause'; playBtn.classList.toggle('on', !p); };
     playBtn.addEventListener('click', () => {
       if (finished) { box.querySelector('.seg-play') && box.querySelector('.seg-play').click(); return; }
-      if (paused) { audio.resume(); playBtn.textContent = '❚❚'; playBtn.classList.add('on'); }
-      else { audio.pause(); playBtn.textContent = '▶'; playBtn.classList.remove('on'); }
-      paused = !paused;
+      audio.toggle();
     });
     loopBtn.addEventListener('click', () => { if (audio.current) { audio.current.loop = !audio.current.loop; loopBtn.classList.toggle('on', audio.current.loop); } });
     bar.addEventListener('click', (e) => { const r = bar.getBoundingClientRect(); const f = (e.clientX - r.left) / r.width; audio.seek(offBegin + f * (offEnd - offBegin)); });
     return {
       tick(tm) { const f = Math.min(1, Math.max(0, (tm - offBegin) / (offEnd - offBegin))); bar.firstChild.style.width = (f * 100) + '%'; time.textContent = FS.fmtTime(tm - offBegin) + ' / ' + FS.fmtTime(end - begin); },
-      done() { finished = true; playBtn.textContent = '▶'; playBtn.classList.remove('on'); bar.firstChild.style.width = '100%'; setTimeout(() => { if (finished && t.isConnected) t.remove(); }, 4000); },
+      done() { finished = true; showPaused(true); bar.firstChild.style.width = '100%'; setTimeout(() => { if (finished && t.isConnected) t.remove(); }, 4000); },
       remove() { t.remove(); },
+      el: t, showPaused,
     };
   }
 
@@ -632,7 +816,7 @@
     const lines = spec.lines && spec.lines.length ? spec.lines : R.DEFAULT_LINES;
     const cell = (v) => String(v == null ? '' : v).replace(/[\t\r\n]+/g, ' ');
     const out = [];
-    for (const seg of obj.segments || []) {
+    for (const seg of (obj.segments || []).filter((x) => !blankSeg(x))) {
       const words = seg.words || [];
       const block = [];
       for (const line of lines) {
@@ -680,7 +864,7 @@
     if (obj.cached) head.appendChild(el('span', { class: 'badge warn', title: obj.liveError || '' }, 'cached' + (obj.cachedAt ? ' ' + obj.cachedAt.slice(0, 10) : '')));
     head.appendChild(el('span', { class: 'spacer' }));
     head.appendChild(el('button', { class: 'lnk', title: 'Reload from FLEx', onclick: () => opts.refresh && opts.refresh() }, '↻'));
-    if (opts.editable && !opts.overlay && !opts.collection) head.appendChild(el('button', { class: 'lnk', title: 'Collapse to a chip', onclick: () => setCollapsed(spec, opts, true) }, '⤡'));
+    if (opts.editable && !opts.overlay) head.appendChild(el('button', { class: 'lnk', 'data-test': 'collapse-obj', title: 'Collapse to a chip', onclick: () => setCollapsed(spec, opts, true) }, '⤡'));
     if (opts.editable && opts.inCell && opts.editCell && !opts.overlay) head.appendChild(el('button', { class: 'lnk', title: 'Edit the cell\u2019s text', onclick: () => opts.editCell() }, '✎'));
     if (opts.editable && !opts.overlay && opts.duplicate) head.appendChild(el('button', { class: 'lnk', title: 'Duplicate this object', onclick: () => opts.duplicate() }, '⧉'));
     if (opts.editable && !opts.overlay && opts.remove) head.appendChild(el('button', { class: 'lnk danger', title: 'Remove this object…', onclick: (e) => removeObject(e.currentTarget, spec, opts) }, '🗑'));
@@ -802,7 +986,7 @@
   function renderChip(container, spec, opts) {
     container.innerHTML = '';
     const icon = spec.kind === 'text' ? '¶' : spec.kind === 'wordform' ? 'ω' : '📖';
-    const chip = el('span', { class: 'flex-collapsed kind-' + spec.kind, tabindex: 0, title: 'Click to preview; ⤡ to expand; drag to move', draggable: opts.editable ? 'true' : null });
+    const chip = el('span', { class: 'flex-collapsed kind-' + spec.kind, tabindex: 0, title: 'Click to preview; ⤢ to expand' + (opts.collection ? '' : '; drag to move'), draggable: opts.editable && !opts.collection ? 'true' : null });   // a collection drags a card by its own grip
     const ttl = el('span', { class: 'cttl' }, chipTitle(spec, null));
     chip.appendChild(el('span', { class: 'cicon' }, icon));
     chip.appendChild(ttl);
@@ -886,7 +1070,7 @@
       spec.kind === 'text' && FS.addToCollection ? el('button', { class: 'lnk', title: 'Add this example to an example collection (the note that exports as a FLEx text)', onclick: (e) => FS.addToCollection(e.currentTarget, FS.flexref.serialize(spec)) }, '\u2795 Collection') : null,
       opts.editable && opts.duplicate ? el('button', { class: 'lnk', title: 'Duplicate this object', onclick: () => { closeOverlay(); opts.duplicate(); } }, '⧉ Duplicate') : null,
       opts.editable && opts.remove ? el('button', { class: 'lnk danger', title: 'Remove this object…', onclick: (e) => removeObject(e.currentTarget, spec, opts) }, '🗑 Remove') : null,
-      opts.editable ? el('button', { class: 'lnk', onclick: () => { closeOverlay(); if (opts.expandInline) opts.expandInline(); else setCollapsed(spec, opts, false); } }, opts.inCell ? '⤢ Show in cell' : '⤢ Expand in note') : null,
+      opts.editable ? el('button', { class: 'lnk', onclick: () => { closeOverlay(); if (opts.expandInline) opts.expandInline(); else setCollapsed(spec, opts, false); } }, opts.inCell ? '⤢ Show in cell' : opts.collection ? '⤢ Expand' : '⤢ Expand in note') : null,
       el('button', { class: 'lnk', onclick: () => closeOverlay() }, '✕'));
     node.append(bar, inner);
     document.body.appendChild(node);
@@ -902,7 +1086,7 @@
     // A style, label or range change saves through the owner's onSpecChange (which re-draws
     // the chip underneath) AND re-draws this overlay, so what was clicked shows at once
     // (Seth, 2026-10-13: "I can click them, but the styling doesn't show afterward").
-    const oo = Object.assign({}, opts, { force: true, overlay: true, editable: !!opts.editable });
+    const oo = Object.assign({}, opts, { force: true, overlay: true, editable: !!opts.editable, keepView: true });
     oo.onSpecChange = (s) => { if (opts.onSpecChange) opts.onSpecChange(s); if (node.isConnected) render(inner, s, oo); };
     render(inner, spec, oo);
     /* Placement: below the chip when it fits, else above, else on whichever side has more
@@ -956,11 +1140,26 @@
    *   editSource    callback for "Edit source"
    *   inCell        table-cell mode: a chip unless the embed says `expanded`
    *   force         render fully whatever the flags say (overlays) */
+  /* The scroll positions of `node` and of every scrolling box around it, put back by the returned
+   * function: replacing a drawing must never move the view. */
+  function holdScroll(node) {
+    const held = [];
+    for (let x = node; x && x.nodeType === 1; x = x.parentElement) if (x.scrollHeight > x.clientHeight || x.scrollTop) held.push([x, x.scrollTop, x.scrollLeft]);
+    return () => { for (const [x, top, left] of held) { if (x.scrollTop !== top) x.scrollTop = top; if (x.scrollLeft !== left) x.scrollLeft = left; } };
+  }
+
   async function render(container, spec, opts) {
     opts = opts || {};
+    if (spec.kind === 'file') return FS.files.render(container, spec, opts);   // an attached file, not a FLEx object
     if (isCollapsed(spec, opts)) { renderChip(container, spec, opts); return; }
-    container.innerHTML = '';
-    container.appendChild(el('div', { class: 'flex-obj' }, el('div', { class: 'flex-loading' }, 'Loading from FLEx…')));
+    // a redraw after an edit (a style, a line, the range) keeps what is shown until the new
+    // drawing is ready (Seth, 2026-10-17: styling inside a preview "jumps back up to the top of the
+    // example" — the "Loading…" in between shrank it and its scroll fell to the top)
+    const keep = opts.keepView && container.querySelector(':scope > .flex-obj:not(.loading-box)');
+    if (!keep) {
+      container.innerHTML = '';
+      container.appendChild(el('div', { class: 'flex-obj loading-box' }, el('div', { class: 'flex-loading' }, 'Loading from FLEx…')));
+    }
     const doRender = async (refresh) => {
       try {
         const kind = spec.kind === 'sense' ? 'entry' : spec.kind;
@@ -968,9 +1167,11 @@
         if (syncAnchors(spec, obj, opts)) return;          // the spec changed: the owner re-renders
         const o = Object.assign({}, opts, { refresh: () => reload() });
         const node = kind === 'text' ? renderText(obj, spec, o) : kind === 'wordform' ? renderWordform(obj, spec, o) : renderEntry(obj, spec, o);
+        const restore = keep && container.isConnected ? holdScroll(container) : null;   // only when a drawing is REPLACED
         container.innerHTML = '';
         container.appendChild(node);
         container._obj = obj;
+        if (restore) restore();
       } catch (e) {
         container.innerHTML = '';
         const err = el('div', { class: 'flex-obj' },
@@ -1005,6 +1206,15 @@
       const src = span.dataset.src;
       const spec = R.parse(src);
       if (!spec) { span.classList.add('err'); return; }
+      if (spec.kind === 'file') {                  // an attached file: opens, or previews
+        FS.files.hydrateChip(span, spec, !opts ? {} : {
+          onSpecChange: (s) => opts.onSpecChange && opts.onSpecChange(s, src),
+          duplicate: opts.duplicate ? () => opts.duplicate(src) : null,
+          remove: opts.remove ? () => opts.remove(src) : null,
+          expandInline: opts.expandInline ? () => opts.expandInline(src) : null,
+        });
+        return;
+      }
       const kind = spec.kind === 'sense' ? 'entry' : spec.kind;
       flexGet(kind, spec.guid, spec.kind === 'text' && spec.seg ? spec.seg[0] : null, spec.kind === 'text' && spec.seg ? spec.seg[1] : null, false, null, spec.kind === 'text' ? spec.at : null)
         .then((obj) => { if (!span.isConnected) return; span.dataset.title = chipTitle(spec, obj); if (spec.kind === 'text') span.dataset.range = chipRange(spec, obj); if (obj.cached) span.classList.add('cached'); })
@@ -1025,5 +1235,5 @@
     });
   }
 
-  FS.interlinear = { render, renderText, renderEntry, renderWordform, renderChip, hydrateInline, openContext, wholeText, openOverlay, closeOverlay, isCollapsed, setCollapsed, styled, styledParts, invalidate, flexGet, openInFlex, labelOf, numberFor, flexTsv, HL_COLORS };
+  FS.interlinear = { blankSeg, nowPlaying, render, renderText, renderEntry, renderWordform, renderChip, hydrateInline, openContext, wholeText, openOverlay, closeOverlay, isCollapsed, setCollapsed, styled, styledParts, invalidate, flexGet, openInFlex, labelOf, numberFor, flexTsv, HL_COLORS };
 })();

@@ -64,6 +64,14 @@
   FS.mockApi = function () {
     FS._mockActive = true;
     const demo = FS.demoData ? FS.demoData() : { entries: [], texts: {} };
+    const mockFiles = {};
+    const fileInfo = (ref) => {
+      const f = mockFiles[ref];
+      const name = String(ref).split(/[\\/]/).pop();
+      const ext = (/\.([^.]+)$/.exec(name) || [])[1] || '';
+      const kind = FS.files ? FS.files.kindOf(name) : 'file';
+      return { ref, name, linked: /^([A-Za-z]:|\/)/.test(ref), path: ref, kind: ext ? kind : 'file', exists: !!f, size: f ? f.size : null, fileUrl: f ? f.data : null };
+    };
     const notes = {};
     const config = { tabs: [{ dir: 'Notes', name: 'Notes', color: '#2f6fdb' }, { dir: 'Grammar', name: 'Grammar', color: '#0f766e' }],
       tags: [{ name: 'todo', color: '#b45309' }], flex: { source: 'demo', project: 'Kalu Demo' }, media: { byGuid: {}, folders: [] }, settings: { diacriticsInsensitive: true } };
@@ -93,6 +101,27 @@
       get_note: async (id) => ({ ...notes[id], inlineTags: summary(notes[id]).inlineTags }),
       create_note: async (tab, folder, title, body, kind) => ({ ...mk(tab || 'Notes', folder || '', title || '', body || '', null, kind || '') }),
       list_collections: async () => Object.values(notes).filter((n) => n.kind === 'examples').sort((a, b) => b.updated.localeCompare(a.updated)).map((n) => ({ id: n.id, title: n.title, tab: n.tab, folder: n.folder, updated: n.updated, count: (n.body.match(/^\s*\{\{flex:text\b[^\n]*\}\}\s*$/gm) || []).length })),
+      texts_used: async (scope) => {
+        // the mock's version of Api.texts_used: one row per text the examples come from
+        scope = scope || {};
+        const src = scope.note ? [[notes[scope.note], scope.markdown != null ? scope.markdown : notes[scope.note].body]]
+          : Object.values(notes).filter((n) => (!scope.tab || n.tab === scope.tab) && (!scope.folder || n.folder === scope.folder || n.folder.startsWith(scope.folder + '/'))).map((n) => [n, n.body]);
+        const rows = {};
+        for (const [n, body] of src) {
+          for (const [re, key] of [[/\{\{\s*flex:text\s+([0-9a-fA-F-]{36})/g, 'examples'], [/\(flex:text\/([0-9a-fA-F-]{36})/g, 'links']]) {
+            let m;
+            while ((m = re.exec(body || ''))) {
+              const g = m[1].toLowerCase();
+              const r = rows[g] = rows[g] || { guid: g, examples: 0, links: 0, notes: [] };
+              r[key]++;
+              if (!r.notes.some((x) => x.id === n.id)) r.notes.push({ id: n.id, title: n.title });
+            }
+          }
+        }
+        const out = Object.values(rows).map((r) => Object.assign(r, { title: (demo.texts[r.guid] || {}).title || '(a text not in this project)', url: 'silfw://localhost/link?app=flex&server=&database=Demo&tool=interlinearEdit&guid=' + r.guid }));
+        out.sort((a, b) => a.title.localeCompare(b.title));
+        return { texts: out, notes: src.length };
+      },
       add_to_collection: async (id, embeds) => { const n = notes[id]; if (!n || n.kind !== 'examples') throw new Error('Not an example collection'); const add = (embeds || []).map((e) => String(e).trim()).filter(Boolean); if (add.length) { const b = n.body.replace(/\n+$/, ''); n.body = (b.trim() ? b + '\n\n' : '') + add.join('\n\n') + '\n'; n.updated = now(); } return summary(n); },
       save_note: async (id, patch) => { const n = notes[id]; for (const k of ['title', 'body', 'tags', 'pinned']) if (patch[k] != null) n[k] = patch[k]; n.updated = now(); return summary(n); },
       move_note: async (id, tab, folder) => { notes[id].tab = tab; notes[id].folder = folder || ''; return summary(notes[id]); },
@@ -108,6 +137,13 @@
       delete_folder: async (tab, folder) => { folders[tab] = folders[tab].filter((f) => f !== folder && !f.startsWith(folder + '/')); return true; },
       set_tags: async (t) => (config.tags = t), rename_tag: async () => 0, set_setting: async (k, v) => (config.settings[k] = v, config.settings),
       save_attachment: async (name, data) => ({ path: name, fileUrl: data, name }),
+      // attached files: kept in memory as data: URLs (the real program copies them into attachments/)
+      attach_files: async () => [], attach_paths: async () => [], locate_file: async () => null,
+      attach_dropped: async (names) => ({ files: [], missing: names || [] }),
+      attach_data: async (name, data) => { const ref = 'attachments/' + name; mockFiles[ref] = { data, size: Math.floor(((data || '').split(',')[1] || '').length * 3 / 4) }; return fileInfo(ref); },
+      file_info: async (ref) => fileInfo(ref),
+      open_file: async (ref) => { FS.toast('Would open ' + ref + ' in its program'); return { opened: true }; },
+      reveal_file: async () => false,
       flex_status: async () => status(), flex_projects: async () => ['Kalu Demo'],
       flex_configure: async () => status(), flex_open: async () => status(), flex_refresh: async () => status(), flex_reload: async () => status(),
       flex_get: async (kind, guid, a, b, _pc, _ws) => { if (kind === 'entry' || kind === 'sense') { const e = demo.entries.find((x) => x.guid === guid || x.senses.some((s) => s.guid === guid)); if (!e) throw new Error('No such entry'); return { ...e, cached: false }; } const t = demo.texts[guid]; if (!t) throw new Error('No such text'); return sliceText(t, a, b); },

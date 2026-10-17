@@ -4,7 +4,8 @@ Layout (the notebook folder is self-describing; nothing here needs the app to be
 
     <notebook>/notebook.json                       tabs, tags, FLEx source, media mappings
     <notebook>/<Tab>/<Folder>/<Sub>/<slug>--<id>.md one note; directories ARE the tabs and folders
-    <notebook>/.scratchpad/                        trash, flex-cache, attachments (never scanned)
+    <notebook>/attachments/                        files attached to notes (never a tab, never scanned)
+    <notebook>/.scratchpad/                        trash, flex-cache, pasted images (never scanned)
 
 A note file is a small front-matter header followed by the markdown body:
 
@@ -44,6 +45,11 @@ CONFIG_NAME = "notebook.json"
 NOTE_KINDS = ("", "examples")
 EXAMPLE_LINE_RE = re.compile(r"^\s*\{\{flex:text\b[^\n]*\}\}\s*$", re.M)
 PRIVATE_DIR = ".scratchpad"
+# Files attached to notes (Seth, 2026-10-17): copied here under their own names, visible beside
+# the tabs so the notebook stays readable without the app; a `{{file attachments/…}}` embed in a
+# note points at one. At the notebook ROOT, not per tab, so an attachment chip moved or pasted
+# into a note in another tab still finds its file.
+ATTACH_DIR = "attachments"
 DEFAULT_TAB = "Notes"
 NOTE_SUFFIX = ".md"
 
@@ -187,11 +193,29 @@ class Note:
 
 _EMBED = re.compile(r"\{\{[^}]*\}\}")
 _MD_NOISE = re.compile(r"^(#{1,6}\s+|[-*+]\s+(\[[ xX]\]\s+)?|\d+[.)]\s+|>\s+)", re.M)
+# a closed heading's fold marker (" {collapsed}", the editor's and a collection's) is view state,
+# never text: excerpts, search and the Markdown export leave it out
+FOLD_MARK = re.compile(r"^(#{1,6}\s.*?)\s+\{collapsed\}[ \t]*$", re.M)
+
+
+def without_fold_marks(body: str) -> str:
+    return FOLD_MARK.sub(r"\1", body or "")
 _INLINE_TAG = re.compile(r"(?<![\w#/&])#([\w][\w\-]*)", re.UNICODE)
 
 
+_FILE_EMBED = re.compile(r'\{\{\s*file\s+([^\s}]+)[^}"]*(?:"([^"]*)")?[^}]*\}\}')
+
+
+def _file_word(m: re.Match) -> str:
+    """An attached file in an excerpt: its label or its name, so the sentence still reads."""
+    if m.group(2):
+        return m.group(2)
+    ref = re.sub(r"%([0-9A-Fa-f]{2})", lambda x: chr(int(x.group(1), 16)), m.group(1))
+    return re.split(r"[\\/]", ref)[-1]
+
+
 def excerpt(body: str, n: int = 160) -> str:
-    s = _EMBED.sub(" ", body or "")
+    s = _EMBED.sub(" ", _FILE_EMBED.sub(_file_word, without_fold_marks(body)))
     s = re.sub(r"```[\s\S]*?```", " ", s)
     s = _MD_NOISE.sub("", s)
     s = re.sub(r"[*_`~=]{1,3}", "", s)
@@ -363,7 +387,7 @@ class Notebook:
             known = {t["dir"] for t in self.config["tabs"]}
             changed = False
             for entry in sorted(self.root.iterdir(), key=lambda p: p.name.casefold()):
-                if not entry.is_dir() or entry.name.startswith("."):
+                if not entry.is_dir() or entry.name.startswith(".") or entry.name == ATTACH_DIR:
                     continue
                 if entry.name not in known:
                     self.config["tabs"].append({
@@ -426,7 +450,7 @@ class Notebook:
             extra = self.extra_text(note.body) or ""
         except Exception:  # a cache problem must never break note loading
             extra = ""
-        blob = "\n".join([note.title, note.body, " ".join(note.tags), note.folder, note.tab, extra])
+        blob = "\n".join([note.title, without_fold_marks(note.body), " ".join(note.tags), note.folder, note.tab, extra])
         self._index[note.id] = normalize(blob)
         self._index_marks[note.id] = normalize(blob, strip_marks=True)
 
@@ -623,7 +647,7 @@ class Notebook:
         with self.lock:
             d = safe_dirname(name, "Tab")
             base, i = d, 2
-            while any(t["dir"] == d for t in self.config["tabs"]):
+            while any(t["dir"] == d for t in self.config["tabs"]) or d.casefold() == ATTACH_DIR:
                 d = f"{base} {i}"
                 i += 1
             tab = {"dir": d, "name": name.strip() or d, "color": color or TAB_COLORS[len(self.config["tabs"]) % len(TAB_COLORS)]}
@@ -828,6 +852,156 @@ class Notebook:
 
     # -- attachments -------------------------------------------------------------
 
+    @property
+    def files_dir(self) -> Path:
+        return self.root / ATTACH_DIR
+
+    def add_file(self, name: str, src: str | Path | None = None, data: bytes | None = None) -> str:
+        """Copy a file (from `src`, or `data`) into attachments/ under its own name and return
+        the reference a note uses (`attachments/<name>`). The same name with the same content
+        is the same attachment (reused, not copied again); another file of that name becomes
+        `name (2).ext`. Nothing already there is ever overwritten."""
+        name = _UNSAFE.sub("-", Path(name or (Path(src).name if src else "file")).name).strip(" .") or "file"
+        stem, ext = Path(name).stem[:80] or "file", Path(name).suffix[:16]
+        with self.lock:
+            self.files_dir.mkdir(parents=True, exist_ok=True)
+            k = 1
+            while True:
+                target = self.files_dir / (f"{stem}{ext}" if k == 1 else f"{stem} ({k}){ext}")
+                if not target.exists():
+                    break
+                if _same_content(target, src, data):
+                    return f"{ATTACH_DIR}/{target.name}"
+                k += 1
+            tmp = target.with_name(target.name + ".tmp")
+            if src is not None:
+                shutil.copyfile(src, tmp)
+                try:
+                    shutil.copystat(src, tmp)
+                except OSError:
+                    pass
+            else:
+                tmp.write_bytes(data or b"")
+            os.replace(tmp, target)
+            return f"{ATTACH_DIR}/{target.name}"
+
+    def resolve_file(self, ref: str) -> Path:
+        """The file an attachment reference names: a relative reference is inside the notebook
+        (and may not climb out of it), an absolute one is a LINKED file wherever it is."""
+        ref = (ref or "").strip()
+        if not ref:
+            raise ValueError("No file.")
+        p = Path(ref)
+        if p.is_absolute() or re.match(r"^[A-Za-z]:[\\/]", ref) or ref.startswith("\\\\"):
+            return p
+        full = (self.root / ref).resolve()
+        root = self.root.resolve()
+        if full != root and root not in full.parents:
+            raise ValueError("That file reference points outside the notebook.")
+        return full
+
+    # -- storage (Seth, 2026-10-17: "show them how much storage space is used … and give them
+    #    storage management options") ---------------------------------------------------
+
+    def storage(self) -> dict:
+        """What the notebook folder holds, by kind: {total, parts: [{id, label, files, bytes}]}."""
+        parts = {k: [0, 0] for k in ("notes", "attachments", "images", "snapshots", "clips", "trash", "other")}
+        priv = self.private_dir.resolve()
+        for dirpath, _, files in os.walk(self.root):
+            d = Path(dirpath)
+            try:
+                rel = d.resolve().relative_to(self.root.resolve()).parts
+            except ValueError:
+                rel = ()
+            for fn in files:
+                try:
+                    size = os.stat(d / fn).st_size
+                except OSError:
+                    continue
+                if rel[:1] == (ATTACH_DIR,):
+                    k = "attachments"
+                elif rel[:1] == (PRIVATE_DIR,):
+                    sub = rel[1] if len(rel) > 1 else ""
+                    k = {"trash": "trash", "attachments": "images"}.get(sub)
+                    if not k:
+                        k = "clips" if sub == "flex-cache" and "audio" in rel else "snapshots" if sub == "flex-cache" else "other"
+                elif fn.endswith(NOTE_SUFFIX) or (not rel and fn == CONFIG_NAME):
+                    k = "notes"
+                else:
+                    k = "other"
+                parts[k][0] += 1
+                parts[k][1] += size
+        labels = {"notes": "Notes", "attachments": "Attached files", "images": "Pasted pictures",
+                  "snapshots": "FLEx snapshots (keep notes readable without FLEx)", "clips": "Cached audio clips",
+                  "trash": "Trash (deleted notes and files)", "other": "Other files"}
+        out = [{"id": k, "label": labels[k], "files": v[0], "bytes": v[1]} for k, v in parts.items()]
+        return {"total": sum(v[1] for v in parts.values()), "files": sum(v[0] for v in parts.values()), "parts": out}
+
+    def _referenced_files(self) -> set[str]:
+        refs: set[str] = set()
+        bodies = [n.body for n in self.notes.values()]
+        if self.trash_dir.is_dir():                 # a note in the trash may come back: its files stay "used"
+            for p in self.trash_dir.glob("*" + NOTE_SUFFIX):
+                try:
+                    bodies.append(p.read_text(encoding="utf-8"))
+                except OSError:
+                    pass
+        for body in bodies:
+            for m in re.finditer(r"\{\{\s*file\s+([^\s}]+)", body or ""):
+                ref = re.sub(r"%([0-9A-Fa-f]{2})", lambda x: chr(int(x.group(1), 16)), m.group(1))
+                refs.add(ref.replace("\\", "/").casefold())
+        return refs
+
+    def unused_files(self) -> list[dict]:
+        """Files in attachments/ that no note (nor a note in the trash) refers to."""
+        with self.lock:
+            used = self._referenced_files()
+            out = []
+            if self.files_dir.is_dir():
+                for p in sorted(self.files_dir.rglob("*")):
+                    if p.is_file() and not p.name.endswith(".tmp"):
+                        ref = p.relative_to(self.root).as_posix()
+                        if ref.casefold() not in used:
+                            out.append({"ref": ref, "name": p.name, "bytes": p.stat().st_size})
+            return out
+
+    def trash_unused_files(self) -> dict:
+        """Unused attachments go to the trash (like a deleted note), not away."""
+        moved = freed = 0
+        with self.lock:
+            dest = self.trash_dir / "attachments"
+            for f in self.unused_files():
+                src = self.root / f["ref"]
+                dest.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(src), str(dest / f"{now_iso().replace(':', '-')}--{src.name}"))
+                moved += 1
+                freed += f["bytes"]
+        return {"files": moved, "bytes": freed}
+
+    def empty_trash(self) -> dict:
+        """The one place things are really deleted: the user asked to empty the trash."""
+        with self.lock:
+            n = size = 0
+            if self.trash_dir.is_dir():
+                for p in self.trash_dir.rglob("*"):
+                    if p.is_file():
+                        n += 1
+                        size += p.stat().st_size
+                shutil.rmtree(self.trash_dir, ignore_errors=True)
+            return {"files": n, "bytes": size}
+
+    def clear_audio_clips(self) -> dict:
+        """Cut audio clips are a cache: they are cut again from the recordings when needed."""
+        with self.lock:
+            n = size = 0
+            for d in self.cache_dir.glob("*/audio"):
+                for p in d.rglob("*"):
+                    if p.is_file():
+                        n += 1
+                        size += p.stat().st_size
+                shutil.rmtree(d, ignore_errors=True)
+            return {"files": n, "bytes": size}
+
     def save_attachment(self, name: str, data: bytes) -> Path:
         with self.lock:
             self.attachments_dir.mkdir(parents=True, exist_ok=True)
@@ -837,6 +1011,28 @@ class Notebook:
             with open(target, "wb") as fh:
                 fh.write(data)
             return target
+
+
+def _same_content(target: Path, src, data) -> bool:
+    import hashlib
+    try:
+        size = Path(src).stat().st_size if src is not None else len(data or b"")
+        if target.stat().st_size != size:
+            return False
+
+        def digest(fh) -> str:
+            h = hashlib.sha256()
+            for chunk in iter(lambda: fh.read(1 << 20), b""):
+                h.update(chunk)
+            return h.hexdigest()
+        with open(target, "rb") as a:
+            mine = digest(a)
+        if src is not None:
+            with open(src, "rb") as b:
+                return mine == digest(b)
+        return mine == hashlib.sha256(data or b"").hexdigest()
+    except OSError:
+        return False
 
 
 def _match_tab(nb: Notebook, wanted: str, tab_dir: str) -> bool:

@@ -282,6 +282,21 @@ def tokenize(text: str) -> list[dict]:
     return tokens
 
 
+def fill_punctuation(words: list[dict], baseline: str) -> list[dict]:
+    """Punctuation tokens whose text could not be read take theirs from the segment's baseline
+    (the n-th punctuation run of the baseline for the n-th punctuation token, when the counts
+    agree); any still empty is dropped, never shown as a placeholder or written to an export
+    (Seth, 2026-10-16: "A PunctuationForm" in an example; a <word/> FLEx refused)."""
+    if not any(w.get("punct") and not w.get("txt") for w in words):
+        return words
+    marks = [t["txt"] for t in tokenize(baseline or "") if t["punct"] and t["txt"].strip()]
+    puncts = [w for w in words if w.get("punct")]
+    if len(marks) == len(puncts):
+        for w, m in zip(puncts, marks):
+            if not w.get("txt"):
+                w["txt"] = m
+    return [w for w in words if not (w.get("punct") and not w.get("txt"))]
+
 def baseline_from_words(words: list[dict]) -> str:
     """Opening punctuation leads the next word; everything else trails the previous one."""
     out = ""
@@ -296,6 +311,23 @@ def baseline_from_words(words: list[dict]) -> str:
             out += " " + t
         prev_leads = bool(w.get("punct")) and bool(PUNCT_LEADS.match(t))
     return out
+
+
+# --------------------------------------------------------------------------- blank lines
+
+_INVISIBLE = re.compile(r"[\s\u200b-\u200d\u2060\ufeff]+")
+
+
+def is_blank_segment(seg: dict) -> bool:
+    """A line with no word and no text — only spaces, the line break FLEx's Shift+Enter leaves
+    (U+2028) or other invisible characters — and no translation or note. FLEx shows no such line
+    (though it numbers it); the page and every export leave it out (ui/js/interlinear.js blankSeg)."""
+    vis = lambda t: _INVISIBLE.sub("", t or "")  # noqa: E731
+    if vis(seg.get("baseline")) or any(vis(w.get("txt")) for w in seg.get("words") or []):
+        return False
+    if vis(seg.get("free")) or vis(seg.get("lit")):
+        return False
+    return not any(vis(n) for n in seg.get("notes") or [])
 
 
 # --------------------------------------------------------------------------- segment index + anchors

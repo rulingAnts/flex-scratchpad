@@ -2,7 +2,8 @@
 
 Order of preference:
   1. WAV → the stdlib `wave` module: an exact sample slice, no dependencies.
-  2. anything else → `ffmpeg` if it is on PATH (decoded to WAV).
+  2. anything else → `ffmpeg`: the one shipped beside the Windows build (`<app>/ffmpeg/ffmpeg.exe`),
+     else Settings, PATH and the usual install spots (decoded to WAV).
   3. otherwise the UI captures the range itself while it plays once (MediaRecorder → webm/opus)
      and hands the bytes back through `store_clip_bytes`.
 """
@@ -11,8 +12,16 @@ from __future__ import annotations
 import base64
 import shutil
 import subprocess
+import sys
 import wave
 from pathlib import Path
+
+
+def _run(cmd: list[str], timeout: int) -> None:
+    """ffmpeg, quietly: on Windows a windowed app that starts a console program flashes a console
+    window for every clip unless it asks for none."""
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
+    subprocess.run(cmd, check=True, capture_output=True, timeout=timeout, creationflags=flags)
 
 
 def cut_wav(src: Path, dst: Path, begin_ms: int, end_ms: int) -> Path:
@@ -44,10 +53,21 @@ _FFMPEG_CANDIDATES = (
 )
 
 
+def bundled_ffmpeg() -> Path | None:
+    """The ffmpeg shipped with the Windows build, beside the program: `<app>/ffmpeg/ffmpeg.exe`
+    (Seth, 2026-10-16: a release ships ffmpeg — field laptops are often offline)."""
+    if not getattr(sys, "frozen", False):
+        return None
+    exe = Path(sys.executable).resolve().parent / "ffmpeg" / ("ffmpeg.exe" if sys.platform == "win32" else "ffmpeg")
+    return exe if exe.is_file() else None
+
+
 def find_ffmpeg(configured: str = "") -> str | None:
-    """ffmpeg, if there is one: the path from Settings, PATH, then the usual install spots."""
+    """ffmpeg, if there is one: the path from Settings, the bundled one, PATH, then the usual
+    install spots."""
     import os
-    for cand in ([configured] if configured else []) + [shutil.which("ffmpeg") or ""] + [os.path.expandvars(c) for c in _FFMPEG_CANDIDATES]:
+    bundled = bundled_ffmpeg()
+    for cand in ([configured] if configured else []) + [str(bundled) if bundled else ""] + [shutil.which("ffmpeg") or ""] + [os.path.expandvars(c) for c in _FFMPEG_CANDIDATES]:
         if cand and Path(cand).is_file():
             return str(cand)
     return None
@@ -67,7 +87,7 @@ def cut_ffmpeg(src: Path, dst: Path, begin_ms: int, end_ms: int, exe: str | None
     cmd = [exe, "-y", "-v", "error", "-ss", f"{begin_ms / 1000:.3f}", "-t", f"{(end_ms - begin_ms) / 1000:.3f}",
            "-i", str(src), "-vn", "-acodec", "flac" if flac else "pcm_s16le", str(tmp)]
     try:
-        subprocess.run(cmd, check=True, capture_output=True, timeout=120)
+        _run(cmd, 120)
     except (subprocess.SubprocessError, OSError):
         try:
             tmp.unlink()
@@ -115,75 +135,106 @@ def _decode_to_wav(src: Path, dst: Path, exe: str, rate: int | None = None, chan
         cmd += ["-ac", str(channels)]
     cmd.append(str(dst))
     try:
-        subprocess.run(cmd, check=True, capture_output=True, timeout=300)
+        _run(cmd, 300)
         return dst
     except (subprocess.SubprocessError, OSError):
         return None
 
 
-def concat_clips(clips: list[Path], dst: Path, gap_ms: int = 600, ffmpeg: str | None = None) -> list[tuple[int, int]]:
-    """One WAV out of several clips in order, `gap_ms` of silence between them (Seth,
-    2026-10-16: the examples' audio, matched in the flextext export). Returns each clip's
-    (begin, end) in milliseconds within `dst`. Non-WAV clips (the FLAC cache) and WAVs whose
-    sample format differs from the first one are decoded with ffmpeg; without ffmpeg every
-    clip must be a WAV with the same rate / channels / width, else ValueError."""
+CLICK_MS = 5            # the join click: 5 ms of a 2 kHz sine fading out (the Visual Stimulus
+CLICK_HZ = 2000         # Kit's joiner, rulingAnts/videoannotationtool vat/audio/joiner.py)
+CLICK_PAD_MS = 500      # silence either side of it
+CLICK_LEVEL = 0.5       # its peak at most (−6 dBFS) …
+CLICK_FLOOR = 0.03      # … and at least, beside a silent clip
+
+
+def click_samples(rate: int, level: float) -> "array.array":
+    """The join click as 16-bit mono samples, its peak exactly `level` of full scale."""
+    import array
+    import math
+    n = max(1, int(rate * CLICK_MS / 1000))
+    wave_ = [math.sin(2 * math.pi * CLICK_HZ * i / rate) * (1 - i / n) for i in range(n)]
+    peak = max(abs(v) for v in wave_) or 1.0
+    return array.array("h", (int(v / peak * level * 32767) for v in wave_))
+
+
+def _samples16(wav: Path) -> tuple["array.array", int]:
+    import array
+    with wave.open(str(wav), "rb") as r:
+        if r.getnchannels() != 1 or r.getsampwidth() != 2:
+            raise ValueError(f"{wav.name} is not 16-bit mono")
+        rate = r.getframerate()
+        out = array.array("h")
+        out.frombytes(r.readframes(r.getnframes()))
+    if sys.byteorder == "big":
+        out.byteswap()
+    return out, rate
+
+
+def concat_clips(clips: list[Path], dst: Path, pad_ms: int = CLICK_PAD_MS, ffmpeg: str | None = None,
+                 click: bool = True) -> list[tuple[int, int]]:
+    """One small 16-bit mono WAV out of several clips in order (Seth, 2026-10-16: the examples'
+    audio, matched in the flextext export). Between two clips: `pad_ms` of silence, a CLICK, `pad_ms`
+    of silence (Seth, 2026-10-17: "a generated click inserted at join points", as the Visual
+    Stimulus Kit joins its recordings); the click's peak is the quieter neighbour's, between
+    CLICK_FLOOR and CLICK_LEVEL, so it marks the join without standing out above the speech.
+    Returns each clip's (begin, end) in milliseconds within `dst`. Every clip is taken to the first
+    one's sample rate; that needs ffmpeg when the rates differ or a clip is not a WAV (the FLAC
+    cache), else ValueError."""
+    import array
     import tempfile
     exe = ffmpeg or find_ffmpeg()
     dst.parent.mkdir(parents=True, exist_ok=True)
     spans: list[tuple[int, int]] = []
     with tempfile.TemporaryDirectory() as td:
         tmpdir = Path(td)
-        params = None            # (channels, width, rate) of the output
-        readers = []
+        parts: list[array.array] = []
+        rate = None
         for i, c in enumerate(clips):
             c = Path(c)
-            wav = c
-            if c.suffix.lower() != ".wav":
-                if not exe:
-                    raise ValueError(f"{c.name} is not a WAV and ffmpeg was not found")
-                wav = _decode_to_wav(c, tmpdir / f"clip{i}.wav", exe, params[2] if params else None, params[0] if params else None)
-                if not wav:
-                    raise ValueError(f"ffmpeg could not decode {c.name}")
-            with wave.open(str(wav), "rb") as r:
-                these = (r.getnchannels(), r.getsampwidth(), r.getframerate())
-            if params is None:
-                params = these
-            elif these != params:
-                if not exe:
-                    raise ValueError(f"{c.name} has a different sample format and ffmpeg was not found")
-                wav = _decode_to_wav(c, tmpdir / f"clip{i}.wav", exe, params[2], params[0])
-                if not wav:
-                    raise ValueError(f"ffmpeg could not convert {c.name}")
-                with wave.open(str(wav), "rb") as r:
-                    these = (r.getnchannels(), r.getsampwidth(), r.getframerate())
-                if these[2] != params[2] or these[0] != params[0]:
-                    raise ValueError(f"{c.name} could not be matched to the first clip's format")
-                params = (params[0], these[1], params[2]) if these[1] != params[1] and i == 0 else params
-            readers.append(wav)
-        if params is None:
+            if c.suffix.lower() != ".wav" and not exe:
+                raise ValueError(f"{c.name} is not a WAV and ffmpeg was not found")
+            mono = tmpdir / f"clip{i}.wav"
+            if not to_mono16(c, mono, exe):
+                raise ValueError(f"could not read {c.name}")
+            samples, r = _samples16(mono)
+            if rate is None:
+                rate = r
+            elif r != rate:
+                if not exe or not _decode_to_wav(c, tmpdir / f"clip{i}r.wav", exe, rate, 1):
+                    raise ValueError(f"{c.name} has a different sample rate and ffmpeg was not found")
+                samples, _ = _samples16(tmpdir / f"clip{i}r.wav")
+            parts.append(samples)
+        if rate is None:
             raise ValueError("no clips")
-        nch, width, rate = params
-        gap = b"\x00" * int(round(gap_ms / 1000 * rate)) * nch * width
+        pad = array.array("h", bytes(2 * int(round(pad_ms / 1000 * rate))))
         tmp = dst.with_suffix(dst.suffix + ".tmp")
         pos = 0
         with wave.open(str(tmp), "wb") as w:
-            w.setnchannels(nch)
-            w.setsampwidth(width)
+            w.setnchannels(1)
+            w.setsampwidth(2)
             w.setframerate(rate)
-            for i, wav in enumerate(readers):
+
+            def put(a: array.array) -> None:
+                nonlocal pos
+                if sys.byteorder == "big":
+                    a = array.array("h", a)
+                    a.byteswap()
+                w.writeframes(a.tobytes())
+                pos += len(a)
+
+            def peak(a: array.array) -> float:
+                return (max(max(a), -min(a)) / 32767) if len(a) else 0.0
+
+            for i, samples in enumerate(parts):
                 if i:
-                    w.writeframes(gap)
-                    pos += len(gap) // (nch * width)
-                with wave.open(str(wav), "rb") as r:
-                    n = r.getnframes()
-                    begin = pos
-                    while n > 0:
-                        chunk = r.readframes(min(n, 65536))
-                        if not chunk:
-                            break
-                        w.writeframes(chunk)
-                        n -= len(chunk) // (nch * width)
-                    pos += r.getnframes()
+                    put(pad)
+                    if click:
+                        level = max(CLICK_FLOOR, min(CLICK_LEVEL, peak(parts[i - 1]), peak(samples)))
+                        put(click_samples(rate, level))
+                        put(pad)
+                begin = pos
+                put(samples)
                 spans.append((int(round(begin * 1000 / rate)), int(round(pos * 1000 / rate))))
         tmp.replace(dst)
     return spans
@@ -236,7 +287,7 @@ def to_mono16(src: str | Path, dst: Path, ffmpeg: str | None = None) -> int | No
         dst.parent.mkdir(parents=True, exist_ok=True)
         tmp = dst.with_suffix(".tmp.wav")
         try:
-            subprocess.run([exe, "-y", "-v", "error", "-i", str(src), "-vn", "-ac", "1", "-acodec", "pcm_s16le", str(tmp)], check=True, capture_output=True, timeout=300)
+            _run([exe, "-y", "-v", "error", "-i", str(src), "-vn", "-ac", "1", "-acodec", "pcm_s16le", str(tmp)], 300)
             tmp.replace(dst)
             with wave.open(str(dst), "rb") as r:
                 return int(round(r.getnframes() * 1000 / r.getframerate()))

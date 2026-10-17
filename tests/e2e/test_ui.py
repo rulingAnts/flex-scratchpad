@@ -1657,6 +1657,14 @@ def test_export_examples_as_flextext(app):
     page.wait_for_selector(".modal", timeout=15000)
     assert "2 examples" in page.locator(".modal p").first.inner_text()
     assert page.locator(".modal input[type=text]").first.input_value() == "SVCs \u2014 examples"
+    # concatenated audio is the default (Seth, 2026-10-17), per line the other choice
+    sel = page.locator(".modal .form-row:has(label:text-is(\"Audio\")) select")
+    assert sel.input_value() == "bundle" and "click" in sel.locator("option:checked").inner_text()
+    assert page.locator(".modal .form-row", has_text="Audio into").is_visible()
+    sel.select_option("none")
+    assert page.locator(".modal .form-row", has_text="Audio into").is_hidden()
+    sel.select_option("clips")
+    assert page.locator(".modal .form-row", has_text="Audio into").is_visible()
     page.keyboard.press("Escape")
     page.wait_for_timeout(700)
     # the export through the API (the dialog's Export… goes through the save dialog)
@@ -1668,7 +1676,7 @@ def test_export_examples_as_flextext(app):
       return await api.export_note_flextext(cols[0].id, items, { title: 'SVCs', includeLink: true, includeMarkdown: true }, out);
     }""", out)
     assert r["examples"] == 2 and r["skipped"] == 0 and r["texts"] == [{"ws": "kal", "examples": 2}]
-    assert r["audio"].endswith("svcs-audio") and r["audioMatched"] == 3 and (h.tmp / "svcs-audio" / "SVCs-1.1.wav").exists()
+    assert r["audio"] == str(h.tmp / "svcs.wav") and r["audioMatched"] == 3 and (h.tmp / "svcs.wav").exists()
     import xml.etree.ElementTree as ET
     root = ET.parse(out).getroot()
     phrases = root.findall(".//phrase")
@@ -2347,7 +2355,7 @@ def test_insert_a_new_block_from_the_context_menu(app):
     assert re.search(r"\| a \| b \|\n\nAfter the table\.\n\nEnd\.", b), b
     # the ⋮ block menu: a numbered list above the closing paragraph
     page.locator("#editor .blk", has_text="End.").hover()
-    page.locator("#editor .blk", has_text="End.").locator(".blk-handle button[title='Block menu']").dispatch_event("mousedown")
+    page.locator("#editor .blk", has_text="End.").locator(".blk-handle button[data-test=blk-grip]").dispatch_event("mousedown")
     page.locator(".popover [data-ins-kind='ol'][data-ins-where='before']").click()
     page.keyboard.type("first")
     page.wait_for_timeout(900)
@@ -2448,3 +2456,829 @@ def test_a_folder_lists_its_own_notes_unless_subfolders_are_shown(app):
     page.wait_for_timeout(300)
     assert page.locator("#list-subfolders").is_hidden()
     assert not errors
+
+
+def test_headings_have_levels_and_fold_their_sections(app):
+    """Seth, 2026-10-16: "multiple levels of headings, and for those headings to be collapsible
+    (with material between that heading and the NEXT heading of the same or higher level)"."""
+    h, page, errors = app
+    new_note(page, "Folding")
+    page.locator("#editor .blk-body").first.click()
+    paste(page, "# Chapter\n\nintro\n\n## Part A\n\na text\n\n### Deep\n\ndeep text\n\n## Part B\n\nb text\n\n# Next\n\nlast")
+    page.wait_for_timeout(300)
+    blk = lambda t: page.locator("#editor .blk", has=page.locator(".blk-body", has_text=t)).first   # noqa: E731
+    visible = lambda t: blk(t).is_visible()                                                        # noqa: E731
+    # close "## Part A": it hides "a text", "### Deep" and "deep text" — "## Part B" ends it
+    blk("Part A").hover()
+    blk("Part A").locator(".fold-tog").dispatch_event("mousedown")
+    page.wait_for_timeout(100)
+    assert not visible("a text") and not visible("deep text") and not visible("Deep")
+    assert visible("Part B") and visible("b text") and visible("intro")
+    assert blk("Part A").locator(".fold-more").inner_text() == "⋯ 3 blocks"
+    page.wait_for_timeout(900)
+    body = body_of(h)
+    assert "## Part A {collapsed}\n\na text" in body, body
+    # the marker is never text in the editor
+    assert blk("Part A").locator(".blk-body").inner_text() == "## Part A"
+    # Enter at the end of the closed heading starts the next heading of its level after the section
+    blk("Part A").locator(".blk-body").click()
+    page.keyboard.press("End")
+    page.keyboard.press("Enter")
+    page.keyboard.type("Part A2")
+    page.wait_for_timeout(900)
+    assert "deep text\n\n## Part A2\n\n## Part B" in body_of(h), body_of(h)
+    # ArrowUp from it steps onto the closed heading, not into its hidden blocks
+    page.keyboard.press("Home")
+    page.keyboard.press("ArrowUp")
+    assert page.evaluate("() => document.activeElement.textContent") == "## Part A"
+    # closing the chapter hides everything up to "# Next"
+    blk("Chapter").hover()
+    blk("Chapter").locator(".fold-tog").dispatch_event("mousedown")
+    page.wait_for_timeout(100)
+    assert not visible("intro") and not visible("Part B") and not visible("b text") and visible("Next") and visible("last")
+    # reopened, the folds are still there
+    page.reload()
+    page.wait_for_selector(".note-card")
+    page.locator(".note-card", has_text="Folding").click()
+    page.wait_for_selector("#editor .blk-h")
+    assert not visible("intro") and visible("Next")
+    # the toolbar's H menu: expand all, then change a level (Ctrl+Alt+N does the same)
+    page.locator("[data-test=tb-heading]").dispatch_event("mousedown")
+    page.locator("[data-test=unfold-all]").dispatch_event("mousedown")
+    page.wait_for_timeout(100)
+    assert visible("intro") and visible("deep text")
+    blk("b text").locator(".blk-body").click()
+    page.locator("[data-test=tb-heading]").dispatch_event("mousedown")
+    page.locator("[data-test=heading-3]").dispatch_event("mousedown")
+    page.wait_for_timeout(100)
+    blk("intro").locator(".blk-body").click()
+    page.keyboard.press("Control+Alt+4")
+    page.wait_for_timeout(900)
+    body = body_of(h)
+    assert "### b text" in body and "#### intro" in body and "{collapsed}" not in body, body
+    # the block menu of a heading offers its levels and the folds
+    blk("Part B").hover()
+    blk("Part B").locator(".blk-handle button").dispatch_event("mousedown")
+    page.locator("[data-test=heading-levels] .tog", has_text="H1").click()
+    page.wait_for_timeout(900)
+    assert "\n# Part B\n" in body_of(h), body_of(h)
+    # the excerpt never shows a fold marker
+    blk("Next").hover()
+    blk("Next").locator(".fold-tog").dispatch_event("mousedown")
+    page.wait_for_timeout(900)
+    assert "# Next {collapsed}" in body_of(h)
+    assert "collapsed" not in page.locator(".note-card", has_text="Folding").inner_text()
+    assert not errors
+
+
+def test_collection_groups_nest_by_level_and_fold(app):
+    """Seth, 2026-10-16: collapsible headings of several levels in a collection too; they
+    organise the view and are never exported."""
+    h, page, errors = app
+    page.locator("#btn-new-menu").click()
+    page.locator("[data-test='new-collection']").click()
+    page.wait_for_selector("#collection .coll-add")
+    page.locator("#note-title").fill("Chaining")
+    for seg in (1, 2, 4):
+        page.locator("#collection .coll-add").click()
+        paste(page, "{{flex:text %s seg=%d}}" % (T_STORY, seg))
+    page.wait_for_function("document.querySelectorAll('#collection .coll-item').length === 3")
+    cid = h.api.list_collections()[0]["id"]
+    body = lambda: h.api.get_note(cid)["body"]   # noqa: E731
+    # "Chaining" before the first example, "Same subject" before the second, then make it a sub-group
+    for label, at in (("Chaining", 0), ("Same subject", 1)):
+        page.once("dialog", lambda d, label=label: d.accept(label))
+        page.locator("[data-test='coll-add-group']").click()
+        page.wait_for_timeout(200)
+    page.wait_for_timeout(900)
+    # added at the end; move them into place with the API-backed view to keep the test short
+    page.evaluate("""() => { const c = window.__fsCollection; const it = c.items;
+        const g1 = it.findIndex((x) => x.label === 'Chaining'); const a = it.splice(g1, 1)[0]; it.splice(0, 0, a);
+        const g2 = it.findIndex((x) => x.label === 'Same subject'); const b = it.splice(g2, 1)[0]; it.splice(2, 0, b);
+        c.changed(); c.render(); }""")
+    page.wait_for_timeout(200)
+    group = lambda t: page.locator("#collection .coll-group", has_text=t)   # noqa: E731
+    group("Same subject").hover()
+    group("Same subject").locator("[data-test='coll-indent']").click()     # ## → ###, inside "Chaining"
+    page.wait_for_timeout(900)
+    assert body().startswith("## Chaining\n\n{{flex:text") and "\n### Same subject\n" in body(), body()
+    assert "2 examples" in group("Same subject").inner_text() and "3 examples" in group("Chaining").inner_text()
+    # closing the sub-group hides its two examples, closing the parent hides the sub-group too
+    group("Same subject").locator("[data-test='coll-toggle']").click()
+    assert page.locator("#collection .coll-item").count() == 1
+    group("Chaining").locator("[data-test='coll-toggle']").click()
+    assert page.locator("#collection .coll-item").count() == 0 and group("Same subject").count() == 0
+    page.wait_for_timeout(900)
+    assert "## Chaining {collapsed}" in body() and "### Same subject {collapsed}" in body(), body()
+    # numbering still runs straight through, and the export has every example and no headings
+    out = h.tmp / "chaining.flextext"
+    r = h.api.export_note_flextext(cid, page.evaluate("() => window.__fsCollection.flextextItems()"), {"title": "Chaining", "audio": "none"}, str(out))
+    assert r["examples"] == 3
+    xml = out.read_text(encoding="utf-8")
+    assert "Same subject" not in xml and "Chaining" in xml        # the title only
+    assert not errors
+
+
+def test_move_copy_and_drag_several_blocks_in_a_note(app):
+    """Seth, 2026-10-16: "select and move/copy/cut/etc multiple blocks at a time (including FLEx
+    objects) both within a note and within an example collection"."""
+    h, page, errors = app
+    new_note(page, "Blocks")
+    page.locator("#editor .blk-body").first.click()
+    paste(page, "Alpha\n\nBravo\n\n{{flex:text %s seg=1}}\n\nCharlie\n\nDelta" % T_STORY)
+    page.wait_for_selector("#editor .blk-flex .text-obj")
+    page.wait_for_timeout(300)
+    order = lambda: [x.split(" seg=")[0][:12] if x.startswith("{{") else x for x in body_of(h).strip().split("\n\n")]   # noqa: E731
+    # select Alpha … the example (Shift+click), then Alt+Shift+Down moves all three below Charlie
+    page.locator("#editor .blk-body", has_text="Alpha").click()
+    page.keyboard.press("Home")
+    page.locator("#editor .blk-flex").click(modifiers=["Shift"], position={"x": 30, "y": 8})
+    page.wait_for_function("!!window.__fsEditor.msel")
+    page.keyboard.press("Alt+Shift+ArrowDown")
+    page.wait_for_timeout(900)
+    assert order() == ["Charlie", "Alpha", "Bravo", "{{flex:text ", "Delta"], order()
+    assert page.locator("#editor .msel-block").count() >= 2                        # still selected: move again
+    page.keyboard.press("Alt+Shift+ArrowUp")
+    page.wait_for_timeout(900)
+    assert order() == ["Alpha", "Bravo", "{{flex:text ", "Charlie", "Delta"], order()
+    # the ⋮ menu of a selected block acts on all of them
+    page.locator("#editor .blk-p", has_text="Bravo").hover()
+    page.locator("#editor .blk-p", has_text="Bravo").locator(".blk-handle button").dispatch_event("mousedown")
+    assert page.locator("[data-test=blocks-label]").inner_text() == "3 blocks selected"
+    page.locator(".popover .menu-item", has_text="Duplicate").click()
+    page.wait_for_timeout(900)
+    assert order() == ["Alpha", "Bravo", "{{flex:text ", "Alpha", "Bravo", "{{flex:text ", "Charlie", "Delta"], order()
+    page.keyboard.press("Escape")
+    page.locator("#editor .blk-p", has_text="Delta").hover()
+    page.locator("#editor .blk-p", has_text="Delta").locator(".blk-handle button").dispatch_event("mousedown")
+    page.locator(".popover .menu-item", has_text="Delete block").click()
+    page.wait_for_timeout(900)
+    # dragging a block by ⋮: Charlie onto the top half of the first Alpha
+    n = page.locator("#editor > .blk").count()
+    charlie = [i for i in range(n) if page.locator("#editor > .blk").nth(i).inner_text().strip().endswith("Charlie")][0]
+    box = page.locator("#editor .blk-p", has_text="Alpha").first.bounding_box()
+    dnd(page, "#editor > .blk:nth-child(%d) .blk-handle button" % (charlie + 1), box["x"] + 40, box["y"] + 3)
+    assert order()[0] == "Charlie", order()
+    # with a selection, the drag takes every selected block (the example too); Ctrl copies
+    page.locator("#editor .blk-body", has_text="Bravo").first.click()
+    page.keyboard.press("Home")
+    page.locator("#editor .blk-flex").first.click(modifiers=["Shift"], position={"x": 30, "y": 8})
+    page.wait_for_function("!!window.__fsEditor.msel")
+    last = page.locator("#editor > .blk").last.bounding_box()
+    dnd(page, "#editor .blk-flex .blk-handle button", last["x"] + 40, last["y"] + last["height"] - 3)
+    assert order() == ["Charlie", "Alpha", "Alpha", "Bravo", "{{flex:text ", "Bravo", "{{flex:text "], order()
+    assert not errors
+
+
+def test_select_and_move_several_items_in_a_collection(app):
+    h, page, errors = app
+    page.locator("#btn-new-menu").click()
+    page.locator("[data-test='new-collection']").click()
+    page.wait_for_selector("#collection .coll-add")
+    page.locator("#note-title").fill("Sorting")
+    for seg in (1, 2, 4):
+        page.locator("#collection .coll-add").click()
+        paste(page, "{{flex:text %s seg=%d}}" % (T_STORY, seg))
+    page.once("dialog", lambda d: d.accept("Later"))
+    page.locator("[data-test='coll-add-group']").click()
+    page.wait_for_function("document.querySelectorAll('#collection .coll-item').length === 3 && document.querySelector('#collection .coll-group')")
+    cid = h.api.list_collections()[0]["id"]
+
+    def order():
+        page.wait_for_timeout(900)
+        out = []
+        for line in h.api.get_note(cid)["body"].split("\n"):
+            m = re.search(r"seg=(\d+)", line)
+            if m:
+                out.append(int(m.group(1)))
+            elif line.startswith("#"):
+                out.append(line.lstrip("# "))
+        return out
+    items = page.locator("#collection .coll-item")
+    items.nth(0).hover()
+    items.nth(0).locator("[data-test=coll-check]").click()
+    items.nth(1).hover()
+    items.nth(1).locator("[data-test=coll-check]").click(modifiers=["Shift"])
+    assert "2 items selected" in page.locator("[data-test=coll-selbar]").inner_text()
+    page.keyboard.press("Alt+Shift+ArrowDown")
+    assert order() == [4, 1, 2, "Later"], order()
+    # into the group, then copy and paste after the selection
+    page.locator("[data-test=coll-into]").select_option(label="Later")
+    assert order() == [4, "Later", 1, 2], order()
+    page.locator("[data-test=coll-sel-copy]").click()
+    page.locator("[data-test=coll-sel-paste]").click()
+    assert order() == [4, "Later", 1, 2, 1, 2], order()
+    # the pasted copies are the selection now; Delete removes them, Undo brings them back
+    page.keyboard.press("Delete")
+    assert order() == [4, "Later", 1, 2], order()
+    page.locator(".coll-undo button", has_text="Undo").click()
+    assert order() == [4, "Later", 1, 2, 1, 2], order()
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(200)
+    # Ctrl+A selects everything; dragging a selected card moves them all (here: nowhere new)
+    page.locator("#collection .coll-head").click(position={"x": 5, "y": 5})
+    page.keyboard.press("Control+a")
+    assert "items selected" in page.locator("[data-test=coll-selbar]").inner_text()
+    page.keyboard.press("Escape")
+    # select the last two, drag them by a grip to the top
+    items = page.locator("#collection .coll-item")
+    for k in (3, 4):
+        items.nth(k).hover()
+        items.nth(k).locator("[data-test=coll-check]").click(modifiers=["Shift"] if k == 4 else [])
+    items.nth(0).scroll_into_view_if_needed()
+    top = items.nth(0).bounding_box()
+    page.evaluate("""([x, y]) => {
+      const dt = new DataTransfer();
+      const s = document.querySelectorAll('#collection .coll-item')[3].querySelector('.coll-grip');
+      s.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: dt }));
+      const t = document.elementFromPoint(x, y);
+      t.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt, clientX: x, clientY: y }));
+      t.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt, clientX: x, clientY: y }));
+      s.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: dt }));
+    }""", [top["x"] + 60, top["y"] + 4])
+    assert order() == [1, 2, 4, "Later", 1, 2], order()
+    assert not errors
+
+
+def window_last(info):
+    return info[2][-1].split(":", 1)[1]
+
+
+def test_the_view_stays_put_on_a_click_beside_a_table_and_on_table_tools(app):
+    """Seth, 2026-10-16: "if I click outside the table, it scrolls to the same position, but
+    deselects the cell/table … I don't want the scroll jumping to the end of the document after
+    edits or de-select/focus change" — "When I add rows or columns … it jumps to the bottom"."""
+    h, page, errors = app
+    new_note(page, "Tall")
+    page.locator("#editor .blk-body").first.click()
+    paras = "\n\n".join(f"Paragraph {i} with some words in it." for i in range(30))
+    paste(page, paras + "\n\n| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n\n" + paras.replace("Paragraph", "After"))
+    page.wait_for_selector("table.md-table")
+    page.wait_for_timeout(900)
+    st = lambda: page.evaluate("() => document.getElementById('editor').scrollTop")   # noqa: E731
+    page.evaluate("() => document.querySelector('table.md-table').scrollIntoView({block: 'center'})")
+    page.wait_for_timeout(200)
+    s0 = st()
+    # a cell open, then a click on the background beside the table: the cell closes, the view stays
+    page.locator("table.md-table td").first.click()
+    page.keyboard.type("x")
+    tb = page.locator("table.md-table").bounding_box()
+    ed = page.locator("#editor").bounding_box()
+    page.mouse.click(ed["x"] + ed["width"] - 14, tb["y"] + tb["height"] / 2)
+    page.wait_for_timeout(300)
+    assert abs(st() - s0) <= 2, (s0, st())
+    assert page.locator("table.md-table .cell-edit").count() == 0                     # deselected
+    page.wait_for_timeout(700)
+    assert "| 1x |" in body_of(h) or "| x1 |" in body_of(h), body_of(h)
+    # a press on a tool whose release lands on the background (the table redrew under it) is
+    # not a background click
+    page.locator("table.md-table").hover()
+    btn = page.locator(".tbl-tools").first.locator("button", has_text="+ Row")
+    b = btn.bounding_box()
+    page.mouse.move(b["x"] + 5, b["y"] + 5)
+    page.mouse.down()
+    page.mouse.move(ed["x"] + ed["width"] - 14, b["y"] + 5)
+    page.mouse.up()
+    page.wait_for_timeout(300)
+    assert abs(st() - s0) <= 2, (s0, st())
+    for label in ("+ Row", "+ Column"):
+        page.locator("table.md-table").hover()
+        page.locator(".tbl-tools").first.locator("button", has_text=label).click()
+        page.wait_for_timeout(300)
+        assert abs(st() - s0) <= 2, (label, s0, st())
+    # below the last block a click still means "type at the end"
+    page.evaluate("() => { const e = document.getElementById('editor'); e.scrollTop = e.scrollHeight; }")
+    last = page.locator("#editor > .blk").last.bounding_box()
+    page.mouse.click(last["x"] + 40, last["y"] + last["height"] + 40)
+    info = page.evaluate("() => [document.activeElement.className, document.activeElement.textContent, window.__fsEditor.blocks.slice(-2).map((b) => b.type + ':' + b.src)]")
+    assert info[0] == "blk-body" and info[1] == window_last(info), info
+    assert not errors
+
+
+def test_the_export_dialog_shows_no_stray_null(app):
+    """The demo video showed "null" under the title field: Element.append writes a null child
+    as text, and the Baseline row is null when every example shares one baseline."""
+    h, page, errors = app
+    page.locator("#btn-new-menu").click()
+    page.locator("[data-test='new-collection']").click()
+    page.wait_for_selector("#collection .coll-add")
+    page.locator("#collection .coll-add").click()
+    paste(page, "{{flex:text %s seg=1}}" % T_STORY)
+    page.wait_for_selector("#collection .coll-item")
+    page.locator("[data-test='coll-export']").click()
+    page.wait_for_selector(".modal")
+    assert "null" not in page.locator(".modal").inner_text()
+    assert not errors
+
+
+def test_texts_used_in_a_note_a_selection_a_folder_and_a_collection(app):
+    h, page, errors = app
+    tab = h.api.init()["config"]["tabs"][0]["dir"]
+    h.api.create_folder(tab, "Grammar")
+    h.api.create_note(tab, "Grammar", "Chapter", "Intro.\n\n{{flex:text %s seg=1}}\n\n{{flex:text %s seg=2}}\n\nMore.\n\n{{flex:text %s seg=1}}" % (T_STORY, T_STORY, T_ARAB))
+    page.reload()
+    page.wait_for_selector(".folder-item")
+    page.locator(".folder-item[data-path='Grammar']").click()
+    page.locator(".note-card", has_text="Chapter").click()
+    page.wait_for_selector("#editor .blk-flex .text-obj")
+    page.wait_for_timeout(300)
+    # the note: two texts, one row each, with FLEx links
+    page.locator("#btn-note-menu").click()
+    page.locator(".popover .menu-item", has_text="Texts used in this note").click()
+    page.wait_for_selector("[data-test=texts-used]")
+    titles = page.locator("[data-test=texts-used-title]").all_inner_texts()
+    assert titles == ["The dog and the river", "الكلب والنهر"], titles
+    assert "2 examples" in page.locator(".texts-used-row").first.inner_text()
+    assert page.locator("[data-test=texts-used-title]").first.get_attribute("href").startswith("silfw://")
+    page.locator(".modal .btn.primary", has_text="Close").click()
+    # a selection that holds only the first example
+    page.locator("#editor .blk-body", has_text="Intro.").click()
+    page.keyboard.press("Home")
+    page.locator("#editor .blk-flex").first.click(modifiers=["Shift"], position={"x": 30, "y": 8})
+    page.wait_for_function("!!window.__fsEditor.msel")
+    page.locator("#btn-note-menu").dispatch_event("mousedown")
+    page.locator("#btn-note-menu").click()
+    page.locator(".popover .menu-item", has_text="Texts used in the selection").click()
+    page.wait_for_selector("[data-test=texts-used]")
+    assert page.locator("[data-test=texts-used-title]").all_inner_texts() == ["The dog and the river"]
+    page.locator(".modal .btn.primary", has_text="Close").click()
+    # the folder (its subfolders too)
+    page.locator(".folder-item[data-path='Grammar']").click(button="right")
+    page.locator(".popover .menu-item", has_text="Texts used in this folder").click()
+    page.wait_for_selector("[data-test=texts-used]")
+    assert len(page.locator("[data-test=texts-used-title]").all_inner_texts()) == 2
+    page.locator(".modal .btn.primary", has_text="Close").click()
+    # a collection's ticked cards
+    page.locator("#btn-new-menu").click()
+    page.locator("[data-test='new-collection']").click()
+    page.wait_for_selector("#collection .coll-add")
+    for src in ("{{flex:text %s seg=1}}" % T_STORY, "{{flex:text %s seg=1}}" % T_ARAB):
+        page.locator("#collection .coll-add").click()
+        paste(page, src)
+    page.wait_for_function("document.querySelectorAll('#collection .coll-item').length === 2")
+    page.locator("#collection .coll-item").nth(1).hover()
+    page.locator("#collection .coll-item").nth(1).locator("[data-test=coll-check]").click()
+    page.locator("[data-test=coll-sel-texts]").click()
+    page.wait_for_selector("[data-test=texts-used]")
+    assert page.locator("[data-test=texts-used-title]").all_inner_texts() == ["الكلب والنهر"]
+    assert not errors
+
+
+def test_attached_files_open_preview_drop_and_never_start_a_program(app):
+    """Seth, 2026-10-17: attachments in notes, as chips that open the file in its own program,
+    a web page in a preview (sandboxed: its scripts run, this window is out of its reach) with
+    Open in browser; copied into attachments/ by default, linked on request."""
+    h, page, errors = app
+    opened, shown = [], []
+    h.api._open_url = lambda u: opened.append(u) or True
+    h.api._reveal = lambda p: shown.append(str(p)) or True
+    src = h.tmp / "from-elsewhere"
+    src.mkdir()
+    (src / "preview ŋa.html").write_text(
+        "<!doctype html><meta charset=utf-8><body><p id=a>page</p><script>"
+        "document.getElementById('a').textContent='scripts ran';"
+        "var r='isolated';try{r=parent.document.title?'REACHED THE APP':'isolated';}catch(e){}"
+        "try{if(parent.pywebview)r='REACHED THE API';}catch(e){}"
+        "document.body.insertAdjacentHTML('beforeend','<p id=b>'+r+'</p>');</script>", encoding="utf-8")
+    (src / "notes.pdf").write_bytes(b"%PDF-1.4\n%%EOF\n")
+    (src / "tool.bat").write_text("echo hi", encoding="utf-8")
+    html = h.api.attach_paths([str(src / "preview ŋa.html")])[0]
+    pdf = h.api.attach_paths([str(src / "notes.pdf")])[0]
+    bat = h.api.attach_paths([str(src / "tool.bat")], True)[0]
+    assert html["ref"] == "attachments/preview ŋa.html" and bat["linked"]
+    tab = h.api.init()["config"]["tabs"][0]["dir"]
+    body = "See the {{file attachments/preview%20ŋa.html}} page and {{file " + bat["ref"].replace(" ", "%20") + " \"the tool\"}}.\n\n{{file attachments/notes.pdf}}\n\nEnd."
+    h.api.create_note(tab, "", "Field trip", body)
+    page.reload()
+    page.wait_for_selector(".note-card")
+    page.locator(".note-card", has_text="Field trip").click()
+    chip = page.locator("#editor .md-embed[data-kind=file]").first
+    chip.wait_for()
+    assert chip.get_attribute("data-icon") == "🌐" and chip.get_attribute("data-title") == "preview ŋa.html"
+    # a web page: the preview, its scripts running, the app out of its reach
+    chip.click()
+    page.wait_for_selector("[data-test=file-preview] iframe[sandbox]")
+    frame = page.frame_locator("[data-test=file-preview] iframe")
+    assert frame.locator("#a").inner_text() == "scripts ran"
+    assert frame.locator("#b").inner_text() == "isolated"
+    page.locator("[data-test=file-open]").click()                # Open in browser = Windows' choice for .html
+    page.wait_for_timeout(200)
+    assert opened and opened[-1].endswith("preview ŋa.html"), opened
+    page.keyboard.press("Escape")
+    # a program is never started: the click shows it in its folder
+    page.locator("#editor .md-embed[data-kind=file]").nth(1).click()
+    page.wait_for_timeout(300)
+    assert len(opened) == 1 and shown and shown[-1].endswith("tool.bat"), (opened, shown)
+    # the PDF on a line of its own is a card; Open hands it to its program
+    card = page.locator("[data-test=file-card]")
+    card.wait_for()
+    assert "notes.pdf" in card.inner_text()
+    card.locator("[data-test=file-open-btn]").click()
+    page.wait_for_timeout(200)
+    assert opened[-1].endswith("notes.pdf")
+    # a web page can be shown IN the note too: the ⋯ menu, saved as `preview`
+    page.locator("#editor .blk-body", has_text="End.").click()
+    page.keyboard.press("End")
+    page.keyboard.press("Enter")
+    page.keyboard.type("x ")
+    # drop a file from the desktop into that line: copied into attachments/, a chip where it fell
+    target = page.locator("#editor .blk-body", has_text="x").last
+    box = target.bounding_box()
+    page.evaluate("""([x, y]) => {
+        const dt = new DataTransfer();
+        dt.items.add(new File(['dropped bytes'], 'dropped notes.txt', { type: 'text/plain' }));
+        const at = document.elementFromPoint(x, y);
+        for (const type of ['dragenter', 'dragover', 'drop']) at.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, dataTransfer: dt }));
+    }""", [box["x"] + box["width"] - 4, box["y"] + box["height"] / 2])
+    page.wait_for_function("() => [...document.querySelectorAll('#editor .md-embed[data-kind=file]')].some((x) => x.dataset.title === 'dropped notes.txt')", timeout=8000)
+    assert (h.api._nb.root / "attachments" / "dropped notes.txt").read_text() == "dropped bytes"
+    page.wait_for_timeout(1200)
+    assert "{{file attachments/dropped%20notes.txt}}" in body_of(h)
+    # a picture dropped below the last block is shown in the note (Seth: "images and videos
+    # would also work"), the file copied like any other
+    png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+    ed = page.locator("#editor").bounding_box()
+    page.evaluate("""([b64, x, y]) => {
+        const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+        const dt = new DataTransfer();
+        dt.items.add(new File([bytes], 'photo 1.png', { type: 'image/png' }));
+        const at = document.getElementById('editor');
+        for (const type of ['dragover', 'drop']) at.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, dataTransfer: dt }));
+    }""", [png, ed["x"] + 40, ed["y"] + ed["height"] - 10])
+    page.wait_for_selector("[data-test=file-inline] img.file-img", timeout=8000)
+    assert (h.api._nb.root / "attachments" / "photo 1.png").exists()
+    page.wait_for_timeout(1200)
+    assert "{{file attachments/photo%201.png preview}}" in body_of(h)
+    # the HTML page shown inside the note, via the menu of a card
+    nid = next(n["id"] for n in h.api.list_notes() if n["title"] == "Field trip")
+    h.api.save_note(nid, {"body": "{{file attachments/preview%20ŋa.html}}\n"})
+    page.reload()
+    page.wait_for_selector(".note-card")
+    page.locator(".note-card", has_text="Field trip").click()
+    page.locator("[data-test=file-more]").click()
+    page.locator("[data-test=file-menu-inline]").click()
+    page.wait_for_selector("[data-test=file-inline] iframe[sandbox]")
+    assert page.frame_locator("[data-test=file-inline] iframe").locator("#a").inner_text() == "scripts ran"
+    page.wait_for_timeout(1200)
+    assert "{{file attachments/preview%20ŋa.html preview}}" in body_of(h)
+    assert not [e for e in errors if "Failed to load resource" not in e], errors
+
+
+def test_backup_to_a_sync_folder_and_storage_management(app):
+    """Seth, 2026-10-17: back up to a OneDrive / Google Drive / Dropbox folder (or S3 storage), and
+    show how much the notebook and its backup take, with cleanup."""
+    import base64
+    h, page, errors = app
+    h.api._secrets = __import__("flex_scratchpad.secrets_store", fromlist=["MemoryStore"]).MemoryStore()
+    h.api._backup_obj = None
+    h.api._backup.lock_dir = h.tmp / "local"
+    h.api.attach_data("orphan.wav", base64.b64encode(b"o" * 2048).decode())
+    tab = h.api.init()["config"]["tabs"][0]["dir"]
+    n = h.api.create_note(tab, "", "To back up", "Some text.")
+    dest = h.tmp / "OneDrive" / "FLEx Scratchpad backup" / "notebook"
+    page.reload()
+    page.wait_for_selector(".note-card")
+    assert page.locator("[data-test=backup-pill]").is_hidden()
+    page.locator("#btn-settings, [title='Settings']").first.click()
+    page.locator("[data-test=open-backup]").click()
+    page.wait_for_selector("[data-test=backup-dialog]")
+    assert page.locator("[data-test=bk-kind-folder]").is_checked()
+    page.fill("[data-test=bk-folder]", str(dest))
+    page.locator("[data-test=bk-now]").click()
+    page.wait_for_selector("[data-test=bk-progress].ok", timeout=10000)
+    assert (dest / "current" / "notebook.json").exists()
+    assert h.api.backup_status()["settings"]["kind"] == "folder"
+    assert "Backed up" in page.locator("[data-test=backup-pill]").inner_text()
+    # storage: the notebook by kind, and an unused attachment to clear away
+    page.wait_for_selector("[data-test=st-unused]")
+    assert "This notebook:" in page.locator("[data-test=storage]").inner_text()
+    page.locator("[data-test=st-unused]").click()
+    page.locator(".popover .btn.danger").click()
+    page.wait_for_selector("[data-test=st-trash]")
+    assert not (h.api._nb.root / "attachments" / "orphan.wav").exists()
+    page.locator("[data-test=st-trash]").click()
+    page.locator(".popover .btn.danger").click()
+    page.wait_for_function("() => !document.querySelector('[data-test=st-trash]')")
+    assert not h.api._nb.trash_dir.exists()
+    # a second backup after a change keeps a dated version; it shows with its size and can go
+    import time
+    time.sleep(1.1)
+    h.api.save_note(n["id"], {"body": "Changed text."})
+    page.locator("[data-test=bk-now]").click()
+    page.wait_for_selector("[data-test=bk-version]", timeout=10000)
+    assert page.locator("[data-test=bk-version]").count() >= 1
+    page.locator("[data-test=bk-version-check]").first.check()
+    page.locator("[data-test=bk-prune]").click()
+    page.locator(".popover .btn.danger").click()
+    page.wait_for_function("() => !document.querySelector('[data-test=bk-version]')", timeout=10000)
+    assert not any((dest / "versions").iterdir())
+    assert not [e for e in errors if "Failed to load resource" not in e], errors
+
+
+def test_an_example_and_its_highlights_follow_their_lines_when_flex_changes_the_text(app):
+    """Seth, 2026-10-17: lines added, deleted, merged or split in FLEx must not shift what an
+    example shows, nor what its highlights mark."""
+    import copy
+    h, page, errors = app
+    tab = h.api.init()["config"]["tabs"][0]["dir"]
+    h.api.create_note(tab, "", "Follows", "{{flex:text %s seg=3-4 hl=3.1 b=4.2}}" % T_STORY)
+    page.reload()
+    page.wait_for_selector(".note-card")
+    page.locator(".note-card", has_text="Follows").click()
+    page.wait_for_selector("#editor .blk-flex .text-obj")
+    page.wait_for_function("(g) => !!window.__fsEditor && /at=/.test(window.__fsEditor.getMarkdown())", arg=T_STORY)
+    page.wait_for_timeout(1200)
+    assert " at=" in body_of(h)
+    # FLEx: a line added at the top, and the example's last line split in two
+    text = h.api._flex.backend.texts[T_STORY]
+    segs = text["segments"]
+    top = copy.deepcopy(segs[0])
+    top.update(guid="9b1c2d3e-4f50-4a6b-8c7d-0e1f2a3b9101", baseline="Ere ka-sila.", words=[{"txt": "Ere"}, {"txt": "ka-sila"}])
+    segs.insert(0, top)
+    last = next(s for s in segs if s["baseline"] == "Kabir pemu ka-nuwa lo.")
+    tail = copy.deepcopy(last)
+    last.update(baseline="Kabir pemu.", words=[w for w in last["words"] if w.get("txt") in ("Kabir", "pemu")] + [{"txt": ".", "punct": True}])
+    tail.update(guid="9b1c2d3e-4f50-4a6b-8c7d-0e1f2a3b9102", baseline="Ka-nuwa lo.", words=[w for w in tail["words"] if w.get("txt") not in ("Kabir", "pemu")])
+    segs.insert(segs.index(last) + 1, tail)
+    for n, s in enumerate(segs, 1):
+        s["n"] = n
+    page.locator("#editor .text-obj button[title='Reload from FLEx']").first.click()
+    page.wait_for_function("() => /seg=4-6/.test(window.__fsEditor.getMarkdown())", timeout=8000)
+    page.wait_for_timeout(1200)
+    body = body_of(h)
+    assert "seg=4-6" in body and "hl=4.1" in body and "b=5.2" in body, body
+    # and the marks are drawn on the same words as before
+    marked = page.locator("#editor .text-obj .st-hl").first.inner_text()
+    bold = page.locator("#editor .text-obj .st-b").first.inner_text()
+    assert "Ɲamú" in marked and bold == "pemu", (marked, bold)
+    assert "ka-nuwa" in page.locator("#editor .text-obj").inner_text()          # the split-off piece is in the example
+    assert not [e for e in errors if "Failed to load resource" not in e], errors
+
+
+def test_backup_progress_bar_finish_and_the_closing_screen(app):
+    """Seth, 2026-10-17: a progress bar (percent, time left) when backing up — and when the app
+    closes — and a clear word that it has finished."""
+    h, page, errors = app
+    h.api._secrets = __import__("flex_scratchpad.secrets_store", fromlist=["MemoryStore"]).MemoryStore()
+    h.api._backup_obj = None
+    h.api._backup.lock_dir = h.tmp / "local"
+    h.api.backup_save({"kind": "folder", "folder": str(h.tmp / "OneDrive" / "bk")})
+    page.reload()
+    page.wait_for_selector("[data-test=backup-pill]:not([hidden])")
+    page.locator("[data-test=backup-pill]").click()
+    page.wait_for_selector("[data-test=backup-dialog]")
+    page.locator("[data-test=bk-now]").click()
+    # the finish stays on screen: a full, green bar that says what was done
+    page.wait_for_selector("[data-test=bk-progress].ok", timeout=10000)
+    done = page.locator("[data-test=bk-progress].ok").inner_text()
+    assert "✓ Backed up at" in done and "copied to" in done, done
+    # while it runs: the bar follows Python's reports — a stripe until the size is known, then %
+    page.evaluate("() => { window.__bar = FS.backup.progressBar(); document.body.appendChild(window.__bar.node); }")
+    page.evaluate("() => FS.onEvent({event: 'backup', phase: 'scanning', percent: null})")
+    assert "indeterminate" in page.locator("body > [data-test=bk-progress] .bk-track").get_attribute("class")
+    page.evaluate("() => FS.onEvent({event: 'backup', phase: 'copying', percent: 42, done: 4404019, total: 10485760, files: 3, filesTotal: 7, eta: 95})")
+    label = page.locator("body > [data-test=bk-progress] .bk-progress-label").inner_text()
+    assert "42%" in label and "3 of 7 files" in label and "4.2 MB of 10 MB" in label and "about 2 minutes left" in label, label
+    assert page.locator("body > [data-test=bk-progress] .bk-track").get_attribute("aria-valuenow") == "42"
+    assert "Backing up 42%" in page.locator("[data-test=backup-pill]").inner_text()
+    page.evaluate("() => FS.onEvent({event: 'backup', phase: 'done'})")
+    page.locator(".modal .modal-head .icon-btn").first.click()
+    # closing with a backup due: the window stays, the bar shows, Esc does not dismiss it
+    page.evaluate("() => FS.onEvent({event: 'backupClosing', state: 'running'})")
+    page.wait_for_selector("[data-test=backup-closing]")
+    page.keyboard.press("Escape")
+    assert page.locator("[data-test=backup-closing]").is_visible()
+    assert page.locator("[data-test=backup-closing] [data-test=bk-progress]").is_visible()
+    page.locator("[data-test=close-background]").click()
+    page.wait_for_timeout(300)
+    assert h.api._close_choice == "background"
+    # a failed one says so and asks
+    page.evaluate("() => FS.onEvent({event: 'backupClosing', state: 'failed', message: 'offline'})")
+    assert "offline" in page.locator("[data-test=backup-closing]").inner_text()
+    assert page.locator("[data-test=close-retry]").is_visible() and page.locator("[data-test=close-anyway]").is_visible()
+    page.locator("[data-test=close-retry]").click()
+    page.wait_for_timeout(300)
+    assert h.api._close_choice == "retry"
+    assert not [e for e in errors if "Failed to load resource" not in e], errors
+
+
+def test_playback_lights_the_playing_line_follows_it_and_keeps_its_controls_in_view(app):
+    """Seth, 2026-10-17: highlight the line that's playing, scroll to it unless the user is
+    scrolling or clicking, and keep the play controls at the bottom of the view."""
+    h, page, errors = app
+    page.set_viewport_size({"width": 1360, "height": 520})
+    tab = h.api.init()["config"]["tabs"][0]["dir"]
+    h.api.create_note(tab, "", "Listen", "Intro.\n\n{{flex:text %s seg=1-6}}\n\nAfter." % T_STORY)
+    page.reload()
+    page.wait_for_selector(".note-card")
+    page.locator(".note-card", has_text="Listen").click()
+    page.wait_for_selector("#editor .text-obj .play-range")
+    page.evaluate("FS.follow._reset()")
+    seen = "(n) => { const r = document.querySelector('#editor .segment[data-n=\"' + n + '\"]').getBoundingClientRect(), e = document.getElementById('editor').getBoundingClientRect(); return r.top >= e.top - 1 && r.bottom <= e.bottom + 1; }"
+    page.locator("#editor .text-obj .play-range").click()
+    page.wait_for_function("() => !!document.querySelector('#editor .segment.playing-line[data-n=\"1\"]')", timeout=4000)
+    # the player stays at the bottom of the view while the example runs on below it
+    tr = page.evaluate("() => { const t = document.querySelector('#editor .text-obj .transport'), e = document.getElementById('editor').getBoundingClientRect(), r = t.getBoundingClientRect(); return [getComputedStyle(t).position, r.bottom <= e.bottom + 1, r.top >= e.top]; }")
+    assert tr == ["sticky", True, True], tr
+    # the view moved away (not by the user): the next line is brought back into view
+    page.evaluate("() => { document.getElementById('editor').scrollTop = 0; }")
+    page.wait_for_function("() => !!document.querySelector('#editor .segment.playing-line[data-n=\"2\"]')", timeout=4000)
+    page.wait_for_timeout(700)
+    assert page.evaluate(seen, 2), "the playing line was scrolled into view"
+    # the user scrolls with the wheel: the view is left alone
+    page.mouse.move(700, 300)
+    page.mouse.wheel(0, -600)
+    page.wait_for_timeout(200)
+    assert page.evaluate("FS.follow._state().quiet")
+    page.evaluate("() => { document.getElementById('editor').scrollTop = 0; }")
+    top = page.evaluate("document.getElementById('editor').scrollTop")
+    page.wait_for_function("() => !!document.querySelector('#editor .segment.playing-line[data-n=\"3\"]')", timeout=4000)
+    page.wait_for_timeout(500)
+    assert page.evaluate("document.getElementById('editor').scrollTop") == top
+    page.wait_for_function("() => !document.querySelector('#editor .segment.playing-line')", timeout=8000)   # off when it ends
+    assert not [e for e in errors if "Failed to load resource" not in e], errors
+
+
+def test_examples_in_a_collection_collapse_to_chips(app):
+    """Seth, 2026-10-17: "we DO want flex objects in example collection notes to be collapsible"."""
+    h, page, errors = app
+    tab = h.api.init()["config"]["tabs"][0]["dir"]
+    n = h.api.create_note(tab, "", "Switch reference", "## Same subject\n\n{{flex:text %s seg=1}}\n\n{{flex:text %s seg=3-4}}\n" % (T_STORY, T_STORY), "examples")
+    page.reload()
+    page.wait_for_selector(".note-card")
+    page.locator(".note-card", has_text="Switch reference").click()
+    page.wait_for_selector("#collection .coll-item .text-obj")
+    assert page.locator("#collection .coll-item .text-obj").count() == 2
+    # one example, by its ⤡
+    page.locator("#collection .coll-item").first.locator("[data-test=collapse-obj]").click()
+    page.wait_for_selector("#collection .coll-item .flex-collapsed")
+    assert page.locator("#collection .coll-item .text-obj").count() == 1
+    page.wait_for_timeout(1200)
+    body = h.api.get_note(n["id"])["body"]
+    assert body.count(" collapsed") == 1 and "## Same subject" in body, body
+    # all of them, from the header; it stays so after a reload
+    page.locator("[data-test=coll-ex-all]").click()
+    page.wait_for_function("() => document.querySelectorAll('#collection .coll-item .flex-collapsed').length === 2")
+    page.wait_for_timeout(1200)
+    page.reload()
+    page.wait_for_selector(".note-card")
+    page.locator(".note-card", has_text="Switch reference").click()
+    page.wait_for_function("() => document.querySelectorAll('#collection .coll-item .flex-collapsed').length === 2")
+    assert "Examples in full" in page.locator("[data-test=coll-ex-all]").inner_text()
+    # a chip opens its preview on a click, and ⤢ Expand puts the example back in full
+    page.locator("#collection .coll-item .flex-collapsed").first.click()
+    page.wait_for_selector(".flex-overlay .text-obj")
+    page.locator(".flex-overlay .lnk", has_text="⤢ Expand").click()
+    page.wait_for_function("() => document.querySelectorAll('#collection .coll-item .text-obj').length === 1")
+    # the export takes every example, open or not
+    items = page.evaluate("() => window.__fsCollection.flextextItems()")
+    assert len(items) == 2, items
+    page.wait_for_timeout(1200)
+    assert h.api.get_note(n["id"])["body"].count(" collapsed") == 1
+    assert not [e for e in errors if "Failed to load resource" not in e], errors
+
+
+def test_blank_flex_lines_are_left_out_and_flex_numbers_kept(app):
+    """Seth, 2026-10-17: a Shift+Enter in FLEx leaves an empty line 1.2 that FLEx numbers but never
+    shows; the example must not show it either."""
+    import copy
+    h, page, errors = app
+    text = h.api._flex.backend.texts[T_STORY]
+    segs = text["segments"]
+    blank = copy.deepcopy(segs[0])
+    blank.update(guid="9b1c2d3e-4f50-4a6b-8c7d-0e1f2a3b9301", baseline=" ", words=[], free="", lit="", notes=[], begin=None, end=None)
+    segs.insert(1, blank)
+    for n, s in enumerate(segs, 1):
+        s["n"] = n
+    segs[0]["label"], segs[1]["label"], segs[2]["label"] = "1.1", "1.2", "1.3"
+    tab = h.api.init()["config"]["tabs"][0]["dir"]
+    h.api.create_note(tab, "", "Blank", "{{flex:text %s seg=1-3}}\n\n{{flex:text %s seg=2}}" % (T_STORY, T_STORY))
+    page.reload()
+    page.wait_for_selector(".note-card")
+    page.locator(".note-card", has_text="Blank").click()
+    page.wait_for_selector("#editor .text-obj .segment")
+    ex = page.locator("#editor .text-obj").first
+    assert ex.locator(".segment").count() == 2
+    body = ex.inner_text()
+    assert "1.1" in body and "1.3" in body and "segments 1.1–1.3" in body, body
+    # an example that IS the blank line says so instead of showing nothing
+    assert "This line is empty in FLEx." in page.locator("#editor .text-obj").nth(1).inner_text()
+    # the copy for FLEx (TSV) leaves it out too
+    tsv = page.evaluate("""(g) => FS.interlinear.flexTsv(FS.flexref.parse('{{flex:text ' + g + ' seg=1-2 lines=txt}}'),
+        { segments: [{ n: 1, label: '1.1', baseline: 'Kabir', words: [{ txt: 'Kabir' }] }, { n: 2, label: '1.2', baseline: '\u2028', words: [] }] })""", T_STORY)
+    assert tsv.count("Word") == 1 and "Kabir" in tsv, tsv
+    assert not [e for e in errors if "Failed to load resource" not in e], errors
+
+
+def test_something_playing_always_has_a_way_to_pause_and_stop_it(app):
+    """Seth, 2026-10-17: a collapsed example played from its preview kept playing after the preview
+    closed, with no player left to stop it."""
+    h, page, errors = app
+    tab = h.api.init()["config"]["tabs"][0]["dir"]
+    h.api.create_note(tab, "", "Chip audio", "Intro.\n\n{{flex:text %s seg=1-3 collapsed}}\n\nAfter." % T_STORY)
+    page.reload()
+    page.wait_for_selector(".note-card")
+    page.locator(".note-card", has_text="Chip audio").click()
+    page.wait_for_selector("#editor .flex-collapsed")
+    # the example's own player is on screen: no second one
+    page.locator("#editor .flex-collapsed").click()
+    page.wait_for_selector(".flex-overlay .text-obj .play-range")
+    page.locator(".flex-overlay .play-range").click()
+    page.wait_for_selector(".flex-overlay .transport")
+    page.wait_for_timeout(400)
+    assert page.locator("[data-test=now-playing]").is_hidden()
+    # the preview closes (Esc closes it first, without stopping the sound): the bar takes over
+    page.keyboard.press("Escape")
+    page.wait_for_selector(".flex-overlay", state="detached")
+    page.wait_for_selector("[data-test=now-playing]:not([hidden])")
+    assert page.evaluate("!!FS.audio.current")
+    assert "The dog and the river" in page.locator("[data-test=np-title]").inner_text()
+    page.locator("[data-test=np-play]").click()
+    assert page.evaluate("FS.audio.current && FS.audio.current.paused") is True
+    t0 = page.evaluate("FS.audio.current.el.currentTime")
+    page.wait_for_timeout(400)
+    assert page.evaluate("FS.audio.current.el.currentTime") == t0
+    page.locator("[data-test=np-play]").click()
+    page.wait_for_timeout(300)
+    assert page.evaluate("FS.audio.current && !FS.audio.current.paused") is True
+    page.locator("[data-test=np-stop]").click()
+    assert page.evaluate("FS.audio.current") is None
+    page.wait_for_selector("[data-test=now-playing]", state="hidden")
+    # reopened and played again, then Esc twice: the preview closes, then the sound stops
+    page.locator("#editor .flex-collapsed").click()
+    page.wait_for_selector(".flex-overlay .text-obj .play-range")
+    page.locator(".flex-overlay .play-range").click()
+    page.wait_for_timeout(300)
+    page.keyboard.press("Escape")
+    page.wait_for_selector(".flex-overlay", state="detached")
+    assert page.evaluate("!!FS.audio.current")
+    page.keyboard.press("Escape")
+    assert page.evaluate("FS.audio.current") is None
+    assert not [e for e in errors if "Failed to load resource" not in e], errors
+
+
+def test_styling_inside_a_preview_keeps_the_preview_where_it_was(app):
+    """Seth, 2026-10-17: styling a word inside a collapsed example's preview made the preview
+    jump back up to the top of the example."""
+    h, page, errors = app
+    page.set_viewport_size({"width": 1360, "height": 560})
+    tab = h.api.init()["config"]["tabs"][0]["dir"]
+    n = h.api.create_note(tab, "", "Styled chip", "Intro.\n\n{{flex:text %s seg=1-6 collapsed}}\n\nAfter." % T_STORY)
+    page.reload()
+    page.wait_for_selector(".note-card")
+    page.locator(".note-card", has_text="Styled chip").click()
+    page.wait_for_selector("#editor .flex-collapsed")
+    page.locator("#editor .flex-collapsed").click()
+    page.wait_for_selector(".flex-overlay .text-obj .segment")
+    page.wait_for_timeout(400)
+    inner = ".flex-overlay .flex-overlay-inner"
+    assert page.evaluate("(s) => { const e = document.querySelector(s); return e.scrollHeight > e.clientHeight + 100; }", inner), "the preview scrolls"
+    # down to a later line, then highlight one of its words
+    page.evaluate("(s) => { const e = document.querySelector(s); e.querySelector('.segment[data-n=\"5\"]').scrollIntoView({ block: 'center' }); }", inner)
+    page.wait_for_timeout(200)
+    before = page.evaluate("(s) => document.querySelector(s).scrollTop", inner)
+    assert before > 100
+    page.locator(".flex-overlay .segment[data-n='5'] .word-cell").first.locator(".il-txt").click()
+    page.wait_for_selector(".popover .sw")
+    page.locator(".popover .sw").nth(1).click()
+    page.wait_for_selector(".flex-overlay .segment[data-n='5'] .st-hl")
+    page.wait_for_timeout(300)
+    after = page.evaluate("(s) => document.querySelector(s).scrollTop", inner)
+    assert abs(after - before) < 4, (before, after)
+    page.wait_for_timeout(900)
+    assert "hl[#ffd6a5]=5.1" in h.api.get_note(n["id"])["body"]
+    assert not [e for e in errors if "Failed to load resource" not in e], errors
+
+
+def test_one_backspace_or_delete_removes_a_whole_br(app):
+    """Seth, 2026-10-17: "Deleting <br> with one backspace just deletes part and leaves the text
+    behind (should delete the line break altogether)"."""
+    h, page, errors = app
+    tab = h.api.init()["config"]["tabs"][0]["dir"]
+    n = h.api.create_note(tab, "", "Breaks", "one<br>two\n\n| a | b |\n|---|---|\n| x<br>y | z |\n")
+    page.reload()
+    page.wait_for_selector(".note-card")
+    page.locator(".note-card", has_text="Breaks").click()
+    page.wait_for_selector("#editor .blk-body")
+    body = page.locator("#editor .blk-body").first
+    body.click()
+    # Backspace just after the break, in a paragraph
+    page.evaluate("() => { const b = document.querySelector('#editor .blk-body'); b.focus(); FS.editor.setCaret(b, 'one<br>'.length); }")
+    page.keyboard.press("Backspace")
+    page.wait_for_function("() => document.querySelector('#editor .blk-body').textContent === 'onetwo'", timeout=3000)
+    page.keyboard.type("<br>")
+    # Delete just before it
+    page.evaluate("() => { const b = document.querySelector('#editor .blk-body'); FS.editor.setCaret(b, 'one'.length); }")
+    page.keyboard.press("Delete")
+    page.wait_for_function("() => document.querySelector('#editor .blk-body').textContent === 'onetwo'", timeout=3000)
+    # inside a table cell, the caret inside the token
+    page.locator("table.md-table td .cell-view").first.click()
+    page.wait_for_selector(".cell-edit")
+    page.evaluate("() => { const c = document.querySelector('.cell-edit'); FS.editor.setCaret(c, 'x<b'.length); }")
+    page.keyboard.press("Backspace")
+    page.wait_for_function("() => document.querySelector('.cell-edit') && document.querySelector('.cell-edit').textContent === 'xy'", timeout=3000)
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(1200)
+    saved = h.api.get_note(n["id"])["body"]
+    assert "onetwo" in saved and "| xy |" in saved and "<b" not in saved and "br>" not in saved, saved
+    assert not [e for e in errors if "Failed to load resource" not in e], errors

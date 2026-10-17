@@ -316,7 +316,11 @@
       const pane = container.closest('#editor');
       const top = pane ? pane.scrollTop : 0;
       const w2 = render(container, serialize(t), opts);
-      if (pane) pane.scrollTop = top;
+      if (pane) {
+        pane.scrollTop = top;
+        // and again once the reopened cell (or the browser) has moved the focus
+        requestAnimationFrame(() => { if (pane.scrollTop !== top) pane.scrollTop = top; });
+      }
       const want = reopen || (editing && focus ? { r: focus.r, c: focus.c, caret } : null);
       if (want && w2) {
         const cell = container.querySelector('[data-r="' + want.r + '"][data-c="' + want.c + '"]');
@@ -1014,8 +1018,8 @@
           else {
             // the placeholder's copy and the cell's source drifted (another edit in between):
             // replace the embed for this GUID, so the change is never silently dropped
-            const re = new RegExp('\\{\\{flex:' + s.kind + '\\s+' + s.guid + '[^}]*\\}\\}', 'i');
-            t.rows[r][c] = re.test(cur) ? cur.replace(re, ns) : cur + ' ' + ns;
+            const re = s.kind === 'file' ? null : new RegExp('\\{\\{flex:' + s.kind + '\\s+' + s.guid + '[^}]*\\}\\}', 'i');
+            t.rows[r][c] = re && re.test(cur) ? cur.replace(re, ns) : cur + ' ' + ns;
           }
           ph.dataset.src = ns;
           commit();

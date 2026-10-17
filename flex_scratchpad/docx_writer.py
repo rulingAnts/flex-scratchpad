@@ -84,6 +84,8 @@ class Docx:
             props.append(f'<w:sz w:val="{int(r["size"]) * 2}"/>')
         if r.get("rtl"):
             props.append("<w:rtl/>")
+        if r.get("href") and not r.get("color"):
+            props.append('<w:color w:val="1F4F8F"/><w:u w:val="single"/>')
         rpr = f"<w:rPr>{''.join(props)}</w:rPr>" if props else ""
         parts = text.split("\n")
         out = []
@@ -92,7 +94,14 @@ class Docx:
                 out.append(f"<w:r>{rpr}<w:br/></w:r>")
             if part:
                 out.append(f'<w:r>{rpr}<w:t xml:space="preserve">{escape(part)}</w:t></w:r>')
-        return "".join(out)
+        xml = "".join(out)
+        if r.get("href"):
+            # a link (an attached file's file:/// URL): an external relationship of the document
+            rid = f"rIdLink{len(self.rels) + 1}"
+            self.rels.append(f'<Relationship Id="{rid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" '
+                             f'Target="{escape(str(r["href"]), {chr(34): "&quot;"})}" TargetMode="External"/>')
+            xml = f'<w:hyperlink r:id="{rid}" w:history="1">{xml}</w:hyperlink>'
+        return xml
 
     def runs(self, runs: list[dict] | None) -> str:
         return "".join(self.run(r) for r in (runs or []))
@@ -115,7 +124,7 @@ class Docx:
     def add(self, block: dict) -> None:
         t = block.get("type")
         if t == "h":
-            self.body.append(self.para(block.get("runs"), f"Heading{min(3, max(1, int(block.get('level', 1))))}"))
+            self.body.append(self.para(block.get("runs"), f"Heading{min(6, max(1, int(block.get('level', 1))))}"))
         elif t == "p":
             self.body.append(self.para(block.get("runs"), rtl=bool(block.get("rtl"))))
         elif t == "quote":
@@ -364,6 +373,9 @@ class Docx:
                   '<w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/><w:pPr><w:spacing w:before="240" w:after="120"/><w:outlineLvl w:val="0"/></w:pPr><w:rPr><w:b/><w:sz w:val="34"/></w:rPr></w:style>'
                   '<w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="heading 2"/><w:basedOn w:val="Normal"/><w:pPr><w:spacing w:before="200" w:after="100"/><w:outlineLvl w:val="1"/></w:pPr><w:rPr><w:b/><w:sz w:val="28"/></w:rPr></w:style>'
                   '<w:style w:type="paragraph" w:styleId="Heading3"><w:name w:val="heading 3"/><w:basedOn w:val="Normal"/><w:pPr><w:spacing w:before="160" w:after="80"/><w:outlineLvl w:val="2"/></w:pPr><w:rPr><w:b/><w:sz w:val="24"/></w:rPr></w:style>'
+                  '<w:style w:type="paragraph" w:styleId="Heading4"><w:name w:val="heading 4"/><w:basedOn w:val="Normal"/><w:pPr><w:spacing w:before="140" w:after="60"/><w:outlineLvl w:val="3"/></w:pPr><w:rPr><w:b/><w:sz w:val="22"/></w:rPr></w:style>'
+                  '<w:style w:type="paragraph" w:styleId="Heading5"><w:name w:val="heading 5"/><w:basedOn w:val="Normal"/><w:pPr><w:spacing w:before="120" w:after="60"/><w:outlineLvl w:val="4"/></w:pPr><w:rPr><w:b/><w:color w:val="595959"/><w:sz w:val="22"/></w:rPr></w:style>'
+                  '<w:style w:type="paragraph" w:styleId="Heading6"><w:name w:val="heading 6"/><w:basedOn w:val="Normal"/><w:pPr><w:spacing w:before="120" w:after="60"/><w:outlineLvl w:val="5"/></w:pPr><w:rPr><w:b/><w:i/><w:color w:val="595959"/><w:sz w:val="22"/></w:rPr></w:style>'
                   '<w:style w:type="paragraph" w:styleId="Quote"><w:name w:val="Quote"/><w:basedOn w:val="Normal"/><w:pPr><w:ind w:left="567"/></w:pPr><w:rPr><w:i/><w:color w:val="555555"/></w:rPr></w:style>'
                   '<w:style w:type="paragraph" w:styleId="Code"><w:name w:val="Code"/><w:basedOn w:val="Normal"/><w:pPr><w:spacing w:after="0"/></w:pPr><w:rPr><w:rFonts w:ascii="Consolas" w:hAnsi="Consolas"/><w:sz w:val="18"/></w:rPr></w:style>'
                   '</w:styles>')

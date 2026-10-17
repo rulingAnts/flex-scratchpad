@@ -65,6 +65,12 @@ order; the page collects them with `FS.exporter.flextextItems(collection.asEdito
 `.flextext` that FieldWorks imports (File → Import → FLExText Interlinear). The writer is
 `flex/flextext_writer.py`:
 
+> FLEx does not validate an import against its schema, and its importer assumes more than the
+> schema says. Every export is therefore checked against FieldWorks' `FlexInterlinear.xsd` in the
+> tests (`tests/test_flextext_schema.py`, a copy in `tests/fixtures/`) and against the importer's
+> own assumptions by `flex/flextext_check.import_problems` at export time; a file that would fail
+> is not saved, and the message names the text, phrase and word.
+
 - one `<interlinear-text>` per baseline writing system (a FLEx text has exactly one), titled
   `<title> (<ws>)` when there are several; `opts.onlyWs` keeps one;
 - one `<paragraph>` per example, one `<phrase>` per segment, `segnum` = paragraph.segment;

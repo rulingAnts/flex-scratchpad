@@ -59,6 +59,10 @@
     renderRail();
     renderList();
     renderFlexPill();
+    FS.backup.refreshPill();
+  }
+  function openBackup() {
+    FS.backup.open({ onOpenNotebook: async (path) => { try { const r = await FS.api.open_notebook(path); S.note = null; $('editor-pane').classList.add('no-note'); applyInit(r); FS.toast('Opened ' + path, 'ok'); } catch (e) { FS.toast(e.message, 'error'); } } });
   }
 
   async function refreshLists() {
@@ -135,6 +139,7 @@
       pop.appendChild(colors);
       pop.appendChild(el('hr'));
       item('New folder in this tab…', () => newFolder(t.dir));
+      item('Texts used in this tab\u2026', () => textsUsedDialog({ tab: t.dir, folder: '' }, 'in the tab \u201c' + t.name + '\u201d'), 'texts-used-tab');
       item('Delete tab', async () => { if (!confirm('Delete the tab “' + t.name + '”? It must be empty.')) return; try { await FS.api.delete_tab(t.dir); S.tab = null; applyInit(await FS.api.init()); } catch (e) { FS.toast(e.message, 'error'); } }, 'danger');
     });
   }
@@ -142,6 +147,7 @@
     FS.popover(anchor, (pop, close) => {
       const item = (label, fn, cls) => pop.appendChild(el('button', { class: 'menu-item ' + (cls || ''), onclick: () => { close(); fn(); } }, label));
       item('New subfolder…', () => newFolder(S.tab, path));
+      item('Texts used in this folder\u2026', () => textsUsedDialog({ tab: S.tab, folder: path }, 'in \u201c' + path.split('/').pop() + '\u201d and its subfolders'), 'texts-used-folder');
       item('Rename…', async () => { const name = prompt('Folder name', path.split('/').pop()); if (name && name.trim()) { try { const np = await FS.api.rename_folder(S.tab, path, name.trim()); if (S.folder === path) S.folder = np; await refreshLists(); } catch (e) { FS.toast(e.message, 'error'); } } });
       item('Delete folder', async () => { try { await FS.api.delete_folder(S.tab, path); if (S.folder === path) S.folder = null; await refreshLists(); } catch (e) { FS.toast(e.message, 'error'); } }, 'danger');
     });
@@ -327,10 +333,16 @@
       openLink: openLink,
       onPasteLink: (text, insert) => FS.picker.pasteChooser(text, insert),
       onPasteLocate: (text, insert, fallback) => (S.flex && S.flex.open) ? FS.picker.locateChooser(text, insert, fallback) : fallback(),
-      onPasteImage: async (file, insert) => {
+      onPasteFiles: async (files, insert) => {
+        // a screenshot (a picture with no file behind it) is shown in the note, as before; a copied
+        // FILE becomes an attachment chip, copied into the notebook (Seth, 2026-10-17)
+        const shot = files.length === 1 && /^image\//.test(files[0].type) && (!files[0].name || /^image\.\w+$/i.test(files[0].name));
+        if (!shot) { const srcs = await FS.files.fromFiles(files, false); if (srcs.length) insert(srcs.join(' ')); return; }
+        const file = files[0];
         const b64 = await new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsDataURL(file); });
         try { const r = await FS.api.save_attachment(file.name || 'pasted.png', b64); insert('![' + (file.name || 'image') + '](' + (r.fileUrl || b64) + ')'); } catch (e) { FS.toast(e.message, 'error'); }
       },
+      onAttach: () => attachFiles(false),
       onSlash: (body, b) => slashMenu(body, b),
       onInsertFlex: () => insertFlex(),
     });
@@ -367,6 +379,7 @@
       onChange: (md) => { if (!isCollection()) return; S.note.body = md; S.dirty = true; $('save-state').textContent = 'Editing…'; scheduleSave(); },
       onExport: () => exportCollection(),
       onRefreshAll: () => refreshAll(),
+      onTextsUsed: (md) => textsUsedDialog({ note: S.note.id, markdown: md }, 'in the selected items'),
       canLocate: () => !!(S.flex && S.flex.open),
     });
     window.__fsCollection = S.coll;      // for the tests and the console
@@ -531,6 +544,11 @@
         if (k) item('Collect the ' + k + ' selected example' + (k === 1 ? '' : 's') + ' into a new collection…', () => collectExamples(n, hl), 'collect-selection');
         else item('Collect the examples into a new collection…' + (hl ? '  (none selected: the whole note)' : ''), () => collectExamples(n));
       }
+      {
+        const hl2 = S.note && S.note.id === n.id ? (S.menuHighlight !== undefined ? S.menuHighlight : highlightedSource()) : null;
+        if (hl2 && examplesIn(hl2).length) item('Texts used in the selection\u2026', () => textsUsedDialog({ note: n.id, markdown: hl2 }, 'in the selection'), 'texts-used-selection');
+        else item('Texts used in this note\u2026', () => textsUsedDialog({ note: n.id }, 'in \u201c' + (n.title || 'Untitled') + '\u201d'), 'texts-used-note');
+      }
       S.menuHighlight = undefined;
       item('Copy markdown', async () => { const full = await FS.api.get_note(n.id); FS.copyText(full.body); FS.toast('Copied'); });
       item('Copy link to this note', () => { FS.copyText('flexscratchpad://note/' + n.id); FS.toast('Link copied — it opens this note in FLEx Scratchpad'); });
@@ -547,6 +565,54 @@
       pop.appendChild(el('hr'));
       item('Delete (to trash)', async () => { if (!confirm('Move “' + (n.title || 'Untitled') + '” to the trash?')) return; await FS.api.delete_note(n.id); if (S.note && S.note.id === n.id) { S.note = null; $('editor-pane').classList.add('no-note'); } await refreshLists(); }, 'danger');
     });
+  }
+  /* Which FLEx texts the examples come from (Seth, 2026-10-16: "list which texts are referenced in
+   * a [note], a folder, or a selected range … not individual items, but texts they come from",
+   * "a FLEx hyperlink for each"): one row per text with its count, the notes it is in, and its
+   * FLEx link; Copy list puts the titles (or titles with their links) on the clipboard. */
+  async function textsUsedDialog(scope, where) {
+    await flushSave();
+    let r;
+    try { r = await FS.api.texts_used(scope); } catch (e) { FS.toast(e.message, 'error'); return; }
+    const texts = r.texts || [];
+    const m = FS.modal({ title: 'Texts used ' + where });
+    const n = texts.length;
+    m.body.appendChild(el('p', { class: 'small muted', 'data-test': 'texts-used-summary' },
+      n ? n + (n === 1 ? ' text' : ' texts') + ' — the texts the examples come from' + (r.notes > 1 ? ', in ' + r.notes + ' notes' : '') + '.'
+        : 'No interlinear examples here' + (r.notes > 1 ? ' (' + r.notes + ' notes looked at).' : '.')));
+    const count = (t) => {
+      const parts = [];
+      if (t.examples) parts.push(t.examples + (t.examples === 1 ? ' example' : ' examples'));
+      if (t.links) parts.push(t.links + (t.links === 1 ? ' link' : ' links'));
+      if (t.notes.length > 1 || (r.notes > 1 && t.notes.length)) parts.push(t.notes.length === 1 ? 'in \u201c' + (t.notes[0].title || 'Untitled') + '\u201d' : 'in ' + t.notes.length + ' notes');
+      return parts.join(' \u00b7 ');
+    };
+    if (n) {
+      const list = el('div', { class: 'texts-used', 'data-test': 'texts-used' });
+      for (const t of texts) {
+        const row = el('div', { class: 'texts-used-row' },
+          el('div', { class: 'tu-main' },
+            el('a', { class: 'tu-title', dir: 'auto', href: t.url, title: 'Open this text in FLEx', 'data-test': 'texts-used-title', onclick: (e) => { e.preventDefault(); FS.api.open_in_flex(t.url); } }, t.title),
+            el('div', { class: 'small muted' }, count(t))),
+          el('button', { class: 'btn', title: 'Copy the FLEx link to this text', onclick: () => { FS.copyText(t.url); FS.toast('FLEx link copied'); } }, 'Copy link'),
+          el('button', { class: 'btn', title: 'Open this text in FLEx', onclick: () => FS.api.open_in_flex(t.url) }, 'Open in FLEx \u2197'));
+        if (t.notes.length > 1) {
+          const notesEl = el('div', { class: 'tu-notes small' });
+          for (const x of t.notes) notesEl.appendChild(el('a', { href: '#', onclick: (e) => { e.preventDefault(); m.close(); openNote(x.id); } }, x.title || 'Untitled'));
+          row.querySelector('.tu-main').appendChild(notesEl);
+        }
+        list.appendChild(row);
+      }
+      m.body.appendChild(list);
+    }
+    const row = el('div', { class: 'btn-row' });
+    if (n) {
+      row.appendChild(el('button', { class: 'btn', 'data-test': 'texts-used-copy', title: 'The titles, one per line', onclick: () => { FS.copyText(texts.map((t) => t.title).join('\n')); FS.toast('List copied'); } }, 'Copy list'));
+      row.appendChild(el('button', { class: 'btn', 'data-test': 'texts-used-copy-links', title: 'A Markdown list of the titles, each a FLEx link (paste it into a note)', onclick: () => { FS.copyText(texts.map((t) => '- [' + t.title.replace(/[\[\]]/g, '') + '](' + t.url + ')').join('\n')); FS.toast('List with FLEx links copied'); } }, 'Copy with FLEx links'));
+    }
+    row.appendChild(el('span', { class: 'spacer' }));
+    row.appendChild(el('button', { class: 'btn primary', onclick: () => m.close() }, 'Close'));
+    m.body.appendChild(row);
   }
   function moveDialog(n, copy) {
     const m = FS.modal({ title: copy ? 'Copy note to' : 'Move note', class: 'narrow' });
@@ -584,6 +650,23 @@
 
   /* ------------------------------------------------------------------ insert / slash */
   function insertFlex() { FS.picker.open((md, asBlock) => ensureEditor().insertMarkdown(md, asBlock)); }
+  /* Attach files (Seth, 2026-10-17): COPIED into the notebook's attachments/ unless `link`,
+   * then a file alone on its line becomes a card, after text a chip. */
+  async function attachFiles(link) {
+    if (!S.note || isCollection()) return;
+    const ed = ensureEditor();
+    const srcs = await FS.files.pick(link);
+    if (srcs.length) ed.insertMarkdown(srcs.join('\n\n'), true);
+  }
+  function attachMenu(anchor) {
+    FS.popover(anchor, (pop, close) => {
+      const item = (label, hint, fn, test) => pop.appendChild(el('button', { class: 'menu-item', 'data-test': test, onclick: () => { close(); fn(); } },
+        el('div', {}, label), el('div', { class: 'muted small' }, hint)));
+      item('📎 Copy into the notebook…', 'The note keeps its file wherever the notebook goes (the default).', () => attachFiles(false), 'attach-copy');
+      item('🔗 Link to the file where it is…', 'No copy: for big recordings, or a file you keep editing. The link breaks if the file moves.', () => attachFiles(true), 'attach-link');
+      pop.appendChild(el('div', { class: 'muted small', style: { padding: '6px 8px 2px' } }, 'Or drop files on the note (Alt+drop links them).'));
+    });
+  }
   /* Refresh all: every example in every note is re-fetched from FLEx and re-snapshotted,
    * then the open note is redrawn in place (scroll kept). */
   async function refreshAll() {
@@ -611,6 +694,8 @@
     FS.popover(body, (pop, close) => {
       const item = (label, fn) => pop.appendChild(el('button', { class: 'menu-item', onclick: () => { close(); fn(); } }, label));
       item('FLEx object…', insertFlex);
+      item('Attach a file…', () => attachFiles(false));
+      item('Link to a file…', () => attachFiles(true));
       item('Table', () => S.editor.insertMarkdown(FS.tables.template(3, 3), true));
       item('Chart', () => S.editor.insertMarkdown(FS.charts.template(), true));
       item('Checklist', () => S.editor.insertMarkdown('- [ ] ', false));
@@ -620,10 +705,10 @@
       item('Divider', () => S.editor.insertMarkdown('---', true));
     });
   }
-  function toolbarAction(kind) {
+  function toolbarAction(kind, btn) {
     const ed = ensureEditor();
     switch (kind) {
-      case 'h': return ed.linePrefix('h', 2);
+      case 'h': return btn ? headingMenu(btn, ed) : ed.linePrefix('h', 2);
       case 'bold': return ed.wrapSelection('**');
       case 'italic': return ed.wrapSelection('*');
       case 'mark': return ed.wrapSelection('==');
@@ -635,6 +720,23 @@
       case 'chart': return ed.insertMarkdown(FS.charts.template(), true);
       case 'hr': return ed.insertMarkdown('---', true);
     }
+  }
+
+  /* Heading levels 1-6 (Seth, 2026-10-16), plain text, and folding every heading at once. The
+   * buttons act on mousedown so the caret stays where it is in the note. */
+  function headingMenu(btn, ed) {
+    FS.popover(btn, (pop, close) => {
+      const act = (fn) => (e) => { e.preventDefault(); close(); fn(); };
+      const cur = ed.active && ed.active.type === 'h' ? FS.markdown.headingLevel(ed.active) : 0;
+      for (let lv = 1; lv <= 6; lv++) {
+        pop.appendChild(FS.el('button', { class: 'menu-item heading-pick hp' + lv + (lv === cur ? ' on' : ''), 'data-test': 'heading-' + lv, onmousedown: act(() => ed.linePrefix('h', lv)) },
+          FS.el('span', { class: 'hp-label' }, 'Heading ' + lv), FS.el('kbd', {}, 'Ctrl+Alt+' + lv)));
+      }
+      if (cur) pop.appendChild(FS.el('button', { class: 'menu-item', onmousedown: act(() => ed.linePrefix('h', cur)) }, 'Plain text'));
+      pop.appendChild(FS.el('hr'));
+      pop.appendChild(FS.el('button', { class: 'menu-item', 'data-test': 'fold-all', onmousedown: act(() => ed.setAllFolds(true)) }, '\u25b8 Collapse all headings'));
+      pop.appendChild(FS.el('button', { class: 'menu-item', 'data-test': 'unfold-all', onmousedown: act(() => ed.setAllFolds(false)) }, '\u25be Expand all headings'));
+    }, { class: 'heading-menu' });
   }
 
   /* ------------------------------------------------------------------ find in note */
@@ -666,6 +768,9 @@
     nb.appendChild(el('label', { class: 'small', style: { display: 'flex', gap: '6px', marginTop: '8px' } }, mk, 'Hide Markdown markers while editing (**bold**, # heading, - list) — the toolbar still formats, and typing the markers still works'));
     body.appendChild(nb);
     // FLEx
+    body.appendChild(el('div', { class: 'setting-block' }, el('h3', {}, 'Backup & storage'),
+      el('p', { class: 'muted small' }, 'Back the notebook up to a OneDrive, Google Drive or Dropbox folder, or to S3-compatible storage; see how much space the notebook and its backup take, and clean up.'),
+      el('div', { class: 'btn-row', style: { justifyContent: 'flex-start' } }, el('button', { class: 'btn primary', 'data-test': 'open-backup', onclick: () => { m.close(); openBackup(); } }, 'Backup & storage…'))));
     const fx = el('div', { class: 'setting-block' }, el('h3', {}, 'FieldWorks project'));
     const source = el('select');
     for (const [v, l] of [['lcm', 'FieldWorks project (direct, via flexicon)'], ['flextext', '.flextext export file (fallback)'], ['demo', 'Built-in demo project']]) source.appendChild(el('option', { value: v, selected: (S.flex.source || 'lcm') === v }, l));
@@ -834,7 +939,14 @@
     $('btn-pin').addEventListener('click', () => { if (!S.note) return; S.note.pinned = !S.note.pinned; saveMeta({ pinned: S.note.pinned }); refreshLists(); });
     $('btn-note-menu').addEventListener('click', (e) => { if (S.note) noteMenu(e.currentTarget, S.note); });
     $('btn-insert-flex').addEventListener('click', insertFlex);
-    $('toolbar').querySelectorAll('[data-ins]').forEach((b) => b.addEventListener('mousedown', (e) => { e.preventDefault(); toolbarAction(b.dataset.ins); }));
+    $('backup-pill').addEventListener('click', openBackup);
+    $('btn-attach').addEventListener('click', (e) => attachFiles(e.altKey));
+    $('btn-attach-more').addEventListener('click', (e) => attachMenu(e.currentTarget));
+    // A file dropped anywhere the note does not take it must never replace the page with the
+    // file (WebView2 would navigate to it): refuse the drop there.
+    document.addEventListener('dragover', (e) => { if (!e.defaultPrevented && FS.files.hasFiles(e.dataTransfer)) { e.preventDefault(); e.dataTransfer.dropEffect = 'none'; } });
+    document.addEventListener('drop', (e) => { if (!e.defaultPrevented && e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) e.preventDefault(); });
+    $('toolbar').querySelectorAll('[data-ins]').forEach((b) => b.addEventListener('mousedown', (e) => { e.preventDefault(); toolbarAction(b.dataset.ins, b); }));
     $('btn-find').addEventListener('click', openFind);
     $('btn-markers').addEventListener('click', toggleMarkers);
     $('btn-refresh-all').addEventListener('click', refreshAll);
@@ -866,7 +978,7 @@
       else if (mod && !e.shiftKey && e.key.toLowerCase() === 'f') { if (S.note && !isCollection()) { e.preventDefault(); openFind(); } }
       else if (mod && e.shiftKey && e.key.toLowerCase() === 'l') { if (S.note) { e.preventDefault(); if (isCollection()) ensureCollection().pick(); else insertFlex(); } }
       else if (mod && e.key.toLowerCase() === 's') { e.preventDefault(); flushSave().then(() => FS.toast('Saved')); }
-      else if (mod && e.altKey && /^[1-3]$/.test(e.key)) { if (!isCollection()) { e.preventDefault(); ensureEditor().linePrefix('h', +e.key); } }
+      else if (mod && e.altKey && /^[1-6]$/.test(e.key)) { if (!isCollection()) { e.preventDefault(); ensureEditor().linePrefix('h', +e.key); } }
       else if (mod && e.key === ',') { e.preventDefault(); openSettings(); }
       else if (mod && (e.key === '\\' || e.code === 'Backslash')) { e.preventDefault(); toggleNav(); }
     });

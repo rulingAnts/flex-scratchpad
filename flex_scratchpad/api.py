@@ -19,7 +19,49 @@ from . import APP_NAME, __version__, build_id
 from .config import AppConfig
 from .flex import FlexService
 from .flex.lcm import FlexError
-from .notebook import Notebook, inline_tags
+from .notebook import ATTACH_DIR, Notebook, inline_tags
+
+
+def safe_filename(name: str) -> str:
+    """`name` with the characters Windows refuses in a filename (\\ / : * ? " < > | and controls)
+    turned into "-", Unicode kept; never empty."""
+    import re
+    out = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "-", name or "").strip().rstrip(".")
+    stem = Path(out).stem.strip(" -.")
+    return out if stem else "untitled" + Path(out).suffix
+
+
+def with_suffix(path: str, ext: str) -> str:
+    """`path`, with `ext` added when it does not already end in it (any case)."""
+    if ext and not str(path).lower().endswith(ext.lower()):
+        return str(path) + ext
+    return str(path)
+
+
+# What an attachment is, by extension: what the page can preview, and what is never STARTED
+# from a note (a click shows it in its folder instead, so opening a note's chip cannot run a
+# program).
+_KINDS = {
+    "html": {".html", ".htm", ".xhtml"},
+    "pdf": {".pdf"},
+    "image": {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico"},
+    "audio": {".wav", ".mp3", ".m4a", ".ogg", ".oga", ".opus", ".flac", ".aac", ".weba"},
+    "video": {".mp4", ".webm", ".m4v", ".mov", ".ogv"},
+    "program": {".exe", ".com", ".bat", ".cmd", ".ps1", ".psm1", ".psd1", ".vbs", ".vbe", ".js", ".jse",
+                ".wsf", ".wsh", ".msi", ".msp", ".mst", ".scr", ".pif", ".lnk", ".reg", ".hta", ".cpl",
+                ".jar", ".appref-ms", ".application", ".msc", ".gadget", ".inf", ".sct", ".url", ".dll",
+                ".sys", ".ocx", ".psc1", ".appx", ".msix", ".appinstaller", ".py", ".pyw", ".sh"},
+}
+
+
+def file_kind(p: Path) -> str:
+    if p.is_dir():
+        return "folder"
+    ext = p.suffix.lower()
+    for kind, exts in _KINDS.items():
+        if ext in exts:
+            return kind
+    return "file"
 
 
 class Api:
@@ -31,6 +73,12 @@ class Api:
         self._window = None                     # set by app.py once the window exists
         self._lock = threading.RLock()
         self._demo = demo
+        self._drops: list[tuple[str, str, float]] = []   # (name, full path, when) from _on_drop
+        self._drop_cv = threading.Condition()
+        self._secrets = None                    # the secret store (tests set one); else the platform's
+        self._backup_obj = None
+        self._close_choice: str | None = None   # the answer while backing up before closing (app.py)
+        self._close_evt = threading.Event()
         self._open_notebook(notebook_dir or config.notebook_dir)
 
 
@@ -234,9 +282,42 @@ class Api:
         target = path or self._save_dialog((n.title or "note") + ".md")
         if not target:
             return None
-        import shutil
-        shutil.copyfile(n.path, target)
+        from .notebook import without_fold_marks
+        # the note's own file, less the fold markers of closed headings (view state, not text)
+        text = without_fold_marks(Path(n.path).read_text(encoding="utf-8"))
+        Path(target).write_text(text, encoding="utf-8", newline="\n")
+        self._copy_attachments(text, Path(target).parent)
         return target
+
+    def _copy_attachments(self, text: str, dest: Path) -> int:
+        """The files a note has COPIED in (`{{file attachments/…}}`) go beside an exported .md
+        in an attachments/ folder of its own, so the export's references still find them.
+        Linked files stay where they are. Never overwrites a different file of that name."""
+        import re
+        import shutil
+        n = 0
+        for m in re.finditer(r"\{\{\s*file\s+([^\s}]+)", text or ""):
+            ref = re.sub(r"%([0-9A-Fa-f]{2})", lambda x: chr(int(x.group(1), 16)), m.group(1))
+            if not ref.startswith(ATTACH_DIR + "/"):
+                continue
+            try:
+                src = self._nb.resolve_file(ref)
+                if not src.is_file():
+                    continue
+                out = (dest / ref).resolve()
+                if dest.resolve() not in out.parents:
+                    continue
+                if out.exists() and out.stat().st_size == src.stat().st_size:
+                    continue
+                if out.exists():            # another file by that name is already there: keep it
+                    continue
+                out.parent.mkdir(parents=True, exist_ok=True)
+                if out != src:
+                    shutil.copy2(src, out)
+                    n += 1
+            except (OSError, ValueError):
+                continue
+        return n
 
     def export_note_docx(self, note_id: str, doc: dict, path: str | None = None) -> str | None:
         """Word document from the page's export model (zero-dependency writer)."""
@@ -294,44 +375,70 @@ class Api:
         target = path or self._save_dialog((wopts["title"] or "examples") + ".flextext")
         if not target:
             return None
-        # audio (Seth, 2026-10-16: "grab audio segments and match them"): one recording per
-        # exported text next to the file, every example's clip in order, offsets rewritten;
-        # 'original' keeps the source recordings and offsets; 'none' drops the timing
-        audio = opts.get("audio") or "clips"
+        target = Path(target)
+        # one FILE per baseline writing system (Seth, 2026-10-17: "handle different baseline
+        # writing systems gracefully … by having one different text for each"): a FLEx text has
+        # one vernacular WS, and the Audio Segmenter pairs a .flextext with the recording of the
+        # SAME NAME and gives no recording to a file holding several texts. `oneFile` keeps them
+        # together as several texts of one file instead.
+        if len(groups) > 1 and not opts.get("oneFile"):
+            plan = [(target.with_name(f"{target.stem} ({k}){target.suffix or '.flextext'}"), [(k, v)]) for k, v in groups]
+        else:
+            plan = [(target, groups)]
+        # audio (Seth, 2026-10-16: "grab audio segments and match them"; 2026-10-17: "concatenate
+        # the audio as a single audio file stored in the text media file … with a generated click
+        # inserted at join points … default to concatenated … per flex object, not per flex text
+        # line"): 'bundle' = one 16-bit mono WAV per text, one piece per EXAMPLE with a click
+        # between, named like its .flextext and next to it (or in the chosen folder); 'clips' = one
+        # small WAV per line, in `<name>-audio/` or the chosen folder; 'original' keeps the source
+        # recordings and offsets; 'none' drops the timing. In a project's LinkedFiles/AudioVisual
+        # the locations are relative, as FLEx stores them.
+        audio = opts.get("audio") or "bundle"
         audio_out = {"path": "", "matched": 0, "missing": 0}
-        if audio == "clips":
-            # one 16-bit mono WAV per line, into the chosen folder (a project's
-            # LinkedFiles/AudioVisual, ideally) or a folder next to the file
-            folder = Path(opts.get("audioFolder") or Path(target).with_name(Path(target).stem + "-audio"))
-            linked_root = next((p for p in [folder] + list(folder.parents) if p.name.lower() == "linkedfiles"), None)
-            stem = "".join(c if c.isalnum() or c in "-_" else "-" for c in (wopts["title"] or "examples")).strip("-") or "examples"
-            for k, v in groups:
-                r = self._flex.clip_audio(v, folder, stem + (f"-{k}" if len(groups) > 1 else ""), linked_root)
+        chosen = Path(opts["audioFolder"]) if opts.get("audioFolder") else None
+        stem = "".join(c if c.isalnum() or c in "-_" else "-" for c in (wopts["title"] or "examples")).strip("-") or "examples"
+        for out, file_groups in plan:
+            for k, v in file_groups:
+                suffix = f"-{k}" if len(file_groups) > 1 else ""
+                if audio == "clips":
+                    folder = chosen or out.with_name(out.stem + "-audio")
+                elif audio == "bundle":
+                    folder = chosen or out.parent
+                else:
+                    if audio == "none":
+                        for ex in v:
+                            for seg in ex["text"].get("segments") or []:
+                                seg["begin"] = seg["end"] = None
+                    continue
+                linked_root = next((p for p in [folder] + list(folder.parents) if p.name.lower() == "linkedfiles"), None)
+                if audio == "clips":
+                    r = self._flex.clip_audio(v, folder, stem + (f"-{k}" if len(groups) > 1 else ""), linked_root)
+                    where = r["folder"]
+                else:
+                    r = self._flex.bundle_audio(v, folder / f"{out.stem}{suffix}.wav", linked_root)
+                    where = r["path"]
                 audio_out["matched"] += r["matched"]
                 audio_out["missing"] += r["missing"]
-                if r["folder"]:
-                    audio_out["path"] = r["folder"]
-        elif audio == "bundle":
-            kept = [ex for k, v in groups for ex in v]
-            per_text = {}
-            for k, v in groups:
-                suffix = f"-{k}" if len(groups) > 1 else ""
-                dst = Path(target).with_name(Path(target).stem + suffix + ".wav")
-                r = self._flex.bundle_audio(v, dst)
-                per_text[k] = r
-                audio_out["matched"] += r["matched"]
-                audio_out["missing"] += r["missing"]
-                if r["path"]:
-                    audio_out["path"] = (audio_out["path"] + "; " if audio_out["path"] else "") + r["path"]
-            del kept
-        elif audio == "none":
-            for _, v in groups:
-                for ex in v:
-                    for seg in ex["text"].get("segments") or []:
-                        seg["begin"] = seg["end"] = None
-        xml = build_flextext([ex for _, v in groups for ex in v], wopts)
-        Path(target).write_text(xml, encoding="utf-8", newline="\n")
-        return {"path": target, "examples": sum(len(v) for _, v in groups), "texts": [{"ws": k, "examples": len(v)} for k, v in groups], "skipped": len(skipped),
+                if where and where not in audio_out["path"].split("; "):
+                    audio_out["path"] = (audio_out["path"] + "; " if audio_out["path"] else "") + where
+        # never hand FLEx a file its importer would fail on (Seth, 2026-10-16: a schema-valid
+        # export stopped FLEx with "Object reference not set…"); say what and where instead —
+        # every file is checked before any is written
+        from .flex.flextext_check import import_problems
+        xmls = []
+        for out, file_groups in plan:
+            # a text per file keeps its writing system in its title, as in a shared file
+            title = wopts["title"] + (f" ({file_groups[0][0]})" if len(plan) > 1 else "")
+            xml = build_flextext([ex for _, v in file_groups for ex in v], dict(wopts, title=title))
+            problems = import_problems(xml)
+            if problems:
+                raise ValueError("This export would not import into FLEx, so it was not saved: "
+                                 + "; ".join(problems[:5]) + (f" (and {len(problems) - 5} more)" if len(problems) > 5 else ""))
+            xmls.append((out, xml))
+        for out, xml in xmls:
+            out.write_text(xml, encoding="utf-8", newline="\n")
+        return {"path": str(plan[0][0]), "paths": [str(out) for out, _ in plan],
+                "examples": sum(len(v) for _, v in groups), "texts": [{"ws": k, "examples": len(v)} for k, v in groups], "skipped": len(skipped),
                 "audio": audio_out["path"], "audioMatched": audio_out["matched"], "audioMissing": audio_out["missing"]}
 
     def flextext_preview(self, items: list[dict]) -> dict:
@@ -395,6 +502,203 @@ class Api:
         raw = base64.b64decode(data_base64.split(",", 1)[-1])
         p = self._nb.save_attachment(name, raw)
         return {"path": str(p), "fileUrl": p.resolve().as_uri(), "name": p.name}
+
+    # -- backup (Seth, 2026-10-17): a cloud sync folder, or S3-compatible storage via rclone ----
+
+    @property
+    def _backup(self):
+        if getattr(self, "_backup_obj", None) is None:
+            from .backup import Backup
+            from .secrets_store import default_store
+            self._backup_obj = Backup(self._config, self._secrets or default_store(), lambda: self._nb.root, progress=self._progress,
+                                      report=lambda st: self._emit("backup", st))
+        return self._backup_obj
+
+    def backup_status(self) -> dict:
+        return self._backup.status()
+
+    def backup_save(self, settings: dict, secrets: dict | None = None, forget: list | None = None) -> dict:
+        """Settings go to the per-user config; secrets ONLY to the secret store (the Windows
+        Credential Manager) — they never come back to the page, which only learns which are set."""
+        return self._backup.save(settings or {}, secrets or {}, forget or [])
+
+    def backup_test(self) -> dict:
+        return self._backup.test()
+
+    def backup_now(self) -> dict:
+        return self._backup.run("manual")
+
+    def backup_cancel(self) -> bool:
+        """Stop the running backup (the dialog's Cancel)."""
+        return self._backup.cancel()
+
+    def backup_close_choice(self, choice: str) -> bool:
+        """The page's answer while the app backs up before closing (app.py): 'background' (close
+        now, a quiet process finishes the backup), 'skip' (close without it), 'close' / 'retry'
+        after a failed one."""
+        if choice not in ("background", "skip", "close", "retry"):
+            return False
+        self._close_choice = choice
+        if choice in ("background", "skip"):
+            self._backup.cancel()
+        self._close_evt.set()
+        return True
+
+    def backup_versions(self) -> list[str]:
+        return self._backup.versions()
+
+    def backup_usage(self) -> dict:
+        """The backup's size: its current copy and each dated version (may be slow for S3)."""
+        return self._backup.usage()
+
+    def backup_prune(self, names: list | None = None, older_than_days: int | None = None) -> dict:
+        return self._backup.prune(names=names, older_than_days=older_than_days)
+
+    def storage_usage(self) -> dict:
+        """What the notebook folder takes, by kind, and the attached files no note uses."""
+        unused = self._nb.unused_files()
+        return {"notebook": self._nb.storage(), "path": str(self._nb.root),
+                "unused": {"files": len(unused), "bytes": sum(f["bytes"] for f in unused), "list": unused[:200]}}
+
+    def storage_trash_unused(self) -> dict:
+        return self._nb.trash_unused_files()
+
+    def storage_empty_trash(self) -> dict:
+        return self._nb.empty_trash()
+
+    def storage_clear_clips(self) -> dict:
+        return self._nb.clear_audio_clips()
+
+    def backup_choose_folder(self) -> str | None:
+        return self._folder_dialog()
+
+    def backup_restore(self, version: str = "") -> dict | None:
+        """Restore into a NEW folder the user picks a place for (never over the notebook)."""
+        parent = self._folder_dialog()
+        if not parent:
+            return None
+        from datetime import datetime
+        name = "FLEx Scratchpad restored " + (version or datetime.now().strftime("%Y-%m-%d_%H%M%S"))
+        target = Path(parent) / name
+        k = 2
+        while target.exists():
+            target = Path(parent) / f"{name} ({k})"
+            k += 1
+        self._backup.restore(target, version)
+        return {"path": str(target)}
+
+    # -- files attached to notes (Seth, 2026-10-17) ------------------------------------
+    #
+    # A `{{file <ref> "label"}}` embed: `ref` is `attachments/<name>` for a file COPIED into the
+    # notebook (the default), or an absolute path for a file LINKED where it is (the user's
+    # choice). A click opens it in the program Windows associates with it; web pages, PDFs,
+    # pictures, audio and video can also be previewed in the window.
+
+    def _file_item(self, ref: str) -> dict:
+        p = self._nb.resolve_file(ref)
+        linked = Path(ref).is_absolute() or ref[1:3] in (":\\", ":/") or ref.startswith("\\\\")
+        info = {"ref": ref, "name": p.name, "linked": bool(linked), "path": str(p), "kind": file_kind(p),
+                "exists": p.exists(), "size": None, "fileUrl": None}
+        if info["exists"]:
+            info["fileUrl"] = p.resolve().as_uri()
+            if p.is_file():
+                try:
+                    info["size"] = p.stat().st_size
+                except OSError:
+                    pass
+        return info
+
+    def _attach_path(self, path: str, link: bool) -> dict:
+        p = Path(path)
+        if not p.exists():
+            raise ValueError(f"Not found: {path}")
+        if p.is_dir() or link:          # a folder is always linked: copying one could be anything
+            return self._file_item(str(p.resolve()))
+        return self._file_item(self._nb.add_file(p.name, src=p))
+
+    def attach_files(self, link: bool = False) -> list[dict]:
+        """Pick files to attach; copied into attachments/ unless `link`. [] when cancelled."""
+        if self._window is None:
+            return []
+        import webview
+        try:
+            dt = webview.FileDialog.OPEN
+        except AttributeError:  # pywebview 4
+            dt = webview.OPEN_DIALOG
+        res = self._window.create_file_dialog(dt, allow_multiple=True)
+        return [self._attach_path(p, link) for p in (res or [])]
+
+    def attach_paths(self, paths: list[str], link: bool = False) -> list[dict]:
+        return [self._attach_path(p, link) for p in paths or []]
+
+    def attach_data(self, name: str, data_base64: str) -> dict:
+        """A file whose bytes the page has but whose path it does not (copied, never linked)."""
+        raw = base64.b64decode((data_base64 or "").split(",", 1)[-1])
+        return self._file_item(self._nb.add_file(name, data=raw))
+
+    def _on_drop(self, event: dict) -> None:
+        """pywebview's own drop handler (app.py): the only place a dropped file's full path is
+        known. Kept for a few seconds for the page's drop handler to claim by name."""
+        import time
+        files = ((event or {}).get("dataTransfer") or {}).get("files") or []
+        with self._drop_cv:
+            now = time.monotonic()
+            self._drops = [d for d in self._drops if now - d[2] < 10]
+            for f in files:
+                if f.get("pywebviewFullPath"):
+                    self._drops.append((f.get("name") or Path(f["pywebviewFullPath"]).name, f["pywebviewFullPath"], now))
+            self._drop_cv.notify_all()
+
+    def attach_dropped(self, names: list[str], link: bool = False) -> dict:
+        """Attach files just dropped on the page, by name. pywebview reports their paths on
+        another thread, so wait for them briefly. {files: [...], missing: [names]} — the page
+        sends a missing file's bytes instead (attach_data), which can only copy it."""
+        import time
+        want = list(names or [])
+        found: dict[str, str] = {}
+        deadline = time.monotonic() + 1.5
+        with self._drop_cv:
+            while True:
+                for name in want:
+                    if name in found:
+                        continue
+                    for d in self._drops:
+                        if d[0] == name:
+                            found[name] = d[1]
+                            self._drops.remove(d)
+                            break
+                left = deadline - time.monotonic()
+                if len(found) == len(want) or left <= 0:
+                    break
+                self._drop_cv.wait(left)
+        return {"files": [self._attach_path(found[n], link) for n in want if n in found],
+                "missing": [n for n in want if n not in found]}
+
+    def file_info(self, ref: str) -> dict:
+        return self._file_item(ref)
+
+    def open_file(self, ref: str) -> dict:
+        """Open an attachment in its default program. A program or script is never started from
+        a note: it is shown in its folder instead ({opened: False, shown: True})."""
+        p = self._nb.resolve_file(ref)
+        if not p.exists():
+            raise ValueError(f"The file is missing: {p}")
+        if file_kind(p) == "program":
+            return {"opened": False, "shown": self._reveal(p), "reason": "program"}
+        return {"opened": self._open_url(str(p))}
+
+    def reveal_file(self, ref: str) -> bool:
+        p = self._nb.resolve_file(ref)
+        return self._reveal(p if p.exists() else p.parent)
+
+    def locate_file(self, ref: str) -> dict | None:
+        """A missing attachment: pick the file again. A copied one is copied again, a linked one
+        is linked to the new place. None when cancelled."""
+        if self._window is None:
+            return None
+        item = self._file_item(ref)
+        picked = self._dialog("open", allow_multiple=False)
+        return self._attach_path(picked, item["linked"]) if picked else None
 
     # -- FLEx ---------------------------------------------------------------------------
 
@@ -481,6 +785,31 @@ class Api:
         url = model.goto_url(self._flex.project_name, kind, guid)
         return self._open_url(url)
 
+    def texts_used(self, scope: dict) -> dict:
+        """The FLEx texts the examples come from, one row per text (Seth, 2026-10-16: "list which
+        texts are referenced in a [note], a folder, or a selected range … not individual items,
+        but texts they come from", and "a FLEx hyperlink for each"). scope: {"note": id} — that
+        note; {"note": id, "markdown": md} — the highlighted part of it; {"tab": t, "folder": f} —
+        every note in that folder AND its subfolders ("" = the whole tab).
+        → {texts: [FlexService.texts_used rows], notes: n notes looked at}."""
+        scope = scope or {}
+        sources: list[tuple[str, str, str]] = []
+        with self._lock:
+            if scope.get("note"):
+                n = self._nb.get_note(scope["note"])
+                sources.append((n.id, n.title, scope["markdown"] if scope.get("markdown") is not None else n.body))
+            else:
+                tab, folder = scope.get("tab") or "", (scope.get("folder") or "").strip("/")
+                for s in self._nb.list_notes():
+                    if tab and s.get("tab") != tab:
+                        continue
+                    f = s.get("folder") or ""
+                    if folder and not (f == folder or f.startswith(folder + "/")):
+                        continue
+                    n = self._nb.get_note(s["id"])
+                    sources.append((n.id, n.title, n.body))
+        return {"texts": self._flex.texts_used(sources), "notes": len(sources)}
+
     def open_in_flex(self, url: str) -> bool:
         """Hand a silfw:// link to the OS; Windows routes it to FieldWorks."""
         if not url or not url.lower().startswith("silfw:"):
@@ -553,8 +882,23 @@ class Api:
             types.append(f"{a} ({b})")
         return self._dialog("open", allow_multiple=False, file_types=tuple(types))
 
+    _SAVE_TYPES = {".flextext": "FLEx interlinear text", ".html": "Web page", ".md": "Markdown",
+                   ".docx": "Word document", ".zip": "Zip archive", ".wav": "WAV audio"}
+
     def _save_dialog(self, name: str) -> str | None:
-        return self._dialog("save", save_filename=name)
+        """A save dialog suggesting `name`, made safe for a Windows filename, and a path that
+        always ends in the suggested extension (Seth, 2026-10-16: a title with "/" in it saved
+        an export with no .flextext, which FLEx then refused)."""
+        name = safe_filename(name)
+        ext = Path(name).suffix.lower()
+        kw = {"save_filename": name}
+        if ext:
+            kw["file_types"] = (f"{self._SAVE_TYPES.get(ext, ext[1:].upper() + ' file')} (*{ext})",)
+        try:
+            target = self._dialog("save", **kw)
+        except Exception:  # noqa: BLE001 — a backend that refuses the filter: ask without it
+            target = self._dialog("save", save_filename=name)
+        return with_suffix(target, ext) if target else target
 
     @staticmethod
     def _open_url(url: str) -> bool:

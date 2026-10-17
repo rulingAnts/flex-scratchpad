@@ -520,3 +520,29 @@ def test_locate_report_explains_a_paste(tmp_path):
     assert r["bestPerSegment"][0]["candidates"][0]["label"] == "2.2"
     seg = r["textsWithThoseNumbers"][0]["segments"][0]
     assert seg["label"] == "2.2" and seg["baselineNorm"] == "kabir pemu kanuwa lo"
+
+
+def test_free_row_drops_its_writing_system_code(tmp_path):
+    """Seth's Print-view copy, 2026-10-16: "Free Eng So concerning…" kept "eng" in the query,
+    while a translation that only starts with a short word keeps it."""
+    fs = FlexService(Notebook(tmp_path / "nb"))
+    pasted = ("51.1\tWord\tbɛtɛ\tnae\r\n\tWord Gloss Eng\tand.then\tdog\r\n"
+              "‎Free ‎Eng‎ ‎‎So concerning the dogs, \r\n‎ ‎Ind‎ ‎‎\r\n")
+    q, _ = fs._paste_queries(pasted)
+    assert q[0]["free"] == "so concerning the dogs" and q[0]["label"] == "51.1"
+    q, _ = fs._paste_queries("Word\tshe caught it\nFree She caught it.")
+    assert q[0]["free"] == "she caught it"
+    q, _ = fs._paste_queries("Word\tfoo bar\nFree\tEng\tThe dog ran.\nInd")
+    assert q[0]["free"] == "the dog ran"
+
+
+def test_unreadable_punctuation_comes_from_the_baseline_or_is_dropped():
+    """Seth's screen, 2026-10-16: a punctuation token whose text read empty showed as
+    "A PunctuationForm" (its ShortName); before that it was an empty <word/> in an export."""
+    w = [model.make_word("dʒuɾi"), model.make_word("", punct=True), model.make_word("kuɾiətɛ"), model.make_word("", punct=True)]
+    assert [x["txt"] for x in model.fill_punctuation(w, "dʒuɾi, kuɾiətɛ.")] == ["dʒuɾi", ",", "kuɾiətɛ", "."]
+    w = [model.make_word("ka"), model.make_word("", punct=True)]
+    assert [x["txt"] for x in model.fill_punctuation(w, "ka")] == ["ka"]                 # nothing to take: dropped
+    assert model.fill_punctuation([model.make_word("", punct=True)], "") == []
+    src = (Path(__file__).resolve().parent.parent / "flex_scratchpad" / "flex" / "lcm.py").read_text(encoding="utf-8")
+    assert "tok.ShortName" not in src.replace("never tok.ShortName", "")

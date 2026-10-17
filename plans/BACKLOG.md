@@ -205,3 +205,22 @@ bundle a static `ffmpeg.exe` next to the exe (licence: LGPL build, keep the noti
 `find_ffmpeg` look beside `sys.executable` first; or offer `winget install Gyan.FFmpeg` /
 a download into `%LOCALAPPDATA%\FLEx Scratchpad\ffmpeg` on first use, with the Settings field
 already there for a custom path. Decide at release time; nothing in the code assumes either.
+
+
+## Dekereke objects in notes (Seth, 2026-10-17 — "near future")
+
+> *"I'd also like our app to be able to have Dekereke objects (linked to Dekereke XML line/ref
+> number, column(s), and mapped audio file(s), both baseline and suffixed). But that's a future
+> feature."*
+
+A third embed kind beside `{{flex:…}}` and `{{file …}}`, extended additively in flexref.js (the
+embed grammar contract): something like `{{dek <xml ref> ref=0123 cols=Phonetic,Gloss "label"}}`
+— the Dekereke XML database (a path, notebook-relative or linked, like attachments), the record's
+line / Reference number, the column(s) shown. Python reads the XML (stdlib ElementTree, read-only,
+as with FLEx), resolves the record's mapped audio: the BASELINE file and the SUFFIXED variants
+(Dekereke's per-record audio naming: the sound-file field plus its suffixes, e.g. `0123.wav`,
+`0123_frame.wav` — confirm the convention against a real database and its settings), each
+playable from the chip/card, and snapshots the record into the cache like a FLEx object so a note
+still reads when the database is elsewhere. Open questions for Seth before building: which
+columns matter by default, how the suffix list is configured (per database or per notebook), and
+whether a range of records (a word list) is one embed or many.

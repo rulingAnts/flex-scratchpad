@@ -1,0 +1,11 @@
+{
+  "_about": "Files in this folder that the site's pages may show (docs/assets/media.js). Made by tools/record_demo.py.",
+  "files": [
+    "scratchpad-loop.jpg",
+    "scratchpad-loop.mp4",
+    "scratchpad-loop.webm",
+    "step-collect.webp",
+    "step-paste.webp",
+    "step-style.webp"
+  ]
+}
