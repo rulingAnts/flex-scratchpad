@@ -715,35 +715,48 @@ class FlexService:
         return {"folder": str(folder) if files else "", "files": files, "matched": matched, "missing": missing}
 
     def bundle_audio(self, examples: list[dict], dst: Path, linked_root: Path | None = None) -> dict:
-        """One recording of every timed segment of these examples, in order (the clips the
-        cache already cuts, joined with a click between them: `audio.concat_clips`), as the
-        text's ONE media file; the segments' offsets and media are rewritten to it (Seth,
-        2026-10-17: concatenated, the export's default, or one clip per line). Inside a
-        FieldWorks LinkedFiles folder the location is written relative to it, as for clips.
-        Returns {path, matched, missing}; no file when nothing was timed."""
+        """One recording of these examples, in order, as the text's ONE media file (Seth,
+        2026-10-17: "concatenate the audio as a single audio file stored in the text media file
+        … with a generated click inserted at join points"). The unit is the EXAMPLE, not the line
+        ("an example that's multiple lines long … treated as a unit. So per flex object"): each
+        example's audio is cut once, from its first timed line's begin to its last one's end
+        (a run of lines on another recording is its own piece), so its lines keep their own
+        timing inside it; the click (`audio.concat_clips`) goes only between examples. Offsets and
+        media are rewritten to the new file. Inside a FieldWorks LinkedFiles folder the location
+        is relative to it, as for clips. Returns {path, matched, missing}; no file when nothing
+        was timed."""
         from .audio import concat_clips, find_ffmpeg
         import uuid as _uuid
-        clips, slots = [], []
+        clips: list[Path] = []
+        runs: list[tuple[int, list[dict]]] = []          # (begin in the source, its segments)
         missing = 0
         for ex in examples:
             text = ex["text"]
-            for seg in text.get("segments") or []:
-                if seg.get("begin") is None or seg.get("end") is None or seg["end"] <= seg["begin"]:
-                    continue
-                info = self.ensure_clip(text["guid"], seg.get("media"), seg["begin"], seg["end"])
+            timed = [seg for seg in text.get("segments") or []
+                     if seg.get("begin") is not None and seg.get("end") is not None and seg["end"] > seg["begin"]]
+            pieces: list[list[dict]] = []
+            for seg in timed:                            # consecutive lines on one recording
+                if pieces and pieces[-1][-1].get("media") == seg.get("media"):
+                    pieces[-1].append(seg)
+                else:
+                    pieces.append([seg])
+            for piece in pieces:
+                begin, end = min(x["begin"] for x in piece), max(x["end"] for x in piece)
+                info = self.ensure_clip(text["guid"], piece[0].get("media"), begin, end)
                 if info.get("clipPath"):
                     clips.append(Path(info["clipPath"]))
-                    slots.append(seg)
+                    runs.append((begin, piece))
                 else:
-                    missing += 1
-        if not clips:
-            for ex in examples:
-                for seg in ex["text"].get("segments") or []:
+                    missing += len(piece)
+        kept = {id(seg) for _, piece in runs for seg in piece}
+        for ex in examples:
+            for seg in ex["text"].get("segments") or []:
+                if id(seg) not in kept:
                     seg["begin"] = seg["end"] = None      # no recording to point at
+        if not clips:
             return {"path": "", "matched": 0, "missing": missing}
         spans = concat_clips(clips, Path(dst), ffmpeg=find_ffmpeg(self.nb.config.get("settings", {}).get("ffmpegPath", "")))
         bundle_guid = str(_uuid.uuid4())
-        matched = {id(seg) for seg in slots}
         loc = str(Path(dst).resolve())
         if linked_root is not None:
             try:
@@ -752,12 +765,11 @@ class FlexService:
                 pass
         for ex in examples:
             ex["text"]["media"] = [{"guid": bundle_guid, "uri": loc, "path": loc, "found": True}]
-            for seg in ex["text"].get("segments") or []:
-                if id(seg) not in matched:
-                    seg["begin"] = seg["end"] = None
-        for seg, (a, b) in zip(slots, spans):
-            seg["begin"], seg["end"], seg["media"] = a, b, bundle_guid
-        return {"path": str(dst), "matched": len(slots), "missing": missing}
+        for (src_begin, piece), (a, z) in zip(runs, spans):
+            for seg in piece:
+                b0 = min(z, a + seg["begin"] - src_begin)
+                seg["begin"], seg["end"], seg["media"] = b0, max(b0 + 1, min(z, a + seg["end"] - src_begin)), bundle_guid
+        return {"path": str(dst), "matched": len(kept), "missing": missing}
 
     def resolve_link(self, text: str) -> dict | None:
         """A pasted FLEx hyperlink or bare GUID → {kind, guid, title, seg?, sense?, database?}."""

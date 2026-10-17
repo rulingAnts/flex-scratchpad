@@ -96,14 +96,28 @@ def test_mixed_baselines_become_separate_texts_and_only_ws_filters(tmp_path):
     items = [{"kind": "text", "guid": T_STORY, "seg": [1, 1]}, {"kind": "text", "guid": T_ARAB, "seg": None, "at": None}, {"kind": "text", "guid": T_STORY, "seg": [2, 2]}]
     assert api.flextext_preview(items) == {"texts": [{"ws": "kal", "examples": 2}, {"ws": "kal-Arab", "examples": 1}], "skipped": 0}
     out = tmp_path / "mixed.flextext"
+    # Seth, 2026-10-17: one text per baseline writing system, each its own FILE (the Audio
+    # Segmenter gives no recording to a file holding several texts) with its own recording
     r = api.export_note_flextext(n["id"], items, {"title": "Mixed"}, str(out))
     assert r["texts"] == [{"ws": "kal", "examples": 2}, {"ws": "kal-Arab", "examples": 1}]
-    root = ET.fromstring(out.read_text(encoding="utf-8"))
-    titles = [t.find("item[@type='title']").text for t in root.findall("interlinear-text")]
-    assert titles == ["Mixed (kal)", "Mixed (kal-Arab)"]
-    arab = root.findall("interlinear-text")[1]
+    files = [tmp_path / "mixed (kal).flextext", tmp_path / "mixed (kal-Arab).flextext"]
+    assert r["paths"] == [str(f) for f in files] and not out.exists()
+    roots = [ET.fromstring(f.read_text(encoding="utf-8")) for f in files]
+    assert [len(x.findall("interlinear-text")) for x in roots] == [1, 1]
+    assert [x.find("interlinear-text/item[@type='title']").text for x in roots] == ["Mixed (kal)", "Mixed (kal-Arab)"]
+    arab = roots[1].find("interlinear-text")
     assert len(arab.findall("paragraphs/paragraph/phrases/phrase")) == 2                 # the whole text when the embed has no range
     assert arab.find("languages/language[@lang='kal-Arab']").get("RightToLeft") == "true"
+    assert roots[0].find(".//language[@lang='kal-Arab']") is None
+    # each with its recording beside it, named like it (only the demo story is timed)
+    assert (tmp_path / "mixed (kal).wav").exists()
+    assert roots[0].find(".//media-files/media").get("location") == str((tmp_path / "mixed (kal).wav").resolve())
+    # or, asked for, both texts in one file
+    together = tmp_path / "together.flextext"
+    r1 = api.export_note_flextext(n["id"], items, {"title": "Mixed", "oneFile": True, "audio": "none"}, str(together))
+    root = ET.fromstring(together.read_text(encoding="utf-8"))
+    assert r1["paths"] == [str(together)]
+    assert [t.find("item[@type='title']").text for t in root.findall("interlinear-text")] == ["Mixed (kal)", "Mixed (kal-Arab)"]
     r2 = api.export_note_flextext(n["id"], items, {"title": "Mixed", "onlyWs": "kal-Arab"}, str(tmp_path / "one.flextext"))
     assert r2["texts"] == [{"ws": "kal-Arab", "examples": 1}]
     assert len(ET.fromstring((tmp_path / "one.flextext").read_text(encoding="utf-8")).findall("interlinear-text")) == 1
@@ -164,9 +178,12 @@ def test_word_guids_are_kept_unless_asked_not_to():
     assert dropped.find(".//word").get("guid") is None
 
 
-def test_audio_is_concatenated_by_default_with_a_click_at_each_join(tmp_path):
+def test_audio_is_concatenated_by_default_one_piece_per_example_with_a_click_between(tmp_path):
     """Seth, 2026-10-17: "concatenate the audio as a single audio file stored in the text media
-    file … with a generated click inserted at join points … default to concatenated"."""
+    file … with a generated click inserted at join points … default to concatenated", and "an
+    example that's multiple lines long … treated as a unit. So per flex object, not per flex text
+    line". The recording sits beside the .flextext under its name (the Audio Segmenter pairs them
+    by name)."""
     import array
     import wave
     from flex_scratchpad.flex import audio
@@ -174,7 +191,7 @@ def test_audio_is_concatenated_by_default_with_a_click_at_each_join(tmp_path):
     n = api.create_note(None, "", "Audio", "x", "examples")
     out = tmp_path / "audio.flextext"
     r = api.export_note_flextext(n["id"], [{"kind": "text", "guid": T_STORY, "seg": [1, 2]}, {"kind": "text", "guid": T_STORY, "seg": [4, 4]}], {"title": "Audio"}, str(out))
-    wav = tmp_path / "audio-audio" / "Audio.wav"
+    wav = tmp_path / "audio.wav"
     assert r["audio"] == str(wav) and r["audioMatched"] == 3 and r["audioMissing"] == 0 and wav.exists()
     with wave.open(str(wav)) as w:
         assert w.getnchannels() == 1 and w.getsampwidth() == 2
@@ -182,29 +199,31 @@ def test_audio_is_concatenated_by_default_with_a_click_at_each_join(tmp_path):
         samples = array.array("h", w.readframes(w.getnframes()))
     length_ms = len(samples) * 1000 / rate
     join = 2 * audio.CLICK_PAD_MS + audio.CLICK_MS
-    # segments 1 (0–1500), 2 (1500–3200), 4 (4600–6000) → 1500 + 1700 + 1400 ms of audio + two joins
-    assert abs(length_ms - (1500 + 1700 + 1400 + 2 * join)) < 30, length_ms
+    # example 1 = segments 1–2 (0–3200, one piece), example 2 = segment 4 (4600–6000): ONE join
+    assert abs(length_ms - (3200 + 1400 + join)) < 30, length_ms
     root = ET.fromstring(out.read_text(encoding="utf-8"))
     phrases = root.findall(".//phrase")
     spans = [(int(p.get("begin-time-offset")), int(p.get("end-time-offset"))) for p in phrases]
-    assert spans[0][0] == 0 and abs(spans[0][1] - 1500) < 20
-    assert abs(spans[1][0] - (1500 + join)) < 20 and abs(spans[1][1] - (1500 + join + 1700)) < 20
-    assert abs(spans[2][0] - (1500 + join + 1700 + join)) < 20
-    # each join: silence, the click, silence
+    # the lines of one example keep their own timing inside its piece: no click between them
+    assert spans[0] == (0, 1500) and spans[1] == (1500, 3200), spans
+    assert abs(spans[2][0] - (3200 + join)) < 3 and abs(spans[2][1] - (3200 + join + 1400)) < 3, spans
+    assert all(a < b for a, b in spans) and all(spans[i][1] <= spans[i + 1][0] for i in range(2))
+    assert spans[-1][1] <= length_ms + 1
+    # the one join: silence, the click, silence — between the examples only
     ms = lambda t: int(t * rate / 1000)
-    for end, begin in ((spans[0][1], spans[1][0]), (spans[1][1], spans[2][0])):
-        before = samples[ms(end) + 5:ms(end + audio.CLICK_PAD_MS) - 5]
-        tick = samples[ms(end + audio.CLICK_PAD_MS):ms(end + audio.CLICK_PAD_MS + audio.CLICK_MS)]
-        after = samples[ms(begin - audio.CLICK_PAD_MS) + 5:ms(begin) - 5]
-        assert not any(before) and not any(after)
-        assert audio.CLICK_FLOOR * 32767 * 0.9 <= max(abs(v) for v in tick) <= audio.CLICK_LEVEL * 32767 + 1
+    end, begin = spans[1][1], spans[2][0]
+    before = samples[ms(end) + 5:ms(end + audio.CLICK_PAD_MS) - 5]
+    tick = samples[ms(end + audio.CLICK_PAD_MS):ms(end + audio.CLICK_PAD_MS + audio.CLICK_MS)]
+    after = samples[ms(begin - audio.CLICK_PAD_MS) + 5:ms(begin) - 5]
+    assert not any(before) and not any(after)
+    assert audio.CLICK_FLOOR * 32767 * 0.9 <= max(abs(v) for v in tick) <= audio.CLICK_LEVEL * 32767 + 1
     media = root.findall(".//media-files/media")
     assert len(media) == 1 and media[0].get("location") == str(wav.resolve()) and all(p.get("media-file") == media[0].get("guid") for p in phrases)
     # inside a LinkedFiles folder the text's media file is written relative to it, as FLEx stores it
     av = tmp_path / "Proj" / "LinkedFiles" / "AudioVisual"
     api.export_note_flextext(n["id"], [{"kind": "text", "guid": T_STORY, "seg": [1, 2]}], {"title": "Linked", "audio": "bundle", "audioFolder": str(av)}, str(tmp_path / "linked.flextext"))
-    assert (av / "Linked.wav").exists()
-    assert ET.parse(tmp_path / "linked.flextext").getroot().find(".//media-files/media").get("location") == "AudioVisual/Linked.wav"
+    assert (av / "linked.wav").exists()
+    assert ET.parse(tmp_path / "linked.flextext").getroot().find(".//media-files/media").get("location") == "AudioVisual/linked.wav"
     # 'original' keeps the source offsets and file; 'none' drops the timing
     api.export_note_flextext(n["id"], [{"kind": "text", "guid": T_STORY, "seg": [2, 2]}], {"title": "Orig", "audio": "original"}, str(tmp_path / "orig.flextext"))
     ph = ET.parse(tmp_path / "orig.flextext").getroot().find(".//phrase")

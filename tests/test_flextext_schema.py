@@ -57,9 +57,9 @@ def test_every_export_is_schema_valid_and_importable(tmp_path, name):
     n = api.create_note(None, "", "C", "Some text.\n\n> a note", "examples")
     items = [dict(it, note="An example's own note.") if k == 0 else it for k, it in enumerate(items)]
     out = tmp_path / "x.flextext"
-    api.export_note_flextext(n["id"], items, opts, str(out))
-    xml = out.read_text(encoding="utf-8")
-    assert both(xml) == []
+    r = api.export_note_flextext(n["id"], items, opts, str(out))
+    for f in r["paths"]:
+        assert both(Path(f).read_text(encoding="utf-8")) == [], f
 
 
 def test_our_sample_fixture_is_schema_valid():

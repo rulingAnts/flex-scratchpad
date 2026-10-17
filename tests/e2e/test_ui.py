@@ -1676,7 +1676,7 @@ def test_export_examples_as_flextext(app):
       return await api.export_note_flextext(cols[0].id, items, { title: 'SVCs', includeLink: true, includeMarkdown: true }, out);
     }""", out)
     assert r["examples"] == 2 and r["skipped"] == 0 and r["texts"] == [{"ws": "kal", "examples": 2}]
-    assert r["audio"] == str(h.tmp / "svcs-audio" / "SVCs.wav") and r["audioMatched"] == 3 and (h.tmp / "svcs-audio" / "SVCs.wav").exists()
+    assert r["audio"] == str(h.tmp / "svcs.wav") and r["audioMatched"] == 3 and (h.tmp / "svcs.wav").exists()
     import xml.etree.ElementTree as ET
     root = ET.parse(out).getroot()
     phrases = root.findall(".//phrase")

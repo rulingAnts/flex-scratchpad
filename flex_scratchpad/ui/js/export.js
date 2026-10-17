@@ -322,18 +322,20 @@
       const wg = el('input', { type: 'checkbox', checked: true });
       const audio = el('select', { style: { width: '100%' } });
       // Seth, 2026-10-17: concatenated (the default) or one clip per line — the user's choice
-      audio.appendChild(el('option', { value: 'bundle' }, 'one audio file for the text: every line\u2019s clip in order, a click at each join'));
+      audio.appendChild(el('option', { value: 'bundle' }, 'one audio file for the text: each example\u2019s audio in order, a click between examples'));
       audio.appendChild(el('option', { value: 'clips' }, 'one small audio file per line, each line pointing at its own clip'));
       audio.appendChild(el('option', { value: 'original' }, 'point at the original recordings (their offsets, as in FLEx)'));
       audio.appendChild(el('option', { value: 'none' }, 'no audio'));
       audio.value = 'bundle';
-      const folder = el('input', { type: 'text', placeholder: 'next to the .flextext (<title>-audio) — or the project\u2019s LinkedFiles\\AudioVisual', style: { flex: '1 1 auto', minWidth: '0' } });
+      const folder = el('input', { type: 'text', placeholder: 'next to the .flextext — or the project\u2019s LinkedFiles\\AudioVisual', style: { flex: '1 1 auto', minWidth: '0' } });
       const browse = el('button', { class: 'btn', onclick: async () => { try { const f = await FS.api.pick_folder(); if (f) folder.value = f; } catch (e) { FS.toast(e.message, 'error'); } } }, 'Browse…');
       const folderRow = el('div', { class: 'form-row' }, el('label', {}, 'Audio into'), el('div', { style: { display: 'flex', gap: '6px', flex: '1 1 auto', minWidth: '0' } }, folder, browse));
-      const folderNote = el('p', { class: 'small muted' }, 'Choose the project\u2019s LinkedFiles\\AudioVisual folder and the audio is written there with locations FLEx resolves on import; anywhere else the file points at it by full path. 16-bit mono WAV.');
+      const folderNote = el('p', { class: 'small muted' }, 'One audio file is named like its .flextext (the Audio Segmenter pairs them by name); clips per line go into a <name>-audio folder. Choose the project\u2019s LinkedFiles\\AudioVisual folder and the audio is written there with locations FLEx resolves on import; anywhere else the file points at it by full path. 16-bit mono WAV.');
       const showFolder = () => { const on = audio.value === 'clips' || audio.value === 'bundle'; folderRow.style.display = on ? '' : 'none'; folderNote.style.display = on ? '' : 'none'; };
       audio.addEventListener('change', showFolder);
       showFolder();
+      // Seth, 2026-10-17: one text per baseline writing system, each in its own file by default
+      const oneFile = el('input', { type: 'checkbox' });
       const only = el('select', { style: { width: '100%' } });
       only.appendChild(el('option', { value: '' }, preview.texts.length > 1 ? 'all — one FLEx text per baseline writing system' : 'all'));
       for (const t of preview.texts) only.appendChild(el('option', { value: t.ws }, t.ws + ' only (' + t.examples + ' example' + (t.examples === 1 ? '' : 's') + ')'));
@@ -345,6 +347,7 @@
         el('p', { class: 'small muted' }, what),
         el('div', { class: 'form-row' }, el('label', {}, 'Text title'), title),
         preview.texts.length > 1 ? el('div', { class: 'form-row' }, el('label', {}, 'Baseline'), only) : null,
+        preview.texts.length > 1 ? el('label', { class: 'row', style: { gap: '8px' } }, oneFile, 'Put the texts in one file (else one .flextext per writing system, each with its own audio)') : null,
         el('div', { class: 'form-row' }, el('label', {}, 'Audio'), audio),
         folderRow,
         folderNote,
@@ -352,15 +355,15 @@
         el('label', { class: 'row', style: { gap: '8px' } }, link, 'Include a link back to this note (flexscratchpad://note/…)'),
         el('label', { class: 'row', style: { gap: '8px' } }, md, 'Attach this note\u2019s markdown as the text\u2019s comment (Info tab)'),
         el('label', { class: 'row', style: { gap: '8px' } }, wg, 'Keep FLEx\u2019s word analysis GUIDs (the import reuses the same analyses)'),
-        el('p', { class: 'small muted' }, 'Each example becomes a paragraph of the new text; its segments keep every writing system. A FLEx text has one baseline writing system, so examples from texts in different vernacular writing systems become separate texts in the same file. Import with FieldWorks → File → Import → FLExText Interlinear.'),
+        el('p', { class: 'small muted' }, 'Each example becomes a paragraph of the new text; its segments keep every writing system. A FLEx text has one baseline writing system, so examples from texts in different vernacular writing systems become separate texts, each in its own file (or together in one, if you tick that). Import with FieldWorks → File → Import → FLExText Interlinear.'),
       ].filter(Boolean));
       const row = el('div', { class: 'btn-row' });
       row.appendChild(el('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'));
       row.appendChild(el('button', { class: 'btn primary', onclick: async () => {
-        const opts = { title: title.value.trim(), includeLink: link.checked, includeMarkdown: md.checked, sourceNotes: src.checked, wordGuids: wg.checked, onlyWs: only.value || '', audio: audio.value, audioFolder: folder.value.trim() };
+        const opts = { title: title.value.trim(), includeLink: link.checked, includeMarkdown: md.checked, sourceNotes: src.checked, wordGuids: wg.checked, onlyWs: only.value || '', audio: audio.value, audioFolder: folder.value.trim(), oneFile: oneFile.checked };
         try {
           const r = await FS.api.export_note_flextext(note.id, items, opts);
-          if (r) FS.toast('Saved ' + r.path + ' — ' + r.examples + ' example' + (r.examples === 1 ? '' : 's') + (r.texts.length > 1 ? ' in ' + r.texts.length + ' texts' : '') + (r.skipped ? ', ' + r.skipped + ' skipped' : '') + (r.audio ? '; audio: ' + r.audioMatched + ' line' + (r.audioMatched === 1 ? '' : 's') + (opts.audio === 'bundle' ? ' joined in ' : ' in ') + r.audio + (r.audioMissing ? ' (' + r.audioMissing + ' segment' + (r.audioMissing === 1 ? '' : 's') + ' without a playable clip)' : '') : ''), 'ok');
+          if (r) FS.toast('Saved ' + (r.paths || [r.path]).join('; ') + ' — ' + r.examples + ' example' + (r.examples === 1 ? '' : 's') + (r.texts.length > 1 ? ' in ' + r.texts.length + ' texts' : '') + (r.skipped ? ', ' + r.skipped + ' skipped' : '') + (r.audio ? '; audio: ' + r.audioMatched + ' line' + (r.audioMatched === 1 ? '' : 's') + (opts.audio === 'bundle' ? ' in ' : ' clipped in ') + r.audio + (r.audioMissing ? ' (' + r.audioMissing + ' segment' + (r.audioMissing === 1 ? '' : 's') + ' without a playable clip)' : '') : ''), 'ok');
           m.close(); resolve(r);
         } catch (e) { FS.toast('Export failed: ' + e.message, 'error'); }
       } }, 'Export…'));

@@ -375,46 +375,70 @@ class Api:
         target = path or self._save_dialog((wopts["title"] or "examples") + ".flextext")
         if not target:
             return None
+        target = Path(target)
+        # one FILE per baseline writing system (Seth, 2026-10-17: "handle different baseline
+        # writing systems gracefully … by having one different text for each"): a FLEx text has
+        # one vernacular WS, and the Audio Segmenter pairs a .flextext with the recording of the
+        # SAME NAME and gives no recording to a file holding several texts. `oneFile` keeps them
+        # together as several texts of one file instead.
+        if len(groups) > 1 and not opts.get("oneFile"):
+            plan = [(target.with_name(f"{target.stem} ({k}){target.suffix or '.flextext'}"), [(k, v)]) for k, v in groups]
+        else:
+            plan = [(target, groups)]
         # audio (Seth, 2026-10-16: "grab audio segments and match them"; 2026-10-17: "concatenate
-        # the audio as a single audio file stored in the text media file … with a generated
-        # click inserted at join points … default to concatenated"): 'bundle' = one 16-bit mono
-        # WAV per exported text, every line's clip in order with a click between, offsets
-        # rewritten; 'clips' = one small WAV per line; 'original' keeps the source recordings
-        # and offsets; 'none' drops the timing. Both written files go into the chosen folder
-        # (a project's LinkedFiles/AudioVisual, ideally) or one next to the .flextext.
+        # the audio as a single audio file stored in the text media file … with a generated click
+        # inserted at join points … default to concatenated … per flex object, not per flex text
+        # line"): 'bundle' = one 16-bit mono WAV per text, one piece per EXAMPLE with a click
+        # between, named like its .flextext and next to it (or in the chosen folder); 'clips' = one
+        # small WAV per line, in `<name>-audio/` or the chosen folder; 'original' keeps the source
+        # recordings and offsets; 'none' drops the timing. In a project's LinkedFiles/AudioVisual
+        # the locations are relative, as FLEx stores them.
         audio = opts.get("audio") or "bundle"
         audio_out = {"path": "", "matched": 0, "missing": 0}
-        if audio in ("clips", "bundle"):
-            folder = Path(opts.get("audioFolder") or Path(target).with_name(Path(target).stem + "-audio"))
-            linked_root = next((p for p in [folder] + list(folder.parents) if p.name.lower() == "linkedfiles"), None)
-            stem = "".join(c if c.isalnum() or c in "-_" else "-" for c in (wopts["title"] or "examples")).strip("-") or "examples"
-            for k, v in groups:
-                suffix = f"-{k}" if len(groups) > 1 else ""
+        chosen = Path(opts["audioFolder"]) if opts.get("audioFolder") else None
+        stem = "".join(c if c.isalnum() or c in "-_" else "-" for c in (wopts["title"] or "examples")).strip("-") or "examples"
+        for out, file_groups in plan:
+            for k, v in file_groups:
+                suffix = f"-{k}" if len(file_groups) > 1 else ""
                 if audio == "clips":
-                    r = self._flex.clip_audio(v, folder, stem + suffix, linked_root)
+                    folder = chosen or out.with_name(out.stem + "-audio")
+                elif audio == "bundle":
+                    folder = chosen or out.parent
+                else:
+                    if audio == "none":
+                        for ex in v:
+                            for seg in ex["text"].get("segments") or []:
+                                seg["begin"] = seg["end"] = None
+                    continue
+                linked_root = next((p for p in [folder] + list(folder.parents) if p.name.lower() == "linkedfiles"), None)
+                if audio == "clips":
+                    r = self._flex.clip_audio(v, folder, stem + (f"-{k}" if len(groups) > 1 else ""), linked_root)
                     where = r["folder"]
                 else:
-                    r = self._flex.bundle_audio(v, folder / f"{stem}{suffix}.wav", linked_root)
+                    r = self._flex.bundle_audio(v, folder / f"{out.stem}{suffix}.wav", linked_root)
                     where = r["path"]
                 audio_out["matched"] += r["matched"]
                 audio_out["missing"] += r["missing"]
-                if where and where not in audio_out["path"]:
+                if where and where not in audio_out["path"].split("; "):
                     audio_out["path"] = (audio_out["path"] + "; " if audio_out["path"] else "") + where
-        elif audio == "none":
-            for _, v in groups:
-                for ex in v:
-                    for seg in ex["text"].get("segments") or []:
-                        seg["begin"] = seg["end"] = None
-        xml = build_flextext([ex for _, v in groups for ex in v], wopts)
         # never hand FLEx a file its importer would fail on (Seth, 2026-10-16: a schema-valid
-        # export stopped FLEx with "Object reference not set…"); say what and where instead
+        # export stopped FLEx with "Object reference not set…"); say what and where instead —
+        # every file is checked before any is written
         from .flex.flextext_check import import_problems
-        problems = import_problems(xml)
-        if problems:
-            raise ValueError("This export would not import into FLEx, so it was not saved: "
-                             + "; ".join(problems[:5]) + (f" (and {len(problems) - 5} more)" if len(problems) > 5 else ""))
-        Path(target).write_text(xml, encoding="utf-8", newline="\n")
-        return {"path": target, "examples": sum(len(v) for _, v in groups), "texts": [{"ws": k, "examples": len(v)} for k, v in groups], "skipped": len(skipped),
+        xmls = []
+        for out, file_groups in plan:
+            # a text per file keeps its writing system in its title, as in a shared file
+            title = wopts["title"] + (f" ({file_groups[0][0]})" if len(plan) > 1 else "")
+            xml = build_flextext([ex for _, v in file_groups for ex in v], dict(wopts, title=title))
+            problems = import_problems(xml)
+            if problems:
+                raise ValueError("This export would not import into FLEx, so it was not saved: "
+                                 + "; ".join(problems[:5]) + (f" (and {len(problems) - 5} more)" if len(problems) > 5 else ""))
+            xmls.append((out, xml))
+        for out, xml in xmls:
+            out.write_text(xml, encoding="utf-8", newline="\n")
+        return {"path": str(plan[0][0]), "paths": [str(out) for out, _ in plan],
+                "examples": sum(len(v) for _, v in groups), "texts": [{"ws": k, "examples": len(v)} for k, v in groups], "skipped": len(skipped),
                 "audio": audio_out["path"], "audioMatched": audio_out["matched"], "audioMissing": audio_out["missing"]}
 
     def flextext_preview(self, items: list[dict]) -> dict:

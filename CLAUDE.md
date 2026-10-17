@@ -330,7 +330,11 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
   Close anyway; ✕ again = background), then destroys the window.
 - Exporting a collection's examples as a `.flextext` (`flex/flextext_writer.py`, `Api.export_note_flextext`,
   Seth, 2026-10-16): one `<interlinear-text>` PER BASELINE WRITING SYSTEM (a FLEx text has one
-  vernacular WS), one paragraph per example, one phrase per segment, every writing-system
+  vernacular WS), and since 2026-10-17 each in its OWN FILE, `<name> (<ws>).flextext`, titled
+  `<title> (<ws>)` (Seth: "handle different baseline writing systems gracefully … one different
+  text for each"; the Audio Segmenter gives no recording to a file holding several texts —
+  `importFile` in flextext-editor's app.js); `oneFile` puts them together again. One paragraph per
+  example, one phrase per segment, every writing-system
   alternative as its own `<item lang>` (backends attach `*Alts` only when asked: `get_text(…,
   alts=True)` / `get_object(…, alts=True)`, see `model.fill_alts`). Text / paragraph / phrase
   GUIDs are NEW (an original GUID would make FLEx's import touch the source text); word GUIDs
@@ -338,15 +342,20 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
   GUIDs) and, optionally, a `flexscratchpad://note/<id>` link and the note's markdown as the
   text comment. Audio (`opts.audio`, the user's choice in the dialog; Seth, 2026-10-17:
   "default to concatenated"): `bundle` (default) = the text's ONE media file, a 16-bit mono WAV
-  of every line's clip in order with a generated CLICK at each join (500 ms silence, 5 ms 2 kHz
-  fading sine, 500 ms silence — the Visual Stimulus Kit's joiner,
-  `videoannotationtool/vat/audio/joiner.py`; its peak is the quieter neighbour's, 0.03–0.5),
-  offsets rewritten (`audio.concat_clips`, `FlexService.bundle_audio`); `clips` = one small
-  16-bit mono WAV PER LINE (`audio.to_mono16`, `FlexService.clip_audio`), each phrase pointing at
-  its own `<media>` from 0 to its length. Both go into `<title>-audio/` or a chosen folder —
-  inside a LinkedFiles tree the locations are relative to it (`AudioVisual/x.wav`, as FLEx
-  stores media); `original` keeps the source
-  recordings and offsets; `none` drops timing.
+  NAMED LIKE ITS .flextext and beside it (the Segmenter pairs a text and a recording by name,
+  `satBase`), one piece PER EXAMPLE ("an example that's multiple lines long … treated as a unit.
+  So per flex object, not per flex text line": cut once from its first timed line's begin to its
+  last one's end, so its lines keep their own timing and pauses) with a generated CLICK between
+  examples only (500 ms silence, 5 ms 2 kHz fading sine, 500 ms silence — the Visual Stimulus
+  Kit's joiner, `videoannotationtool/vat/audio/joiner.py`; its peak is the quieter neighbour's,
+  0.03–0.5), offsets rewritten (`audio.concat_clips`, `FlexService.bundle_audio`); `clips` = one
+  small 16-bit mono WAV PER LINE (`audio.to_mono16`, `FlexService.clip_audio`) in
+  `<name>-audio/`, each phrase pointing at its own `<media>` from 0 to its length. Either goes
+  into a chosen folder instead — inside a LinkedFiles tree the locations are relative to it
+  (`AudioVisual/x.wav`, as FLEx stores media); `original` keeps the source recordings and
+  offsets; `none` drops timing. Checked against the Segmenter's own reader
+  (`parseFlextext` + `segmentsFromOffsets`, run in node with its `test/lib/mini-xml-dom.mjs`):
+  one text per file, ordered spans.
   ⚠ VALID BY THE SCHEMA IS NOT IMPORTABLE (Seth, 2026-10-16: an export stopped FLEx with "Object
   reference not set…" on one `<word/>` with no items, and the file passed the XSD). FLEx reads a
   .flextext with XmlSerializer and never validates it; `BIRDInterlinearImporter.cs` assumes more
