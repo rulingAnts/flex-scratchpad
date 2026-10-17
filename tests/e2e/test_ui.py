@@ -3160,3 +3160,50 @@ def test_blank_flex_lines_are_left_out_and_flex_numbers_kept(app):
         { segments: [{ n: 1, label: '1.1', baseline: 'Kabir', words: [{ txt: 'Kabir' }] }, { n: 2, label: '1.2', baseline: '\u2028', words: [] }] })""", T_STORY)
     assert tsv.count("Word") == 1 and "Kabir" in tsv, tsv
     assert not [e for e in errors if "Failed to load resource" not in e], errors
+
+
+def test_something_playing_always_has_a_way_to_pause_and_stop_it(app):
+    """Seth, 2026-10-17: a collapsed example played from its preview kept playing after the preview
+    closed, with no player left to stop it."""
+    h, page, errors = app
+    tab = h.api.init()["config"]["tabs"][0]["dir"]
+    h.api.create_note(tab, "", "Chip audio", "Intro.\n\n{{flex:text %s seg=1-3 collapsed}}\n\nAfter." % T_STORY)
+    page.reload()
+    page.wait_for_selector(".note-card")
+    page.locator(".note-card", has_text="Chip audio").click()
+    page.wait_for_selector("#editor .flex-collapsed")
+    # the example's own player is on screen: no second one
+    page.locator("#editor .flex-collapsed").click()
+    page.wait_for_selector(".flex-overlay .text-obj .play-range")
+    page.locator(".flex-overlay .play-range").click()
+    page.wait_for_selector(".flex-overlay .transport")
+    page.wait_for_timeout(400)
+    assert page.locator("[data-test=now-playing]").is_hidden()
+    # the preview closes (Esc closes it first, without stopping the sound): the bar takes over
+    page.keyboard.press("Escape")
+    page.wait_for_selector(".flex-overlay", state="detached")
+    page.wait_for_selector("[data-test=now-playing]:not([hidden])")
+    assert page.evaluate("!!FS.audio.current")
+    assert "The dog and the river" in page.locator("[data-test=np-title]").inner_text()
+    page.locator("[data-test=np-play]").click()
+    assert page.evaluate("FS.audio.current && FS.audio.current.paused") is True
+    t0 = page.evaluate("FS.audio.current.el.currentTime")
+    page.wait_for_timeout(400)
+    assert page.evaluate("FS.audio.current.el.currentTime") == t0
+    page.locator("[data-test=np-play]").click()
+    page.wait_for_timeout(300)
+    assert page.evaluate("FS.audio.current && !FS.audio.current.paused") is True
+    page.locator("[data-test=np-stop]").click()
+    assert page.evaluate("FS.audio.current") is None
+    page.wait_for_selector("[data-test=now-playing]", state="hidden")
+    # reopened and played again, then Esc twice: the preview closes, then the sound stops
+    page.locator("#editor .flex-collapsed").click()
+    page.wait_for_selector(".flex-overlay .text-obj .play-range")
+    page.locator(".flex-overlay .play-range").click()
+    page.wait_for_timeout(300)
+    page.keyboard.press("Escape")
+    page.wait_for_selector(".flex-overlay", state="detached")
+    assert page.evaluate("!!FS.audio.current")
+    page.keyboard.press("Escape")
+    assert page.evaluate("FS.audio.current") is None
+    assert not [e for e in errors if "Failed to load resource" not in e], errors

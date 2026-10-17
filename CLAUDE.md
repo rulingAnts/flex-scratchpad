@@ -377,7 +377,15 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
   scroll bar (until released), a click inside an example or preview other than its ▶ / Play /
   player controls (4 s). The player (`.transport`) is `position: sticky; bottom` inside the
   example, so it rides the bottom of the view while the example runs on below and rests at the
-  example's end once you scroll there.
+  example's end once you scroll there. NOW PLAYING (Seth, 2026-10-17: "Any time something is playing, there should be a
+  play control and the ability to stop it" — a collapsed example's preview closed and took its
+  player along): `nowPlaying` (interlinear.js) shows a bar at the bottom of the window whenever
+  `audio.current` exists and the example's own `.transport` is not on screen (closed preview,
+  scrolled away, redrawn) — ❚❚/▶ (`audio.toggle`; the pause state lives on the playback, so both
+  players agree), ■ Stop, the progress (click to seek), "<text title> · <FLEx line>" (a click
+  scrolls to the example when it is still open). It is re-checked on the ticks (≤ every 150 ms)
+  and every 300 ms while paused. Esc stops playback when no modal, popover or preview is open
+  (Esc closes those first).
 - Refreshing: what FieldWorks saved after the project was opened only shows after LCM's
   `RefreshFromDisk`. The ↻ on ONE example calls `Api.flex_reload` (RefreshFromDisk, indexes
   kept so the next paste stays fast) before re-fetching; "Refresh all" (the toolbar, and a

@@ -771,3 +771,17 @@ table.md-table td.drop-target, table.md-table th.drop-target { outline: 2px soli
    stays at the bottom of the view while its example runs past it, then rests at the example's end */
 .segment.playing-line { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); border-radius: 6px; scroll-margin: 64px 0 72px; transition: background 0.2s; }
 .text-obj .transport { position: sticky; bottom: 8px; z-index: 4; background: var(--bg); border: 1px solid var(--border); box-shadow: 0 4px 14px rgba(15, 23, 42, 0.12); }
+
+/* now playing (interlinear.js nowPlaying): whenever audio plays and the example's own player is
+   not on screen — always a way to pause and to stop it */
+.now-playing { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 1200; display: flex; align-items: center; gap: 8px; width: min(560px, calc(100vw - 32px)); padding: 7px 12px; border-radius: 999px; background: var(--bg); border: 1px solid var(--border); box-shadow: var(--shadow); font-size: 12.5px; color: var(--muted); }
+.now-playing[hidden] { display: none; }
+.now-playing .np-ico { color: var(--accent); font-size: 15px; }
+.now-playing button.np-play, .now-playing button.np-stop { border: 1px solid var(--border); background: var(--bg); border-radius: 999px; width: 28px; height: 28px; color: var(--accent); font-size: 11px; flex: none; cursor: pointer; }
+.now-playing button.np-play.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.now-playing button.np-stop { color: var(--danger); }
+.now-playing .np-ttl { border: 0; background: none; color: var(--text); font-weight: 600; cursor: pointer; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 2px; }
+.now-playing .np-ttl:hover { color: var(--accent); text-decoration: underline; }
+.now-playing .np-bar { flex: 1; height: 6px; border-radius: 3px; background: var(--panel-2); position: relative; cursor: pointer; min-width: 40px; }
+.now-playing .np-bar > i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); border-radius: 3px; width: 0; }
+.now-playing .np-t { font-variant-numeric: tabular-nums; white-space: nowrap; }

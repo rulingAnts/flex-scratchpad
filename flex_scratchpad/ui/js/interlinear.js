@@ -186,6 +186,7 @@
       cancelAnimationFrame(c.raf);
       this.current = null;
       if (c.onEnd) c.onEnd();
+      nowPlaying.update();
     },
     /* Play [begin,end] ms of src (both in ms of the file). Resolves when started. */
     async play(src, begin, end, handlers) {
@@ -201,18 +202,73 @@
         if (c.onTick) c.onTick(t);
         if (t >= end - 15 || a.ended) {
           if (c.loop) { a.currentTime = begin / 1000; }
-          else { a.pause(); this.current = null; if (c.onEnd) c.onEnd(); return; }
+          else { a.pause(); this.current = null; if (c.onEnd) c.onEnd(); nowPlaying.update(); return; }
         }
         c.raf = requestAnimationFrame(tick);
       };
       try { await a.play(); } catch (e) { this.current = null; throw e; }
       c.raf = requestAnimationFrame(tick);
+      nowPlaying.update();
       return c;
     },
     seek(t) { const c = this.current; if (c) c.el.currentTime = Math.min(c.end, Math.max(c.begin, t)) / 1000; },
-    pause() { const c = this.current; if (c) { c.el.pause(); cancelAnimationFrame(c.raf); } },
-    resume() { const c = this.current; if (c) { c.el.play(); const tick = () => { if (this.current !== c) return; const t = c.el.currentTime * 1000; if (c.onTick) c.onTick(t); if (t >= c.end - 15) { if (c.loop) c.el.currentTime = c.begin / 1000; else { c.el.pause(); this.current = null; if (c.onEnd) c.onEnd(); return; } } c.raf = requestAnimationFrame(tick); }; c.raf = requestAnimationFrame(tick); } },
+    pause() { const c = this.current; if (c) { c.el.pause(); cancelAnimationFrame(c.raf); c.paused = true; if (c.onPause) c.onPause(true); nowPlaying.update(); } },
+    resume() { const c = this.current; if (c) { c.paused = false; if (c.onPause) c.onPause(false); c.el.play(); const tick = () => { if (this.current !== c) return; const t = c.el.currentTime * 1000; if (c.onTick) c.onTick(t); if (t >= c.end - 15) { if (c.loop) c.el.currentTime = c.begin / 1000; else { c.el.pause(); this.current = null; if (c.onEnd) c.onEnd(); nowPlaying.update(); return; } } c.raf = requestAnimationFrame(tick); }; c.raf = requestAnimationFrame(tick); nowPlaying.update(); } },
+    toggle() { const c = this.current; if (!c) return; if (c.paused) this.resume(); else this.pause(); },
   };
+
+  /* NOW PLAYING (Seth, 2026-10-17: "Any time something is playing, there should be a play control
+   * and the ability to stop it playing" — a collapsed example's preview closed under a playing
+   * clip and took its player with it). Whenever something plays and the example's own player is
+   * not on screen (its preview closed, the example scrolled away or redrawn), this bar at the
+   * bottom of the window has pause / resume, ■ Stop, the progress, and which text and line is
+   * playing (a click goes to it when it is still open). Esc stops playback too. */
+  const nowPlaying = (() => {
+    let node = null, playBtn, ttl, bar, timeEl, timer = 0;
+    const onScreen = (elx) => {
+      if (!elx || !elx.isConnected || !elx.offsetParent) return false;
+      const r = elx.getBoundingClientRect();
+      return r.bottom > 0 && r.top < window.innerHeight && r.width > 0;
+    };
+    function build() {
+      playBtn = el('button', { class: 'np-play on', title: 'Pause', 'data-test': 'np-play', onclick: () => audio.toggle() }, '❚❚');
+      ttl = el('button', { class: 'np-ttl', title: 'Show where it is playing', 'data-test': 'np-title', onclick: () => { const c = audio.current; const box = c && c.box; if (box && box.isConnected) box.scrollIntoView({ block: 'center', behavior: 'smooth' }); else FS.toast('That example is no longer open; ■ stops it.'); } });
+      bar = el('div', { class: 'np-bar', onclick: (e) => { const c = audio.current; if (!c) return; const r = bar.getBoundingClientRect(); audio.seek(c.begin + (e.clientX - r.left) / r.width * (c.end - c.begin)); } }, el('i'));
+      timeEl = el('span', { class: 'np-t' });
+      node = el('div', { class: 'now-playing', id: 'now-playing', 'data-test': 'now-playing', role: 'region', 'aria-label': 'Now playing', hidden: true },
+        el('span', { class: 'np-ico', 'aria-hidden': 'true' }, '♪'), playBtn,
+        el('button', { class: 'np-stop', title: 'Stop (Esc)', 'data-test': 'np-stop', onclick: () => audio.stop() }, '■'),
+        ttl, bar, timeEl);
+      document.body.appendChild(node);
+    }
+    let last = 0;
+    function update(fromTick) {
+      const c = audio.current;
+      if (!c) { if (node) node.hidden = true; clearInterval(timer); timer = 0; return; }
+      const now = performance.now();
+      if (fromTick === true && now - last < 150) return;    // the playhead ticks every frame; a few looks a second do
+      last = now;
+      if (!timer) timer = setInterval(() => update(), 300);   // paused clips do not tick: look anyway
+      if (!node) build();
+      const own = onScreen(c.transport);
+      node.hidden = own;
+      if (own) return;
+      const t = c.el.currentTime * 1000, f = Math.min(1, Math.max(0, (t - c.begin) / Math.max(1, c.end - c.begin)));
+      bar.firstChild.style.width = (f * 100) + '%';
+      timeEl.textContent = FS.fmtTime(t - c.begin) + ' / ' + FS.fmtTime(c.end - c.begin);
+      playBtn.textContent = c.paused ? '▶' : '❚❚';
+      playBtn.title = c.paused ? 'Play' : 'Pause';
+      playBtn.classList.toggle('on', !c.paused);
+      const line = c.lineAt ? c.lineAt(t) : '';
+      ttl.textContent = (c.title || 'Playing') + (line ? ' · ' + line : '');
+    }
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape' || !audio.current || e.defaultPrevented) return;
+      if (document.querySelector('.modal-backdrop, .popover, .flex-overlay')) return;   // Esc closes those first
+      audio.stop();
+    });
+    return { update };
+  })();
   FS.audio = audio;
 
   /* Capture a played range with MediaRecorder when Python could not cut the clip itself. */
@@ -471,8 +527,11 @@
       return hit ? hit.n : null;
     };
     try {
+      const labelOf2 = (n) => { const sg = segs.find((x) => x.n === n); return sg ? (sg.label || String(sg.n)) : ''; };
       await audio.play(src, offBegin, offEnd, {
-        onTick: (t) => { transport.tick(t); const n = lineAt(t); if (n != null) light(n); },
+        title: obj.title || '', box, transport: transport.el, onPause: (p) => transport.showPaused(p),
+        lineAt: (t) => { const n = lineAt(t); return n == null ? '' : labelOf2(n); },
+        onTick: (t) => { transport.tick(t); const n = lineAt(t); if (n != null) light(n); nowPlaying.update(true); },
         onEnd: () => { light(null); transport.done(); if (btn) btn.classList.remove('playing'); if (captureClip.active) { try { captureClip.active.stop(); } catch (e) { /* ignore */ } captureClip.active = null; } },
       });
       if (btn) btn.classList.add('playing');
@@ -500,19 +559,19 @@
     const t = el('div', { class: 'transport' }, playBtn, loopBtn, bar, time,
       el('span', { class: 'muted small' }, FS.fmtTime(begin) + '–' + FS.fmtTime(end)));
     box.appendChild(t);
-    let paused = false, finished = false;
+    let finished = false;
+    const showPaused = (p) => { playBtn.textContent = p ? '▶' : '❚❚'; playBtn.title = p ? 'Play' : 'Pause'; playBtn.classList.toggle('on', !p); };
     playBtn.addEventListener('click', () => {
       if (finished) { box.querySelector('.seg-play') && box.querySelector('.seg-play').click(); return; }
-      if (paused) { audio.resume(); playBtn.textContent = '❚❚'; playBtn.classList.add('on'); }
-      else { audio.pause(); playBtn.textContent = '▶'; playBtn.classList.remove('on'); }
-      paused = !paused;
+      audio.toggle();
     });
     loopBtn.addEventListener('click', () => { if (audio.current) { audio.current.loop = !audio.current.loop; loopBtn.classList.toggle('on', audio.current.loop); } });
     bar.addEventListener('click', (e) => { const r = bar.getBoundingClientRect(); const f = (e.clientX - r.left) / r.width; audio.seek(offBegin + f * (offEnd - offBegin)); });
     return {
       tick(tm) { const f = Math.min(1, Math.max(0, (tm - offBegin) / (offEnd - offBegin))); bar.firstChild.style.width = (f * 100) + '%'; time.textContent = FS.fmtTime(tm - offBegin) + ' / ' + FS.fmtTime(end - begin); },
-      done() { finished = true; playBtn.textContent = '▶'; playBtn.classList.remove('on'); bar.firstChild.style.width = '100%'; setTimeout(() => { if (finished && t.isConnected) t.remove(); }, 4000); },
+      done() { finished = true; showPaused(true); bar.firstChild.style.width = '100%'; setTimeout(() => { if (finished && t.isConnected) t.remove(); }, 4000); },
       remove() { t.remove(); },
+      el: t, showPaused,
     };
   }
 
@@ -1160,5 +1219,5 @@
     });
   }
 
-  FS.interlinear = { blankSeg, render, renderText, renderEntry, renderWordform, renderChip, hydrateInline, openContext, wholeText, openOverlay, closeOverlay, isCollapsed, setCollapsed, styled, styledParts, invalidate, flexGet, openInFlex, labelOf, numberFor, flexTsv, HL_COLORS };
+  FS.interlinear = { blankSeg, nowPlaying, render, renderText, renderEntry, renderWordform, renderChip, hydrateInline, openContext, wholeText, openOverlay, closeOverlay, isCollapsed, setCollapsed, styled, styledParts, invalidate, flexGet, openInFlex, labelOf, numberFor, flexTsv, HL_COLORS };
 })();
