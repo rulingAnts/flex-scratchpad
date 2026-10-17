@@ -958,6 +958,7 @@
    *   force         render fully whatever the flags say (overlays) */
   async function render(container, spec, opts) {
     opts = opts || {};
+    if (spec.kind === 'file') return FS.files.render(container, spec, opts);   // an attached file, not a FLEx object
     if (isCollapsed(spec, opts)) { renderChip(container, spec, opts); return; }
     container.innerHTML = '';
     container.appendChild(el('div', { class: 'flex-obj' }, el('div', { class: 'flex-loading' }, 'Loading from FLEx…')));
@@ -1005,6 +1006,15 @@
       const src = span.dataset.src;
       const spec = R.parse(src);
       if (!spec) { span.classList.add('err'); return; }
+      if (spec.kind === 'file') {                  // an attached file: opens, or previews
+        FS.files.hydrateChip(span, spec, !opts ? {} : {
+          onSpecChange: (s) => opts.onSpecChange && opts.onSpecChange(s, src),
+          duplicate: opts.duplicate ? () => opts.duplicate(src) : null,
+          remove: opts.remove ? () => opts.remove(src) : null,
+          expandInline: opts.expandInline ? () => opts.expandInline(src) : null,
+        });
+        return;
+      }
       const kind = spec.kind === 'sense' ? 'entry' : spec.kind;
       flexGet(kind, spec.guid, spec.kind === 'text' && spec.seg ? spec.seg[0] : null, spec.kind === 'text' && spec.seg ? spec.seg[1] : null, false, null, spec.kind === 'text' ? spec.at : null)
         .then((obj) => { if (!span.isConnected) return; span.dataset.title = chipTitle(spec, obj); if (spec.kind === 'text') span.dataset.range = chipRange(spec, obj); if (obj.cached) span.classList.add('cached'); })

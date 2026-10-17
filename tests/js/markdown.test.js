@@ -222,3 +222,21 @@ test('collapsible headings: the fold rides in the file, not in the text; section
   assert.equal(MD.sectionEnd(b, 1), 1);                                   // not a heading
   assert.ok(!/collapsed/.test(MD.joinBlocks(b).split('\n')[0]));
 });
+
+test('an attached file in a line is a chip too (its own icon and name), alone on a line a block', () => {
+  const F = load(['util', 'flexref', 'markdown', 'files']);
+  const src = 'the survey {{file attachments/Survey%20ŋa.html}} and {{file C:/x/rec.wav "Recording 3"}} here';
+  const html = F.markdown.decorate(src, 'p');
+  assert.equal(html.replace(/<[^>]+>/g, '').replace(/&quot;/g, '"'), src);
+  assert.match(html, /data-kind="file" data-icon="🌐" data-title="Survey ŋa\.html"/);
+  assert.match(html, /data-kind="file" data-icon="🔊" data-title="Recording 3"/);
+  assert.equal(F.markdown.splitBlocks('{{file attachments/a.pdf}}')[0].type, 'flex');
+  assert.equal(F.files.kindOf('a/b/Notes.HTM'), 'html');
+  assert.equal(F.files.kindOf('setup.exe'), 'program');
+  assert.equal(F.files.kindOf('README'), 'file');
+  // a picture or a video shows in the note when it has a line of its own; anything else is a card
+  assert.equal(F.files.embedFor({ ref: 'attachments/photo 1.jpg', kind: 'image' }), '{{file attachments/photo%201.jpg preview}}');
+  assert.equal(F.files.embedFor({ ref: 'attachments/clip.mp4' }), '{{file attachments/clip.mp4 preview}}');
+  assert.equal(F.files.embedFor({ ref: 'attachments/a.pdf', kind: 'pdf' }), '{{file attachments/a.pdf}}');
+  assert.ok(F.files.isLinked('C:\\x\\y.pdf') && F.files.isLinked('\\\\server\\share\\y.pdf') && !F.files.isLinked('attachments/y.pdf'));
+});

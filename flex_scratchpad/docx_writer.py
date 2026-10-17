@@ -84,6 +84,8 @@ class Docx:
             props.append(f'<w:sz w:val="{int(r["size"]) * 2}"/>')
         if r.get("rtl"):
             props.append("<w:rtl/>")
+        if r.get("href") and not r.get("color"):
+            props.append('<w:color w:val="1F4F8F"/><w:u w:val="single"/>')
         rpr = f"<w:rPr>{''.join(props)}</w:rPr>" if props else ""
         parts = text.split("\n")
         out = []
@@ -92,7 +94,14 @@ class Docx:
                 out.append(f"<w:r>{rpr}<w:br/></w:r>")
             if part:
                 out.append(f'<w:r>{rpr}<w:t xml:space="preserve">{escape(part)}</w:t></w:r>')
-        return "".join(out)
+        xml = "".join(out)
+        if r.get("href"):
+            # a link (an attached file's file:/// URL): an external relationship of the document
+            rid = f"rIdLink{len(self.rels) + 1}"
+            self.rels.append(f'<Relationship Id="{rid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" '
+                             f'Target="{escape(str(r["href"]), {chr(34): "&quot;"})}" TargetMode="External"/>')
+            xml = f'<w:hyperlink r:id="{rid}" w:history="1">{xml}</w:hyperlink>'
+        return xml
 
     def runs(self, runs: list[dict] | None) -> str:
         return "".join(self.run(r) for r in (runs or []))

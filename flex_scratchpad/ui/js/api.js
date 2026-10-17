@@ -64,6 +64,14 @@
   FS.mockApi = function () {
     FS._mockActive = true;
     const demo = FS.demoData ? FS.demoData() : { entries: [], texts: {} };
+    const mockFiles = {};
+    const fileInfo = (ref) => {
+      const f = mockFiles[ref];
+      const name = String(ref).split(/[\\/]/).pop();
+      const ext = (/\.([^.]+)$/.exec(name) || [])[1] || '';
+      const kind = FS.files ? FS.files.kindOf(name) : 'file';
+      return { ref, name, linked: /^([A-Za-z]:|\/)/.test(ref), path: ref, kind: ext ? kind : 'file', exists: !!f, size: f ? f.size : null, fileUrl: f ? f.data : null };
+    };
     const notes = {};
     const config = { tabs: [{ dir: 'Notes', name: 'Notes', color: '#2f6fdb' }, { dir: 'Grammar', name: 'Grammar', color: '#0f766e' }],
       tags: [{ name: 'todo', color: '#b45309' }], flex: { source: 'demo', project: 'Kalu Demo' }, media: { byGuid: {}, folders: [] }, settings: { diacriticsInsensitive: true } };
@@ -129,6 +137,13 @@
       delete_folder: async (tab, folder) => { folders[tab] = folders[tab].filter((f) => f !== folder && !f.startsWith(folder + '/')); return true; },
       set_tags: async (t) => (config.tags = t), rename_tag: async () => 0, set_setting: async (k, v) => (config.settings[k] = v, config.settings),
       save_attachment: async (name, data) => ({ path: name, fileUrl: data, name }),
+      // attached files: kept in memory as data: URLs (the real program copies them into attachments/)
+      attach_files: async () => [], attach_paths: async () => [], locate_file: async () => null,
+      attach_dropped: async (names) => ({ files: [], missing: names || [] }),
+      attach_data: async (name, data) => { const ref = 'attachments/' + name; mockFiles[ref] = { data, size: Math.floor(((data || '').split(',')[1] || '').length * 3 / 4) }; return fileInfo(ref); },
+      file_info: async (ref) => fileInfo(ref),
+      open_file: async (ref) => { FS.toast('Would open ' + ref + ' in its program'); return { opened: true }; },
+      reveal_file: async () => false,
       flex_status: async () => status(), flex_projects: async () => ['Kalu Demo'],
       flex_configure: async () => status(), flex_open: async () => status(), flex_refresh: async () => status(), flex_reload: async () => status(),
       flex_get: async (kind, guid, a, b, _pc, _ws) => { if (kind === 'entry' || kind === 'sense') { const e = demo.entries.find((x) => x.guid === guid || x.senses.some((s) => s.guid === guid)); if (!e) throw new Error('No such entry'); return { ...e, cached: false }; } const t = demo.texts[guid]; if (!t) throw new Error('No such text'); return sliceText(t, a, b); },

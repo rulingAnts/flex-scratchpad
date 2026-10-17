@@ -19,7 +19,7 @@ from . import APP_NAME, __version__, build_id
 from .config import AppConfig
 from .flex import FlexService
 from .flex.lcm import FlexError
-from .notebook import Notebook, inline_tags
+from .notebook import ATTACH_DIR, Notebook, inline_tags
 
 
 def safe_filename(name: str) -> str:
@@ -38,6 +38,32 @@ def with_suffix(path: str, ext: str) -> str:
     return str(path)
 
 
+# What an attachment is, by extension: what the page can preview, and what is never STARTED
+# from a note (a click shows it in its folder instead, so opening a note's chip cannot run a
+# program).
+_KINDS = {
+    "html": {".html", ".htm", ".xhtml"},
+    "pdf": {".pdf"},
+    "image": {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico"},
+    "audio": {".wav", ".mp3", ".m4a", ".ogg", ".oga", ".opus", ".flac", ".aac", ".weba"},
+    "video": {".mp4", ".webm", ".m4v", ".mov", ".ogv"},
+    "program": {".exe", ".com", ".bat", ".cmd", ".ps1", ".psm1", ".psd1", ".vbs", ".vbe", ".js", ".jse",
+                ".wsf", ".wsh", ".msi", ".msp", ".mst", ".scr", ".pif", ".lnk", ".reg", ".hta", ".cpl",
+                ".jar", ".appref-ms", ".application", ".msc", ".gadget", ".inf", ".sct", ".url", ".dll",
+                ".sys", ".ocx", ".psc1", ".appx", ".msix", ".appinstaller", ".py", ".pyw", ".sh"},
+}
+
+
+def file_kind(p: Path) -> str:
+    if p.is_dir():
+        return "folder"
+    ext = p.suffix.lower()
+    for kind, exts in _KINDS.items():
+        if ext in exts:
+            return kind
+    return "file"
+
+
 class Api:
     """Only the public METHODS of this object are the API. pywebview inspects every public
     attribute (and recurses into objects), so all state lives in underscored attributes."""
@@ -47,6 +73,8 @@ class Api:
         self._window = None                     # set by app.py once the window exists
         self._lock = threading.RLock()
         self._demo = demo
+        self._drops: list[tuple[str, str, float]] = []   # (name, full path, when) from _on_drop
+        self._drop_cv = threading.Condition()
         self._open_notebook(notebook_dir or config.notebook_dir)
 
 
@@ -252,8 +280,40 @@ class Api:
             return None
         from .notebook import without_fold_marks
         # the note's own file, less the fold markers of closed headings (view state, not text)
-        Path(target).write_text(without_fold_marks(Path(n.path).read_text(encoding="utf-8")), encoding="utf-8", newline="\n")
+        text = without_fold_marks(Path(n.path).read_text(encoding="utf-8"))
+        Path(target).write_text(text, encoding="utf-8", newline="\n")
+        self._copy_attachments(text, Path(target).parent)
         return target
+
+    def _copy_attachments(self, text: str, dest: Path) -> int:
+        """The files a note has COPIED in (`{{file attachments/…}}`) go beside an exported .md
+        in an attachments/ folder of its own, so the export's references still find them.
+        Linked files stay where they are. Never overwrites a different file of that name."""
+        import re
+        import shutil
+        n = 0
+        for m in re.finditer(r"\{\{\s*file\s+([^\s}]+)", text or ""):
+            ref = re.sub(r"%([0-9A-Fa-f]{2})", lambda x: chr(int(x.group(1), 16)), m.group(1))
+            if not ref.startswith(ATTACH_DIR + "/"):
+                continue
+            try:
+                src = self._nb.resolve_file(ref)
+                if not src.is_file():
+                    continue
+                out = (dest / ref).resolve()
+                if dest.resolve() not in out.parents:
+                    continue
+                if out.exists() and out.stat().st_size == src.stat().st_size:
+                    continue
+                if out.exists():            # another file by that name is already there: keep it
+                    continue
+                out.parent.mkdir(parents=True, exist_ok=True)
+                if out != src:
+                    shutil.copy2(src, out)
+                    n += 1
+            except (OSError, ValueError):
+                continue
+        return n
 
     def export_note_docx(self, note_id: str, doc: dict, path: str | None = None) -> str | None:
         """Word document from the page's export model (zero-dependency writer)."""
@@ -419,6 +479,119 @@ class Api:
         raw = base64.b64decode(data_base64.split(",", 1)[-1])
         p = self._nb.save_attachment(name, raw)
         return {"path": str(p), "fileUrl": p.resolve().as_uri(), "name": p.name}
+
+    # -- files attached to notes (Seth, 2026-10-17) ------------------------------------
+    #
+    # A `{{file <ref> "label"}}` embed: `ref` is `attachments/<name>` for a file COPIED into the
+    # notebook (the default), or an absolute path for a file LINKED where it is (the user's
+    # choice). A click opens it in the program Windows associates with it; web pages, PDFs,
+    # pictures, audio and video can also be previewed in the window.
+
+    def _file_item(self, ref: str) -> dict:
+        p = self._nb.resolve_file(ref)
+        linked = Path(ref).is_absolute() or ref[1:3] in (":\\", ":/") or ref.startswith("\\\\")
+        info = {"ref": ref, "name": p.name, "linked": bool(linked), "path": str(p), "kind": file_kind(p),
+                "exists": p.exists(), "size": None, "fileUrl": None}
+        if info["exists"]:
+            info["fileUrl"] = p.resolve().as_uri()
+            if p.is_file():
+                try:
+                    info["size"] = p.stat().st_size
+                except OSError:
+                    pass
+        return info
+
+    def _attach_path(self, path: str, link: bool) -> dict:
+        p = Path(path)
+        if not p.exists():
+            raise ValueError(f"Not found: {path}")
+        if p.is_dir() or link:          # a folder is always linked: copying one could be anything
+            return self._file_item(str(p.resolve()))
+        return self._file_item(self._nb.add_file(p.name, src=p))
+
+    def attach_files(self, link: bool = False) -> list[dict]:
+        """Pick files to attach; copied into attachments/ unless `link`. [] when cancelled."""
+        if self._window is None:
+            return []
+        import webview
+        try:
+            dt = webview.FileDialog.OPEN
+        except AttributeError:  # pywebview 4
+            dt = webview.OPEN_DIALOG
+        res = self._window.create_file_dialog(dt, allow_multiple=True)
+        return [self._attach_path(p, link) for p in (res or [])]
+
+    def attach_paths(self, paths: list[str], link: bool = False) -> list[dict]:
+        return [self._attach_path(p, link) for p in paths or []]
+
+    def attach_data(self, name: str, data_base64: str) -> dict:
+        """A file whose bytes the page has but whose path it does not (copied, never linked)."""
+        raw = base64.b64decode((data_base64 or "").split(",", 1)[-1])
+        return self._file_item(self._nb.add_file(name, data=raw))
+
+    def _on_drop(self, event: dict) -> None:
+        """pywebview's own drop handler (app.py): the only place a dropped file's full path is
+        known. Kept for a few seconds for the page's drop handler to claim by name."""
+        import time
+        files = ((event or {}).get("dataTransfer") or {}).get("files") or []
+        with self._drop_cv:
+            now = time.monotonic()
+            self._drops = [d for d in self._drops if now - d[2] < 10]
+            for f in files:
+                if f.get("pywebviewFullPath"):
+                    self._drops.append((f.get("name") or Path(f["pywebviewFullPath"]).name, f["pywebviewFullPath"], now))
+            self._drop_cv.notify_all()
+
+    def attach_dropped(self, names: list[str], link: bool = False) -> dict:
+        """Attach files just dropped on the page, by name. pywebview reports their paths on
+        another thread, so wait for them briefly. {files: [...], missing: [names]} — the page
+        sends a missing file's bytes instead (attach_data), which can only copy it."""
+        import time
+        want = list(names or [])
+        found: dict[str, str] = {}
+        deadline = time.monotonic() + 1.5
+        with self._drop_cv:
+            while True:
+                for name in want:
+                    if name in found:
+                        continue
+                    for d in self._drops:
+                        if d[0] == name:
+                            found[name] = d[1]
+                            self._drops.remove(d)
+                            break
+                left = deadline - time.monotonic()
+                if len(found) == len(want) or left <= 0:
+                    break
+                self._drop_cv.wait(left)
+        return {"files": [self._attach_path(found[n], link) for n in want if n in found],
+                "missing": [n for n in want if n not in found]}
+
+    def file_info(self, ref: str) -> dict:
+        return self._file_item(ref)
+
+    def open_file(self, ref: str) -> dict:
+        """Open an attachment in its default program. A program or script is never started from
+        a note: it is shown in its folder instead ({opened: False, shown: True})."""
+        p = self._nb.resolve_file(ref)
+        if not p.exists():
+            raise ValueError(f"The file is missing: {p}")
+        if file_kind(p) == "program":
+            return {"opened": False, "shown": self._reveal(p), "reason": "program"}
+        return {"opened": self._open_url(str(p))}
+
+    def reveal_file(self, ref: str) -> bool:
+        p = self._nb.resolve_file(ref)
+        return self._reveal(p if p.exists() else p.parent)
+
+    def locate_file(self, ref: str) -> dict | None:
+        """A missing attachment: pick the file again. A copied one is copied again, a linked one
+        is linked to the new place. None when cancelled."""
+        if self._window is None:
+            return None
+        item = self._file_item(ref)
+        picked = self._dialog("open", allow_multiple=False)
+        return self._attach_path(picked, item["linked"]) if picked else None
 
     # -- FLEx ---------------------------------------------------------------------------
 

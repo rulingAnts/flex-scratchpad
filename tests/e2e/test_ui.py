@@ -2814,3 +2814,103 @@ def test_texts_used_in_a_note_a_selection_a_folder_and_a_collection(app):
     page.wait_for_selector("[data-test=texts-used]")
     assert page.locator("[data-test=texts-used-title]").all_inner_texts() == ["الكلب والنهر"]
     assert not errors
+
+
+def test_attached_files_open_preview_drop_and_never_start_a_program(app):
+    """Seth, 2026-10-17: attachments in notes, as chips that open the file in its own program,
+    a web page in a preview (sandboxed: its scripts run, this window is out of its reach) with
+    Open in browser; copied into attachments/ by default, linked on request."""
+    h, page, errors = app
+    opened, shown = [], []
+    h.api._open_url = lambda u: opened.append(u) or True
+    h.api._reveal = lambda p: shown.append(str(p)) or True
+    src = h.tmp / "from-elsewhere"
+    src.mkdir()
+    (src / "preview ŋa.html").write_text(
+        "<!doctype html><meta charset=utf-8><body><p id=a>page</p><script>"
+        "document.getElementById('a').textContent='scripts ran';"
+        "var r='isolated';try{r=parent.document.title?'REACHED THE APP':'isolated';}catch(e){}"
+        "try{if(parent.pywebview)r='REACHED THE API';}catch(e){}"
+        "document.body.insertAdjacentHTML('beforeend','<p id=b>'+r+'</p>');</script>", encoding="utf-8")
+    (src / "notes.pdf").write_bytes(b"%PDF-1.4\n%%EOF\n")
+    (src / "tool.bat").write_text("echo hi", encoding="utf-8")
+    html = h.api.attach_paths([str(src / "preview ŋa.html")])[0]
+    pdf = h.api.attach_paths([str(src / "notes.pdf")])[0]
+    bat = h.api.attach_paths([str(src / "tool.bat")], True)[0]
+    assert html["ref"] == "attachments/preview ŋa.html" and bat["linked"]
+    tab = h.api.init()["config"]["tabs"][0]["dir"]
+    body = "See the {{file attachments/preview%20ŋa.html}} page and {{file " + bat["ref"].replace(" ", "%20") + " \"the tool\"}}.\n\n{{file attachments/notes.pdf}}\n\nEnd."
+    h.api.create_note(tab, "", "Field trip", body)
+    page.reload()
+    page.wait_for_selector(".note-card")
+    page.locator(".note-card", has_text="Field trip").click()
+    chip = page.locator("#editor .md-embed[data-kind=file]").first
+    chip.wait_for()
+    assert chip.get_attribute("data-icon") == "🌐" and chip.get_attribute("data-title") == "preview ŋa.html"
+    # a web page: the preview, its scripts running, the app out of its reach
+    chip.click()
+    page.wait_for_selector("[data-test=file-preview] iframe[sandbox]")
+    frame = page.frame_locator("[data-test=file-preview] iframe")
+    assert frame.locator("#a").inner_text() == "scripts ran"
+    assert frame.locator("#b").inner_text() == "isolated"
+    page.locator("[data-test=file-open]").click()                # Open in browser = Windows' choice for .html
+    page.wait_for_timeout(200)
+    assert opened and opened[-1].endswith("preview ŋa.html"), opened
+    page.keyboard.press("Escape")
+    # a program is never started: the click shows it in its folder
+    page.locator("#editor .md-embed[data-kind=file]").nth(1).click()
+    page.wait_for_timeout(300)
+    assert len(opened) == 1 and shown and shown[-1].endswith("tool.bat"), (opened, shown)
+    # the PDF on a line of its own is a card; Open hands it to its program
+    card = page.locator("[data-test=file-card]")
+    card.wait_for()
+    assert "notes.pdf" in card.inner_text()
+    card.locator("[data-test=file-open-btn]").click()
+    page.wait_for_timeout(200)
+    assert opened[-1].endswith("notes.pdf")
+    # a web page can be shown IN the note too: the ⋯ menu, saved as `preview`
+    page.locator("#editor .blk-body", has_text="End.").click()
+    page.keyboard.press("End")
+    page.keyboard.press("Enter")
+    page.keyboard.type("x ")
+    # drop a file from the desktop into that line: copied into attachments/, a chip where it fell
+    target = page.locator("#editor .blk-body", has_text="x").last
+    box = target.bounding_box()
+    page.evaluate("""([x, y]) => {
+        const dt = new DataTransfer();
+        dt.items.add(new File(['dropped bytes'], 'dropped notes.txt', { type: 'text/plain' }));
+        const at = document.elementFromPoint(x, y);
+        for (const type of ['dragenter', 'dragover', 'drop']) at.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, dataTransfer: dt }));
+    }""", [box["x"] + box["width"] - 4, box["y"] + box["height"] / 2])
+    page.wait_for_function("() => [...document.querySelectorAll('#editor .md-embed[data-kind=file]')].some((x) => x.dataset.title === 'dropped notes.txt')", timeout=8000)
+    assert (h.api._nb.root / "attachments" / "dropped notes.txt").read_text() == "dropped bytes"
+    page.wait_for_timeout(1200)
+    assert "{{file attachments/dropped%20notes.txt}}" in body_of(h)
+    # a picture dropped below the last block is shown in the note (Seth: "images and videos
+    # would also work"), the file copied like any other
+    png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+    ed = page.locator("#editor").bounding_box()
+    page.evaluate("""([b64, x, y]) => {
+        const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+        const dt = new DataTransfer();
+        dt.items.add(new File([bytes], 'photo 1.png', { type: 'image/png' }));
+        const at = document.getElementById('editor');
+        for (const type of ['dragover', 'drop']) at.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, dataTransfer: dt }));
+    }""", [png, ed["x"] + 40, ed["y"] + ed["height"] - 10])
+    page.wait_for_selector("[data-test=file-inline] img.file-img", timeout=8000)
+    assert (h.api._nb.root / "attachments" / "photo 1.png").exists()
+    page.wait_for_timeout(1200)
+    assert "{{file attachments/photo%201.png preview}}" in body_of(h)
+    # the HTML page shown inside the note, via the menu of a card
+    nid = next(n["id"] for n in h.api.list_notes() if n["title"] == "Field trip")
+    h.api.save_note(nid, {"body": "{{file attachments/preview%20ŋa.html}}\n"})
+    page.reload()
+    page.wait_for_selector(".note-card")
+    page.locator(".note-card", has_text="Field trip").click()
+    page.locator("[data-test=file-more]").click()
+    page.locator("[data-test=file-menu-inline]").click()
+    page.wait_for_selector("[data-test=file-inline] iframe[sandbox]")
+    assert page.frame_locator("[data-test=file-inline] iframe").locator("#a").inner_text() == "scripts ran"
+    page.wait_for_timeout(1200)
+    assert "{{file attachments/preview%20ŋa.html preview}}" in body_of(h)
+    assert not [e for e in errors if "Failed to load resource" not in e], errors

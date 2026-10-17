@@ -101,7 +101,7 @@
   const NEW_BLOCKS = [
     ['p', 'Paragraph', ''], ['h', 'Heading', '## '], ['list', 'Bulleted list', '- '], ['ol', 'Numbered list', '1. '],
     ['task', 'Checklist', '- [ ] '], ['quote', 'Quote', '> '], ['table', 'Table', () => FS.tables.template(3, 3)],
-    ['flex', 'FLEx example', ''], ['hr', 'Divider', '---'],
+    ['flex', 'FLEx example', ''], ['file', 'Attached file', ''], ['hr', 'Divider', '---'],
   ];
   const TEXT_TYPES = new Set(['p', 'h', 'list', 'quote', 'code']);
   const PLACEHOLDER = 'Write something, or type / for a menu';
@@ -461,6 +461,15 @@
           this.markDrop(to);
           return;
         }
+        if (FS.files && FS.files.hasFiles(e.dataTransfer) && !FS.drag) {
+          // files from Explorer: attached where they land; Alt links instead of copying
+          const to = this.dropTargetAt(e);
+          if (!to) { this.clearDropMarks(); return; }
+          e.preventDefault();
+          e.dataTransfer.dropEffect = e.altKey ? 'link' : 'copy';
+          this.markDrop(to);
+          return;
+        }
         if (!this.dragPayload(e)) return;
         const to = this.dropTargetAt(e);
         if (!to) { this.clearDropMarks(); return; }
@@ -481,6 +490,14 @@
           if (idx.length) this.moveBlocksTo(Math.min(...idx), Math.max(...idx), to.index, !!(e.ctrlKey || e.altKey));
           return;
         }
+        if (FS.files && !FS.drag && e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
+          const to = this.dropTargetAt(e);
+          this.clearDropMarks();
+          if (!to) return;
+          e.preventDefault();             // no stopPropagation: pywebview's own drop handler must see it (the files' paths)
+          this.dropFiles([...e.dataTransfer.files], to, !!e.altKey || e.dataTransfer.dropEffect === 'link');
+          return;
+        }
         const payload = this.dragPayload(e, true);
         if (!payload) return;
         const to = this.dropTargetAt(e);
@@ -491,6 +508,35 @@
         this.moveEmbed(from, to, payload, !!(e.ctrlKey || e.altKey));
         FS.drag = null;
       });
+    }
+    /* Files dropped on the note (Seth, 2026-10-17): copied into the notebook's attachments/ (or
+     * linked, with Alt) and put where they were dropped — in the line, in the table cell, or as
+     * blocks of their own between blocks. */
+    async dropFiles(files, to, link) {
+      const srcs = await FS.files.fromFiles(files, link);
+      if (!srcs.length || !this.blocks.includes(to.b || this.blocks[0])) return;
+      if (to.type === 'between') {
+        const at = Math.max(0, Math.min(to.index, this.blocks.length));
+        this.blocks.splice(at, 0, ...srcs.map((src) => ({ id: FS.uid(), type: 'flex', src })));
+        this.renderAll();
+        this.changed({ force: true });
+        return;
+      }
+      const joined = srcs.join(' ');
+      if (to.type === 'cell') {
+        const w = to.b.el && to.b.el._table;
+        if (w) w.insertInto(to.r, to.c, joined, to.caret);
+        this.changed({ force: true });
+        return;
+      }
+      const s = to.b.src;
+      const a = Math.max(0, Math.min(to.offset, s.length));
+      const padL = a > 0 && !/\s$/.test(s.slice(0, a)) ? ' ' : '';
+      const padR = a < s.length && !/^\s/.test(s.slice(a)) ? ' ' : '';
+      to.b.src = s.slice(0, a) + padL + joined + padR + s.slice(a);
+      this.redrawText(to.b);
+      this.changed({ force: true });
+      this.resplit(to.b);                          // a file alone on its line becomes a card
     }
     /* Where dragged blocks would land: before or after the block under the pointer (its top or
      * bottom half), never inside what is being dragged; below the last block at the end. */
@@ -924,7 +970,7 @@
         if (table) { e.preventDefault(); this.insertBlockSourceAtCaret(body, b, table); return; }
         // image paste (files) — beforeinput does not expose them
         const files = dt && dt.files;
-        if (files && files.length && this.opts.onPasteImage) { e.preventDefault(); this.opts.onPasteImage(files[0], (md) => this.insertTextAtCaret(body, b, md)); }
+        if (files && files.length && this.opts.onPasteFiles) { e.preventDefault(); this.opts.onPasteFiles([...files], (md) => this.insertTextAtCaret(body, b, md)); }
       });
     }
 
@@ -1391,6 +1437,7 @@
       this.changed({ force: true });
       this.focusBlock(i, 'end');
       if (kind === 'flex' && this.opts.onInsertFlex) this.opts.onInsertFlex();   // the picker fills the new paragraph
+      if (kind === 'file' && this.opts.onAttach) this.opts.onAttach();             // the file dialog fills it
       return nb;
     }
     /* The "Insert a block" section of a menu: one row per kind, Above / Below. */

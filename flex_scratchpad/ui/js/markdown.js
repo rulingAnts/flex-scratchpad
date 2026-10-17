@@ -144,7 +144,7 @@
     const taken = new Uint8Array(n);      // chars already claimed by code/embeds/links
     // 1. embeds and code spans (atomic)
     let m;
-    const embedRe = /\{\{\s*flex:[^{}]*\}\}/g;
+    const embedRe = /\{\{\s*(?:flex:|file\s)[^{}]*\}\}/g;
     while ((m = embedRe.exec(text))) {
       addRange(m.index, m.index + m[0].length, 'embed');
       out.embeds.push({ start: offset + m.index, end: offset + m.index + m[0].length, src: m[0] });
@@ -338,6 +338,10 @@
    * fills in from the object once it is known. */
   function embedAttrs(src) {
     const spec = FS.flexref && FS.flexref.parse ? FS.flexref.parse(src) : null;
+    if (spec && spec.kind === 'file') {          // an attached file: its own icon, its label or name
+      const f = FS.files ? FS.files.chipInfo(spec) : { icon: '📄', title: spec.label || spec.ref };
+      return ' contenteditable="false" draggable="true" data-src="' + esc(src) + '" data-kind="file" data-icon="' + f.icon + '" data-title="' + esc(f.title) + '"';
+    }
     const icon = !spec ? '?' : spec.kind === 'text' ? '¶' : spec.kind === 'wordform' ? 'ω' : '📖';
     const title = !spec ? 'FLEx object' : spec.label || (spec.kind + ' ' + spec.guid.slice(0, 8) + '…');
     return ' contenteditable="false" draggable="true" data-src="' + esc(src) + '" data-icon="' + icon + '" data-title="' + esc(title) + '"' + (spec && spec.kind === 'text' && spec.seg ? ' data-range="' + spec.seg[0] + (spec.seg[1] !== spec.seg[0] ? '–' + spec.seg[1] : '') + '"' : '');

@@ -10,7 +10,15 @@
  * style   = hl | b | u | i | s | color, with an optional colour: hl[#fff2a8]=…  color[red]=…
  * Words are numbered 1.. counting only real words (punctuation is skipped); characters are
  * grapheme clusters, 1-based, inclusive. Only "…" quotes are allowed inside {{ }} and no raw
- * `|`, so an embed can live inside a table cell. */
+ * `|`, so an embed can live inside a table cell.
+ *
+ * An ATTACHED FILE (Seth, 2026-10-17) is the same kind of embed without the `flex:`:
+ *   {{file attachments/Survey%20notes.pdf "Survey"}}     copied into the notebook (the default)
+ *   {{file C:/Recordings/elicitation 3.wav}}            → written C:/Recordings/elicitation%203.wav: linked where it is
+ *   {{file attachments/preview.html preview h=480}}     a web page shown in the note, 480 px high
+ * The reference is percent-encoded only where it must be (% space " { } | and controls), so
+ * Unicode names stay readable; a relative reference is inside the notebook, an absolute one is
+ * a link. spec = {kind: 'file', ref, label, extra}; `guid` is ''. */
 (function () {
   'use strict';
   const FS = (window.FS = window.FS || {});
@@ -26,7 +34,10 @@
   const ENTRY_FIELDS = ['cf', 'lf', 'mt', 'hn', 'note', 'sn', 'spos', 'gl', 'def', 'ex', 'tr', 'sub', 'snote', 'sem'];
   const DEFAULT_FIELDS = ['cf', 'mt', 'hn', 'sn', 'spos', 'gl', 'def', 'ex', 'tr', 'sub'];
   const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  const EMBED_RE = /\{\{\s*flex:[^{}]*\}\}/g;
+  const EMBED_RE = /\{\{\s*(?:flex:|file\s)[^{}]*\}\}/g;
+  const EMBED_LINE_RE = /^\s*\{\{\s*(?:flex:|file\s)[^{}]*\}\}\s*$/;
+  const encodeRef = (ref) => String(ref || '').replace(/[%\s"{}|\x00-\x1f]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0'));
+  const decodeRef = (s) => String(s || '').replace(/%([0-9A-Fa-f]{2})/g, (m, h) => String.fromCharCode(parseInt(h, 16)));
 
   const TARGET_RE = new RegExp('^(?:(' + LINES.join('|') + '):)?(\\d+)(?:\\.(\\d+))?(?::(\\d+)(?:-(\\d+))?)?(?:-(\\d+)(?:\\.(\\d+))?)?$');
   const QUOTED_RE = new RegExp('^(?:(' + LINES.join('|') + '):)?(\\*)?"(.*)"$');
@@ -102,8 +113,21 @@
     return items.map((s) => s.trim()).filter(Boolean);
   }
 
+  function parseFile(s) {
+    const m = /^file\s+(\S+)\s*([\s\S]*)$/.exec(s);
+    if (!m || m[1].startsWith('"')) return null;
+    const spec = { kind: 'file', guid: '', ref: decodeRef(m[1]), seg: null, at: null, lines: null, fields: null, senses: null, ws: null, styles: [], label: '', extra: {} };
+    for (const tok of tokenize(m[2])) {
+      if (tok.label != null) spec.label = tok.label;
+      else if (tok.flag) spec.extra[tok.flag] = true;
+      else spec.extra[tok.key] = tok.val;
+    }
+    return spec;
+  }
+
   function parse(src) {
     const s = String(src || '').trim().replace(/^\{\{\s*/, '').replace(/\s*\}\}$/, '');
+    if (/^file\s/.test(s)) return parseFile(s);
     const m = /^flex:(entry|sense|text|wordform)\s+([0-9a-fA-F-]{36})\s*([\s\S]*)$/i.exec(s);
     if (!m || !GUID.test(m[2])) return null;
     const spec = { kind: m[1].toLowerCase(), guid: m[2].toLowerCase(), seg: null, at: null, lines: null, fields: null, senses: null, ws: null, styles: [], label: '', extra: {} };
@@ -141,6 +165,12 @@
   }
 
   function serialize(spec) {
+    if (spec.kind === 'file') {
+      const parts = ['file ' + encodeRef(spec.ref)];
+      for (const [k, v] of Object.entries(spec.extra || {})) parts.push(v === true ? k : k + '=' + v);
+      if (spec.label) parts.push('"' + spec.label.replace(/"/g, '”') + '"');
+      return '{{' + parts.join(' ') + '}}';
+    }
     const parts = ['flex:' + spec.kind + ' ' + spec.guid];
     if (spec.seg) parts.push('seg=' + spec.seg[0] + (spec.seg[1] !== spec.seg[0] ? '-' + spec.seg[1] : ''));
     if (spec.at && spec.at[0]) parts.push('at=' + spec.at[0] + (spec.at[1] && spec.at[1] !== spec.at[0] ? '-' + spec.at[1] : ''));
@@ -326,10 +356,10 @@
   }
   FS.flexref = {
     ENTRY_FIELDS, DEFAULT_FIELDS, entryFields, visibleSenses,
-    LINES, STYLES, DEFAULT_LINES, GUID, EMBED_RE,
+    LINES, STYLES, DEFAULT_LINES, GUID, EMBED_RE, encodeRef, decodeRef,
     parse, serialize, parseTarget, serializeTarget, sameTarget,
     hasStyle, toggleStyle, clearStyles, resolveStyles, stylesFor, findAll,
     lineTextOfWord, lineTextOfSegment, findEmbeds,
-    isEmbedLine: (line) => /^\s*\{\{\s*flex:[^{}]*\}\}\s*$/.test(line || ''),
+    isEmbedLine: (line) => EMBED_LINE_RE.test(line || ''),
   };
 })();

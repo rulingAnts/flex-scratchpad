@@ -329,10 +329,16 @@
       openLink: openLink,
       onPasteLink: (text, insert) => FS.picker.pasteChooser(text, insert),
       onPasteLocate: (text, insert, fallback) => (S.flex && S.flex.open) ? FS.picker.locateChooser(text, insert, fallback) : fallback(),
-      onPasteImage: async (file, insert) => {
+      onPasteFiles: async (files, insert) => {
+        // a screenshot (a picture with no file behind it) is shown in the note, as before; a copied
+        // FILE becomes an attachment chip, copied into the notebook (Seth, 2026-10-17)
+        const shot = files.length === 1 && /^image\//.test(files[0].type) && (!files[0].name || /^image\.\w+$/i.test(files[0].name));
+        if (!shot) { const srcs = await FS.files.fromFiles(files, false); if (srcs.length) insert(srcs.join(' ')); return; }
+        const file = files[0];
         const b64 = await new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsDataURL(file); });
         try { const r = await FS.api.save_attachment(file.name || 'pasted.png', b64); insert('![' + (file.name || 'image') + '](' + (r.fileUrl || b64) + ')'); } catch (e) { FS.toast(e.message, 'error'); }
       },
+      onAttach: () => attachFiles(false),
       onSlash: (body, b) => slashMenu(body, b),
       onInsertFlex: () => insertFlex(),
     });
@@ -640,6 +646,23 @@
 
   /* ------------------------------------------------------------------ insert / slash */
   function insertFlex() { FS.picker.open((md, asBlock) => ensureEditor().insertMarkdown(md, asBlock)); }
+  /* Attach files (Seth, 2026-10-17): COPIED into the notebook's attachments/ unless `link`,
+   * then a file alone on its line becomes a card, after text a chip. */
+  async function attachFiles(link) {
+    if (!S.note || isCollection()) return;
+    const ed = ensureEditor();
+    const srcs = await FS.files.pick(link);
+    if (srcs.length) ed.insertMarkdown(srcs.join('\n\n'), true);
+  }
+  function attachMenu(anchor) {
+    FS.popover(anchor, (pop, close) => {
+      const item = (label, hint, fn, test) => pop.appendChild(el('button', { class: 'menu-item', 'data-test': test, onclick: () => { close(); fn(); } },
+        el('div', {}, label), el('div', { class: 'muted small' }, hint)));
+      item('📎 Copy into the notebook…', 'The note keeps its file wherever the notebook goes (the default).', () => attachFiles(false), 'attach-copy');
+      item('🔗 Link to the file where it is…', 'No copy: for big recordings, or a file you keep editing. The link breaks if the file moves.', () => attachFiles(true), 'attach-link');
+      pop.appendChild(el('div', { class: 'muted small', style: { padding: '6px 8px 2px' } }, 'Or drop files on the note (Alt+drop links them).'));
+    });
+  }
   /* Refresh all: every example in every note is re-fetched from FLEx and re-snapshotted,
    * then the open note is redrawn in place (scroll kept). */
   async function refreshAll() {
@@ -667,6 +690,8 @@
     FS.popover(body, (pop, close) => {
       const item = (label, fn) => pop.appendChild(el('button', { class: 'menu-item', onclick: () => { close(); fn(); } }, label));
       item('FLEx object…', insertFlex);
+      item('Attach a file…', () => attachFiles(false));
+      item('Link to a file…', () => attachFiles(true));
       item('Table', () => S.editor.insertMarkdown(FS.tables.template(3, 3), true));
       item('Chart', () => S.editor.insertMarkdown(FS.charts.template(), true));
       item('Checklist', () => S.editor.insertMarkdown('- [ ] ', false));
@@ -907,6 +932,12 @@
     $('btn-pin').addEventListener('click', () => { if (!S.note) return; S.note.pinned = !S.note.pinned; saveMeta({ pinned: S.note.pinned }); refreshLists(); });
     $('btn-note-menu').addEventListener('click', (e) => { if (S.note) noteMenu(e.currentTarget, S.note); });
     $('btn-insert-flex').addEventListener('click', insertFlex);
+    $('btn-attach').addEventListener('click', (e) => attachFiles(e.altKey));
+    $('btn-attach-more').addEventListener('click', (e) => attachMenu(e.currentTarget));
+    // A file dropped anywhere the note does not take it must never replace the page with the
+    // file (WebView2 would navigate to it): refuse the drop there.
+    document.addEventListener('dragover', (e) => { if (!e.defaultPrevented && FS.files.hasFiles(e.dataTransfer)) { e.preventDefault(); e.dataTransfer.dropEffect = 'none'; } });
+    document.addEventListener('drop', (e) => { if (!e.defaultPrevented && e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) e.preventDefault(); });
     $('toolbar').querySelectorAll('[data-ins]').forEach((b) => b.addEventListener('mousedown', (e) => { e.preventDefault(); toolbarAction(b.dataset.ins, b); }));
     $('btn-find').addEventListener('click', openFind);
     $('btn-markers').addEventListener('click', toggleMarkers);

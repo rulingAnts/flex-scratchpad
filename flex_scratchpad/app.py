@@ -134,6 +134,13 @@ def run(notebook_dir: str | None = None, demo: bool = False, debug: bool = False
             pass
 
     def on_loaded():
+        # A file dropped from Explorer: only pywebview's own drop handler learns its full path
+        # (the page sees a name and bytes), which "link instead of copy" needs (Seth, 2026-10-17).
+        try:
+            from webview.dom import DOMEventHandler
+            window.dom.document.events.drop += DOMEventHandler(api._on_drop, False, False)
+        except Exception:  # noqa: BLE001 — an older pywebview: dropped files are copied from their bytes
+            pass
         if open_url:
             open_link(open_url)
         links.watch_requests(open_link)

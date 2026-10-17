@@ -4,7 +4,8 @@ Layout (the notebook folder is self-describing; nothing here needs the app to be
 
     <notebook>/notebook.json                       tabs, tags, FLEx source, media mappings
     <notebook>/<Tab>/<Folder>/<Sub>/<slug>--<id>.md one note; directories ARE the tabs and folders
-    <notebook>/.scratchpad/                        trash, flex-cache, attachments (never scanned)
+    <notebook>/attachments/                        files attached to notes (never a tab, never scanned)
+    <notebook>/.scratchpad/                        trash, flex-cache, pasted images (never scanned)
 
 A note file is a small front-matter header followed by the markdown body:
 
@@ -44,6 +45,11 @@ CONFIG_NAME = "notebook.json"
 NOTE_KINDS = ("", "examples")
 EXAMPLE_LINE_RE = re.compile(r"^\s*\{\{flex:text\b[^\n]*\}\}\s*$", re.M)
 PRIVATE_DIR = ".scratchpad"
+# Files attached to notes (Seth, 2026-10-17): copied here under their own names, visible beside
+# the tabs so the notebook stays readable without the app; a `{{file attachments/…}}` embed in a
+# note points at one. At the notebook ROOT, not per tab, so an attachment chip moved or pasted
+# into a note in another tab still finds its file.
+ATTACH_DIR = "attachments"
 DEFAULT_TAB = "Notes"
 NOTE_SUFFIX = ".md"
 
@@ -197,8 +203,19 @@ def without_fold_marks(body: str) -> str:
 _INLINE_TAG = re.compile(r"(?<![\w#/&])#([\w][\w\-]*)", re.UNICODE)
 
 
+_FILE_EMBED = re.compile(r'\{\{\s*file\s+([^\s}]+)[^}"]*(?:"([^"]*)")?[^}]*\}\}')
+
+
+def _file_word(m: re.Match) -> str:
+    """An attached file in an excerpt: its label or its name, so the sentence still reads."""
+    if m.group(2):
+        return m.group(2)
+    ref = re.sub(r"%([0-9A-Fa-f]{2})", lambda x: chr(int(x.group(1), 16)), m.group(1))
+    return re.split(r"[\\/]", ref)[-1]
+
+
 def excerpt(body: str, n: int = 160) -> str:
-    s = _EMBED.sub(" ", without_fold_marks(body))
+    s = _EMBED.sub(" ", _FILE_EMBED.sub(_file_word, without_fold_marks(body)))
     s = re.sub(r"```[\s\S]*?```", " ", s)
     s = _MD_NOISE.sub("", s)
     s = re.sub(r"[*_`~=]{1,3}", "", s)
@@ -370,7 +387,7 @@ class Notebook:
             known = {t["dir"] for t in self.config["tabs"]}
             changed = False
             for entry in sorted(self.root.iterdir(), key=lambda p: p.name.casefold()):
-                if not entry.is_dir() or entry.name.startswith("."):
+                if not entry.is_dir() or entry.name.startswith(".") or entry.name == ATTACH_DIR:
                     continue
                 if entry.name not in known:
                     self.config["tabs"].append({
@@ -630,7 +647,7 @@ class Notebook:
         with self.lock:
             d = safe_dirname(name, "Tab")
             base, i = d, 2
-            while any(t["dir"] == d for t in self.config["tabs"]):
+            while any(t["dir"] == d for t in self.config["tabs"]) or d.casefold() == ATTACH_DIR:
                 d = f"{base} {i}"
                 i += 1
             tab = {"dir": d, "name": name.strip() or d, "color": color or TAB_COLORS[len(self.config["tabs"]) % len(TAB_COLORS)]}
@@ -835,6 +852,54 @@ class Notebook:
 
     # -- attachments -------------------------------------------------------------
 
+    @property
+    def files_dir(self) -> Path:
+        return self.root / ATTACH_DIR
+
+    def add_file(self, name: str, src: str | Path | None = None, data: bytes | None = None) -> str:
+        """Copy a file (from `src`, or `data`) into attachments/ under its own name and return
+        the reference a note uses (`attachments/<name>`). The same name with the same content
+        is the same attachment (reused, not copied again); another file of that name becomes
+        `name (2).ext`. Nothing already there is ever overwritten."""
+        name = _UNSAFE.sub("-", Path(name or (Path(src).name if src else "file")).name).strip(" .") or "file"
+        stem, ext = Path(name).stem[:80] or "file", Path(name).suffix[:16]
+        with self.lock:
+            self.files_dir.mkdir(parents=True, exist_ok=True)
+            k = 1
+            while True:
+                target = self.files_dir / (f"{stem}{ext}" if k == 1 else f"{stem} ({k}){ext}")
+                if not target.exists():
+                    break
+                if _same_content(target, src, data):
+                    return f"{ATTACH_DIR}/{target.name}"
+                k += 1
+            tmp = target.with_name(target.name + ".tmp")
+            if src is not None:
+                shutil.copyfile(src, tmp)
+                try:
+                    shutil.copystat(src, tmp)
+                except OSError:
+                    pass
+            else:
+                tmp.write_bytes(data or b"")
+            os.replace(tmp, target)
+            return f"{ATTACH_DIR}/{target.name}"
+
+    def resolve_file(self, ref: str) -> Path:
+        """The file an attachment reference names: a relative reference is inside the notebook
+        (and may not climb out of it), an absolute one is a LINKED file wherever it is."""
+        ref = (ref or "").strip()
+        if not ref:
+            raise ValueError("No file.")
+        p = Path(ref)
+        if p.is_absolute() or re.match(r"^[A-Za-z]:[\\/]", ref) or ref.startswith("\\\\"):
+            return p
+        full = (self.root / ref).resolve()
+        root = self.root.resolve()
+        if full != root and root not in full.parents:
+            raise ValueError("That file reference points outside the notebook.")
+        return full
+
     def save_attachment(self, name: str, data: bytes) -> Path:
         with self.lock:
             self.attachments_dir.mkdir(parents=True, exist_ok=True)
@@ -844,6 +909,28 @@ class Notebook:
             with open(target, "wb") as fh:
                 fh.write(data)
             return target
+
+
+def _same_content(target: Path, src, data) -> bool:
+    import hashlib
+    try:
+        size = Path(src).stat().st_size if src is not None else len(data or b"")
+        if target.stat().st_size != size:
+            return False
+
+        def digest(fh) -> str:
+            h = hashlib.sha256()
+            for chunk in iter(lambda: fh.read(1 << 20), b""):
+                h.update(chunk)
+            return h.hexdigest()
+        with open(target, "rb") as a:
+            mine = digest(a)
+        if src is not None:
+            with open(src, "rb") as b:
+                return mine == digest(b)
+        return mine == hashlib.sha256(data or b"").hexdigest()
+    except OSError:
+        return False
 
 
 def _match_tab(nb: Notebook, wanted: str, tab_dir: str) -> bool:

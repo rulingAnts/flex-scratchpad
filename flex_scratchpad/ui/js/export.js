@@ -137,7 +137,8 @@
           const x = spec.extra || {};
           const layout = { exNum: x.ex ? '(' + (++exNum) + ')' : '', indent: Math.max(0, Math.min(4, parseInt(x.indent, 10) || 0)) };
           let blk;
-          try { blk = await flexBlock(spec); } catch (e) { blk = { type: 'p', runs: [{ text: '[FLEx object unavailable: ' + (e.message || e) + ']', color: '#c0392b' }] }; }
+          if (spec.kind === 'file') blk = { type: 'p', runs: [await fileRun(spec)] };
+          else try { blk = await flexBlock(spec); } catch (e) { blk = { type: 'p', runs: [{ text: '[FLEx object unavailable: ' + (e.message || e) + ']', color: '#c0392b' }] }; }
           blocks.push(Object.assign(blk, layout));
         }
       } else if (b.type === 'table') {
@@ -168,16 +169,34 @@
     return { title: note.title || 'Untitled', blocks };
   }
 
-  /* Text that may contain {{flex …}} embeds: split into runs parts and object blocks. */
+  /* An attached file in an export (Seth, 2026-10-17): a Word / HTML / PDF file cannot hold it,
+   * so it is 📎 and its label, LINKED to the file (it opens on this computer; elsewhere it is
+   * the name). */
+  async function fileRun(spec) {
+    const ci = FS.files.chipInfo(spec);
+    let href = '';
+    try { const inf = await FS.files.info(spec.ref); if (inf.exists) href = inf.fileUrl || ''; } catch (e) { /* the name, unlinked */ }
+    const r = { text: '📎 ' + ci.title, color: '#1f4f8f' };
+    if (href) r.href = href;
+    return r;
+  }
+
+  /* Text that may contain {{flex …}} embeds: split into runs parts and object blocks. An
+   * attached file stays IN its line, as a linked run. */
   async function textWithEmbeds(text) {
     const parts = [];
-    let pos = 0;
+    let pos = 0, runs = [];
+    const flush = () => { if (runs.length) parts.push({ runs }); runs = []; };
     for (const e of R.findEmbeds(text)) {
-      if (e.start > pos) parts.push({ runs: runsOf(text.slice(pos, e.start)) });
-      try { parts.push(await flexBlock(e.spec)); } catch (err) { parts.push({ runs: [{ text: '[FLEx object unavailable]', color: '#c0392b' }] }); }
+      if (e.start > pos) runs.push(...runsOf(text.slice(pos, e.start)));
       pos = e.end;
+      if (e.spec.kind === 'file') { runs.push(await fileRun(e.spec)); continue; }
+      flush();
+      try { parts.push(await flexBlock(e.spec)); } catch (err) { parts.push({ runs: [{ text: '[FLEx object unavailable]', color: '#c0392b' }] }); }
     }
-    if (pos < text.length || !parts.length) parts.push({ runs: runsOf(text.slice(pos)) });
+    if (pos < text.length) runs.push(...runsOf(text.slice(pos)));
+    flush();
+    if (!parts.length) parts.push({ runs: [] });
     return parts.filter((p) => p.type || p.runs.some((r) => r.text.trim()) || parts.length === 1);
   }
 
@@ -215,6 +234,7 @@
     if (r.i) s = '<i>' + s + '</i>';
     if (r.u) s = '<u>' + s + '</u>';
     if (r.s) s = '<s>' + s + '</s>';
+    if (r.href) s = '<a href="' + esc(r.href) + '">' + s + '</a>';
     return css.length ? '<span style="' + css.join(';') + '">' + s + '</span>' : s;
   }
   const runsHtml = (runs) => (runs || []).map(runHtml).join('');
@@ -281,7 +301,7 @@
     for (const b of editor.blocks) {
       for (const e of R.findEmbeds(b.src || '')) {
         const sp = e.spec;
-        if (!sp) continue;
+        if (!sp || sp.kind === 'file') continue;
         items.push({ kind: sp.kind, guid: sp.guid, seg: sp.seg, at: sp.at, label: sp.label || '' });
       }
     }

@@ -1018,8 +1018,8 @@
           else {
             // the placeholder's copy and the cell's source drifted (another edit in between):
             // replace the embed for this GUID, so the change is never silently dropped
-            const re = new RegExp('\\{\\{flex:' + s.kind + '\\s+' + s.guid + '[^}]*\\}\\}', 'i');
-            t.rows[r][c] = re.test(cur) ? cur.replace(re, ns) : cur + ' ' + ns;
+            const re = s.kind === 'file' ? null : new RegExp('\\{\\{flex:' + s.kind + '\\s+' + s.guid + '[^}]*\\}\\}', 'i');
+            t.rows[r][c] = re && re.test(cur) ? cur.replace(re, ns) : cur + ' ' + ns;
           }
           ph.dataset.src = ns;
           commit();
