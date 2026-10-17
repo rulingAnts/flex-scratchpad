@@ -152,3 +152,13 @@ def test_a_stamped_build_id_wins(tmp_path, monkeypatch):
     finally:
         stamp.unlink()
         monkeypatch.setattr(flex_scratchpad, "_BUILD", None)
+
+
+def test_a_dispatched_prerelease_publishes_only_tested_packages():
+    import yaml
+    ci = yaml.safe_load((ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
+    job = ci["jobs"]["prerelease"]
+    assert set(job["needs"]) == {"test", "build-windows"} and "prerelease_version != ''" in job["if"]
+    assert job["permissions"] == {"contents": "write"}
+    run = "\n".join(st.get("run", "") for st in job["steps"])
+    assert "--prerelease" in run and "--target" in run
