@@ -1,0 +1,57 @@
+# A GitHub PRE-RELEASE of the Windows packages (Seth, 2026-10-16: "a pre-release, and then our site
+# can point to the pre-release download"). Push a tag such as v0.1.0-beta.1 and this runs from the
+# tagged commit, so it works from any branch: windows-package.yml builds and tests the Setup .exe
+# and the portable zip on a Windows runner, then `publish` makes the pre-release with them, their
+# SHA-256 sums and build/RELEASE-NOTES.md. Nothing is published unless every test passed.
+# Public repository, standard runners (windows-latest, ubuntu-latest): free. No schedule.
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - id: v
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+          echo "${tag#v}"
+
+  package:
+    needs: version
+    uses: ./.github/workflows/windows-package.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+
+  publish:
+    needs: [version, package]
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.ref_name }}
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-packages
+          path: out
+      - name: Publish the pre-release
+        run: |
+          ls -la out
+          # every tag here is a pre-release until a release is called final by hand
+          gh release create "$TAG" out/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "FLEx Scratchpad $VERSION" \
+            --notes-file build/RELEASE-NOTES.md \
+            --prerelease \
+            --verify-tag

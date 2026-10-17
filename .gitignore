@@ -3,6 +3,7 @@ __pycache__/
 *.egg-info/
 build/dist/
 build/work/
+build/ffmpeg/
 dist/
 .pytest_cache/
 .venv/

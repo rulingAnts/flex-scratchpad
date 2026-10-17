@@ -2,7 +2,8 @@
 
 Order of preference:
   1. WAV → the stdlib `wave` module: an exact sample slice, no dependencies.
-  2. anything else → `ffmpeg` if it is on PATH (decoded to WAV).
+  2. anything else → `ffmpeg`: the one shipped beside the Windows build (`<app>/ffmpeg/ffmpeg.exe`),
+     else Settings, PATH and the usual install spots (decoded to WAV).
   3. otherwise the UI captures the range itself while it plays once (MediaRecorder → webm/opus)
      and hands the bytes back through `store_clip_bytes`.
 """
@@ -11,8 +12,16 @@ from __future__ import annotations
 import base64
 import shutil
 import subprocess
+import sys
 import wave
 from pathlib import Path
+
+
+def _run(cmd: list[str], timeout: int) -> None:
+    """ffmpeg, quietly: on Windows a windowed app that starts a console program flashes a console
+    window for every clip unless it asks for none."""
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
+    subprocess.run(cmd, check=True, capture_output=True, timeout=timeout, creationflags=flags)
 
 
 def cut_wav(src: Path, dst: Path, begin_ms: int, end_ms: int) -> Path:
@@ -44,10 +53,21 @@ _FFMPEG_CANDIDATES = (
 )
 
 
+def bundled_ffmpeg() -> Path | None:
+    """The ffmpeg shipped with the Windows build, beside the program: `<app>/ffmpeg/ffmpeg.exe`
+    (Seth, 2026-10-16: a release ships ffmpeg — field laptops are often offline)."""
+    if not getattr(sys, "frozen", False):
+        return None
+    exe = Path(sys.executable).resolve().parent / "ffmpeg" / ("ffmpeg.exe" if sys.platform == "win32" else "ffmpeg")
+    return exe if exe.is_file() else None
+
+
 def find_ffmpeg(configured: str = "") -> str | None:
-    """ffmpeg, if there is one: the path from Settings, PATH, then the usual install spots."""
+    """ffmpeg, if there is one: the path from Settings, the bundled one, PATH, then the usual
+    install spots."""
     import os
-    for cand in ([configured] if configured else []) + [shutil.which("ffmpeg") or ""] + [os.path.expandvars(c) for c in _FFMPEG_CANDIDATES]:
+    bundled = bundled_ffmpeg()
+    for cand in ([configured] if configured else []) + [str(bundled) if bundled else ""] + [shutil.which("ffmpeg") or ""] + [os.path.expandvars(c) for c in _FFMPEG_CANDIDATES]:
         if cand and Path(cand).is_file():
             return str(cand)
     return None
@@ -67,7 +87,7 @@ def cut_ffmpeg(src: Path, dst: Path, begin_ms: int, end_ms: int, exe: str | None
     cmd = [exe, "-y", "-v", "error", "-ss", f"{begin_ms / 1000:.3f}", "-t", f"{(end_ms - begin_ms) / 1000:.3f}",
            "-i", str(src), "-vn", "-acodec", "flac" if flac else "pcm_s16le", str(tmp)]
     try:
-        subprocess.run(cmd, check=True, capture_output=True, timeout=120)
+        _run(cmd, 120)
     except (subprocess.SubprocessError, OSError):
         try:
             tmp.unlink()
@@ -115,7 +135,7 @@ def _decode_to_wav(src: Path, dst: Path, exe: str, rate: int | None = None, chan
         cmd += ["-ac", str(channels)]
     cmd.append(str(dst))
     try:
-        subprocess.run(cmd, check=True, capture_output=True, timeout=300)
+        _run(cmd, 300)
         return dst
     except (subprocess.SubprocessError, OSError):
         return None
@@ -236,7 +256,7 @@ def to_mono16(src: str | Path, dst: Path, ffmpeg: str | None = None) -> int | No
         dst.parent.mkdir(parents=True, exist_ok=True)
         tmp = dst.with_suffix(".tmp.wav")
         try:
-            subprocess.run([exe, "-y", "-v", "error", "-i", str(src), "-vn", "-ac", "1", "-acodec", "pcm_s16le", str(tmp)], check=True, capture_output=True, timeout=300)
+            _run([exe, "-y", "-v", "error", "-i", str(src), "-vn", "-ac", "1", "-acodec", "pcm_s16le", str(tmp)], 300)
             tmp.replace(dst)
             with wave.open(str(dst), "rb") as r:
                 return int(round(r.getnframes() * 1000 / r.getframerate()))

@@ -1,0 +1,118 @@
+# The Windows packages, built AND tested on a Windows runner: the program folder (PyInstaller
+# onedir, with flexicon, pythonnet and ffmpeg in it), the Setup .exe (NSIS, per user) and the
+# portable zip. Called by ci.yml (manual dispatch, an artifact to try) and release.yml (a tag, a
+# GitHub pre-release). Public repository, standard runner (windows-latest): free.
+#
+# What is checked before anything is handed on:
+#   1. the built program's own --selftest: the page, pywebview, .NET via pythonnet, flexicon
+#      packaged, and the bundled ffmpeg cutting a clip;
+#   2. the Setup run silently into a fresh folder, the installed program's --selftest, its Start
+#      menu shortcut and Settings > Apps entry; then the uninstaller, and that nothing is left.
+name: Windows package
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: "Version label shown by the installer and in file names, e.g. 0.1.0-beta.1"
+        required: true
+        type: string
+
+jobs:
+  package:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      VERSION: ${{ inputs.version }}
+      DIST: build\dist\FLEx Scratchpad
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # pythonnet 3.0/3.1 and flexicon support it; FieldWorks is 64-bit, so is this
+          python-version: "3.12"
+          architecture: x64
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[build,flex]" pywebview
+          python -m pip list
+
+      - name: ffmpeg (BtbN's LGPL build, checksum-verified)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python tools/fetch_ffmpeg.py --out build\ffmpeg
+
+      - name: Build (PyInstaller onedir)
+        run: |
+          pyinstaller build/flex-scratchpad.spec --distpath build/dist --workpath build/work --noconfirm
+          Copy-Item -Recurse build\ffmpeg "$env:DIST\ffmpeg"
+          Copy-Item LICENSE "$env:DIST\LICENSE.txt"
+          Get-ChildItem "$env:DIST" | Format-Table Name, Length
+          "{0:N0} MB" -f ((Get-ChildItem -Recurse "$env:DIST" | Measure-Object Length -Sum).Sum / 1MB)
+
+      - name: Self-test the built program
+        run: |
+          $out = "$env:RUNNER_TEMP\selftest-dist.json"
+          $p = Start-Process -FilePath "$env:DIST\FLEx Scratchpad.exe" -ArgumentList @('--selftest', "`"$out`"") -Wait -PassThru
+          if (Test-Path $out) { Get-Content $out } else { Write-Error "no self-test report was written" }
+          if ($p.ExitCode -ne 0) { Write-Error "self-test failed (exit $($p.ExitCode))"; exit 1 }
+
+      - name: Setup (.exe) and portable zip
+        run: |
+          $nsis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+          if (-not (Test-Path $nsis)) { choco install nsis -y --no-progress; $nsis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe" }
+          New-Item -ItemType Directory -Force out | Out-Null
+          $src = (Resolve-Path "$env:DIST").Path
+          $ico = (Resolve-Path "flex_scratchpad\ui\img\flex-scratchpad.ico").Path
+          & $nsis /V2 "/DVERSION=$env:VERSION" "/DSRC=$src" "/DOUT=$PWD\out\FLEx-Scratchpad-Setup-$env:VERSION.exe" "/DICON=$ico" build\installer.nsi
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          # the portable zip: the same folder, run from wherever it is unzipped
+          Compress-Archive -Path "$env:DIST" -DestinationPath "out\FLEx-Scratchpad-$env:VERSION-windows-portable.zip"
+          Get-ChildItem out | Format-Table Name, Length
+
+      - name: Install, self-test, uninstall
+        run: |
+          $setup = (Resolve-Path "out\FLEx-Scratchpad-Setup-$env:VERSION.exe").Path
+          $dir = "$env:RUNNER_TEMP\fs-install\FLEx Scratchpad"
+          # /D= must come last and unquoted (NSIS)
+          $p = Start-Process -FilePath $setup -ArgumentList @('/S', "/D=$dir") -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Write-Error "Setup failed (exit $($p.ExitCode))"; exit 1 }
+          foreach ($f in @("$dir\FLEx Scratchpad.exe", "$dir\ffmpeg\ffmpeg.exe", "$dir\Uninstall.exe", "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\FLEx Scratchpad.lnk")) {
+            if (-not (Test-Path $f)) { Write-Error "missing after install: $f"; exit 1 }
+          }
+          $key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\FLEx Scratchpad'
+          $v = (Get-ItemProperty $key).DisplayVersion
+          if ($v -ne $env:VERSION) { Write-Error "Settings > Apps shows version '$v'"; exit 1 }
+          $out = "$env:RUNNER_TEMP\selftest-installed.json"
+          $p = Start-Process -FilePath "$dir\FLEx Scratchpad.exe" -ArgumentList @('--selftest', "`"$out`"") -Wait -PassThru
+          Get-Content $out
+          if ($p.ExitCode -ne 0) { Write-Error "installed self-test failed"; exit 1 }
+          # the same Setup again is an upgrade in place
+          $p = Start-Process -FilePath $setup -ArgumentList @('/S', "/D=$dir") -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Write-Error "re-install (upgrade) failed"; exit 1 }
+          # _?= runs the uninstaller in place and waits for it
+          $p = Start-Process -FilePath "$dir\Uninstall.exe" -ArgumentList @('/S', "_?=$dir") -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Write-Error "uninstall failed (exit $($p.ExitCode))"; exit 1 }
+          Remove-Item -Force "$dir\Uninstall.exe" -ErrorAction SilentlyContinue   # left by _?= by design
+          foreach ($f in @("$dir\FLEx Scratchpad.exe", "$dir\_internal", "$dir\ffmpeg", "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\FLEx Scratchpad.lnk")) {
+            if (Test-Path $f) { Write-Error "left after uninstall: $f"; exit 1 }
+          }
+          if (Test-Path $key) { Write-Error "the Settings > Apps entry was left"; exit 1 }
+          "install, upgrade and uninstall all clean"
+
+      - name: Checksums
+        run: |
+          Get-ChildItem out -File | ForEach-Object { "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.Name } | Set-Content -Encoding ascii out\SHA256SUMS.txt
+          Get-Content out\SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-packages
+          path: out/*
+          if-no-files-found: error
+          retention-days: 7

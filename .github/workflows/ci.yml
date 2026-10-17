@@ -1,6 +1,6 @@
-# Tests on every push (ubuntu-latest, a standard free runner on a public repo) and a Windows
-# PyInstaller build ONLY on manual dispatch (windows-latest, also standard). No schedules, no
-# releases, no larger runners — see CLAUDE.md "GitHub costs".
+# Tests on every push (ubuntu-latest, a standard free runner on a public repo) and the Windows
+# packages ONLY on manual dispatch (windows-latest, also standard). No schedules, no larger
+# runners. Releases are release.yml's, from a tag (Seth asked for the first pre-release, 2026-10-16).
 name: CI
 
 on:
@@ -37,22 +37,9 @@ jobs:
         run: python -m pytest tests/e2e -q
 
   build-windows:
+    # the Setup .exe, the portable zip and the program's self-test, as an artifact to try
+    # (windows-package.yml; release.yml publishes the same packages from a tag)
     if: github.event_name == 'workflow_dispatch' && inputs.build_windows
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          architecture: x64
-      - name: Install
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[build]" pywebview
-      - name: Build (onedir)
-        run: pyinstaller build/flex-scratchpad.spec --distpath build/dist --workpath build/work --noconfirm
-      - uses: actions/upload-artifact@v4
-        with:
-          name: FLEx-Scratchpad-windows-x64
-          path: build/dist/FLEx Scratchpad
-          if-no-files-found: error
+    uses: ./.github/workflows/windows-package.yml
+    with:
+      version: 0.1.0-ci.${{ github.run_number }}
