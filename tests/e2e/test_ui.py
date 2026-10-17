@@ -2965,3 +2965,43 @@ def test_backup_to_a_sync_folder_and_storage_management(app):
     page.wait_for_function("() => !document.querySelector('[data-test=bk-version]')", timeout=10000)
     assert not any((dest / "versions").iterdir())
     assert not [e for e in errors if "Failed to load resource" not in e], errors
+
+
+def test_an_example_and_its_highlights_follow_their_lines_when_flex_changes_the_text(app):
+    """Seth, 2026-10-17: lines added, deleted, merged or split in FLEx must not shift what an
+    example shows, nor what its highlights mark."""
+    import copy
+    h, page, errors = app
+    tab = h.api.init()["config"]["tabs"][0]["dir"]
+    h.api.create_note(tab, "", "Follows", "{{flex:text %s seg=3-4 hl=3.1 b=4.2}}" % T_STORY)
+    page.reload()
+    page.wait_for_selector(".note-card")
+    page.locator(".note-card", has_text="Follows").click()
+    page.wait_for_selector("#editor .blk-flex .text-obj")
+    page.wait_for_function("(g) => !!window.__fsEditor && /at=/.test(window.__fsEditor.getMarkdown())", arg=T_STORY)
+    page.wait_for_timeout(1200)
+    assert " at=" in body_of(h)
+    # FLEx: a line added at the top, and the example's last line split in two
+    text = h.api._flex.backend.texts[T_STORY]
+    segs = text["segments"]
+    top = copy.deepcopy(segs[0])
+    top.update(guid="9b1c2d3e-4f50-4a6b-8c7d-0e1f2a3b9101", baseline="Ere ka-sila.", words=[{"txt": "Ere"}, {"txt": "ka-sila"}])
+    segs.insert(0, top)
+    last = next(s for s in segs if s["baseline"] == "Kabir pemu ka-nuwa lo.")
+    tail = copy.deepcopy(last)
+    last.update(baseline="Kabir pemu.", words=[w for w in last["words"] if w.get("txt") in ("Kabir", "pemu")] + [{"txt": ".", "punct": True}])
+    tail.update(guid="9b1c2d3e-4f50-4a6b-8c7d-0e1f2a3b9102", baseline="Ka-nuwa lo.", words=[w for w in tail["words"] if w.get("txt") not in ("Kabir", "pemu")])
+    segs.insert(segs.index(last) + 1, tail)
+    for n, s in enumerate(segs, 1):
+        s["n"] = n
+    page.locator("#editor .text-obj button[title='Reload from FLEx']").first.click()
+    page.wait_for_function("() => /seg=4-6/.test(window.__fsEditor.getMarkdown())", timeout=8000)
+    page.wait_for_timeout(1200)
+    body = body_of(h)
+    assert "seg=4-6" in body and "hl=4.1" in body and "b=5.2" in body, body
+    # and the marks are drawn on the same words as before
+    marked = page.locator("#editor .text-obj .st-hl").first.inner_text()
+    bold = page.locator("#editor .text-obj .st-b").first.inner_text()
+    assert "Ɲamú" in marked and bold == "pemu", (marked, bold)
+    assert "ka-nuwa" in page.locator("#editor .text-obj").inner_text()          # the split-off piece is in the example
+    assert not [e for e in errors if "Failed to load resource" not in e], errors

@@ -46,6 +46,7 @@ flex_scratchpad/
   flex/__init__.py  FlexService: backend + snapshot cache + audio clips + media mapping + link resolution
   flex/lcm.py   flexicon backend (worker thread)   flex/flextext.py  .flextext fallback   flex/demo.py  fixture
   flex/cache.py snapshots + clip paths            flex/audio.py     wave / ffmpeg cutting
+  flex/tracking.py  keeps an example on its lines when FLEx splits, merges, deletes or rebuilds them
   ui/index.html, ui/css/app.css, ui/js/
     util.js api.js(+mock) flexref.js markdown.js interlinear.js files.js backup.js charts.js tables.js editor.js picker.js
     export.js collection.js (example collections) app.js
@@ -179,6 +180,26 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
   While a pasted example or `silfw://` link is being looked up, `FS.busy` (util.js) shows a
   spinner pill by the caret after 200 ms (a quick answer never flashes it), with "Paste as
   text" / Esc to stop waiting; a late answer after that is ignored (Seth, 2026-10-16).
+- AN EXAMPLE STAYS ON ITS LINES (Seth, 2026-10-17: "lines deleted, merged, or split in baseline …
+  Will that throw off all of our object references … We'd really like our flex objects to be more
+  reliable, stable, and intelligent"). What FieldWorks does (liblcm `DomainImpl/AnalysisAdjuster.cs`,
+  read 2026-10-17): an untouched segment keeps its object/GUID; a SPLIT keeps it on the FIRST piece
+  (the rest are new segments); a MERGE keeps the FIRST segment and deletes the second; a re-import
+  or a rebuilt paragraph gives new GUIDs. `flex/tracking.py` keeps a LEDGER per text in the snapshot
+  folder (`ledger-<text>.json`: the last orders of its segment anchors, and per segment its last
+  texts, words and drawn copy) and `FlexService._tracked_text` runs every text fetch through
+  `track()`: the embed's OWN old range (the stored order whose anchors sit at its `seg=` numbers),
+  survivors mapped, widened over a split last line's NEW pieces whose text was in it, and over the
+  line a deleted first line was merged into; no survivors → found again by TEXT (difflib, ≥0.6,
+  nearest the old place); else LOST → the saved copy with a warning, never whatever now has those
+  numbers. `obj.track = {change: none|moved|reshaped|found|lost, how, map, oldWords}`; the page
+  (`syncAnchors` → `remapStyles`, interlinear.js) moves every `hl= b= u= …` target with its LINE
+  (a deleted line's go) and a word target with its WORD (or drops it rather than mark another
+  word), then rewrites `seg=` / `at=` and says what happened. A plain redraw reads no extra text
+  from FLEx (texts come from the fetched range; the whole text is read only for a NEW segment
+  next to the range, a missing first line, or a search). The snapshot no longer keeps an old
+  segment under a number the text has since given to another (`cache.merge_text`). Inline chips
+  are titled only (they are not rewritten). Not yet run against a real FieldWorks project.
 - EXAMPLE COLLECTIONS (Seth, 2026-10-16: *"a special notes type that is JUST IGT examples"*, and
   *"have just that special note/document type be the one that can export"*): `kind: examples` in
   the front matter (written only for collections, so ordinary files are unchanged), body = one

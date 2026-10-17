@@ -247,8 +247,9 @@ class FlexService:
                         obj = be.get_entry(guid)
                         self.cache.put(self.project_name, "entry", guid, obj)
                     elif kind == "text":
-                        obj = be.get_text(guid, seg_from, seg_to, ws=ws, at=at, alts=alts) if alts else be.get_text(guid, seg_from, seg_to, ws=ws, at=at)
-                        self.cache.merge_text(self.project_name, variant, obj)
+                        obj = self._tracked_text(be, guid, seg_from, seg_to, ws, at, alts)
+                        if not obj.get("lost"):
+                            self.cache.merge_text(self.project_name, variant, obj)
                     elif kind == "wordform":
                         obj = be.get_wordform(guid)
                         self.cache.put(self.project_name, "wordform", guid, obj)
@@ -284,6 +285,50 @@ class FlexService:
             if live_err:
                 raise live_err
             raise FlexError("Not in the FLEx project and not cached.", "", "missing")
+
+    def _tracked_text(self, be, guid: str, seg_from, seg_to, ws, at, alts: bool) -> dict:
+        """The text range an embed asks for, kept on ITS lines when FLEx has changed the text
+        (flex/tracking.py): the backend first follows the `at=` anchors; the ledger then
+        widens / narrows / re-finds the range for split, merged, deleted or rebuilt segments
+        and says how each of the embed's old segments maps now (`track`), so the page can move
+        the embed's highlights with them. Lines that cannot be found come back as the saved
+        copy, marked `lost`, never as whatever now has their numbers."""
+        from . import tracking
+
+        def get(a, b, anchors):
+            return be.get_text(guid, a, b, ws=ws, at=anchors, alts=alts) if alts else be.get_text(guid, a, b, ws=ws, at=anchors)
+
+        obj = get(seg_from, seg_to, at)
+        ledger = tracking.Ledger(self.cache.ledger_path(self.project_name, guid))
+        tr = None
+        if seg_from and ledger.orders:
+            texts = (lambda: be.text_baselines(guid)) if hasattr(be, "text_baselines") else (lambda: {})
+            try:
+                seen = {model.anchor_of(x.get("guid", "")): x.get("baseline", "") for x in obj.get("segments") or []}
+                tr = tracking.track(ledger, obj.get("index") or [], texts, seg_from, seg_to, at, seen)
+            except Exception:  # noqa: BLE001 — tracking must never stop a text from showing
+                tr = None
+        if tr:
+            if tr["change"] == "lost":
+                saved = [x for x in tr.get("saved") or [] if x]
+                obj = dict(obj)
+                obj["segments"] = saved
+                obj["range"] = [int(seg_from), int(seg_to or seg_from)]
+                obj["anchors"] = list(at or [])
+                obj["lost"] = True
+                obj["rangeMoved"] = False
+            elif tr["change"] in ("reshaped", "found") and [tr["from"], tr["to"]] != list(obj.get("range") or []):
+                obj = get(tr["from"], tr["to"], None)
+            if tr["change"] in ("moved", "reshaped", "found"):
+                obj["rangeMoved"] = [int(seg_from), int(seg_to or seg_from)] != list(obj.get("range") or [])
+            obj["track"] = {k: tr[k] for k in ("change", "how", "map", "oldWords")}
+        if not obj.get("lost"):
+            try:
+                ledger.record(obj.get("index") or [], obj.get("segments") or [])
+                ledger.save()
+            except OSError:
+                pass
+        return obj
 
     def refresh_all(self, bodies: list[str]) -> dict:
         """Re-fetch every FLEx object embedded anywhere in the notebook from the live project

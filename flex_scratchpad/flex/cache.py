@@ -60,11 +60,19 @@ class SnapshotCache:
                     return obj
         return None
 
+    def ledger_path(self, project: str, text_guid: str) -> Path:
+        return self.project_dir(project) / f"ledger-{_SAFE.sub('_', (text_guid or '').lower())}.json"
+
     def merge_text(self, project: str, guid: str, page: dict) -> dict:
         """Texts are fetched a segment range at a time; the snapshot accumulates every range
         seen so far (keyed by segment number) so a note with several embeds stays whole."""
         existing = self.get(project, "text", guid) or {}
         segs = {s["n"]: s for s in existing.get("segments", [])}
+        # after FLEx renumbered the text, an old snapshot's segment 5 is not the new segment 5:
+        # keep only those the new index still has at that number (Seth, 2026-10-17)
+        now = {e.get("n"): (e.get("guid") or "").lower() for e in page.get("index") or []}
+        if now:
+            segs = {n: s for n, s in segs.items() if now.get(n) == (s.get("guid") or "").lower()}
         for s in page.get("segments", []):
             segs[s["n"]] = s
         merged = dict(page)

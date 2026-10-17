@@ -34,13 +34,68 @@
   /* After a fetch: a text embed records its anchors the first time, and follows them when
    * FLEx has renumbered its segments — rewriting `seg=` in the note (silently, via onSpecChange). */
   function syncAnchors(spec, obj, opts) {
-    if (spec.kind !== 'text' || !obj || obj.kind !== 'text' || !opts.onSpecChange || !spec.seg) return false;
+    if (spec.kind !== 'text' || !obj || obj.kind !== 'text' || !opts.onSpecChange || !spec.seg || obj.lost) return false;
     const anchors = obj.anchors && obj.anchors[0] ? obj.anchors : null;
     let changed = false;
-    if (obj.rangeMoved && obj.range && obj.range[0]) { spec.seg = [obj.range[0], obj.range[1]]; changed = true; }
+    if (obj.rangeMoved && obj.range && obj.range[0]) {
+      remapStyles(spec, obj);               // the highlights go with their lines, not with the numbers
+      spec.seg = [obj.range[0], obj.range[1]];
+      changed = true;
+    }
     if (anchors && (!spec.at || (obj.rangeMoved && (spec.at[0] !== anchors[0] || spec.at[1] !== anchors[1])))) { spec.at = anchors; changed = true; }
-    if (changed) { opts.onSpecChange(spec); if (obj.rangeMoved) FS.toast('Segments renumbered in FLEx — the example now reads ' + labelOf(obj, spec.seg[0]) + '–' + labelOf(obj, spec.seg[1])); }
+    if (changed) {
+      opts.onSpecChange(spec);
+      if (obj.rangeMoved) {
+        const tr = obj.track || {}, now = labelOf(obj, spec.seg[0]) + (spec.seg[1] !== spec.seg[0] ? '–' + labelOf(obj, spec.seg[1]) : '');
+        const what = { split: 'a line was split', merged: 'lines were merged', deleted: 'a line was deleted', inserted: 'lines were added' };
+        if (tr.change === 'found') FS.toast('These lines were rebuilt in FLEx and found again by their text — the example now reads ' + now + '. Worth a look.', 'warn');
+        else if (tr.change === 'reshaped') FS.toast('In FLEx, ' + (tr.how || []).map((h) => what[h] || h).join(' and ') + ' — the example follows its lines and now reads ' + now + '.');
+        else FS.toast('Lines renumbered in FLEx — the example now reads ' + now);
+      }
+    }
     return changed;
+  }
+  /* The embed's highlight / bold / underline targets name segments by NUMBER (`hl=5.2`): when the
+   * example's lines moved, each target follows its own line (obj.track.map: old position in the
+   * range → new number; a deleted line's targets go), and a word target follows its WORD when the
+   * line's words changed (obj.track.oldWords) — or goes, rather than mark another word. */
+  function remapStyles(spec, obj) {
+    const tr = obj.track;
+    if (!tr || !tr.map || !spec.seg || !(spec.styles || []).length) {
+      if (spec.seg && obj.range && !tr) shiftStyles(spec, obj.range[0] - spec.seg[0]);   // an older backend: a plain shift
+      return;
+    }
+    const base = spec.seg[0];
+    const inRange = (n) => n - base >= 0 && n - base < tr.map.length;
+    const mapSeg = (n) => (inRange(n) ? tr.map[n - base] : n);
+    const wordsOf = (n) => { const sg = (obj.segments || []).find((x) => x.n === n); return sg ? (sg.words || []).filter((w) => !w.punct).map((w) => FS.normalize(w.txt || '', true)) : null; };
+    for (const g of spec.styles) {
+      g.targets = g.targets.filter((t) => {
+        if (t.text != null || t.seg == null) return true;               // "text" targets find themselves
+        const k = t.seg - base, ns = mapSeg(t.seg);
+        if (ns == null) return false;
+        if (t.word != null && inRange(t.seg) && tr.oldWords && tr.oldWords[k]) {
+          const ow = tr.oldWords[k][t.word - 1], nw = wordsOf(ns);
+          if (ow != null && nw) {
+            const want = FS.normalize(ow, true);
+            let best = -1;
+            nw.forEach((w, i) => { if (w === want && (best < 0 || Math.abs(i - (t.word - 1)) < Math.abs(best - (t.word - 1)))) best = i; });
+            if (best < 0) return false;
+            const d = best + 1 - t.word;
+            t.word += d;
+            if (t.wordEnd != null && (t.segEnd == null || t.segEnd === t.seg)) t.wordEnd += d;
+          }
+        }
+        if (t.segEnd != null) { const ne = mapSeg(t.segEnd); t.segEnd = ne == null ? ns : ne; }
+        t.seg = ns;
+        return true;
+      });
+    }
+    spec.styles = spec.styles.filter((g) => g.targets.length);
+  }
+  function shiftStyles(spec, d) {
+    if (!d) return;
+    for (const g of spec.styles || []) for (const t of g.targets) { if (t.seg != null) t.seg += d; if (t.segEnd != null) t.segEnd += d; }
   }
 
   /* ------------------------------------------------------------------ styled text */
@@ -201,6 +256,7 @@
       el('span', Object.assign({ class: 'ttl vern' }, wsAttrs(vern)), obj.title || '(untitled text)'),
       el('span', { class: 'badge' }, rangeLabel),
       obj.cached ? el('span', { class: 'badge warn', title: obj.liveError || 'Shown from the notebook cache' }, 'cached' + (obj.cachedAt ? ' ' + obj.cachedAt.slice(0, 10) : '')) : null,
+      obj.lost ? el('span', { class: 'badge warn', 'data-test': 'lines-lost', title: 'These lines are no longer in the text as they were' }, 'lines changed in FLEx') : null,
       spec.label ? el('span', { class: 'badge' }, spec.label) : null,
       el('span', { class: 'spacer' }),
     );
@@ -218,6 +274,10 @@
     if (obj.url) head.appendChild(el('a', { href: obj.url, title: 'Open in FieldWorks', onclick: (e) => { e.preventDefault(); openInFlex(obj.url); } }, 'Open in FLEx ↗'));
     if (opts.editable) head.appendChild(el('button', { class: 'lnk', title: 'Options', onclick: (e) => embedMenu(e.currentTarget, spec, opts, obj) }, '⋯'));
     box.appendChild(head);
+    if (obj.lost) box.appendChild(el('div', { class: 'flex-lost', 'data-test': 'flex-lost' },
+      '⚠ These lines are no longer in the text as they were — changed or deleted in FLEx, and not found again by their text. This is the copy saved when the example was last shown. ',
+      el('button', { class: 'lnk', onclick: () => openContext(spec, null) }, '⊡ See the text as it is now'),
+      opts.editable && opts.editSource ? el('button', { class: 'lnk', onclick: () => opts.editSource() }, '✎ Edit the range') : null));
 
     if (!segs.length) box.appendChild(el('div', { class: 'seg-empty' }, 'No segments in this range.'));
     const sel = { anchor: null };

@@ -704,6 +704,25 @@ class FlexiconBackend:
         except BaseException as e:
             raise _friendly(e, self.project_name)
 
+    def text_baselines(self, guid: str) -> dict:
+        """{segment anchor: baseline} for one text as it is NOW (not the session's locate index,
+        which a refresh keeps): what the line tracker compares (flex/tracking.py)."""
+        def go():
+            self._need()
+            p = self.project
+            text = self._owning_text(self._c(p.Object(guid)))
+            if text is None:
+                raise FlexError("That GUID is not an interlinear text.", "", "no-object")
+            out = {}
+            for para in _t(lambda: list(p.Paragraphs.GetAll(text)), []):
+                for seg in _t(lambda: list(p.Segments.GetAll(para)), []):
+                    out[model.anchor_of(_guid(seg))] = _s(_t(lambda: p.Segments.GetBaselineText(seg), ""))
+            return out
+        try:
+            return self.worker.call(go, timeout=OPEN_TIMEOUT)
+        except BaseException as e:
+            raise _friendly(e, self.project_name)
+
     def _index_lines(self, seg, vh=None) -> tuple[str, str]:
         """The segment's Morphemes and Lex. Gloss lines (forms and glosses of every morph
         bundle), so rows pasted without a Word line can still be located. The forms are read in

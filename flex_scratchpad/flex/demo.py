@@ -239,6 +239,10 @@ class DemoBackend:
         return {g: {"title": t["title"], "segments": [(sg["n"], sg["baseline"], sg.get("free", "")) + model.index_lines(sg) + (sg.get("label") or str(sg["n"]), sg.get("guid", "")) for sg in t["segments"]]}
                 for g, t in self.texts.items()}
 
+    def text_baselines(self, guid: str) -> dict:
+        t = self.texts.get((guid or "").lower()) or {"segments": []}
+        return {model.anchor_of(sg.get("guid", "")): sg.get("baseline", "") for sg in t["segments"]}
+
     def resolve_guid(self, guid: str) -> dict | None:
         g = (guid or "").lower()
         if g in ENTRY_BY_GUID:

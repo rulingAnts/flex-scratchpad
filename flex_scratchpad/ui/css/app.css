@@ -744,3 +744,5 @@ table.md-table td.drop-target, table.md-table th.drop-target { outline: 2px soli
 .st-dot { width: 10px; height: 10px; border-radius: 3px; }
 .bk-usage { border-top: 1px solid var(--border-soft); margin-top: 10px; padding-top: 8px; }
 .bk-versions .lnk { border: 0; background: none; color: var(--accent); cursor: pointer; font-size: 13px; }
+.flex-lost { margin: 6px 0 8px; padding: 6px 10px; border-radius: 6px; background: rgba(180, 83, 9, 0.08); color: #92400e; font-size: 13px; }
+.flex-lost .lnk { border: 0; background: none; color: var(--accent); cursor: pointer; font-size: 13px; padding: 0 4px; }
