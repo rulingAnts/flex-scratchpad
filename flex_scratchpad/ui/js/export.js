@@ -315,7 +315,8 @@
       const what = texts.length + ' example' + (texts.length === 1 ? '' : 's')
         + (preview.texts.length > 1 ? ' → ' + preview.texts.length + ' texts: ' + preview.texts.map((t) => t.ws + ' (' + t.examples + ')').join(', ') : preview.texts.length === 1 ? ' → one text, baseline ' + preview.texts[0].ws : '')
         + (items.length > texts.length ? ' · ' + (items.length - texts.length) + ' entry object' + (items.length - texts.length === 1 ? '' : 's') + ' skipped (not interlinear)' : '');
-      m.body.append(
+      // Element.append writes a null child as the text "null" (FS.el skips it; append does not)
+      m.body.append(...[
         el('p', { class: 'small muted' }, what),
         el('div', { class: 'form-row' }, el('label', {}, 'Text title'), title),
         preview.texts.length > 1 ? el('div', { class: 'form-row' }, el('label', {}, 'Baseline'), only) : null,
@@ -327,7 +328,7 @@
         el('label', { class: 'row', style: { gap: '8px' } }, md, 'Attach this note\u2019s markdown as the text\u2019s comment (Info tab)'),
         el('label', { class: 'row', style: { gap: '8px' } }, wg, 'Keep FLEx\u2019s word analysis GUIDs (the import reuses the same analyses)'),
         el('p', { class: 'small muted' }, 'Each example becomes a paragraph of the new text; its segments keep every writing system. A FLEx text has one baseline writing system, so examples from texts in different vernacular writing systems become separate texts in the same file. Import with FieldWorks → File → Import → FLExText Interlinear.'),
-      );
+      ].filter(Boolean));
       const row = el('div', { class: 'btn-row' });
       row.appendChild(el('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'));
       row.appendChild(el('button', { class: 'btn primary', onclick: async () => {

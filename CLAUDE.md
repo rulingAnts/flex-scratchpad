@@ -272,8 +272,27 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
   group it under Python. Link registration is keyed on the build, so updates reach the registry.
 - The window starts maximized (Seth, 2026-10-16: the default size hung off his screen); the
   size it restores to is fitted to the screen (`_fit_to_screen`) and is not saved while maximized.
-- ffmpeg is optional at runtime (`flex/audio.py` falls back to the stdlib for WAV) but a
-  release must ship it or install it on first use (Seth, 2026-10-16) — `plans/BACKLOG.md`.
+- RELEASES (Seth, 2026-10-16: "a pyinstaller version (portable and setup) … bundled ffmpeg OR an
+  auto download … a pre-release, and then our site can point to the pre-release download"): push a
+  tag `v0.1.0-beta.N` → `release.yml` → `windows-package.yml` (windows-latest) builds the onedir
+  (`build/flex-scratchpad.spec`, entry `build/launcher.py` — NEVER `flex_scratchpad/__main__.py`,
+  whose relative imports fail as a script and hang a windowed build on a message box), with
+  flexicon + pythonnet bundled (flexicon still loads the INSTALLED FieldWorks) and ffmpeg BUNDLED
+  beside the exe (`ffmpeg/ffmpeg.exe`, BtbN's LGPL build, `tools/fetch_ffmpeg.py`, checksum-verified;
+  chosen over a first-use download: field laptops are offline, and a program that fetches and runs
+  another executable is what anti-malware watches for). It self-tests a console copy and the real
+  one (`--selftest`), makes the per-user NSIS Setup (`build/installer.nsi`) and the portable zip,
+  installs / upgrades / uninstalls silently with checks, and only then publishes the PRE-release
+  with `build/RELEASE-NOTES.md`. `ci.yml`'s manual dispatch runs the same packaging as an artifact.
+  `build_id()` reads the `BUILD_ID` the spec stamps (a frozen build has no .py files to hash).
+  Unsigned: SmartScreen says so.
+- THE SITE is `docs/` (GitHub Pages from `/docs`), in LingTeX Tools' pattern (its tokens and
+  components, `assets/media.js` verbatim): hero with the loop video, three steps with stills,
+  features, install, a pre-release band. `assets/release.js` moves every download link and the
+  version to the newest release that has BOTH files (`tests/js/site-release.test.js`). The video
+  and stills are filmed from the REAL UI by `tools/record_demo.py` (demo project — an invented
+  language, never a community's data — through the e2e bridge, a drawn cursor and captions,
+  Chromium's screencast, ffmpeg): re-run it after a UI change and look at the result.
 - GitHub Actions: public repo, standard runners only, Windows build is `workflow_dispatch`. Never
   add a schedule, a larger runner, LFS or a release step without Seth's say-so.
 - This is Seth's suite: see `flextext-editor/CLAUDE.md` for the house rules on writing about

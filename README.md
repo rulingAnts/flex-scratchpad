@@ -32,7 +32,18 @@ project database and linked back to FLEx.
 No web server, no cloud: a native window (pywebview / WebView2) over local HTML + JavaScript,
 talking to Python through pywebview's exposed API only.
 
-## Install (Windows, with FieldWorks)
+## Download (Windows)
+
+**The easiest way: the Setup .exe or the portable zip from the
+[latest release](https://github.com/rulingAnts/flex-scratchpad/releases)** (a pre-release for now).
+Nothing else to install: Python, flexicon and ffmpeg are inside. It needs Windows 10/11 (64-bit),
+FieldWorks 9 on the same computer to read a project, and the Edge WebView2 runtime (Windows 11 has
+it; Setup says when it is missing). It isn't signed yet: on "Windows protected your PC" choose
+**More info → Run anyway**. Setup installs per user (no administrator), a newer Setup upgrades in
+place, and uninstalling keeps your notebooks. `FLEx Scratchpad.exe --selftest report.json` reports
+what a copy can and cannot find. The user-facing page is [`docs/index.html`](docs/index.html).
+
+## Install from source (Windows, with FieldWorks)
 
 Requirements: Windows 10/11, FieldWorks 9.x installed, 64-bit Python 3.10–3.13 (match FieldWorks:
 x64), the Edge WebView2 runtime (already on Windows 10/11). Installing from GitHub or a clone also

@@ -2745,3 +2745,19 @@ def test_the_view_stays_put_on_a_click_beside_a_table_and_on_table_tools(app):
     info = page.evaluate("() => [document.activeElement.className, document.activeElement.textContent, window.__fsEditor.blocks.slice(-2).map((b) => b.type + ':' + b.src)]")
     assert info[0] == "blk-body" and info[1] == window_last(info), info
     assert not errors
+
+
+def test_the_export_dialog_shows_no_stray_null(app):
+    """The demo video showed "null" under the title field: Element.append writes a null child
+    as text, and the Baseline row is null when every example shares one baseline."""
+    h, page, errors = app
+    page.locator("#btn-new-menu").click()
+    page.locator("[data-test='new-collection']").click()
+    page.wait_for_selector("#collection .coll-add")
+    page.locator("#collection .coll-add").click()
+    paste(page, "{{flex:text %s seg=1}}" % T_STORY)
+    page.wait_for_selector("#collection .coll-item")
+    page.locator("[data-test='coll-export']").click()
+    page.wait_for_selector(".modal")
+    assert "null" not in page.locator(".modal").inner_text()
+    assert not errors
