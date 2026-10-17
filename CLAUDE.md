@@ -148,7 +148,13 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
   `python -m pytest tests/e2e` (needs Playwright's Chromium) before pushing. CI runs all three.
 - After editing `flex/demo.py` run `python tools/gen_demo_js.py` (the in-browser mock data).
 - Segment numbers: `n` counts through the text (what `seg=` addresses), `label` is FLEx's own
-  `paragraph.segment` (what people read, shown everywhere). Morph glosses wear the morph type's
+  `paragraph.segment` (what people read, shown everywhere). BLANK LINES (Seth, 2026-10-17: a Shift+Enter in FLEx leaves
+  an empty 1.2 that FLEx numbers but never shows): a segment with no word or text (only spaces,
+  U+2028 or other invisibles) and no free / literal translation or note is left out of every
+  example, preview, context view, the picker, the TSV copy and every export (`blankSeg` in
+  interlinear.js, `model.is_blank_segment` for the .flextext writer — keep the two alike); the rest
+  keep FLEx's numbers (1.1 then 1.3), `seg=` still counts it, and an example that is only blank
+  lines says "This line is empty in FLEx." Punctuation alone is not blank. Morph glosses wear the morph type's
   break characters (`-PST`, `3SG-`, `=lo`), from `IMoMorphType.Prefix/Postfix` with a fallback
   to the markers already on the form or headword — unverified against a real project yet.
 - Locating pasted FLEx rows (`FlexService.locate`): the per-session index (`all_baselines`) holds

@@ -138,3 +138,23 @@ def test_a_plain_redraw_never_reads_the_whole_text(tmp_path):
     renumber(text)
     o, _ = show(api, 3, 4, o["anchors"])           # renumbered: still no reading of the whole text
     assert o["range"] == [4, 5] and calls == []
+
+
+def test_blank_flex_lines_are_left_out_of_the_flextext_export_and_match_the_page(tmp_path):
+    """Seth, 2026-10-17: a Shift+Enter in FLEx leaves an empty line (FLEx numbers it, never shows it)."""
+    from flex_scratchpad.flex import model
+    assert model.is_blank_segment({"baseline": " ", "words": []})
+    assert model.is_blank_segment({"baseline": "  ​", "words": [{"txt": " ", "punct": True}], "free": " "})
+    assert not model.is_blank_segment({"baseline": "", "free": "A translation"})
+    assert not model.is_blank_segment({"baseline": ".", "words": [{"txt": ".", "punct": True}]})
+    api, text = make(tmp_path)
+    segs = text["segments"]
+    blank = new_seg(segs[0], "9201", " ")
+    blank.update(words=[], free="", lit="", notes=[], begin=None, end=None)
+    segs.insert(1, blank)
+    renumber(text)
+    from flex_scratchpad.flex.flextext_writer import build_flextext
+    obj = api._flex.get_object("text", T_STORY, 1, 3, alts=True)
+    assert len(obj["segments"]) == 3
+    xml = build_flextext([{"text": obj, "label": "x"}], {"title": "T"})
+    assert xml.count("<phrase ") == 2, xml.count("<phrase ")

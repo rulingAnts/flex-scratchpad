@@ -240,3 +240,14 @@ test('an attached file in a line is a chip too (its own icon and name), alone on
   assert.equal(F.files.embedFor({ ref: 'attachments/a.pdf', kind: 'pdf' }), '{{file attachments/a.pdf}}');
   assert.ok(F.files.isLinked('C:\\x\\y.pdf') && F.files.isLinked('\\\\server\\share\\y.pdf') && !F.files.isLinked('attachments/y.pdf'));
 });
+
+test('a blank FLEx line (Shift+Enter, spaces, nothing to read) is left out; punctuation or a translation is not blank', () => {
+  const F = load(['util', 'flexref', 'markdown', 'interlinear']);
+  const b = F.interlinear.blankSeg;
+  assert.ok(b({ baseline: ' ', words: [] }));
+  assert.ok(b({ baseline: '  ​﻿', words: [{ txt: ' ', punct: true }], free: ' ', notes: [''] }));
+  assert.ok(!b({ baseline: '', words: [], free: 'A translation' }));
+  assert.ok(!b({ baseline: '', words: [], notes: ['a note'] }));
+  assert.ok(!b({ baseline: '.', words: [{ txt: '.', punct: true }] }));
+  assert.ok(!b({ baseline: 'Kabir', words: [{ txt: 'Kabir' }] }));
+});

@@ -98,6 +98,22 @@
     for (const g of spec.styles || []) for (const t of g.targets) { if (t.seg != null) t.seg += d; if (t.segEnd != null) t.segEnd += d; }
   }
 
+  /* A BLANK line (Seth, 2026-10-17: FLEx "has data on 1.1 and then if it's a SHIFT+ENTER then it
+   * has a blank 1.2 (and sometimes more empty lines) that don't show up in FLEx baseline or gloss,
+   * but that do get skipped in numbering"): no word and no text — only spaces, the line break
+   * Shift+Enter leaves (U+2028) or other invisible characters — and no free / literal translation
+   * or note. It is left out wherever lines are shown or written; the others keep FLEx's own
+   * numbers, so 1.1 is followed by 1.3 as in FLEx. A line with only punctuation is not blank. */
+  const INVISIBLE = /[\s\u200b-\u200d\u2060\ufeff]/g;
+  const visible = (t) => String(t || '').replace(INVISIBLE, '');
+  function blankSeg(seg) {
+    if (!seg) return true;
+    if (visible(seg.baseline)) return false;
+    if ((seg.words || []).some((w) => visible(w.txt))) return false;
+    if (visible(seg.free) || visible(seg.lit)) return false;
+    return !(seg.notes || []).some((n) => visible(n));
+  }
+
   /* ------------------------------------------------------------------ styled text */
   const STYLE_CLASS = { hl: 'st-hl', b: 'st-b', u: 'st-u', i: 'st-i', s: 'st-s', color: 'st-color' };
 
@@ -261,8 +277,8 @@
       el('span', { class: 'spacer' }),
     );
     const anyTimed = segs.some((s) => s.begin != null && s.end != null);
-    if (anyTimed && segs.length > 1) {
-      head.appendChild(el('button', { class: 'lnk play-range', title: 'Play this range', onclick: () => playRange(box, obj, segs, mediaByGuid, opts) }, '▶ Play ' + flexRange));
+    if (anyTimed && segs.filter((x) => !blankSeg(x)).length > 1) {
+      head.appendChild(el('button', { class: 'lnk play-range', title: 'Play this range', onclick: () => playRange(box, obj, segs.filter((x) => !blankSeg(x)), mediaByGuid, opts) }, '▶ Play ' + flexRange));
     }
     head.appendChild(el('button', { class: 'lnk', title: 'Reload from FLEx', onclick: () => opts.refresh && opts.refresh() }, '↻'));
     if (opts.editable && !opts.overlay) head.appendChild(el('button', { class: 'lnk', 'data-test': 'collapse-obj', title: 'Collapse to a chip', onclick: () => setCollapsed(spec, opts, true) }, '⤡'));
@@ -279,9 +295,11 @@
       el('button', { class: 'lnk', onclick: () => openContext(spec, null) }, '⊡ See the text as it is now'),
       opts.editable && opts.editSource ? el('button', { class: 'lnk', onclick: () => opts.editSource() }, '✎ Edit the range') : null));
 
+    const shown = segs.filter((x) => !blankSeg(x));
     if (!segs.length) box.appendChild(el('div', { class: 'seg-empty' }, 'No segments in this range.'));
+    else if (!shown.length) box.appendChild(el('div', { class: 'seg-empty' }, segs.length === 1 ? 'This line is empty in FLEx.' : 'These lines are empty in FLEx.'));
     const sel = { anchor: null };
-    for (const seg of segs) {
+    for (const seg of shown) {
       box.appendChild(renderSegment(seg, obj, spec, lines, index, vern, anal, mediaByGuid, opts, box, sel));
     }
     return box;
@@ -739,7 +757,7 @@
     const lines = spec.lines && spec.lines.length ? spec.lines : R.DEFAULT_LINES;
     const cell = (v) => String(v == null ? '' : v).replace(/[\t\r\n]+/g, ' ');
     const out = [];
-    for (const seg of obj.segments || []) {
+    for (const seg of (obj.segments || []).filter((x) => !blankSeg(x))) {
       const words = seg.words || [];
       const block = [];
       for (const line of lines) {
@@ -1142,5 +1160,5 @@
     });
   }
 
-  FS.interlinear = { render, renderText, renderEntry, renderWordform, renderChip, hydrateInline, openContext, wholeText, openOverlay, closeOverlay, isCollapsed, setCollapsed, styled, styledParts, invalidate, flexGet, openInFlex, labelOf, numberFor, flexTsv, HL_COLORS };
+  FS.interlinear = { blankSeg, render, renderText, renderEntry, renderWordform, renderChip, hydrateInline, openContext, wholeText, openOverlay, closeOverlay, isCollapsed, setCollapsed, styled, styledParts, invalidate, flexGet, openInFlex, labelOf, numberFor, flexTsv, HL_COLORS };
 })();

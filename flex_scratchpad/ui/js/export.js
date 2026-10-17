@@ -82,7 +82,7 @@
     const index = R.resolveStyles(spec, obj);
     const vern = obj.ws && obj.ws.vern || {};
     const vbase = { color: '#00379c', font: vern.font || undefined, rtl: !!vern.rtl };
-    const segs = (obj.segments || []).map((seg) => {
+    const segs = (obj.segments || []).filter((seg) => !FS.interlinear.blankSeg(seg)).map((seg) => {   // blank lines are left out
       const words = (seg.words || []).filter((w) => !w.punct);
       const lineModels = [];
       const add = (name, cellsFn) => { const cells = words.map((w, i) => cellsFn(w, i + 1)); if (cells.some((c) => c.some((r) => r.text))) lineModels.push({ name, cells }); };

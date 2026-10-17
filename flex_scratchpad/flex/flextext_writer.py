@@ -155,12 +155,13 @@ def build_flextext(examples: list[dict], opts: dict | None = None) -> str:
         text_media: dict[str, str] = {}
         for ex in exs:
             text = ex["text"]
-            if not text.get("segments"):
+            segments = [x for x in text.get("segments") or [] if not model.is_blank_segment(x)]   # FLEx's blank lines stay out
+            if not segments:
                 continue                    # no phrases: nothing for FLEx to import
             pe = ET.SubElement(paras, "paragraph", {"guid": str(uuid.uuid4())})
             phs = ET.SubElement(pe, "phrases")
             seg_k = 0
-            for seg in text.get("segments") or []:
+            for seg in segments:
                 seg_k += 1
                 attrs = {"guid": str(uuid.uuid4())}
                 if seg.get("begin") is not None and seg.get("end") is not None:

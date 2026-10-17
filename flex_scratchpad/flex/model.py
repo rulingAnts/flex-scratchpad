@@ -313,6 +313,23 @@ def baseline_from_words(words: list[dict]) -> str:
     return out
 
 
+# --------------------------------------------------------------------------- blank lines
+
+_INVISIBLE = re.compile(r"[\s\u200b-\u200d\u2060\ufeff]+")
+
+
+def is_blank_segment(seg: dict) -> bool:
+    """A line with no word and no text — only spaces, the line break FLEx's Shift+Enter leaves
+    (U+2028) or other invisible characters — and no translation or note. FLEx shows no such line
+    (though it numbers it); the page and every export leave it out (ui/js/interlinear.js blankSeg)."""
+    vis = lambda t: _INVISIBLE.sub("", t or "")  # noqa: E731
+    if vis(seg.get("baseline")) or any(vis(w.get("txt")) for w in seg.get("words") or []):
+        return False
+    if vis(seg.get("free")) or vis(seg.get("lit")):
+        return False
+    return not any(vis(n) for n in seg.get("notes") or [])
+
+
 # --------------------------------------------------------------------------- segment index + anchors
 # An embed addresses segments by running count (`seg=6-11`), which FLEx renumbers the moment a
 # line is added or removed above them. So the embed also carries the GUIDs of the first and last

@@ -3128,3 +3128,35 @@ def test_examples_in_a_collection_collapse_to_chips(app):
     page.wait_for_timeout(1200)
     assert h.api.get_note(n["id"])["body"].count(" collapsed") == 1
     assert not [e for e in errors if "Failed to load resource" not in e], errors
+
+
+def test_blank_flex_lines_are_left_out_and_flex_numbers_kept(app):
+    """Seth, 2026-10-17: a Shift+Enter in FLEx leaves an empty line 1.2 that FLEx numbers but never
+    shows; the example must not show it either."""
+    import copy
+    h, page, errors = app
+    text = h.api._flex.backend.texts[T_STORY]
+    segs = text["segments"]
+    blank = copy.deepcopy(segs[0])
+    blank.update(guid="9b1c2d3e-4f50-4a6b-8c7d-0e1f2a3b9301", baseline=" ", words=[], free="", lit="", notes=[], begin=None, end=None)
+    segs.insert(1, blank)
+    for n, s in enumerate(segs, 1):
+        s["n"] = n
+    segs[0]["label"], segs[1]["label"], segs[2]["label"] = "1.1", "1.2", "1.3"
+    tab = h.api.init()["config"]["tabs"][0]["dir"]
+    h.api.create_note(tab, "", "Blank", "{{flex:text %s seg=1-3}}\n\n{{flex:text %s seg=2}}" % (T_STORY, T_STORY))
+    page.reload()
+    page.wait_for_selector(".note-card")
+    page.locator(".note-card", has_text="Blank").click()
+    page.wait_for_selector("#editor .text-obj .segment")
+    ex = page.locator("#editor .text-obj").first
+    assert ex.locator(".segment").count() == 2
+    body = ex.inner_text()
+    assert "1.1" in body and "1.3" in body and "segments 1.1–1.3" in body, body
+    # an example that IS the blank line says so instead of showing nothing
+    assert "This line is empty in FLEx." in page.locator("#editor .text-obj").nth(1).inner_text()
+    # the copy for FLEx (TSV) leaves it out too
+    tsv = page.evaluate("""(g) => FS.interlinear.flexTsv(FS.flexref.parse('{{flex:text ' + g + ' seg=1-2 lines=txt}}'),
+        { segments: [{ n: 1, label: '1.1', baseline: 'Kabir', words: [{ txt: 'Kabir' }] }, { n: 2, label: '1.2', baseline: '\u2028', words: [] }] })""", T_STORY)
+    assert tsv.count("Word") == 1 and "Kabir" in tsv, tsv
+    assert not [e for e in errors if "Failed to load resource" not in e], errors
