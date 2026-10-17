@@ -714,10 +714,13 @@ class FlexService:
             text["media"] = media
         return {"folder": str(folder) if files else "", "files": files, "matched": matched, "missing": missing}
 
-    def bundle_audio(self, examples: list[dict], dst: Path, gap_ms: int = 600) -> dict:
+    def bundle_audio(self, examples: list[dict], dst: Path, linked_root: Path | None = None) -> dict:
         """One recording of every timed segment of these examples, in order (the clips the
-        cache already cuts, concatenated with a gap); the segments' offsets and media are
-        rewritten to it. Returns {path, matched, missing}; no file when nothing was timed."""
+        cache already cuts, joined with a click between them: `audio.concat_clips`), as the
+        text's ONE media file; the segments' offsets and media are rewritten to it (Seth,
+        2026-10-17: concatenated, the export's default, or one clip per line). Inside a
+        FieldWorks LinkedFiles folder the location is written relative to it, as for clips.
+        Returns {path, matched, missing}; no file when nothing was timed."""
         from .audio import concat_clips, find_ffmpeg
         import uuid as _uuid
         clips, slots = [], []
@@ -738,11 +741,17 @@ class FlexService:
                 for seg in ex["text"].get("segments") or []:
                     seg["begin"] = seg["end"] = None      # no recording to point at
             return {"path": "", "matched": 0, "missing": missing}
-        spans = concat_clips(clips, Path(dst), gap_ms, find_ffmpeg(self.nb.config.get("settings", {}).get("ffmpegPath", "")))
+        spans = concat_clips(clips, Path(dst), ffmpeg=find_ffmpeg(self.nb.config.get("settings", {}).get("ffmpegPath", "")))
         bundle_guid = str(_uuid.uuid4())
         matched = {id(seg) for seg in slots}
+        loc = str(Path(dst).resolve())
+        if linked_root is not None:
+            try:
+                loc = Path(dst).resolve().relative_to(Path(linked_root).resolve()).as_posix()
+            except ValueError:
+                pass
         for ex in examples:
-            ex["text"]["media"] = [{"guid": bundle_guid, "uri": Path(dst).name, "path": str(Path(dst).resolve()), "found": True}]
+            ex["text"]["media"] = [{"guid": bundle_guid, "uri": loc, "path": loc, "found": True}]
             for seg in ex["text"].get("segments") or []:
                 if id(seg) not in matched:
                     seg["begin"] = seg["end"] = None

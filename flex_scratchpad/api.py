@@ -375,36 +375,31 @@ class Api:
         target = path or self._save_dialog((wopts["title"] or "examples") + ".flextext")
         if not target:
             return None
-        # audio (Seth, 2026-10-16: "grab audio segments and match them"): one recording per
-        # exported text next to the file, every example's clip in order, offsets rewritten;
-        # 'original' keeps the source recordings and offsets; 'none' drops the timing
-        audio = opts.get("audio") or "clips"
+        # audio (Seth, 2026-10-16: "grab audio segments and match them"; 2026-10-17: "concatenate
+        # the audio as a single audio file stored in the text media file … with a generated
+        # click inserted at join points … default to concatenated"): 'bundle' = one 16-bit mono
+        # WAV per exported text, every line's clip in order with a click between, offsets
+        # rewritten; 'clips' = one small WAV per line; 'original' keeps the source recordings
+        # and offsets; 'none' drops the timing. Both written files go into the chosen folder
+        # (a project's LinkedFiles/AudioVisual, ideally) or one next to the .flextext.
+        audio = opts.get("audio") or "bundle"
         audio_out = {"path": "", "matched": 0, "missing": 0}
-        if audio == "clips":
-            # one 16-bit mono WAV per line, into the chosen folder (a project's
-            # LinkedFiles/AudioVisual, ideally) or a folder next to the file
+        if audio in ("clips", "bundle"):
             folder = Path(opts.get("audioFolder") or Path(target).with_name(Path(target).stem + "-audio"))
             linked_root = next((p for p in [folder] + list(folder.parents) if p.name.lower() == "linkedfiles"), None)
             stem = "".join(c if c.isalnum() or c in "-_" else "-" for c in (wopts["title"] or "examples")).strip("-") or "examples"
             for k, v in groups:
-                r = self._flex.clip_audio(v, folder, stem + (f"-{k}" if len(groups) > 1 else ""), linked_root)
-                audio_out["matched"] += r["matched"]
-                audio_out["missing"] += r["missing"]
-                if r["folder"]:
-                    audio_out["path"] = r["folder"]
-        elif audio == "bundle":
-            kept = [ex for k, v in groups for ex in v]
-            per_text = {}
-            for k, v in groups:
                 suffix = f"-{k}" if len(groups) > 1 else ""
-                dst = Path(target).with_name(Path(target).stem + suffix + ".wav")
-                r = self._flex.bundle_audio(v, dst)
-                per_text[k] = r
+                if audio == "clips":
+                    r = self._flex.clip_audio(v, folder, stem + suffix, linked_root)
+                    where = r["folder"]
+                else:
+                    r = self._flex.bundle_audio(v, folder / f"{stem}{suffix}.wav", linked_root)
+                    where = r["path"]
                 audio_out["matched"] += r["matched"]
                 audio_out["missing"] += r["missing"]
-                if r["path"]:
-                    audio_out["path"] = (audio_out["path"] + "; " if audio_out["path"] else "") + r["path"]
-            del kept
+                if where and where not in audio_out["path"]:
+                    audio_out["path"] = (audio_out["path"] + "; " if audio_out["path"] else "") + where
         elif audio == "none":
             for _, v in groups:
                 for ex in v:

@@ -336,12 +336,16 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
   GUIDs are NEW (an original GUID would make FLEx's import touch the source text); word GUIDs
   are kept so the import reuses the analyses. A Source note per line (title, FLEx number,
   GUIDs) and, optionally, a `flexscratchpad://note/<id>` link and the note's markdown as the
-  text comment. Audio (`opts.audio`): `clips` (default) = one small 16-bit mono WAV PER LINE
-  (`audio.to_mono16`, `FlexService.clip_audio`; Seth: flextext attaches clips to individual
-  lines), each phrase pointing at its own `<media>` from 0 to its length, into
-  `<title>-audio/` or a chosen folder — inside a LinkedFiles tree the locations are relative to
-  it (`AudioVisual/x.wav`, as FLEx stores media); `bundle` = one WAV of all the examples with
-  600 ms gaps and rewritten offsets (`audio.concat_clips`); `original` keeps the source
+  text comment. Audio (`opts.audio`, the user's choice in the dialog; Seth, 2026-10-17:
+  "default to concatenated"): `bundle` (default) = the text's ONE media file, a 16-bit mono WAV
+  of every line's clip in order with a generated CLICK at each join (500 ms silence, 5 ms 2 kHz
+  fading sine, 500 ms silence — the Visual Stimulus Kit's joiner,
+  `videoannotationtool/vat/audio/joiner.py`; its peak is the quieter neighbour's, 0.03–0.5),
+  offsets rewritten (`audio.concat_clips`, `FlexService.bundle_audio`); `clips` = one small
+  16-bit mono WAV PER LINE (`audio.to_mono16`, `FlexService.clip_audio`), each phrase pointing at
+  its own `<media>` from 0 to its length. Both go into `<title>-audio/` or a chosen folder —
+  inside a LinkedFiles tree the locations are relative to it (`AudioVisual/x.wav`, as FLEx
+  stores media); `original` keeps the source
   recordings and offsets; `none` drops timing.
   ⚠ VALID BY THE SCHEMA IS NOT IMPORTABLE (Seth, 2026-10-16: an export stopped FLEx with "Object
   reference not set…" on one `<word/>` with no items, and the file passed the XSD). FLEx reads a

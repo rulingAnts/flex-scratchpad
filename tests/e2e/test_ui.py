@@ -1657,6 +1657,14 @@ def test_export_examples_as_flextext(app):
     page.wait_for_selector(".modal", timeout=15000)
     assert "2 examples" in page.locator(".modal p").first.inner_text()
     assert page.locator(".modal input[type=text]").first.input_value() == "SVCs \u2014 examples"
+    # concatenated audio is the default (Seth, 2026-10-17), per line the other choice
+    sel = page.locator(".modal .form-row:has(label:text-is(\"Audio\")) select")
+    assert sel.input_value() == "bundle" and "click" in sel.locator("option:checked").inner_text()
+    assert page.locator(".modal .form-row", has_text="Audio into").is_visible()
+    sel.select_option("none")
+    assert page.locator(".modal .form-row", has_text="Audio into").is_hidden()
+    sel.select_option("clips")
+    assert page.locator(".modal .form-row", has_text="Audio into").is_visible()
     page.keyboard.press("Escape")
     page.wait_for_timeout(700)
     # the export through the API (the dialog's Export… goes through the save dialog)
@@ -1668,7 +1676,7 @@ def test_export_examples_as_flextext(app):
       return await api.export_note_flextext(cols[0].id, items, { title: 'SVCs', includeLink: true, includeMarkdown: true }, out);
     }""", out)
     assert r["examples"] == 2 and r["skipped"] == 0 and r["texts"] == [{"ws": "kal", "examples": 2}]
-    assert r["audio"].endswith("svcs-audio") and r["audioMatched"] == 3 and (h.tmp / "svcs-audio" / "SVCs-1.1.wav").exists()
+    assert r["audio"] == str(h.tmp / "svcs-audio" / "SVCs.wav") and r["audioMatched"] == 3 and (h.tmp / "svcs-audio" / "SVCs.wav").exists()
     import xml.etree.ElementTree as ET
     root = ET.parse(out).getroot()
     phrases = root.findall(".//phrase")
