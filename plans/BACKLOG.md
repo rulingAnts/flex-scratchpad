@@ -41,7 +41,7 @@ Where it goes: the embed's ⋯ menu (and the overlay's bar) gets *Copy as → FL
 running one through a file in the app data folder (no sockets). **Done 2026-10-16**
 (`links.py`): the flextext export writes the link into each phrase's Source note and the
 text's source field, and "Copy link to this note" is on the note menu. Still open: inserting
-such a link into a FLEx field from here (a write — see below).
+such a link into a FLEx field from here (a write — shelved with the rest, see below).
 
 ## Several FLEx projects in one notebook (Seth, 2026-10-12)
 
@@ -119,6 +119,10 @@ and getting the exact item from there"). Design, to build when it comes up:**
    today.
 
 ## The ONE write to a FLEx project: correcting a text's media source (Seth, 2026-10-13)
+
+**SHELVED 2026-10-17 (Seth): "Read-only is good for this project."** FLEx Scratchpad writes nothing
+to a FLEx project, and the site says so; `tests/test_read_only.py` fails the build if the code
+gains a way to. What follows is kept only as the record of what such a write would take.
 
 > *"Eventually, I'd like correcting the media source for a text (on the info tab) to be the ONE
 > write operation our app can perform on the FLEx project. (At least until we figure out if and
