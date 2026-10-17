@@ -27,12 +27,14 @@
   const R = FS.flexref;
 
   /* The embed as a collection keeps it: its styling and lines, without the layout keys a
-   * collection decides for itself (numbering, indent, collapsed / expanded). */
-  function cleanEmbed(src) {
+   * collection decides for itself (numbering, indent, collapsed / expanded). An example IN a
+   * collection can be collapsed to a chip there (Seth, 2026-10-17): `keepCollapsed` keeps that
+   * flag when the collection rewrites its own examples; one arriving from a note comes open. */
+  function cleanEmbed(src, keepCollapsed) {
     const spec = R.parse(String(src || '').trim());
     if (!spec) return null;
     const x = spec.extra || {};
-    for (const k of ['ex', 'indent', 'collapsed', 'expanded']) delete x[k];
+    for (const k of ['ex', 'indent', 'expanded'].concat(keepCollapsed ? [] : ['collapsed'])) delete x[k];
     spec.extra = x;
     return R.serialize(spec);
   }
@@ -218,6 +220,16 @@
     }
     setCollapsed(g, on) { this.items[g].collapsed = on; this.changed(); this.render(); }
     setAllCollapsed(on) { for (const i of this.items) if (i.t === 'group') i.collapsed = on; this.changed(); this.render(); }
+    /* every example to a chip, or every one open (the groups stay as they are) */
+    setExamplesCollapsed(on) {
+      for (const it of this.items) {
+        if (it.t !== 'ex' || !it.spec) continue;
+        it.spec.extra = it.spec.extra || {};
+        if (on) it.spec.extra.collapsed = true; else delete it.spec.extra.collapsed;
+        it.src = R.serialize(it.spec);
+      }
+      this.changed(); this.render();
+    }
     /* ↑ / ↓ on an example swaps it with its neighbour (so it can cross into the next group);
      * on a group it moves the whole group past the neighbouring group. */
     step(i, d) {
@@ -343,7 +355,7 @@
      * examples and groups in it go after the selection, or at the end. */
     pasteText(text) {
       const got = parse(String(text || '')).filter((x) => x.t !== 'other' || /\{\{flex:/.test(x.src))
-        .map((x) => x.t === 'ex' ? Object.assign(x, { src: cleanEmbed(x.src) || x.src }) : x)
+        .map((x) => x.t === 'ex' ? Object.assign(x, { src: cleanEmbed(x.src, true) || x.src }) : x)
         .filter((x) => x.t !== 'ex' || (x.spec && x.spec.kind === 'text'));
       if (!got.length) return 0;
       const idx = this.selectedIdx();
@@ -417,6 +429,9 @@
         ng ? (this.groups().some((g) => !g.collapsed)
           ? el('button', { class: 'btn', 'data-test': 'coll-all', title: 'Close every group', onclick: () => this.setAllCollapsed(true) }, '\u25b8 Collapse all')
           : el('button', { class: 'btn', 'data-test': 'coll-all', title: 'Open every group', onclick: () => this.setAllCollapsed(false) }, '\u25be Expand all')) : null,
+        n ? (this.examples().some((x) => !(x.spec && x.spec.extra && x.spec.extra.collapsed))
+          ? el('button', { class: 'btn', 'data-test': 'coll-ex-all', title: 'Show every example as a one-line chip (hover or click one to see it)', onclick: () => this.setExamplesCollapsed(true) }, '\u2921 Examples as chips')
+          : el('button', { class: 'btn', 'data-test': 'coll-ex-all', title: 'Show every example in full', onclick: () => this.setExamplesCollapsed(false) }, '\u2922 Examples in full')) : null,
         el('button', { class: 'btn', 'data-test': 'coll-add-group', title: 'A labelled, collapsible block for sorting the examples (not exported)', onclick: () => this.askGroup() }, '➕ Group…'),
         el('button', { class: 'btn', 'data-test': 'coll-refresh', title: 'Take in what was changed in FieldWorks and reload every example', onclick: (e) => { e.currentTarget.disabled = true; this.opts.onRefreshAll && this.opts.onRefreshAll(); } }, '↻ Refresh all'),
         el('button', { class: 'btn', title: 'Find a text and its segments in the project', onclick: () => this.pick() }, '➕ Add from FLEx…'),
@@ -514,8 +529,8 @@
           el('button', { class: 'icon-btn', title: 'Note on this example (exported to FLEx)', 'data-test': 'coll-note-btn', onclick: () => { note.hidden = false; grow(); note.focus(); } }, '✎'),
           el('button', { class: 'icon-btn danger', title: 'Remove from the collection', 'data-test': 'coll-remove', onclick: () => this.remove(i) }, '✕')));
       const opts = () => ({
-        editable: true, force: true, collection: true,
-        onSpecChange: (s) => { const src = cleanEmbed(R.serialize(s)); if (!src) return; item.src = src; item.spec = R.parse(src); this.changed(); FS.interlinear.render(host, item.spec, opts()); },
+        editable: true, collection: true,
+        onSpecChange: (s) => { const src = cleanEmbed(R.serialize(s), true); if (!src) return; item.src = src; item.spec = R.parse(src); this.changed(); FS.interlinear.render(host, item.spec, opts()); },
         duplicate: () => { this.items.splice(i + 1, 0, { t: 'ex', src: item.src, spec: R.parse(item.src), note: item.note }); this.undo = null; this.changed(); this.render(); },
       });                                                 // removing is the ✕ beside the card
       FS.interlinear.render(host, item.spec, opts());

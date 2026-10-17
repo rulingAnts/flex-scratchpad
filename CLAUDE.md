@@ -225,6 +225,12 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
   collection), Duplicate (Ctrl+D), Remove (Delete, with Undo); dragging a selected card moves them
   all. A selected group stands for its whole block (`selectedIdx`). A redraw keeps the keyboard
   focus in the collection.
+  An EXAMPLE collapses to a chip too (Seth, 2026-10-17: "we DO want flex objects in example
+  collection notes to be collapsible"): ⤡ on the example, ⤢ on the chip or "⤢ Expand" in its
+  preview, and "Examples as chips / in full" in the header. The embed keeps `collapsed` in the
+  collection's file (`cleanEmbed(src, keepCollapsed)`; examples arriving from a note still come
+  open), the chip is not draggable there (cards move by their grip), and the export takes every
+  example, open or not.
 - TEXTS USED (Seth, 2026-10-16: "list which texts are referenced in a [note], a folder, or a
   selected range … not individual items, but texts they come from … a FLEx hyperlink for each"):
   `Api.texts_used(scope)` → `FlexService.texts_used` — one row per source TEXT (the guid of every

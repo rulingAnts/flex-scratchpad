@@ -3089,3 +3089,42 @@ def test_playback_lights_the_playing_line_follows_it_and_keeps_its_controls_in_v
     assert page.evaluate("document.getElementById('editor').scrollTop") == top
     page.wait_for_function("() => !document.querySelector('#editor .segment.playing-line')", timeout=8000)   # off when it ends
     assert not [e for e in errors if "Failed to load resource" not in e], errors
+
+
+def test_examples_in_a_collection_collapse_to_chips(app):
+    """Seth, 2026-10-17: "we DO want flex objects in example collection notes to be collapsible"."""
+    h, page, errors = app
+    tab = h.api.init()["config"]["tabs"][0]["dir"]
+    n = h.api.create_note(tab, "", "Switch reference", "## Same subject\n\n{{flex:text %s seg=1}}\n\n{{flex:text %s seg=3-4}}\n" % (T_STORY, T_STORY), "examples")
+    page.reload()
+    page.wait_for_selector(".note-card")
+    page.locator(".note-card", has_text="Switch reference").click()
+    page.wait_for_selector("#collection .coll-item .text-obj")
+    assert page.locator("#collection .coll-item .text-obj").count() == 2
+    # one example, by its ⤡
+    page.locator("#collection .coll-item").first.locator("[data-test=collapse-obj]").click()
+    page.wait_for_selector("#collection .coll-item .flex-collapsed")
+    assert page.locator("#collection .coll-item .text-obj").count() == 1
+    page.wait_for_timeout(1200)
+    body = h.api.get_note(n["id"])["body"]
+    assert body.count(" collapsed") == 1 and "## Same subject" in body, body
+    # all of them, from the header; it stays so after a reload
+    page.locator("[data-test=coll-ex-all]").click()
+    page.wait_for_function("() => document.querySelectorAll('#collection .coll-item .flex-collapsed').length === 2")
+    page.wait_for_timeout(1200)
+    page.reload()
+    page.wait_for_selector(".note-card")
+    page.locator(".note-card", has_text="Switch reference").click()
+    page.wait_for_function("() => document.querySelectorAll('#collection .coll-item .flex-collapsed').length === 2")
+    assert "Examples in full" in page.locator("[data-test=coll-ex-all]").inner_text()
+    # a chip opens its preview on a click, and ⤢ Expand puts the example back in full
+    page.locator("#collection .coll-item .flex-collapsed").first.click()
+    page.wait_for_selector(".flex-overlay .text-obj")
+    page.locator(".flex-overlay .lnk", has_text="⤢ Expand").click()
+    page.wait_for_function("() => document.querySelectorAll('#collection .coll-item .text-obj').length === 1")
+    # the export takes every example, open or not
+    items = page.evaluate("() => window.__fsCollection.flextextItems()")
+    assert len(items) == 2, items
+    page.wait_for_timeout(1200)
+    assert h.api.get_note(n["id"])["body"].count(" collapsed") == 1
+    assert not [e for e in errors if "Failed to load resource" not in e], errors

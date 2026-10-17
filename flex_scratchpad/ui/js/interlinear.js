@@ -265,7 +265,7 @@
       head.appendChild(el('button', { class: 'lnk play-range', title: 'Play this range', onclick: () => playRange(box, obj, segs, mediaByGuid, opts) }, '▶ Play ' + flexRange));
     }
     head.appendChild(el('button', { class: 'lnk', title: 'Reload from FLEx', onclick: () => opts.refresh && opts.refresh() }, '↻'));
-    if (opts.editable && !opts.overlay && !opts.collection) head.appendChild(el('button', { class: 'lnk', title: 'Collapse to a chip', onclick: () => setCollapsed(spec, opts, true) }, '⤡'));
+    if (opts.editable && !opts.overlay) head.appendChild(el('button', { class: 'lnk', 'data-test': 'collapse-obj', title: 'Collapse to a chip', onclick: () => setCollapsed(spec, opts, true) }, '⤡'));
     if (opts.editable && opts.inCell && opts.editCell && !opts.overlay) head.appendChild(el('button', { class: 'lnk', title: 'Edit the cell\u2019s text (type before or after this example, add another)', onclick: () => opts.editCell() }, '✎'));
     if (opts.editable && !opts.overlay && opts.duplicate) head.appendChild(el('button', { class: 'lnk', title: 'Duplicate this object', onclick: () => opts.duplicate() }, '⧉'));
     if (opts.editable && !opts.overlay && opts.remove) head.appendChild(el('button', { class: 'lnk danger', title: 'Remove this object…', onclick: (e) => removeObject(e.currentTarget, spec, opts) }, '🗑'));
@@ -787,7 +787,7 @@
     if (obj.cached) head.appendChild(el('span', { class: 'badge warn', title: obj.liveError || '' }, 'cached' + (obj.cachedAt ? ' ' + obj.cachedAt.slice(0, 10) : '')));
     head.appendChild(el('span', { class: 'spacer' }));
     head.appendChild(el('button', { class: 'lnk', title: 'Reload from FLEx', onclick: () => opts.refresh && opts.refresh() }, '↻'));
-    if (opts.editable && !opts.overlay && !opts.collection) head.appendChild(el('button', { class: 'lnk', title: 'Collapse to a chip', onclick: () => setCollapsed(spec, opts, true) }, '⤡'));
+    if (opts.editable && !opts.overlay) head.appendChild(el('button', { class: 'lnk', 'data-test': 'collapse-obj', title: 'Collapse to a chip', onclick: () => setCollapsed(spec, opts, true) }, '⤡'));
     if (opts.editable && opts.inCell && opts.editCell && !opts.overlay) head.appendChild(el('button', { class: 'lnk', title: 'Edit the cell\u2019s text', onclick: () => opts.editCell() }, '✎'));
     if (opts.editable && !opts.overlay && opts.duplicate) head.appendChild(el('button', { class: 'lnk', title: 'Duplicate this object', onclick: () => opts.duplicate() }, '⧉'));
     if (opts.editable && !opts.overlay && opts.remove) head.appendChild(el('button', { class: 'lnk danger', title: 'Remove this object…', onclick: (e) => removeObject(e.currentTarget, spec, opts) }, '🗑'));
@@ -909,7 +909,7 @@
   function renderChip(container, spec, opts) {
     container.innerHTML = '';
     const icon = spec.kind === 'text' ? '¶' : spec.kind === 'wordform' ? 'ω' : '📖';
-    const chip = el('span', { class: 'flex-collapsed kind-' + spec.kind, tabindex: 0, title: 'Click to preview; ⤡ to expand; drag to move', draggable: opts.editable ? 'true' : null });
+    const chip = el('span', { class: 'flex-collapsed kind-' + spec.kind, tabindex: 0, title: 'Click to preview; ⤢ to expand' + (opts.collection ? '' : '; drag to move'), draggable: opts.editable && !opts.collection ? 'true' : null });   // a collection drags a card by its own grip
     const ttl = el('span', { class: 'cttl' }, chipTitle(spec, null));
     chip.appendChild(el('span', { class: 'cicon' }, icon));
     chip.appendChild(ttl);
@@ -993,7 +993,7 @@
       spec.kind === 'text' && FS.addToCollection ? el('button', { class: 'lnk', title: 'Add this example to an example collection (the note that exports as a FLEx text)', onclick: (e) => FS.addToCollection(e.currentTarget, FS.flexref.serialize(spec)) }, '\u2795 Collection') : null,
       opts.editable && opts.duplicate ? el('button', { class: 'lnk', title: 'Duplicate this object', onclick: () => { closeOverlay(); opts.duplicate(); } }, '⧉ Duplicate') : null,
       opts.editable && opts.remove ? el('button', { class: 'lnk danger', title: 'Remove this object…', onclick: (e) => removeObject(e.currentTarget, spec, opts) }, '🗑 Remove') : null,
-      opts.editable ? el('button', { class: 'lnk', onclick: () => { closeOverlay(); if (opts.expandInline) opts.expandInline(); else setCollapsed(spec, opts, false); } }, opts.inCell ? '⤢ Show in cell' : '⤢ Expand in note') : null,
+      opts.editable ? el('button', { class: 'lnk', onclick: () => { closeOverlay(); if (opts.expandInline) opts.expandInline(); else setCollapsed(spec, opts, false); } }, opts.inCell ? '⤢ Show in cell' : opts.collection ? '⤢ Expand' : '⤢ Expand in note') : null,
       el('button', { class: 'lnk', onclick: () => closeOverlay() }, '✕'));
     node.append(bar, inner);
     document.body.appendChild(node);
