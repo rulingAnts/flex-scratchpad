@@ -126,14 +126,15 @@ def test_workflows_stay_free_and_only_tags_publish():
     assert "tags:" in rel and "--prerelease" in rel and "needs: [version, package]" in rel
 
 
-def test_the_packaged_entry_point_and_page_are_right():
+def test_the_packaged_entry_point_and_page_are_right(monkeypatch):
     """The first Windows build hung: the spec ran flex_scratchpad/__main__.py as a bare script,
     whose relative imports fail there, and the windowed program showed the error in a message
     box; and collect_data_files left the page out when the package was not installed."""
     import runpy
     spec = (ROOT / "build" / "flex-scratchpad.spec").read_text(encoding="utf-8")
-    assert 'os.path.join(here, "launcher.py")' in spec and "collect_data_files" not in spec
+    assert 'os.path.join(here, "launcher.py")' in spec and "collect_data_files(" not in spec
     assert 'os.walk(os.path.join(pkg, "ui"))' in spec and "BUILD_ID" in spec
+    monkeypatch.setattr(sys, "argv", ["flex-scratchpad", "--version"])
     with pytest.raises(ImportError):                       # why the launcher exists
         runpy.run_path(str(ROOT / "flex_scratchpad" / "__main__.py"), run_name="__main__")
     wf = (ROOT / ".github" / "workflows" / "windows-package.yml").read_text(encoding="utf-8")
