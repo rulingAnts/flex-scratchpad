@@ -913,7 +913,7 @@
     }
     _flexOpts(b, host) {
       return {
-        editable: true, layout: true,
+        editable: true, layout: true, keepView: true,
         onSpecChange: (s) => { b.src = FS.flexref.serialize(s); this.applyLayout(b.el, s); this.changed(); FS.interlinear.render(host, s, this._flexOpts(b, host)); },
         editSource: () => this.editSource(b),
         duplicate: () => { this.insertBlockAfter(b, { type: 'flex', src: b.src }, false); FS.toast('Duplicated'); },

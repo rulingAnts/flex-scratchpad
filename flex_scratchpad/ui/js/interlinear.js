@@ -1086,7 +1086,7 @@
     // A style, label or range change saves through the owner's onSpecChange (which re-draws
     // the chip underneath) AND re-draws this overlay, so what was clicked shows at once
     // (Seth, 2026-10-13: "I can click them, but the styling doesn't show afterward").
-    const oo = Object.assign({}, opts, { force: true, overlay: true, editable: !!opts.editable });
+    const oo = Object.assign({}, opts, { force: true, overlay: true, editable: !!opts.editable, keepView: true });
     oo.onSpecChange = (s) => { if (opts.onSpecChange) opts.onSpecChange(s); if (node.isConnected) render(inner, s, oo); };
     render(inner, spec, oo);
     /* Placement: below the chip when it fits, else above, else on whichever side has more
@@ -1140,12 +1140,26 @@
    *   editSource    callback for "Edit source"
    *   inCell        table-cell mode: a chip unless the embed says `expanded`
    *   force         render fully whatever the flags say (overlays) */
+  /* The scroll positions of `node` and of every scrolling box around it, put back by the returned
+   * function: replacing a drawing must never move the view. */
+  function holdScroll(node) {
+    const held = [];
+    for (let x = node; x && x.nodeType === 1; x = x.parentElement) if (x.scrollHeight > x.clientHeight || x.scrollTop) held.push([x, x.scrollTop, x.scrollLeft]);
+    return () => { for (const [x, top, left] of held) { if (x.scrollTop !== top) x.scrollTop = top; if (x.scrollLeft !== left) x.scrollLeft = left; } };
+  }
+
   async function render(container, spec, opts) {
     opts = opts || {};
     if (spec.kind === 'file') return FS.files.render(container, spec, opts);   // an attached file, not a FLEx object
     if (isCollapsed(spec, opts)) { renderChip(container, spec, opts); return; }
-    container.innerHTML = '';
-    container.appendChild(el('div', { class: 'flex-obj' }, el('div', { class: 'flex-loading' }, 'Loading from FLEx…')));
+    // a redraw after an edit (a style, a line, the range) keeps what is shown until the new
+    // drawing is ready (Seth, 2026-10-17: styling inside a preview "jumps back up to the top of the
+    // example" — the "Loading…" in between shrank it and its scroll fell to the top)
+    const keep = opts.keepView && container.querySelector(':scope > .flex-obj:not(.loading-box)');
+    if (!keep) {
+      container.innerHTML = '';
+      container.appendChild(el('div', { class: 'flex-obj loading-box' }, el('div', { class: 'flex-loading' }, 'Loading from FLEx…')));
+    }
     const doRender = async (refresh) => {
       try {
         const kind = spec.kind === 'sense' ? 'entry' : spec.kind;
@@ -1153,9 +1167,11 @@
         if (syncAnchors(spec, obj, opts)) return;          // the spec changed: the owner re-renders
         const o = Object.assign({}, opts, { refresh: () => reload() });
         const node = kind === 'text' ? renderText(obj, spec, o) : kind === 'wordform' ? renderWordform(obj, spec, o) : renderEntry(obj, spec, o);
+        const restore = keep && container.isConnected ? holdScroll(container) : null;   // only when a drawing is REPLACED
         container.innerHTML = '';
         container.appendChild(node);
         container._obj = obj;
+        if (restore) restore();
       } catch (e) {
         container.innerHTML = '';
         const err = el('div', { class: 'flex-obj' },

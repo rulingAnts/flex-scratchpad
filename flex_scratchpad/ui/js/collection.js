@@ -529,7 +529,7 @@
           el('button', { class: 'icon-btn', title: 'Note on this example (exported to FLEx)', 'data-test': 'coll-note-btn', onclick: () => { note.hidden = false; grow(); note.focus(); } }, '✎'),
           el('button', { class: 'icon-btn danger', title: 'Remove from the collection', 'data-test': 'coll-remove', onclick: () => this.remove(i) }, '✕')));
       const opts = () => ({
-        editable: true, collection: true,
+        editable: true, collection: true, keepView: true,
         onSpecChange: (s) => { const src = cleanEmbed(R.serialize(s), true); if (!src) return; item.src = src; item.spec = R.parse(src); this.changed(); FS.interlinear.render(host, item.spec, opts()); },
         duplicate: () => { this.items.splice(i + 1, 0, { t: 'ex', src: item.src, spec: R.parse(item.src), note: item.note }); this.undo = null; this.changed(); this.render(); },
       });                                                 // removing is the ✕ beside the card

@@ -125,6 +125,11 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
   press must start on the background too: a table tool redraws under the pointer and the release
   that lands on the background was the "+ Row jumps to the bottom". `renderAll` and the table's
   `refresh` restore the scroll position. Explicit navigation (focus moves, Find) still scrolls.
+  A FLEx object redrawn after an edit (a style, its lines, its range) keeps its old drawing until
+  the new one is ready (`keepView` in the note's, the collection's and the preview's render opts:
+  no "Loading…" in between to shrink it) and `holdScroll` puts back every scroll position around
+  it — ONLY when a drawing is replaced (holding scroll on every first drawing broke a collection's
+  drag) (Seth, 2026-10-17: styling inside a collapsed example's preview jumped to the top of it).
 - Headings 1–6 FOLD (Seth, 2026-10-16): a closed heading hides everything after it up to the next
   heading of the same or a higher level (`markdown.hiddenByFolds` / `sectionEnd`, the editor's
   `applyFolds`, ▾/▸ in the left margin, "⋯ N blocks" under it). The state is the block's

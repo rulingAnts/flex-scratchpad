@@ -3207,3 +3207,36 @@ def test_something_playing_always_has_a_way_to_pause_and_stop_it(app):
     page.keyboard.press("Escape")
     assert page.evaluate("FS.audio.current") is None
     assert not [e for e in errors if "Failed to load resource" not in e], errors
+
+
+def test_styling_inside_a_preview_keeps_the_preview_where_it_was(app):
+    """Seth, 2026-10-17: styling a word inside a collapsed example's preview made the preview
+    jump back up to the top of the example."""
+    h, page, errors = app
+    page.set_viewport_size({"width": 1360, "height": 560})
+    tab = h.api.init()["config"]["tabs"][0]["dir"]
+    n = h.api.create_note(tab, "", "Styled chip", "Intro.\n\n{{flex:text %s seg=1-6 collapsed}}\n\nAfter." % T_STORY)
+    page.reload()
+    page.wait_for_selector(".note-card")
+    page.locator(".note-card", has_text="Styled chip").click()
+    page.wait_for_selector("#editor .flex-collapsed")
+    page.locator("#editor .flex-collapsed").click()
+    page.wait_for_selector(".flex-overlay .text-obj .segment")
+    page.wait_for_timeout(400)
+    inner = ".flex-overlay .flex-overlay-inner"
+    assert page.evaluate("(s) => { const e = document.querySelector(s); return e.scrollHeight > e.clientHeight + 100; }", inner), "the preview scrolls"
+    # down to a later line, then highlight one of its words
+    page.evaluate("(s) => { const e = document.querySelector(s); e.querySelector('.segment[data-n=\"5\"]').scrollIntoView({ block: 'center' }); }", inner)
+    page.wait_for_timeout(200)
+    before = page.evaluate("(s) => document.querySelector(s).scrollTop", inner)
+    assert before > 100
+    page.locator(".flex-overlay .segment[data-n='5'] .word-cell").first.locator(".il-txt").click()
+    page.wait_for_selector(".popover .sw")
+    page.locator(".popover .sw").nth(1).click()
+    page.wait_for_selector(".flex-overlay .segment[data-n='5'] .st-hl")
+    page.wait_for_timeout(300)
+    after = page.evaluate("(s) => document.querySelector(s).scrollTop", inner)
+    assert abs(after - before) < 4, (before, after)
+    page.wait_for_timeout(900)
+    assert "hl[#ffd6a5]=5.1" in h.api.get_note(n["id"])["body"]
+    assert not [e for e in errors if "Failed to load resource" not in e], errors
