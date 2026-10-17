@@ -242,20 +242,43 @@ not line up in most renderers), and is one unit the app can find, hide and repla
 `ui/js/flexref.js` would treat the block as part of the embed (hidden, carried along on drag, cut
 and copy), and excerpts and search would skip it (search already reads the snapshot).
 
-Open questions (asked 2026-10-17):
-1. **Where the copy sits.** A fenced block right after the embed (above), or INSIDE the embed's own
-   braces (`{{flex:text … ⏎ lines… ⏎ }}`, multi-line, so the grammar gains an optional body: an
-   additive change)? Or an HTML comment, which editors show but Markdown renderers hide?
-2. **Inline chips and table cells.** These are one line, with no room for interlinear rows. Just
-   the reference and the free translation (`[The dog and the river 1.2: ‘Yesterday the child saw
-   the river.’]`)? Or nothing?
-3. **Which lines.** Whatever the example shows (`lines=`), or always the full set? Do highlights
-   show in the copy (`**word**`), or does it stay plain?
-4. **Entries too?** A dictionary-style line for lexical entries (headword, POS, glosses), not just
-   texts?
-5. **When it is written.** Only when the drawn object has CHANGED, so opening a note never rewrites
-   its file (that would touch backups and sync folders), and old notes fill in at their next
-   refresh, or all at once with a "write readable copies" command?
+DECIDED (Seth, 2026-10-17):
+
+1. **A ` ```flex-copy ` fence right after the embed**, and the app NEVER paints it: "the inverse of
+   the old convention of putting JavaScript inside HTML comment tags so that older browsers
+   wouldn't print it … here it's the newer, higher tech thing that needs to not render the
+   backward-compatible bit". Only a fence whose info string is exactly `flex-copy` is hidden; any
+   other code block a user types draws as usual. In the app the unit is the `{{flex …}}` object
+   alone: the copy is hidden, carried with it (drag, cut, copy, delete, undo) and never edited
+   by hand.
+2. **One line inside a table cell (and inside a line of text):** the reference and the free
+   translation. The convention FOLLOWS THE OBJECT: dragged out of a cell into a block of its own,
+   it gets the full fence; dragged into a cell, the fence becomes the one-line form. ("Our app
+   should be smart enough though that if we move it OUT of a table cell, then it should switch to
+   the other convention. And vice versa.")
+3. **Only the lines the example shows** (`lines=`).
+4. **Entries too**, and both entries and IGT examples carry a Markdown link to their `silfw://`
+   address, so a Markdown reader can open the object in FLEx. All of it is invisible in the app,
+   which draws the `{{ }}` object instead.
+5. **Written when the example has changed**, and when it moves into or out of a table (the form
+   changes). Opening a note never rewrites it.
+
+Design points that follow, to check when this is built:
+- A link does not work inside a code fence (it is shown as text there), so the fenced unit is
+  three parts: the embed, ONE reference line that is a Markdown link
+  (`[The dog and the river 1.2](silfw://localhost/link?…)`), then the `flex-copy` fence with the
+  aligned lines. The app hides the link line and the fence, and treats all three as one object.
+- The one-line form (cells, running text) needs a marker the app can recognise and readers ignore,
+  e.g. a link right after the embed whose title is `flex-copy`:
+  `{{flex:text …}}[The dog and the river 1.2: ‘Yesterday the child saw the river.’](silfw://… "flex-copy")`.
+  Pipes in a cell are escaped as usual.
+- Entries: `[ka-sila (v) ‘see’](silfw://…)`, plus the senses on lines of their own in the fenced
+  form.
+- Highlights are not marked in the copy (plain text) unless asked for later.
+- `flexref.js` stays the only parser (the embed grammar contract); the copy is written from the same
+  object model as the TSV copy (`interlinear.flexTsv`) and the exports. Excerpts, search, the
+  Markdown export and the TSV / LaTeX copies must not see the copy twice. The note's Markdown export
+  could keep the copies as they are (they are what a reader without the app sees).
 
 ## Dekereke objects in notes (Seth, 2026-10-17 — "near future")
 
