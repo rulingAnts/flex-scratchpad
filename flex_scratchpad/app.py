@@ -159,7 +159,7 @@ def run(notebook_dir: str | None = None, demo: bool = False, debug: bool = False
             pass
         if open_url:
             open_link(open_url)
-        links.watch_requests(open_link)
+        state["watcher"] = links.watch_requests(open_link)
         # the per-user scheme registration is cheap and idempotent; once per version is plenty
         try:
             # keyed on the build, not the version (which stays 0.1.0), so a new icon or launch
@@ -181,8 +181,42 @@ def run(notebook_dir: str | None = None, demo: bool = False, debug: bool = False
         webview.start(debug=debug, private_mode=False, storage_path=str(storage), http_server=False,
                       icon=str(ICON) if ICON.exists() else None)
     finally:
+        shut_down(api, state.get("watcher"))
         lock.release()
     return 0
+
+
+def shut_down(api, watcher=None, wait: float = 5.0) -> None:
+    """After the window is gone, before the process ends (Seth, 2026-10-17: closing the app
+    printed "Unhandled Exception: Python.Runtime.InternalPythonnetException: Failed to create
+    Python type for System.ComponentModel.InvalidAsynchronousStateException"). A thread still
+    calling into .NET then — an event pushed to the page, a page call's answer, the link poller —
+    reaches the window's ended UI thread (InvalidAsynchronousStateException) while Python is
+    already shutting pythonnet down, and the process dies on it. So: nothing is pushed to the
+    page any more, the poller stops, FLEx is closed, an Api call still writing (the last autosave)
+    may finish, and `exit_now` ends the process without that shutdown."""
+    api._window = None                  # Api._emit is a no-op from here on
+    if watcher is not None and getattr(watcher, "stop", None) is not None:
+        watcher.stop.set()
+    try:
+        api._flex.close()               # idempotent: on_closing usually did it already
+    except Exception:  # noqa: BLE001
+        pass
+    if api._lock.acquire(timeout=wait):
+        api._lock.release()
+
+
+def exit_now(code: int = 0) -> None:
+    """End the process now, without Python's interpreter shutdown (see `shut_down`): daemon
+    threads must not run into pythonnet's teardown. Everything worth keeping is on disk by now."""
+    import os
+    import sys
+    for f in (sys.stdout, sys.stderr):
+        try:
+            f.flush()
+        except Exception:  # noqa: BLE001 — a windowed build has no console
+            pass
+    os._exit(code)
 
 
 def _start_backup_process(notebook: str) -> None:

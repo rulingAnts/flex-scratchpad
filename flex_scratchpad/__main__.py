@@ -68,8 +68,10 @@ def main(argv: list[str] | None = None) -> int:
         finally:
             be.close()
 
-    from .app import run
-    return run(notebook_dir=args.notebook, demo=args.demo, debug=args.debug, open_url=args.url)
+    from .app import exit_now, run
+    code = run(notebook_dir=args.notebook, demo=args.demo, debug=args.debug, open_url=args.url)
+    exit_now(code)                      # never through Python's shutdown with pythonnet loaded (app.shut_down)
+    return code
 
 
 def dump(project: str | None, which: str) -> int:

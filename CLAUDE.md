@@ -361,6 +361,13 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
   we do too. When FLEx changes, re-read those two files in sillsdev/FieldWorks before trusting either.
   Save dialogs (`Api._save_dialog`) make the suggested name Windows-safe (a "/" in a title lost the
   extension) and always end the path in the suggested extension.
+- CLOSING THE APP (Seth, 2026-10-17: "Unhandled Exception: Python.Runtime.InternalPythonnetException:
+  Failed to create Python type for System.ComponentModel.InvalidAsynchronousStateException" on
+  close): a thread calling into .NET after the window's UI thread ended, while Python was already
+  tearing pythonnet down. `app.shut_down` (after `webview.start` returns) stops `_emit`, the link
+  poller and FLEx and waits ≤5 s for an Api call still writing; `__main__` then ends the GUI
+  process with `app.exit_now` (`os._exit`), never through the interpreter's shutdown. Anything
+  that must reach disk is written synchronously before that — never put it in an atexit handler.
 - `flexscratchpad://note/<id>` (`links.py`): registered per user (HKCU) at start on Windows; a
   second instance hands the URL to the running one through `open-request.txt` in the local data
   folder (polled; no sockets) and exits; one instance is kept by a lock file. The second start
