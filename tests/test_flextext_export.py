@@ -362,3 +362,32 @@ def test_a_morpheme_line_with_a_missing_form_is_left_out():
     doc = ET.fromstring(build_flextext([{"text": t}], {"title": "x"}))
     assert doc.find(".//morphemes") is None and doc.find(".//word/item").text == "kabiro"
     assert all(m.find("item[@type='txt']") is not None for m in doc.iter("morph"))
+
+
+def test_each_baseline_text_gets_its_own_concatenated_recording(tmp_path):
+    """Seth, 2026-10-17: "one combined flextext text per baseline with an audio file that
+    corresponds, with clicks where flex objects were joined"."""
+    import copy
+    import wave
+    from flex_scratchpad.flex import audio
+    api = make(tmp_path)
+    be = api._flex.backend
+    story, arab = be.texts[T_STORY], be.texts[T_ARAB]
+    arab["media"] = copy.deepcopy(story["media"])
+    for k, s in enumerate(arab["segments"]):
+        s["begin"], s["end"], s["media"] = 1000 * k, 1000 * k + 900, story["media"][0]["guid"]
+    n = api.create_note(None, "", "Mix", "x", "examples")
+    items = [{"kind": "text", "guid": T_STORY, "seg": [1, 2]}, {"kind": "text", "guid": T_ARAB, "seg": [1, 1]},
+             {"kind": "text", "guid": T_STORY, "seg": [4, 4]}, {"kind": "text", "guid": T_ARAB, "seg": [2, 2]}]
+    r = api.export_note_flextext(n["id"], items, {"title": "Mix"}, str(tmp_path / "Mix.flextext"))
+    join = 2 * audio.CLICK_PAD_MS + audio.CLICK_MS
+    for ws, pieces in (("kal", [3200, 1400]), ("kal-Arab", [900, 900])):
+        ft, wav = tmp_path / f"Mix ({ws}).flextext", tmp_path / f"Mix ({ws}).wav"
+        assert str(ft) in r["paths"] and wav.exists(), ws
+        root = ET.fromstring(ft.read_text(encoding="utf-8"))
+        assert len(root.findall("interlinear-text")) == 1
+        assert len(root.findall(".//paragraph")) == 2                    # both of its examples, combined
+        assert root.find(".//media-files/media").get("location") == str(wav.resolve())
+        with wave.open(str(wav)) as w:
+            ms = w.getnframes() * 1000 / w.getframerate()
+        assert abs(ms - (sum(pieces) + join)) < 30, (ws, ms)             # one click, between the two examples
