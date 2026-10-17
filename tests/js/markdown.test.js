@@ -200,3 +200,25 @@ test('a list starts at its first typed number; a new block restarts when its num
   const c2 = { counters: [] };
   assert.deepEqual(MD.numberLines(['1. a', '1. b', '1. c'], 'list', c2), [1, 2, 3]);   // the "1." style still counts
 });
+
+test('collapsible headings: the fold rides in the file, not in the text; sections end at the same or a higher level', () => {
+  // Seth, 2026-10-16: "headings to be collapsible (with material between that heading and the
+  // NEXT heading of the same or higher level)"
+  const md = ['# Chapter {collapsed}', '', 'intro', '', '## Part A', '', 'a text', '', '### Deep {collapsed}', '', 'deep text', '', '## Part B', '', 'b text', '', '# Next'].join('\n');
+  const b = MD.splitBlocks(md);
+  assert.deepEqual(b.map((x) => x.src), ['# Chapter', 'intro', '## Part A', 'a text', '### Deep', 'deep text', '## Part B', 'b text', '# Next']);
+  assert.deepEqual(b.map((x) => !!x.folded), [true, false, false, false, true, false, false, false, false]);
+  assert.equal(MD.joinBlocks(b), md);                                     // round-trips exactly
+  assert.deepEqual(b.map((x) => MD.headingLevel(x)), [1, 0, 2, 0, 3, 0, 2, 0, 1]);
+  // the closed chapter hides everything up to "# Next"; the closed ### inside it adds nothing
+  assert.deepEqual(MD.hiddenByFolds(b), [false, true, true, true, true, true, true, true, false]);
+  b[0].folded = false;
+  // now only "### Deep" is closed: it hides "deep text", and "## Part B" (higher level) ends it
+  assert.deepEqual(MD.hiddenByFolds(b), [false, false, false, false, false, true, false, false, false]);
+  assert.equal(MD.sectionEnd(b, 0), 7);
+  assert.equal(MD.sectionEnd(b, 2), 5);
+  assert.equal(MD.sectionEnd(b, 4), 5);
+  assert.equal(MD.sectionEnd(b, 8), 8);
+  assert.equal(MD.sectionEnd(b, 1), 1);                                   // not a heading
+  assert.ok(!/collapsed/.test(MD.joinBlocks(b).split('\n')[0]));
+});

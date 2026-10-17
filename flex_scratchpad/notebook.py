@@ -187,11 +187,18 @@ class Note:
 
 _EMBED = re.compile(r"\{\{[^}]*\}\}")
 _MD_NOISE = re.compile(r"^(#{1,6}\s+|[-*+]\s+(\[[ xX]\]\s+)?|\d+[.)]\s+|>\s+)", re.M)
+# a closed heading's fold marker (" {collapsed}", the editor's and a collection's) is view state,
+# never text: excerpts, search and the Markdown export leave it out
+FOLD_MARK = re.compile(r"^(#{1,6}\s.*?)\s+\{collapsed\}[ \t]*$", re.M)
+
+
+def without_fold_marks(body: str) -> str:
+    return FOLD_MARK.sub(r"\1", body or "")
 _INLINE_TAG = re.compile(r"(?<![\w#/&])#([\w][\w\-]*)", re.UNICODE)
 
 
 def excerpt(body: str, n: int = 160) -> str:
-    s = _EMBED.sub(" ", body or "")
+    s = _EMBED.sub(" ", without_fold_marks(body))
     s = re.sub(r"```[\s\S]*?```", " ", s)
     s = _MD_NOISE.sub("", s)
     s = re.sub(r"[*_`~=]{1,3}", "", s)
@@ -426,7 +433,7 @@ class Notebook:
             extra = self.extra_text(note.body) or ""
         except Exception:  # a cache problem must never break note loading
             extra = ""
-        blob = "\n".join([note.title, note.body, " ".join(note.tags), note.folder, note.tab, extra])
+        blob = "\n".join([note.title, without_fold_marks(note.body), " ".join(note.tags), note.folder, note.tab, extra])
         self._index[note.id] = normalize(blob)
         self._index_marks[note.id] = normalize(blob, strip_marks=True)
 

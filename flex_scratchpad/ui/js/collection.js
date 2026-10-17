@@ -7,7 +7,10 @@
  * the app:
  *
  *     ## Shared subject                     a GROUP: a labelled, collapsible block of examples
- *                                           (` {collapsed}` at the end when it is closed);
+ *                                           (` {collapsed}` at the end when it is closed); a
+ *                                           heading of any level, #…######, and a group holds
+ *                                           everything up to the next group of the same or a
+ *                                           higher level, sub-groups included (Seth, 2026-10-16);
  *     {{flex:text … seg=4}}                 groups only organise the view — they are not
  *     > Both verbs take the same subject.   exported; every example still is, in order.
  *                                           `> ` lines after an example are its NOTE, which IS
@@ -34,10 +37,24 @@
     return R.serialize(spec);
   }
   const looksLikeFlexRows = (t) => /\t/.test(t) || /^(\d+(\.\d+)?\t)?\s*(Word|Morphemes|Lex\.|Free|Literal|Note)\b/im.test(t);
-  const HEADING = /^#{1,6}\s+(.*?)\s*$/;
+  const HEADING = /^(#{1,6})\s+(.*?)\s*$/;
   const COLLAPSED = /\s*\{collapsed\}$/;
 
-  /* body → [{t:'group', label, collapsed} | {t:'ex', src, spec, note} | {t:'other', src}] */
+  /* body → [{t:'group', label, level, collapsed} | {t:'ex', src, spec, note} | {t:'other', src}] */
+  const levelOf = (g) => Math.max(1, Math.min(6, (g && g.level) || 2));
+  /* Which items closed groups hide: everything after a closed group up to the next group of the
+   * same or a higher level (a closed group inside a hidden one adds nothing). */
+  function hiddenItems(items) {
+    const out = [];
+    let fold = 0;
+    for (const it of items) {
+      const lvl = it.t === 'group' ? levelOf(it) : 0;
+      if (fold && lvl && lvl <= fold) fold = 0;
+      out.push(!!fold);
+      if (!fold && lvl && it.collapsed) fold = lvl;
+    }
+    return out;
+  }
   function parse(body) {
     const items = [];
     let cur = null, other = null;
@@ -46,7 +63,7 @@
       if (!line.trim()) { cur = null; other = null; continue; }
       const h = HEADING.exec(line);
       if (h) {
-        items.push({ t: 'group', label: h[1].replace(COLLAPSED, '').trim(), collapsed: COLLAPSED.test(h[1]) });
+        items.push({ t: 'group', label: h[2].replace(COLLAPSED, '').trim(), level: h[1].length, collapsed: COLLAPSED.test(h[2]) });
         cur = null; other = null; continue;
       }
       if (R.isEmbedLine(line)) {
@@ -62,7 +79,7 @@
   }
   function serialize(items) {
     const out = items.map((i) => {
-      if (i.t === 'group') return '## ' + (i.label || 'Untitled group') + (i.collapsed ? ' {collapsed}' : '');
+      if (i.t === 'group') return '#'.repeat(levelOf(i)) + ' ' + (i.label || 'Untitled group') + (i.collapsed ? ' {collapsed}' : '');
       if (i.t === 'ex') {
         const note = (i.note || '').replace(/\s+$/, '');
         return note ? i.src + '\n' + note.split('\n').map((l) => (l ? '> ' + l : '>')).join('\n') : i.src;
@@ -98,7 +115,7 @@
     asEditor() {
       const blocks = [];
       for (const i of this.items) {
-        if (i.t === 'group') blocks.push({ type: 'h', level: 2, src: '## ' + i.label });
+        if (i.t === 'group') blocks.push({ type: 'h', level: levelOf(i), src: '#'.repeat(levelOf(i)) + ' ' + i.label });
         else if (i.t === 'ex') {
           const s = R.parse(i.src); s.extra = Object.assign({}, s.extra, { ex: '1' });
           blocks.push({ type: 'flex', src: R.serialize(s) });
@@ -109,13 +126,34 @@
     }
 
     /* -- structure ------------------------------------------------------------------ */
-    /* The block a group heads: [start, end) — the heading and its examples up to the next group. */
+    /* The block a group heads: [start, end) — the heading and everything up to the next group of
+     * the same or a higher level (its sub-groups included). */
     blockOf(g) {
+      const lvl = levelOf(this.items[g]);
       let e = g + 1;
-      while (e < this.items.length && this.items[e].t !== 'group') e++;
+      while (e < this.items.length && !(this.items[e].t === 'group' && levelOf(this.items[e]) <= lvl)) e++;
       return [g, e];
     }
     groupIndexOf(i) { for (let k = i; k >= 0; k--) if (this.items[k].t === 'group') return k; return -1; }
+    /* Every group whose block holds item i (innermost first). */
+    groupsAround(i) {
+      const out = [];
+      let lvl = this.items[i] && this.items[i].t === 'group' ? levelOf(this.items[i]) : 7;
+      for (let k = i - 1; k >= 0; k--) {
+        const it = this.items[k];
+        if (it.t === 'group' && levelOf(it) < lvl) { out.push(k); lvl = levelOf(it); }
+      }
+      return out;
+    }
+    /* Open every group that hides item i. */
+    openAround(i) { let any = false; for (const g of this.groupsAround(i)) if (this.items[g].collapsed) { this.items[g].collapsed = false; any = true; } return any; }
+    setLevel(g, d) {
+      const it = this.items[g];
+      const lv = Math.max(1, Math.min(6, levelOf(it) + d));
+      if (lv === levelOf(it)) return;
+      it.level = lv;
+      this.changed(); this.render();
+    }
     moveRange(from, len, to) {
       if (to >= from && to <= from + len) return false;          // into itself: nothing to do
       const block = this.items.splice(from, len);
@@ -137,9 +175,8 @@
       if (!fresh.length) return 0;
       const i = at == null ? this.items.length : at;
       this.items.splice(i, 0, ...fresh);
-      // an example added into a closed group opens it, so it can be seen
-      const g = this.groupIndexOf(i);
-      if (g >= 0) this.items[g].collapsed = false;
+      // an example added into a closed group opens it (and every group around it), so it is seen
+      this.openAround(i);
       this.undo = null;
       this.changed(); this.render();
       const card = this.root.querySelector('.coll-item[data-i="' + i + '"]');
@@ -161,7 +198,8 @@
       label = (label || '').trim();
       if (!label) return;
       const i = at == null ? this.items.length : at;
-      this.items.splice(i, 0, { t: 'group', label, collapsed: false });
+      const prev = this.groupIndexOf(i - 1);
+      this.items.splice(i, 0, { t: 'group', label, level: prev >= 0 ? levelOf(this.items[prev]) : 2, collapsed: false });
       this.undo = null;
       this.changed(); this.render();
     }
@@ -179,21 +217,23 @@
         const j = i + d;
         if (j < 0 || j >= this.items.length) return;
         this.items[i] = this.items[j]; this.items[j] = it;
-        const g = this.groupIndexOf(j);
-        if (g >= 0 && this.items[g].collapsed) this.items[g].collapsed = false;     // never vanish into a closed group
+        this.openAround(j);                                                       // never vanish into a closed group
         this.undo = null;
         this.changed(); this.render();
         return;
       }
+      // a group moves whole (sub-groups too) past the neighbouring group of its level or above
       const [s, e] = this.blockOf(i);
+      const lvl = levelOf(it);
       if (d < 0) {
         if (s === 0) return;
-        const pg = this.groupIndexOf(s - 1);
-        this.moveRange(s, e - s, pg < 0 ? 0 : pg);
+        let k = s - 1;
+        while (k > 0 && !(this.items[k].t === 'group' && levelOf(this.items[k]) <= lvl)) k--;
+        this.moveRange(s, e - s, k);
       } else {
         if (e >= this.items.length) return;
-        const [, ne] = this.blockOf(e);
-        this.moveRange(s, e - s, ne);
+        const next = this.items[e];
+        this.moveRange(s, e - s, levelOf(next) === lvl ? this.blockOf(e)[1] : e + 1);
       }
     }
 
@@ -218,20 +258,27 @@
 
       const list = el('div', { class: 'coll-list' });
       this.list = list;
-      let num = 0, hidden = false, inGroup = false;
+      let num = 0;
+      const hidden = hiddenItems(this.items);
+      const top = Math.min(7, ...this.groups().map(levelOf));        // the outermost level present
+      let depth = 0;                                                  // nesting of the item being drawn
       this.items.forEach((item, i) => {
         if (this.undo && this.undo.at === i) list.appendChild(this.undoRow());
         if (item.t === 'group') {
-          hidden = item.collapsed; inGroup = true;
+          depth = levelOf(item) - top + 1;
+          if (hidden[i]) return;
           const [s, e] = this.blockOf(i);
           const count = this.items.slice(s + 1, e).filter((x) => x.t === 'ex').length;
-          list.appendChild(this.groupRow(item, i, count));
+          const row = this.groupRow(item, i, count);
+          row.style.setProperty('--depth', String(depth - 1));
+          row.classList.add('lvl' + levelOf(item));
+          list.appendChild(row);
           return;
         }
         if (item.t === 'ex') num++;
-        if (hidden) return;
+        if (hidden[i]) return;
         const card = item.t === 'ex' ? this.card(item, i, num) : this.otherCard(item, i);
-        if (inGroup) card.classList.add('in-group');
+        if (depth) { card.classList.add('in-group'); card.style.setProperty('--depth', String(depth)); }
         list.appendChild(card);
       });
       if (this.undo && this.undo.at >= this.items.length) list.appendChild(this.undoRow());
@@ -264,6 +311,8 @@
         el('div', { class: 'coll-tools row' },
           el('button', { class: 'icon-btn', title: 'Add an example from FLEx at the end of this group', onclick: () => this.pick(e) }, '➕'),
           el('button', { class: 'icon-btn', title: 'Rename', onclick: rename }, '✎'),
+          el('button', { class: 'icon-btn', 'data-test': 'coll-outdent', title: 'One level up (heading ' + Math.max(1, levelOf(item) - 1) + ')', disabled: levelOf(item) <= 1, onclick: () => this.setLevel(i, -1) }, '⇤'),
+          el('button', { class: 'icon-btn', 'data-test': 'coll-indent', title: 'One level down: a sub-group (heading ' + Math.min(6, levelOf(item) + 1) + ')', disabled: levelOf(item) >= 6, onclick: () => this.setLevel(i, 1) }, '⇥'),
           el('button', { class: 'icon-btn', title: 'Move the group up', disabled: i === 0, onclick: () => this.step(i, -1) }, '↑'),
           el('button', { class: 'icon-btn', title: 'Move the group down', disabled: e >= this.items.length, onclick: () => this.step(i, 1) }, '↓'),
           el('button', { class: 'icon-btn danger', title: 'Remove the group (its examples stay)', 'data-test': 'coll-ungroup', onclick: () => this.remove(i) }, '✕')));
@@ -356,7 +405,7 @@
         if (moved.t === 'group') { const [s, e2] = this.blockOf(f); this.moveRange(s, e2 - s, p[0]); return; }
         if (!this.moveRange(f, 1, p[0])) return;
         const g = this.groupIndexOf(this.items.indexOf(moved));
-        if (g >= 0 && this.items[g].collapsed) FS.toast('Moved into \u201c' + this.items[g].label + '\u201d', 'ok');
+        if (g >= 0 && hiddenItems(this.items)[this.items.indexOf(moved)]) FS.toast('Moved into \u201c' + this.items[g].label + '\u201d', 'ok');
       });
       list.addEventListener('dragend', () => { from = null; mark(null); list.querySelectorAll('.dragging').forEach((x) => x.classList.remove('dragging')); });
     }
@@ -392,5 +441,5 @@
   }
 
   FS.Collection = Collection;
-  FS.collection = { cleanEmbed, parse, serialize };
+  FS.collection = { cleanEmbed, parse, serialize, hiddenItems };
 })();

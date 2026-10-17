@@ -620,10 +620,10 @@
       item('Divider', () => S.editor.insertMarkdown('---', true));
     });
   }
-  function toolbarAction(kind) {
+  function toolbarAction(kind, btn) {
     const ed = ensureEditor();
     switch (kind) {
-      case 'h': return ed.linePrefix('h', 2);
+      case 'h': return btn ? headingMenu(btn, ed) : ed.linePrefix('h', 2);
       case 'bold': return ed.wrapSelection('**');
       case 'italic': return ed.wrapSelection('*');
       case 'mark': return ed.wrapSelection('==');
@@ -635,6 +635,23 @@
       case 'chart': return ed.insertMarkdown(FS.charts.template(), true);
       case 'hr': return ed.insertMarkdown('---', true);
     }
+  }
+
+  /* Heading levels 1-6 (Seth, 2026-10-16), plain text, and folding every heading at once. The
+   * buttons act on mousedown so the caret stays where it is in the note. */
+  function headingMenu(btn, ed) {
+    FS.popover(btn, (pop, close) => {
+      const act = (fn) => (e) => { e.preventDefault(); close(); fn(); };
+      const cur = ed.active && ed.active.type === 'h' ? FS.markdown.headingLevel(ed.active) : 0;
+      for (let lv = 1; lv <= 6; lv++) {
+        pop.appendChild(FS.el('button', { class: 'menu-item heading-pick hp' + lv + (lv === cur ? ' on' : ''), 'data-test': 'heading-' + lv, onmousedown: act(() => ed.linePrefix('h', lv)) },
+          FS.el('span', { class: 'hp-label' }, 'Heading ' + lv), FS.el('kbd', {}, 'Ctrl+Alt+' + lv)));
+      }
+      if (cur) pop.appendChild(FS.el('button', { class: 'menu-item', onmousedown: act(() => ed.linePrefix('h', cur)) }, 'Plain text'));
+      pop.appendChild(FS.el('hr'));
+      pop.appendChild(FS.el('button', { class: 'menu-item', 'data-test': 'fold-all', onmousedown: act(() => ed.setAllFolds(true)) }, '\u25b8 Collapse all headings'));
+      pop.appendChild(FS.el('button', { class: 'menu-item', 'data-test': 'unfold-all', onmousedown: act(() => ed.setAllFolds(false)) }, '\u25be Expand all headings'));
+    }, { class: 'heading-menu' });
   }
 
   /* ------------------------------------------------------------------ find in note */
@@ -834,7 +851,7 @@
     $('btn-pin').addEventListener('click', () => { if (!S.note) return; S.note.pinned = !S.note.pinned; saveMeta({ pinned: S.note.pinned }); refreshLists(); });
     $('btn-note-menu').addEventListener('click', (e) => { if (S.note) noteMenu(e.currentTarget, S.note); });
     $('btn-insert-flex').addEventListener('click', insertFlex);
-    $('toolbar').querySelectorAll('[data-ins]').forEach((b) => b.addEventListener('mousedown', (e) => { e.preventDefault(); toolbarAction(b.dataset.ins); }));
+    $('toolbar').querySelectorAll('[data-ins]').forEach((b) => b.addEventListener('mousedown', (e) => { e.preventDefault(); toolbarAction(b.dataset.ins, b); }));
     $('btn-find').addEventListener('click', openFind);
     $('btn-markers').addEventListener('click', toggleMarkers);
     $('btn-refresh-all').addEventListener('click', refreshAll);
@@ -866,7 +883,7 @@
       else if (mod && !e.shiftKey && e.key.toLowerCase() === 'f') { if (S.note && !isCollection()) { e.preventDefault(); openFind(); } }
       else if (mod && e.shiftKey && e.key.toLowerCase() === 'l') { if (S.note) { e.preventDefault(); if (isCollection()) ensureCollection().pick(); else insertFlex(); } }
       else if (mod && e.key.toLowerCase() === 's') { e.preventDefault(); flushSave().then(() => FS.toast('Saved')); }
-      else if (mod && e.altKey && /^[1-3]$/.test(e.key)) { if (!isCollection()) { e.preventDefault(); ensureEditor().linePrefix('h', +e.key); } }
+      else if (mod && e.altKey && /^[1-6]$/.test(e.key)) { if (!isCollection()) { e.preventDefault(); ensureEditor().linePrefix('h', +e.key); } }
       else if (mod && e.key === ',') { e.preventDefault(); openSettings(); }
       else if (mod && (e.key === '\\' || e.code === 'Backslash')) { e.preventDefault(); toggleNav(); }
     });

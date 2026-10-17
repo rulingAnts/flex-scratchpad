@@ -579,6 +579,11 @@
       opts = opts || {};
       if (!opts.silent) this.pushSnapshot(opts.force);
       this.renumberExamples();
+      this.applyFolds();
+      // never leave the caret in a hidden block (a heading turned into text inside a closed
+      // section, say): open what hides it
+      const act = document.activeElement, host = act && act.closest ? act.closest('.blk.fold-hidden') : null;
+      if (host && this.root.contains(host)) { const hb = this.blocks.find((x) => x.el === host); if (hb) this.reveal(hb); }
       if (this.opts.onChange) this.opts.onChange(this.getMarkdown());
     }
 
@@ -588,6 +593,56 @@
       this.assignNumCtx();
       this.blocks.forEach((b, i) => this.root.appendChild(this.renderBlock(b, i)));
       this.renumberExamples();
+      this.applyFolds();
+    }
+    /* -- collapsible headings (Seth, 2026-10-16) ----------------------------------------
+     * A heading folds everything after it up to the next heading of the same or a higher level.
+     * The state is the block's `folded` flag (" {collapsed}" in the file, markdown.js); hidden
+     * blocks stay in the model and the markdown, they are only not shown. */
+    applyFolds() {
+      const hidden = MD.hiddenByFolds(this.blocks);
+      this.blocks.forEach((b, i) => {
+        if (!b.el) return;
+        b.el.classList.toggle('fold-hidden', hidden[i]);
+        if (b.type !== 'h') return;
+        b.el.classList.toggle('folded', !!b.folded);
+        const tog = b.el.querySelector(':scope > .fold-tog');
+        if (tog) { tog.textContent = b.folded ? '\u25b8' : '\u25be'; tog.title = b.folded ? 'Expand this section' : 'Collapse this section'; tog.setAttribute('aria-expanded', String(!b.folded)); }
+        let more = b.el.querySelector(':scope > .fold-more');
+        const n = b.folded ? MD.sectionEnd(this.blocks, i) - i : 0;
+        if (n > 0 && !more) { more = el('button', { class: 'fold-more', contenteditable: 'false', title: 'Expand this section', onmousedown: (e) => { e.preventDefault(); this.setFold(b, false); } }); b.el.appendChild(more); }
+        if (more) { if (n > 0) more.textContent = '\u22ef ' + n + (n === 1 ? ' block' : ' blocks'); else more.remove(); }
+      });
+    }
+    isHidden(b) { return !!(b && b.el && b.el.classList.contains('fold-hidden')); }
+    setFold(b, folded) {
+      if (!b || b.type !== 'h' || !!b.folded === !!folded) return;
+      b.folded = !!folded;
+      // the caret must not be left inside a block that is about to be hidden
+      const act = document.activeElement;
+      this.applyFolds();
+      if (act && act.closest && act.closest('.fold-hidden')) this.focusBlock(this.blocks.indexOf(b), 'end');
+      this.changed({ force: true });
+    }
+    setAllFolds(folded) {
+      let any = false;
+      for (const b of this.blocks) if (b.type === 'h' && !!b.folded !== !!folded && (!folded || MD.sectionEnd(this.blocks, this.blocks.indexOf(b)) > this.blocks.indexOf(b))) { b.folded = !!folded; any = true; }
+      if (!any) return;
+      this.applyFolds();
+      const act = document.activeElement;
+      if (act && act.closest && act.closest('.fold-hidden')) this.focusBlock(0, 0);
+      this.changed({ force: true });
+    }
+    /* Unfold whatever hides block `b` (find, a drop, a focus from elsewhere). */
+    reveal(b) {
+      let i = this.blocks.indexOf(b), changed = false;
+      if (i < 0 || !this.isHidden(b)) return;
+      let lvl = MD.headingLevel(b) || 7;
+      for (let j = i - 1; j >= 0; j--) {
+        const h = this.blocks[j], hl = MD.headingLevel(h);
+        if (hl && hl < lvl) { if (h.folded) { h.folded = false; changed = true; } lvl = hl; if (lvl === 1) break; }
+      }
+      if (changed) { this.applyFolds(); this.changed({ force: true }); }
     }
     /* -- outline numbering across blocks ------------------------------------------------
      * Each text block remembers the numbering state BEFORE it (b.numCtx); decorating with a
@@ -622,6 +677,9 @@
       b.el = wrap;
       const handle = el('div', { class: 'blk-handle' }, el('button', { title: 'Block menu', onmousedown: (e) => { e.preventDefault(); this.blockMenu(e.currentTarget, b); } }, '⋮'));
       wrap.appendChild(handle);
+      if (b.type === 'h') {
+        wrap.appendChild(el('button', { class: 'fold-tog', contenteditable: 'false', 'data-test': 'fold', onmousedown: (e) => { e.preventDefault(); this.setFold(b, !b.folded); } }, b.folded ? '\u25b8' : '\u25be'));
+      }
       if (TEXT_TYPES.has(b.type)) {
         const body = el('div', { class: 'blk-body', contenteditable: 'true', spellcheck: b.type === 'code' ? 'false' : 'true', dir: 'auto', 'data-ph': b.type === 'p' && i === 0 && this.blocks.length === 1 ? PLACEHOLDER : '' });
         this.decorateInto(body, b);
@@ -641,6 +699,7 @@
       const i = this.blocks.indexOf(b);
       const fresh = this.renderBlock(b, i);
       if (old && old.parentNode) old.replaceWith(fresh); else this.root.appendChild(fresh);
+      this.applyFolds();
       return fresh;
     }
     renderWidget(wrap, b) {
@@ -1093,7 +1152,23 @@
         return;
       }
       // paragraph / heading: split into two blocks
-      const i = this.blocks.indexOf(b);
+      let i = this.blocks.indexOf(b);
+      if (b.type === 'h' && b.folded) {
+        if (after.trim() === '') {
+          // Enter at the end of a closed heading starts the NEXT heading of the same level after
+          // its section (a paragraph there would belong to the closed section and be hidden)
+          const end = MD.sectionEnd(this.blocks, i);
+          const marker = '#'.repeat(MD.headingLevel(b)) + ' ';
+          const nb = { id: FS.uid(), type: 'h', src: marker };
+          this.blocks.splice(end + 1, 0, nb);
+          const anchor = this.blocks[end].el;
+          this.root.insertBefore(this.renderBlock(nb, end + 1), anchor ? anchor.nextSibling : null);
+          this.changed({ force: true });
+          this.focusBlock(end + 1, marker.length);
+          return;
+        }
+        b.folded = false;               // splitting the heading's text opens the section
+      }
       const nb = { id: FS.uid(), type: 'p', src: after.replace(/^\n/, '') };
       b.src = before.replace(/\s+$/, '');
       if (b.type === 'h' && !b.src.replace(/^#+\s*/, '')) b.type = 'p';
@@ -1120,6 +1195,7 @@
       }
       if (i === 0) return;
       const prev = this.blocks[i - 1];
+      if (this.isHidden(prev)) { this.focusBlock(i - 1, 'end'); return; }   // lands on the closed heading
       if (!TEXT_TYPES.has(prev.type)) { this.focusBlock(i - 1); return; }
       if (s === '' ) { this.blocks.splice(i, 1); b.el.remove(); this.changed({ force: true }); this.focusBlock(i - 1, 'end'); return; }
       const joinAt = prev.src.length;
@@ -1134,6 +1210,7 @@
       const i = this.blocks.indexOf(b);
       if (i >= this.blocks.length - 1) return;
       const next = this.blocks[i + 1];
+      if (this.isHidden(next)) return;          // the end of a closed heading: its section stays whole
       if (!TEXT_TYPES.has(next.type)) { this.focusBlock(i + 1); return; }
       const at = b.src.length;
       b.src = b.src + next.src;
@@ -1162,6 +1239,14 @@
     focusBlock(i, where, create) {
       if (i < 0 || i >= this.blocks.length) {
         if (create) { const nb = { id: FS.uid(), type: 'p', src: '' }; this.blocks.push(nb); this.root.appendChild(this.renderBlock(nb, this.blocks.length - 1)); i = this.blocks.length - 1; } else return;
+      }
+      if (this.isHidden(this.blocks[i])) {
+        // a folded section is stepped over: up lands on its heading, down after the section
+        const step = where === 'end' ? -1 : 1;
+        let j = i;
+        while (j >= 0 && j < this.blocks.length && this.isHidden(this.blocks[j])) j += step;
+        if (j < 0 || j >= this.blocks.length) { if (!create) return; return this.focusBlock(this.blocks.length, where, true); }
+        i = j;
       }
       const b = this.blocks[i];
       if (TEXT_TYPES.has(b.type)) {
@@ -1305,13 +1390,26 @@
       this.changed({ force: true });
       this.focusBlock(Math.min(i, this.blocks.length - 1), 'end');
     }
+    /* Move a block one step up or down. A CLOSED heading moves with its section, and a closed
+     * section is stepped over whole, so moving never splits what is folded. */
     moveBlock(b, dir) {
-      const i = this.blocks.indexOf(b), j = i + dir;
-      if (j < 0 || j >= this.blocks.length) return;
-      this.blocks.splice(i, 1); this.blocks.splice(j, 0, b);
+      const unit = (k) => {                 // [first, last] of the visible unit at k
+        let a = k;
+        while (a > 0 && this.isHidden(this.blocks[a])) a--;
+        const h = this.blocks[a];
+        return [a, h.type === 'h' && h.folded ? MD.sectionEnd(this.blocks, a) : a];
+      };
+      const [a, z] = unit(this.blocks.indexOf(b));
+      if (dir < 0 && a === 0) return;
+      if (dir > 0 && z >= this.blocks.length - 1) return;
+      const moving = this.blocks.splice(a, z - a + 1);
+      let at;
+      if (dir < 0) at = unit(a - 1)[0];
+      else { const [, nz] = unit(a); at = nz + 1; }
+      this.blocks.splice(at, 0, ...moving);
       this.renderAll();
       this.changed({ force: true });
-      this.focusBlock(j, 0);
+      this.focusBlock(at, 0);
     }
     editSource(b) {
       const ta = el('textarea', { class: 'source-edit', spellcheck: 'false' });
@@ -1341,6 +1439,10 @@
       this.renumberAfter(b);
       this.changed();
     }
+    setHeadingLevel(b, lv) {
+      if (b.type !== 'h') return;
+      this.setBlockSrc(b, b.src.replace(/^#{1,6}\s+/, '#'.repeat(lv) + ' '));
+    }
     blockMenu(anchor, b) {
       FS.popover(anchor, (pop, close) => {
         const item = (label, fn, cls) => pop.appendChild(el('button', { class: 'menu-item ' + (cls || ''), onclick: () => { close(); fn(); } }, label));
@@ -1351,7 +1453,19 @@
         if (TEXT_TYPES.has(b.type)) {
           pop.appendChild(el('hr'));
           item('Turn into paragraph', () => { b.src = b.src.replace(/^(#{1,6}\s+|\s*([-*+]|\d+[.)])\s+(\[[ xX]\]\s+)?|\s*>\s?)/gm, ''); b.type = 'p'; this.rerender(b); this.changed(); });
-          item('Turn into heading', () => { this.active = b; this.focusBlock(this.blocks.indexOf(b), 0); this.linePrefix('h', 2); });
+          if (b.type === 'h') {
+            const cur = MD.headingLevel(b);
+            const row = el('div', { class: 'menu-row', 'data-test': 'heading-levels' }, el('span', { class: 'menu-label' }, 'Heading level'));
+            for (let lv = 1; lv <= 6; lv++) row.appendChild(el('button', { class: 'tog' + (lv === cur ? ' on' : ''), title: 'Heading ' + lv, onclick: () => { close(); this.setHeadingLevel(b, lv); } }, 'H' + lv));
+            pop.appendChild(row);
+            item(b.folded ? 'Expand this section' : 'Collapse this section', () => this.setFold(b, !b.folded));
+            item('Collapse all headings', () => this.setAllFolds(true));
+            item('Expand all headings', () => this.setAllFolds(false));
+          } else {
+            const row = el('div', { class: 'menu-row', 'data-test': 'heading-levels' }, el('span', { class: 'menu-label' }, 'Turn into heading'));
+            for (let lv = 1; lv <= 6; lv++) row.appendChild(el('button', { class: 'tog', title: 'Heading ' + lv, onclick: () => { close(); this.active = b; this.focusBlock(this.blocks.indexOf(b), 0); this.linePrefix('h', lv); } }, 'H' + lv));
+            pop.appendChild(row);
+          }
           item('Turn into checklist', () => { this.active = b; this.focusBlock(this.blocks.indexOf(b), 0); this.linePrefix('task'); });
           if (/^\s*\d+[.)]\s/.test(b.src)) {
             // the first item's typed number is where the list starts (markdown.numberLines)
@@ -1461,6 +1575,8 @@
       this.hits.forEach((h) => h.classList.remove('cur'));
       this.hitIdx = ((this.hitIdx == null ? -1 : this.hitIdx) + dir + this.hits.length) % this.hits.length;
       const h = this.hits[this.hitIdx];
+      const hb = this.blocks.find((x) => x.el && x.el.contains(h));
+      if (hb) this.reveal(hb);
       h.classList.add('cur');
       h.scrollIntoView({ block: 'center' });
       return this.hitIdx + 1;

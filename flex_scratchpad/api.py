@@ -250,8 +250,9 @@ class Api:
         target = path or self._save_dialog((n.title or "note") + ".md")
         if not target:
             return None
-        import shutil
-        shutil.copyfile(n.path, target)
+        from .notebook import without_fold_marks
+        # the note's own file, less the fold markers of closed headings (view state, not text)
+        Path(target).write_text(without_fold_marks(Path(n.path).read_text(encoding="utf-8")), encoding="utf-8", newline="\n")
         return target
 
     def export_note_docx(self, note_id: str, doc: dict, path: str | None = None) -> str | None:

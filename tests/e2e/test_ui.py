@@ -2448,3 +2448,124 @@ def test_a_folder_lists_its_own_notes_unless_subfolders_are_shown(app):
     page.wait_for_timeout(300)
     assert page.locator("#list-subfolders").is_hidden()
     assert not errors
+
+
+def test_headings_have_levels_and_fold_their_sections(app):
+    """Seth, 2026-10-16: "multiple levels of headings, and for those headings to be collapsible
+    (with material between that heading and the NEXT heading of the same or higher level)"."""
+    h, page, errors = app
+    new_note(page, "Folding")
+    page.locator("#editor .blk-body").first.click()
+    paste(page, "# Chapter\n\nintro\n\n## Part A\n\na text\n\n### Deep\n\ndeep text\n\n## Part B\n\nb text\n\n# Next\n\nlast")
+    page.wait_for_timeout(300)
+    blk = lambda t: page.locator("#editor .blk", has=page.locator(".blk-body", has_text=t)).first   # noqa: E731
+    visible = lambda t: blk(t).is_visible()                                                        # noqa: E731
+    # close "## Part A": it hides "a text", "### Deep" and "deep text" — "## Part B" ends it
+    blk("Part A").hover()
+    blk("Part A").locator(".fold-tog").dispatch_event("mousedown")
+    page.wait_for_timeout(100)
+    assert not visible("a text") and not visible("deep text") and not visible("Deep")
+    assert visible("Part B") and visible("b text") and visible("intro")
+    assert blk("Part A").locator(".fold-more").inner_text() == "⋯ 3 blocks"
+    page.wait_for_timeout(900)
+    body = body_of(h)
+    assert "## Part A {collapsed}\n\na text" in body, body
+    # the marker is never text in the editor
+    assert blk("Part A").locator(".blk-body").inner_text() == "## Part A"
+    # Enter at the end of the closed heading starts the next heading of its level after the section
+    blk("Part A").locator(".blk-body").click()
+    page.keyboard.press("End")
+    page.keyboard.press("Enter")
+    page.keyboard.type("Part A2")
+    page.wait_for_timeout(900)
+    assert "deep text\n\n## Part A2\n\n## Part B" in body_of(h), body_of(h)
+    # ArrowUp from it steps onto the closed heading, not into its hidden blocks
+    page.keyboard.press("Home")
+    page.keyboard.press("ArrowUp")
+    assert page.evaluate("() => document.activeElement.textContent") == "## Part A"
+    # closing the chapter hides everything up to "# Next"
+    blk("Chapter").hover()
+    blk("Chapter").locator(".fold-tog").dispatch_event("mousedown")
+    page.wait_for_timeout(100)
+    assert not visible("intro") and not visible("Part B") and not visible("b text") and visible("Next") and visible("last")
+    # reopened, the folds are still there
+    page.reload()
+    page.wait_for_selector(".note-card")
+    page.locator(".note-card", has_text="Folding").click()
+    page.wait_for_selector("#editor .blk-h")
+    assert not visible("intro") and visible("Next")
+    # the toolbar's H menu: expand all, then change a level (Ctrl+Alt+N does the same)
+    page.locator("[data-test=tb-heading]").dispatch_event("mousedown")
+    page.locator("[data-test=unfold-all]").dispatch_event("mousedown")
+    page.wait_for_timeout(100)
+    assert visible("intro") and visible("deep text")
+    blk("b text").locator(".blk-body").click()
+    page.locator("[data-test=tb-heading]").dispatch_event("mousedown")
+    page.locator("[data-test=heading-3]").dispatch_event("mousedown")
+    page.wait_for_timeout(100)
+    blk("intro").locator(".blk-body").click()
+    page.keyboard.press("Control+Alt+4")
+    page.wait_for_timeout(900)
+    body = body_of(h)
+    assert "### b text" in body and "#### intro" in body and "{collapsed}" not in body, body
+    # the block menu of a heading offers its levels and the folds
+    blk("Part B").hover()
+    blk("Part B").locator(".blk-handle button").dispatch_event("mousedown")
+    page.locator("[data-test=heading-levels] .tog", has_text="H1").click()
+    page.wait_for_timeout(900)
+    assert "\n# Part B\n" in body_of(h), body_of(h)
+    # the excerpt never shows a fold marker
+    blk("Next").hover()
+    blk("Next").locator(".fold-tog").dispatch_event("mousedown")
+    page.wait_for_timeout(900)
+    assert "# Next {collapsed}" in body_of(h)
+    assert "collapsed" not in page.locator(".note-card", has_text="Folding").inner_text()
+    assert not errors
+
+
+def test_collection_groups_nest_by_level_and_fold(app):
+    """Seth, 2026-10-16: collapsible headings of several levels in a collection too; they
+    organise the view and are never exported."""
+    h, page, errors = app
+    page.locator("#btn-new-menu").click()
+    page.locator("[data-test='new-collection']").click()
+    page.wait_for_selector("#collection .coll-add")
+    page.locator("#note-title").fill("Chaining")
+    for seg in (1, 2, 4):
+        page.locator("#collection .coll-add").click()
+        paste(page, "{{flex:text %s seg=%d}}" % (T_STORY, seg))
+    page.wait_for_function("document.querySelectorAll('#collection .coll-item').length === 3")
+    cid = h.api.list_collections()[0]["id"]
+    body = lambda: h.api.get_note(cid)["body"]   # noqa: E731
+    # "Chaining" before the first example, "Same subject" before the second, then make it a sub-group
+    for label, at in (("Chaining", 0), ("Same subject", 1)):
+        page.once("dialog", lambda d, label=label: d.accept(label))
+        page.locator("[data-test='coll-add-group']").click()
+        page.wait_for_timeout(200)
+    page.wait_for_timeout(900)
+    # added at the end; move them into place with the API-backed view to keep the test short
+    page.evaluate("""() => { const c = window.__fsCollection; const it = c.items;
+        const g1 = it.findIndex((x) => x.label === 'Chaining'); const a = it.splice(g1, 1)[0]; it.splice(0, 0, a);
+        const g2 = it.findIndex((x) => x.label === 'Same subject'); const b = it.splice(g2, 1)[0]; it.splice(2, 0, b);
+        c.changed(); c.render(); }""")
+    page.wait_for_timeout(200)
+    group = lambda t: page.locator("#collection .coll-group", has_text=t)   # noqa: E731
+    group("Same subject").hover()
+    group("Same subject").locator("[data-test='coll-indent']").click()     # ## → ###, inside "Chaining"
+    page.wait_for_timeout(900)
+    assert body().startswith("## Chaining\n\n{{flex:text") and "\n### Same subject\n" in body(), body()
+    assert "2 examples" in group("Same subject").inner_text() and "3 examples" in group("Chaining").inner_text()
+    # closing the sub-group hides its two examples, closing the parent hides the sub-group too
+    group("Same subject").locator("[data-test='coll-toggle']").click()
+    assert page.locator("#collection .coll-item").count() == 1
+    group("Chaining").locator("[data-test='coll-toggle']").click()
+    assert page.locator("#collection .coll-item").count() == 0 and group("Same subject").count() == 0
+    page.wait_for_timeout(900)
+    assert "## Chaining {collapsed}" in body() and "### Same subject {collapsed}" in body(), body()
+    # numbering still runs straight through, and the export has every example and no headings
+    out = h.tmp / "chaining.flextext"
+    r = h.api.export_note_flextext(cid, page.evaluate("() => window.__fsCollection.flextextItems()"), {"title": "Chaining", "audio": "none"}, str(out))
+    assert r["examples"] == 3
+    xml = out.read_text(encoding="utf-8")
+    assert "Same subject" not in xml and "Chaining" in xml        # the title only
+    assert not errors

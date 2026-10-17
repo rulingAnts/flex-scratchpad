@@ -108,6 +108,18 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
   (`::highlight(fs-msel)`) plus `.msel-block` on whole blocks. Drag out of a block, Shift+click,
   Shift+Arrow Up/Down extend it; Ctrl+A twice takes the note; cut / copy / paste / delete /
   type-over / Enter act on it (`deleteSelection` joins the two ends into one block).
+- Headings 1–6 FOLD (Seth, 2026-10-16): a closed heading hides everything after it up to the next
+  heading of the same or a higher level (`markdown.hiddenByFolds` / `sectionEnd`, the editor's
+  `applyFolds`, ▾/▸ in the left margin, "⋯ N blocks" under it). The state is the block's
+  `folded` flag, written as ` {collapsed}` after the heading in the file (the collection groups'
+  marker) and stripped from the editable text, so the marker is never typed into or shown;
+  excerpts, search and the Markdown export drop it (`notebook.without_fold_marks`). Hidden blocks
+  stay in the model: focus steps over them (up lands on the heading), Backspace/Delete never merge
+  into them, Enter at the end of a closed heading starts the NEXT heading of its level after the
+  section (a paragraph there would belong to the closed section), a closed heading MOVES with its
+  section, Find opens what hides a hit, and an edit that leaves the caret in a hidden block opens
+  its section. The toolbar's H ▾ picks levels 1–6 (Ctrl+Alt+1…6) and folds all; the ⋮ menu of a
+  heading has its levels and the folds. Word export maps levels 1–6 to Heading 1–6.
 - `beforeinput` is whitelisted; Enter/paste/bold/undo are ours. Chromium must never inject HTML.
 - Undo is our own snapshot stack (innerHTML rebuilds break native undo).
 
@@ -165,7 +177,11 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
   GROUP (` {collapsed}` when closed) — it only organises the view and is NOT exported; `> `
   lines after an example are its NOTE, which IS exported (a `note` item on the example's first
   phrase, after FLEx's own notes, whatever the Source-note option); anything else is kept as
-  is. Numbering runs straight through the groups (it is the export order).
+  is. Numbering runs straight through the groups (it is the export order). Groups have LEVELS
+  (`#`…`######`, Seth, 2026-10-16): a group holds everything up to the next group of the same or a
+  higher level, sub-groups included (`blockOf`, `hiddenItems`), steps in by level, and ⇤ / ⇥ change
+  it; a group moves whole with its sub-groups; adding or moving an example into a closed group opens
+  every group around it (`openAround`). Old files' `## Group` is level 2. Still never exported.
 - Exporting a collection's examples as a `.flextext` (`flex/flextext_writer.py`, `Api.export_note_flextext`,
   Seth, 2026-10-16): one `<interlinear-text>` PER BASELINE WRITING SYSTEM (a FLEx text has one
   vernacular WS), one paragraph per example, one phrase per segment, every writing-system

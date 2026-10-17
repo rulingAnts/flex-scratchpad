@@ -895,7 +895,9 @@ class FlexiconBackend:
                 words.append(self._word_dict(tok))
             except Exception as exc:  # noqa: BLE001 — a word that cannot be read shows as "?" with the reason
                 words.append(model.make_word("?", gls=f"⚠ {exc}", guid=_guid(tok)))
-        baseline = _s(_t(lambda: p.Segments.GetBaselineText(seg), "")) or model.baseline_from_words(words)
+        baseline = _s(_t(lambda: p.Segments.GetBaselineText(seg), ""))
+        words = model.fill_punctuation(words, baseline)
+        baseline = baseline or model.baseline_from_words(words)
         # The baseline is already in the text's writing system; when its word tokens line up
         # with the analyses, show those surface forms (as FLEx and flextext-editor do) rather
         # than a wordform alternative from another WS.
@@ -974,7 +976,9 @@ class FlexiconBackend:
         cls = _t(lambda: tok.ClassName, "")
         if cls == "PunctuationForm":
             form = _t(lambda: tok.Form, None)
-            txt = _s(_t(lambda: form.Text, "")) or _s(form) or _s(_t(lambda: tok.ShortName, ""))
+            # ⚠ never tok.ShortName: for a PunctuationForm that is "A PunctuationForm" (Seth's
+            # screen, 2026-10-16). An empty one is filled from the baseline in _segment_dict.
+            txt = _s(_t(lambda: form.Text, "")) or _s(form)
             return model.make_word(txt, punct=True, guid=_guid(tok))
         # the wordform behind a WfiGloss / WfiAnalysis / WfiWordform token
         wf = tok if cls == "WfiWordform" else _t(lambda: tok.Wordform, None)
