@@ -13,13 +13,28 @@
 # ffmpeg is not a Python module: the release workflow fetches it (tools/fetch_ffmpeg.py) and puts it
 # beside the program as `ffmpeg/ffmpeg.exe`, where flex/audio.py's bundled_ffmpeg() looks.
 import os
-from PyInstaller.utils.hooks import collect_all, collect_data_files
+from PyInstaller.utils.hooks import collect_all
 
 block_cipher = None
 here = os.path.abspath(os.path.dirname(SPEC))
 root = os.path.dirname(here)
 
-datas = collect_data_files("flex_scratchpad", includes=["ui/**/*"])
+# The page, from the source tree by path (collect_data_files finds nothing when the package is not
+# installed where the build runs, and a build without its ui/ cannot open a window).
+pkg = os.path.join(root, "flex_scratchpad")
+datas = []
+for d, _, files in os.walk(os.path.join(pkg, "ui")):
+    rel = os.path.relpath(d, root)
+    datas += [(os.path.join(d, f), rel) for f in files]
+# the build fingerprint of these sources (build_id() reads it: there are no .py files to hash)
+import sys as _sys
+_sys.path.insert(0, root)
+import flex_scratchpad as _fs
+work = os.path.join(here, "work")
+os.makedirs(work, exist_ok=True)
+with open(os.path.join(work, "BUILD_ID"), "w", encoding="utf-8") as _f:
+    _f.write(_fs.build_id())
+datas.append((os.path.join(work, "BUILD_ID"), "flex_scratchpad"))
 binaries = []
 hidden = ["flex_scratchpad.flex.lcm", "flex_scratchpad.flex.flextext", "flex_scratchpad.flex.demo",
           "flex_scratchpad.flex.flextext_check", "flex_scratchpad.flex.flextext_writer"]
@@ -36,8 +51,12 @@ for pkg in ("webview", "pythonnet", "clr_loader", "flexicon", "flexlibs2"):
     hidden += h
 hidden += ["clr", "_cffi_backend"]
 
+# FS_CONSOLE=1 builds a console copy ("FLEx Scratchpad (console)") for the release workflow's
+# self-test: the same program, but an error prints a traceback to the log instead of opening a
+# message box that waits for a click.
+console = os.environ.get("FS_CONSOLE") == "1"
 a = Analysis(
-    [os.path.join(root, "flex_scratchpad", "__main__.py")],
+    [os.path.join(here, "launcher.py")],      # not flex_scratchpad/__main__.py: see launcher.py
     pathex=[root],
     binaries=binaries,
     datas=datas,
@@ -52,11 +71,11 @@ pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 exe = EXE(
     pyz, a.scripts, [],
     exclude_binaries=True,
-    name="FLEx Scratchpad",
+    name="FLEx Scratchpad (console)" if console else "FLEx Scratchpad",
     debug=False,
     strip=False,
     upx=False,
-    console=False,
+    console=console,
     icon=os.path.join(root, "flex_scratchpad", "ui", "img", "flex-scratchpad.ico"),
 )
-coll = COLLECT(exe, a.binaries, a.zipfiles, a.datas, strip=False, upx=False, name="FLEx Scratchpad")
+coll = COLLECT(exe, a.binaries, a.zipfiles, a.datas, strip=False, upx=False, name="FLEx Scratchpad (console)" if console else "FLEx Scratchpad")

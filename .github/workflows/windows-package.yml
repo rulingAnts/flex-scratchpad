@@ -49,6 +49,7 @@ jobs:
         run: python tools/fetch_ffmpeg.py --out build\ffmpeg
 
       - name: Build (PyInstaller onedir)
+        timeout-minutes: 15
         run: |
           pyinstaller build/flex-scratchpad.spec --distpath build/dist --workpath build/work --noconfirm
           Copy-Item -Recurse build\ffmpeg "$env:DIST\ffmpeg"
@@ -56,11 +57,25 @@ jobs:
           Get-ChildItem "$env:DIST" | Format-Table Name, Length
           "{0:N0} MB" -f ((Get-ChildItem -Recurse "$env:DIST" | Measure-Object Length -Sum).Sum / 1MB)
 
+      - name: Self-test, console copy (an error prints its traceback here)
+        timeout-minutes: 5
+        run: |
+          $env:FS_CONSOLE = "1"
+          pyinstaller build/flex-scratchpad.spec --distpath build/dist-console --workpath build/work-console --noconfirm
+          $exe = "build\dist-console\FLEx Scratchpad (console)\FLEx Scratchpad (console).exe"
+          Copy-Item -Recurse build\ffmpeg "build\dist-console\FLEx Scratchpad (console)\ffmpeg"
+          & $exe --selftest "$env:RUNNER_TEMP\selftest-console.json"
+          $code = $LASTEXITCODE
+          if ($code -ne 0) { Write-Error "self-test failed (exit $code)"; exit 1 }
+
       - name: Self-test the built program
+        timeout-minutes: 5
         run: |
           $out = "$env:RUNNER_TEMP\selftest-dist.json"
-          $p = Start-Process -FilePath "$env:DIST\FLEx Scratchpad.exe" -ArgumentList @('--selftest', "`"$out`"") -Wait -PassThru
-          if (Test-Path $out) { Get-Content $out } else { Write-Error "no self-test report was written" }
+          $p = Start-Process -FilePath "$env:DIST\FLEx Scratchpad.exe" -ArgumentList @('--selftest', "`"$out`"") -PassThru
+          # a windowed program that fails shows a message box and never exits: give it 3 minutes
+          if (-not $p.WaitForExit(180000)) { Stop-Process -Id $p.Id -Force; Write-Error "the program did not exit (a message box?)"; exit 1 }
+          if (Test-Path $out) { Get-Content $out } else { Write-Error "no self-test report was written"; exit 1 }
           if ($p.ExitCode -ne 0) { Write-Error "self-test failed (exit $($p.ExitCode))"; exit 1 }
 
       - name: Setup (.exe) and portable zip
@@ -77,6 +92,7 @@ jobs:
           Get-ChildItem out | Format-Table Name, Length
 
       - name: Install, self-test, uninstall
+        timeout-minutes: 10
         run: |
           $setup = (Resolve-Path "out\FLEx-Scratchpad-Setup-$env:VERSION.exe").Path
           $dir = "$env:RUNNER_TEMP\fs-install\FLEx Scratchpad"
@@ -90,7 +106,8 @@ jobs:
           $v = (Get-ItemProperty $key).DisplayVersion
           if ($v -ne $env:VERSION) { Write-Error "Settings > Apps shows version '$v'"; exit 1 }
           $out = "$env:RUNNER_TEMP\selftest-installed.json"
-          $p = Start-Process -FilePath "$dir\FLEx Scratchpad.exe" -ArgumentList @('--selftest', "`"$out`"") -Wait -PassThru
+          $p = Start-Process -FilePath "$dir\FLEx Scratchpad.exe" -ArgumentList @('--selftest', "`"$out`"") -PassThru
+          if (-not $p.WaitForExit(180000)) { Stop-Process -Id $p.Id -Force; Write-Error "the installed program did not exit"; exit 1 }
           Get-Content $out
           if ($p.ExitCode -ne 0) { Write-Error "installed self-test failed"; exit 1 }
           # the same Setup again is an upgrade in place
