@@ -1,6 +1,6 @@
 ; installer.nsi -- FLEx Scratchpad for Windows: the Setup .exe most people download.
 ;
-; What it does: copy the program folder (PyInstaller's onedir build, with ffmpeg in ffmpeg\) into
+; What it does: copy the program folder (PyInstaller's onedir build, with ffmpeg in ffmpeg\ and rclone in rclone\) into
 ; %LOCALAPPDATA%\Programs\FLEx Scratchpad, add a Start menu shortcut (and, if ticked, one on the
 ; desktop), and register an uninstaller under Settings > Apps. Everything is per user: no
 ; administrator rights, nothing outside the user's own profile. Notebooks and settings are never
@@ -134,6 +134,7 @@ Section "FLEx Scratchpad"
   ; an upgrade: the previous build's program files go first (only what this installer wrote)
   RMDir /r "$INSTDIR\_internal"
   RMDir /r "$INSTDIR\ffmpeg"
+  RMDir /r "$INSTDIR\rclone"
   Delete "$INSTDIR\${EXE}"
   SetOverwrite on
   File /r "${SRC}\*.*"
@@ -159,6 +160,7 @@ SectionEnd
 Section "Uninstall"
   RMDir /r "$INSTDIR\_internal"
   RMDir /r "$INSTDIR\ffmpeg"
+  RMDir /r "$INSTDIR\rclone"
   Delete "$INSTDIR\${EXE}"
   Delete "$INSTDIR\Uninstall.exe"
   RMDir "$INSTDIR"                      ; only when nothing else is in it

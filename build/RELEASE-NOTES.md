@@ -7,7 +7,7 @@ FLEx Scratchpad is a notebook for FieldWorks: notes in tabs and folders that sho
 - **FLEx-Scratchpad-Setup-…exe**: the installer. Per user, no administrator rights; it adds a Start menu entry and appears in Settings › Apps. Running a newer Setup upgrades in place; your notebooks and settings are kept.
 - **FLEx-Scratchpad-…-windows-portable.zip**: the same program, no installer. Unzip anywhere and run `FLEx Scratchpad.exe`.
 
-ffmpeg (for cutting audio clips from any recording) is included; nothing is downloaded when the program runs.
+ffmpeg (for cutting audio clips from any recording) and rclone (for backups to S3-compatible storage) are included; nothing is downloaded when the program runs.
 
 ### Needs
 

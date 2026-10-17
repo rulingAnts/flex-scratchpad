@@ -2914,3 +2914,54 @@ def test_attached_files_open_preview_drop_and_never_start_a_program(app):
     page.wait_for_timeout(1200)
     assert "{{file attachments/preview%20ŋa.html preview}}" in body_of(h)
     assert not [e for e in errors if "Failed to load resource" not in e], errors
+
+
+def test_backup_to_a_sync_folder_and_storage_management(app):
+    """Seth, 2026-10-17: back up to a OneDrive / Google Drive / Dropbox folder (or S3 storage), and
+    show how much the notebook and its backup take, with cleanup."""
+    import base64
+    h, page, errors = app
+    h.api._secrets = __import__("flex_scratchpad.secrets_store", fromlist=["MemoryStore"]).MemoryStore()
+    h.api._backup_obj = None
+    h.api._backup.lock_dir = h.tmp / "local"
+    h.api.attach_data("orphan.wav", base64.b64encode(b"o" * 2048).decode())
+    tab = h.api.init()["config"]["tabs"][0]["dir"]
+    n = h.api.create_note(tab, "", "To back up", "Some text.")
+    dest = h.tmp / "OneDrive" / "FLEx Scratchpad backup" / "notebook"
+    page.reload()
+    page.wait_for_selector(".note-card")
+    assert page.locator("[data-test=backup-pill]").is_hidden()
+    page.locator("#btn-settings, [title='Settings']").first.click()
+    page.locator("[data-test=open-backup]").click()
+    page.wait_for_selector("[data-test=backup-dialog]")
+    assert page.locator("[data-test=bk-kind-folder]").is_checked()
+    page.fill("[data-test=bk-folder]", str(dest))
+    page.locator("[data-test=bk-now]").click()
+    page.wait_for_function("() => /^✓/.test(document.querySelector('[data-test=bk-status]').textContent)", timeout=10000)
+    assert (dest / "current" / "notebook.json").exists()
+    assert h.api.backup_status()["settings"]["kind"] == "folder"
+    assert "Backed up" in page.locator("[data-test=backup-pill]").inner_text()
+    # storage: the notebook by kind, and an unused attachment to clear away
+    page.wait_for_selector("[data-test=st-unused]")
+    assert "This notebook:" in page.locator("[data-test=storage]").inner_text()
+    page.locator("[data-test=st-unused]").click()
+    page.locator(".popover .btn.danger").click()
+    page.wait_for_selector("[data-test=st-trash]")
+    assert not (h.api._nb.root / "attachments" / "orphan.wav").exists()
+    page.locator("[data-test=st-trash]").click()
+    page.locator(".popover .btn.danger").click()
+    page.wait_for_function("() => !document.querySelector('[data-test=st-trash]')")
+    assert not h.api._nb.trash_dir.exists()
+    # a second backup after a change keeps a dated version; it shows with its size and can go
+    import time
+    time.sleep(1.1)
+    h.api.save_note(n["id"], {"body": "Changed text."})
+    page.locator("[data-test=bk-now]").click()
+    page.wait_for_selector("[data-test=bk-version]", timeout=10000)
+    assert page.locator("[data-test=bk-version]").count() >= 1
+    page.locator("[data-test=bk-version-check]").first.check()
+    page.locator("[data-test=bk-prune]").click()
+    page.locator(".popover .btn.danger").click()
+    page.wait_for_function("() => !document.querySelector('[data-test=bk-version]')", timeout=10000)
+    assert not any((dest / "versions").iterdir())
+    assert not [e for e in errors if "Failed to load resource" not in e], errors

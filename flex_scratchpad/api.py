@@ -75,6 +75,8 @@ class Api:
         self._demo = demo
         self._drops: list[tuple[str, str, float]] = []   # (name, full path, when) from _on_drop
         self._drop_cv = threading.Condition()
+        self._secrets = None                    # the secret store (tests set one); else the platform's
+        self._backup_obj = None
         self._open_notebook(notebook_dir or config.notebook_dir)
 
 
@@ -479,6 +481,73 @@ class Api:
         raw = base64.b64decode(data_base64.split(",", 1)[-1])
         p = self._nb.save_attachment(name, raw)
         return {"path": str(p), "fileUrl": p.resolve().as_uri(), "name": p.name}
+
+    # -- backup (Seth, 2026-10-17): a cloud sync folder, or S3-compatible storage via rclone ----
+
+    @property
+    def _backup(self):
+        if getattr(self, "_backup_obj", None) is None:
+            from .backup import Backup
+            from .secrets_store import default_store
+            self._backup_obj = Backup(self._config, self._secrets or default_store(), lambda: self._nb.root, progress=self._progress)
+        return self._backup_obj
+
+    def backup_status(self) -> dict:
+        return self._backup.status()
+
+    def backup_save(self, settings: dict, secrets: dict | None = None, forget: list | None = None) -> dict:
+        """Settings go to the per-user config; secrets ONLY to the secret store (the Windows
+        Credential Manager) — they never come back to the page, which only learns which are set."""
+        return self._backup.save(settings or {}, secrets or {}, forget or [])
+
+    def backup_test(self) -> dict:
+        return self._backup.test()
+
+    def backup_now(self) -> dict:
+        return self._backup.run("manual")
+
+    def backup_versions(self) -> list[str]:
+        return self._backup.versions()
+
+    def backup_usage(self) -> dict:
+        """The backup's size: its current copy and each dated version (may be slow for S3)."""
+        return self._backup.usage()
+
+    def backup_prune(self, names: list | None = None, older_than_days: int | None = None) -> dict:
+        return self._backup.prune(names=names, older_than_days=older_than_days)
+
+    def storage_usage(self) -> dict:
+        """What the notebook folder takes, by kind, and the attached files no note uses."""
+        unused = self._nb.unused_files()
+        return {"notebook": self._nb.storage(), "path": str(self._nb.root),
+                "unused": {"files": len(unused), "bytes": sum(f["bytes"] for f in unused), "list": unused[:200]}}
+
+    def storage_trash_unused(self) -> dict:
+        return self._nb.trash_unused_files()
+
+    def storage_empty_trash(self) -> dict:
+        return self._nb.empty_trash()
+
+    def storage_clear_clips(self) -> dict:
+        return self._nb.clear_audio_clips()
+
+    def backup_choose_folder(self) -> str | None:
+        return self._folder_dialog()
+
+    def backup_restore(self, version: str = "") -> dict | None:
+        """Restore into a NEW folder the user picks a place for (never over the notebook)."""
+        parent = self._folder_dialog()
+        if not parent:
+            return None
+        from datetime import datetime
+        name = "FLEx Scratchpad restored " + (version or datetime.now().strftime("%Y-%m-%d_%H%M%S"))
+        target = Path(parent) / name
+        k = 2
+        while target.exists():
+            target = Path(parent) / f"{name} ({k})"
+            k += 1
+        self._backup.restore(target, version)
+        return {"path": str(target)}
 
     # -- files attached to notes (Seth, 2026-10-17) ------------------------------------
     #

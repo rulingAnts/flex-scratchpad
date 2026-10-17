@@ -900,6 +900,108 @@ class Notebook:
             raise ValueError("That file reference points outside the notebook.")
         return full
 
+    # -- storage (Seth, 2026-10-17: "show them how much storage space is used … and give them
+    #    storage management options") ---------------------------------------------------
+
+    def storage(self) -> dict:
+        """What the notebook folder holds, by kind: {total, parts: [{id, label, files, bytes}]}."""
+        parts = {k: [0, 0] for k in ("notes", "attachments", "images", "snapshots", "clips", "trash", "other")}
+        priv = self.private_dir.resolve()
+        for dirpath, _, files in os.walk(self.root):
+            d = Path(dirpath)
+            try:
+                rel = d.resolve().relative_to(self.root.resolve()).parts
+            except ValueError:
+                rel = ()
+            for fn in files:
+                try:
+                    size = os.stat(d / fn).st_size
+                except OSError:
+                    continue
+                if rel[:1] == (ATTACH_DIR,):
+                    k = "attachments"
+                elif rel[:1] == (PRIVATE_DIR,):
+                    sub = rel[1] if len(rel) > 1 else ""
+                    k = {"trash": "trash", "attachments": "images"}.get(sub)
+                    if not k:
+                        k = "clips" if sub == "flex-cache" and "audio" in rel else "snapshots" if sub == "flex-cache" else "other"
+                elif fn.endswith(NOTE_SUFFIX) or (not rel and fn == CONFIG_NAME):
+                    k = "notes"
+                else:
+                    k = "other"
+                parts[k][0] += 1
+                parts[k][1] += size
+        labels = {"notes": "Notes", "attachments": "Attached files", "images": "Pasted pictures",
+                  "snapshots": "FLEx snapshots (keep notes readable without FLEx)", "clips": "Cached audio clips",
+                  "trash": "Trash (deleted notes and files)", "other": "Other files"}
+        out = [{"id": k, "label": labels[k], "files": v[0], "bytes": v[1]} for k, v in parts.items()]
+        return {"total": sum(v[1] for v in parts.values()), "files": sum(v[0] for v in parts.values()), "parts": out}
+
+    def _referenced_files(self) -> set[str]:
+        refs: set[str] = set()
+        bodies = [n.body for n in self.notes.values()]
+        if self.trash_dir.is_dir():                 # a note in the trash may come back: its files stay "used"
+            for p in self.trash_dir.glob("*" + NOTE_SUFFIX):
+                try:
+                    bodies.append(p.read_text(encoding="utf-8"))
+                except OSError:
+                    pass
+        for body in bodies:
+            for m in re.finditer(r"\{\{\s*file\s+([^\s}]+)", body or ""):
+                ref = re.sub(r"%([0-9A-Fa-f]{2})", lambda x: chr(int(x.group(1), 16)), m.group(1))
+                refs.add(ref.replace("\\", "/").casefold())
+        return refs
+
+    def unused_files(self) -> list[dict]:
+        """Files in attachments/ that no note (nor a note in the trash) refers to."""
+        with self.lock:
+            used = self._referenced_files()
+            out = []
+            if self.files_dir.is_dir():
+                for p in sorted(self.files_dir.rglob("*")):
+                    if p.is_file() and not p.name.endswith(".tmp"):
+                        ref = p.relative_to(self.root).as_posix()
+                        if ref.casefold() not in used:
+                            out.append({"ref": ref, "name": p.name, "bytes": p.stat().st_size})
+            return out
+
+    def trash_unused_files(self) -> dict:
+        """Unused attachments go to the trash (like a deleted note), not away."""
+        moved = freed = 0
+        with self.lock:
+            dest = self.trash_dir / "attachments"
+            for f in self.unused_files():
+                src = self.root / f["ref"]
+                dest.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(src), str(dest / f"{now_iso().replace(':', '-')}--{src.name}"))
+                moved += 1
+                freed += f["bytes"]
+        return {"files": moved, "bytes": freed}
+
+    def empty_trash(self) -> dict:
+        """The one place things are really deleted: the user asked to empty the trash."""
+        with self.lock:
+            n = size = 0
+            if self.trash_dir.is_dir():
+                for p in self.trash_dir.rglob("*"):
+                    if p.is_file():
+                        n += 1
+                        size += p.stat().st_size
+                shutil.rmtree(self.trash_dir, ignore_errors=True)
+            return {"files": n, "bytes": size}
+
+    def clear_audio_clips(self) -> dict:
+        """Cut audio clips are a cache: they are cut again from the recordings when needed."""
+        with self.lock:
+            n = size = 0
+            for d in self.cache_dir.glob("*/audio"):
+                for p in d.rglob("*"):
+                    if p.is_file():
+                        n += 1
+                        size += p.stat().st_size
+                shutil.rmtree(d, ignore_errors=True)
+            return {"files": n, "bytes": size}
+
     def save_attachment(self, name: str, data: bytes) -> Path:
         with self.lock:
             self.attachments_dir.mkdir(parents=True, exist_ok=True)

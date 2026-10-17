@@ -5,7 +5,7 @@
     flex-scratchpad --demo                use the built-in demo project instead of FieldWorks
     flex-scratchpad --list-projects       print the FieldWorks projects flexicon can see, then exit
     flex-scratchpad --check               report whether flexicon/pythonnet/pywebview import, then exit
-    flex-scratchpad --selftest OUT.json   check the installed program (window code, .NET, flexicon, ffmpeg,
+    flex-scratchpad --selftest OUT.json   check the installed program (window code, .NET, flexicon, ffmpeg, rclone,
                                           the page) and write the results; what the release build runs
     flex-scratchpad flexscratchpad://note/<id>   open that note (a second instance hands it to the running one)
     flex-scratchpad --register-links      register the flexscratchpad:// scheme for this user (Windows)
@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 import sys
 
 
@@ -29,6 +30,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--dump", metavar="TEXT", help="print the first segments of a text (title, part of a title, or GUID) as JSON and exit — for diagnosing what flexicon returns")
     ap.add_argument("--locate", metavar="SOURCE", help="explain where pasted FLEx rows land: SOURCE is 'clip' (the clipboard, Windows) or a text file; writes a JSON report (--out) and exits")
     ap.add_argument("--out", default="flex-scratchpad-locate.json", help="report file for --locate")
+    ap.add_argument("--backup", action="store_true", help="back the notebook up to the place set in Settings (what closing the app starts), then exit (0 = backed up)")
     ap.add_argument("--register-links", action="store_true", help="register flexscratchpad:// links for this user (Windows) and exit")
     ap.add_argument("url", nargs="?", help="a flexscratchpad://note/<id> link to open (what Windows passes when such a link is clicked)")
     args = ap.parse_args(argv)
@@ -47,6 +49,8 @@ def main(argv: list[str] | None = None) -> int:
         return check()
     if args.selftest:
         return selftest(args.selftest)
+    if args.backup:
+        return backup_once(args.notebook)
     if args.dump:
         return dump(args.project, args.dump)
     if args.locate:
@@ -255,6 +259,41 @@ def selftest(out: str) -> int:
         return f"{ver} — {exe}"
     rec("ffmpeg", ffmpeg)
 
+    def rclone():
+        # the backup's engine: present, runs, and takes a password on stdin (how the encryption
+        # password reaches it, never on a command line)
+        import subprocess
+        from .backup import bundled_rclone, find_rclone
+        exe = find_rclone()
+        if not exe:
+            raise FileNotFoundError("no rclone")
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
+        ver = subprocess.run([exe, "version"], capture_output=True, text=True, timeout=60, creationflags=flags).stdout.splitlines()[0]
+        ob = subprocess.run([exe, "obscure", "-"], input="selftest", capture_output=True, text=True, timeout=60, creationflags=flags)
+        if ob.returncode != 0 or not ob.stdout.strip():
+            raise RuntimeError("rclone obscure failed: " + ob.stderr[-200:])
+        bundled = bundled_rclone()
+        if res["frozen"] and not (bundled and Path(exe).resolve() == bundled.resolve()):
+            raise RuntimeError(f"the bundled rclone was not used (found {exe})")
+        return f"{ver} — {exe}"
+    rec("rclone", rclone)
+
+    if sys.platform == "win32":
+        def secrets():
+            # the Windows Credential Manager, through advapi32: write, read back, remove
+            from .secrets_store import WindowsCredentialStore
+            st = WindowsCredentialStore()
+            st.set("selftest", "ŋ-selftest")
+            try:
+                if st.get("selftest") != "ŋ-selftest":
+                    raise RuntimeError("the credential read back differs")
+            finally:
+                st.delete("selftest")
+            if st.get("selftest") is not None:
+                raise RuntimeError("the credential was not removed")
+            return "Windows Credential Manager: write, read, remove"
+        rec("secrets", secrets)
+
     res["ok"] = all(c["ok"] for c in res["checks"].values())
     Path(out).write_text(json.dumps(res, indent=2, ensure_ascii=False), encoding="utf-8")
     print(json.dumps(res, indent=2, ensure_ascii=False))
@@ -280,3 +319,20 @@ def check() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+def backup_once(notebook: str | None) -> int:
+    """One backup without a window (closing the app starts this); the result is recorded in the
+    per-user config, where Settings shows it."""
+    from .backup import Backup, BackupError
+    from .config import AppConfig
+    from .secrets_store import default_store
+    cfg = AppConfig()
+    root = Path(notebook) if notebook else cfg.notebook_dir
+    try:
+        r = Backup(cfg, default_store(), lambda: root).run("close")
+    except BackupError as e:
+        print(e)
+        return 2
+    print(r.get("message", ""))
+    return 0 if r.get("ok") else 1

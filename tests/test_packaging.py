@@ -162,3 +162,30 @@ def test_a_dispatched_prerelease_publishes_only_tested_packages():
     assert job["permissions"] == {"contents": "write"}
     run = "\n".join(st.get("run", "") for st in job["steps"])
     assert "--prerelease" in run and "--target" in run
+
+
+def test_rclone_is_its_own_windows_release_checked_against_its_sums(tmp_path, monkeypatch):
+    import fetch_rclone
+    names = ["rclone-v1.71.1-linux-amd64.zip", "rclone-v1.71.1-windows-386.zip", "rclone-v1.71.1-windows-amd64.zip",
+             "rclone-v1.71.1-windows-arm64.zip", "SHA256SUMS"]
+    assert fetch_rclone.pick([{"name": n} for n in names])["name"] == "rclone-v1.71.1-windows-amd64.zip"
+    with pytest.raises(SystemExit):
+        fetch_rclone.pick([{"name": "rclone-v1.71.1-windows-386.zip"}])
+    h = "a" * 64
+    signed = ("-----BEGIN PGP SIGNED MESSAGE-----\nHash: SHA1\n\n" + "b" * 64 + "  rclone-v1.71.1-windows-386.zip\n"
+              + h + "  rclone-v1.71.1-windows-amd64.zip\n-----BEGIN PGP SIGNATURE-----\nxyz\n")
+    assert fetch_rclone.expected_sum(signed, "rclone-v1.71.1-windows-amd64.zip") == h
+    assert fetch_rclone.expected_sum(signed, "rclone-v9.zip") == ""
+    # the packaged program prefers its own rclone, beside the exe
+    from flex_scratchpad import backup
+    app = tmp_path / "app"
+    (app / "rclone").mkdir(parents=True)
+    exe = app / "rclone" / ("rclone.exe" if sys.platform == "win32" else "rclone")
+    exe.write_text("x")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(app / "FLEx Scratchpad.exe"))
+    assert backup.bundled_rclone() == exe.resolve() and backup.find_rclone() == str(exe.resolve())
+    wf = (ROOT / ".github" / "workflows" / "windows-package.yml").read_text(encoding="utf-8")
+    nsi = (ROOT / "build" / "installer.nsi").read_text(encoding="utf-8")
+    assert "fetch_rclone.py" in wf and r'"$dir\rclone\rclone.exe"' in wf
+    assert nsi.count('RMDir /r "$INSTDIR\\rclone"') == 2                 # an upgrade and the uninstaller remove it

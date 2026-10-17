@@ -11,7 +11,8 @@
 # installed; a FieldWorks that needs a newer flexicon needs a new release of this app.
 #
 # ffmpeg is not a Python module: the release workflow fetches it (tools/fetch_ffmpeg.py) and puts it
-# beside the program as `ffmpeg/ffmpeg.exe`, where flex/audio.py's bundled_ffmpeg() looks.
+# beside the program as `ffmpeg/ffmpeg.exe`, where flex/audio.py's bundled_ffmpeg() looks; rclone
+# likewise (tools/fetch_rclone.py) as `rclone/rclone.exe`, where backup.py's bundled_rclone() looks.
 import os
 from PyInstaller.utils.hooks import collect_all
 
@@ -37,7 +38,8 @@ with open(os.path.join(work, "BUILD_ID"), "w", encoding="utf-8") as _f:
 datas.append((os.path.join(work, "BUILD_ID"), "flex_scratchpad"))
 binaries = []
 hidden = ["flex_scratchpad.flex.lcm", "flex_scratchpad.flex.flextext", "flex_scratchpad.flex.demo",
-          "flex_scratchpad.flex.flextext_check", "flex_scratchpad.flex.flextext_writer"]
+          "flex_scratchpad.flex.flextext_check", "flex_scratchpad.flex.flextext_writer",
+          "flex_scratchpad.backup", "flex_scratchpad.secrets_store"]
 # pywebview (the window), pythonnet + clr_loader (.NET: pywebview's WinForms backend and flexicon
 # both need it), flexicon (+ its flexlibs2 compatibility package). collect_all takes each package's
 # modules, data files and native DLLs (Python.Runtime.dll, ClrLoader.dll …).

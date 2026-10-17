@@ -59,6 +59,10 @@
     renderRail();
     renderList();
     renderFlexPill();
+    FS.backup.refreshPill();
+  }
+  function openBackup() {
+    FS.backup.open({ onOpenNotebook: async (path) => { try { const r = await FS.api.open_notebook(path); S.note = null; $('editor-pane').classList.add('no-note'); applyInit(r); FS.toast('Opened ' + path, 'ok'); } catch (e) { FS.toast(e.message, 'error'); } } });
   }
 
   async function refreshLists() {
@@ -764,6 +768,9 @@
     nb.appendChild(el('label', { class: 'small', style: { display: 'flex', gap: '6px', marginTop: '8px' } }, mk, 'Hide Markdown markers while editing (**bold**, # heading, - list) — the toolbar still formats, and typing the markers still works'));
     body.appendChild(nb);
     // FLEx
+    body.appendChild(el('div', { class: 'setting-block' }, el('h3', {}, 'Backup & storage'),
+      el('p', { class: 'muted small' }, 'Back the notebook up to a OneDrive, Google Drive or Dropbox folder, or to S3-compatible storage; see how much space the notebook and its backup take, and clean up.'),
+      el('div', { class: 'btn-row', style: { justifyContent: 'flex-start' } }, el('button', { class: 'btn primary', 'data-test': 'open-backup', onclick: () => { m.close(); openBackup(); } }, 'Backup & storage…'))));
     const fx = el('div', { class: 'setting-block' }, el('h3', {}, 'FieldWorks project'));
     const source = el('select');
     for (const [v, l] of [['lcm', 'FieldWorks project (direct, via flexicon)'], ['flextext', '.flextext export file (fallback)'], ['demo', 'Built-in demo project']]) source.appendChild(el('option', { value: v, selected: (S.flex.source || 'lcm') === v }, l));
@@ -932,6 +939,7 @@
     $('btn-pin').addEventListener('click', () => { if (!S.note) return; S.note.pinned = !S.note.pinned; saveMeta({ pinned: S.note.pinned }); refreshLists(); });
     $('btn-note-menu').addEventListener('click', (e) => { if (S.note) noteMenu(e.currentTarget, S.note); });
     $('btn-insert-flex').addEventListener('click', insertFlex);
+    $('backup-pill').addEventListener('click', openBackup);
     $('btn-attach').addEventListener('click', (e) => attachFiles(e.altKey));
     $('btn-attach-more').addEventListener('click', (e) => attachMenu(e.currentTarget));
     // A file dropped anywhere the note does not take it must never replace the page with the

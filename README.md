@@ -27,6 +27,13 @@ project database and linked back to FLEx.
 - **Search** the whole notebook, including the vernacular words and glosses of embedded FLEx
   objects; diacritics-insensitive; filters by tab, folder and tag; find-in-note.
 - **Plain files**: the notebook is a folder of markdown files; tabs and folders are directories.
+- **Attached files**: drop a file on a note (or 📎 Attach): a chip that opens it in its own program; web
+  pages, PDFs, pictures, audio and video preview in the window. Copied into the notebook's
+  `attachments/` folder, or linked where it is.
+- **Backup & storage**: back the notebook up to a OneDrive, Google Drive or Dropbox folder (found for
+  you), or to S3-compatible storage (Amazon S3, Cloudflare R2, Backblaze B2, Wasabi, MinIO…) through
+  the bundled rclone, optionally encrypted; the keys live in the Windows Credential Manager. Every
+  backup keeps dated older versions; see what the notebook and its backup take, and clean up.
   Readable without the app, syncable, git-friendly.
 
 No web server, no cloud: a native window (pywebview / WebView2) over local HTML + JavaScript,

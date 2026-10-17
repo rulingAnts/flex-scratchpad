@@ -104,6 +104,13 @@ def run(notebook_dir: str | None = None, demo: bool = False, debug: bool = False
         except Exception:  # noqa: BLE001
             pass
         api._flex.close()
+        # the backup on close (Seth, 2026-10-17): a separate quiet process, so the window closes
+        # at once and the upload carries on; skipped when nothing changed since the last one
+        try:
+            if api._backup.needed():
+                _start_backup_process(str(api._nb.root))
+        except Exception:  # noqa: BLE001 — a backup problem must never stop the app closing
+            pass
 
     window.events.closing += on_closing
     for name, fn in (("maximized", on_maximized), ("restored", on_restored)):
@@ -167,3 +174,15 @@ def run(notebook_dir: str | None = None, demo: bool = False, debug: bool = False
     finally:
         lock.release()
     return 0
+
+
+def _start_backup_process(notebook: str) -> None:
+    """`<this program> --backup --notebook <dir>`, detached and windowless. It reads the settings
+    and the secrets itself: nothing secret is on its command line."""
+    import subprocess
+    import sys
+    args = [sys.executable] + ([] if getattr(sys, "frozen", False) else ["-m", "flex_scratchpad"]) + ["--backup", "--notebook", notebook]
+    flags = 0
+    if sys.platform == "win32":
+        flags = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+    subprocess.Popen(args, creationflags=flags, close_fds=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

@@ -1,11 +1,12 @@
 # The Windows packages, built AND tested on a Windows runner: the program folder (PyInstaller
-# onedir, with flexicon, pythonnet and ffmpeg in it), the Setup .exe (NSIS, per user) and the
+# onedir, with flexicon, pythonnet, ffmpeg and rclone in it), the Setup .exe (NSIS, per user) and the
 # portable zip. Called by ci.yml (manual dispatch, an artifact to try) and release.yml (a tag, a
 # GitHub pre-release). Public repository, standard runner (windows-latest): free.
 #
 # What is checked before anything is handed on:
 #   1. the built program's own --selftest: the page, pywebview, .NET via pythonnet, flexicon
-#      packaged, and the bundled ffmpeg cutting a clip;
+#      packaged, the bundled ffmpeg cutting a clip, the bundled rclone, and the Windows
+#      Credential Manager (a test secret written, read back and removed);
 #   2. the Setup run silently into a fresh folder, the installed program's --selftest, its Start
 #      menu shortcut and Settings > Apps entry; then the uninstaller, and that nothing is left.
 name: Windows package
@@ -48,11 +49,17 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: python tools/fetch_ffmpeg.py --out build\ffmpeg
 
+      - name: rclone (its own Windows release, checksum-verified)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python tools/fetch_rclone.py --out build\rclone
+
       - name: Build (PyInstaller onedir)
         timeout-minutes: 15
         run: |
           pyinstaller build/flex-scratchpad.spec --distpath build/dist --workpath build/work --noconfirm
           Copy-Item -Recurse build\ffmpeg "$env:DIST\ffmpeg"
+          Copy-Item -Recurse build\rclone "$env:DIST\rclone"
           Copy-Item LICENSE "$env:DIST\LICENSE.txt"
           Get-ChildItem "$env:DIST" | Format-Table Name, Length
           "{0:N0} MB" -f ((Get-ChildItem -Recurse "$env:DIST" | Measure-Object Length -Sum).Sum / 1MB)
@@ -64,6 +71,7 @@ jobs:
           pyinstaller build/flex-scratchpad.spec --distpath build/dist-console --workpath build/work-console --noconfirm
           $exe = "build\dist-console\FLEx Scratchpad (console)\FLEx Scratchpad (console).exe"
           Copy-Item -Recurse build\ffmpeg "build\dist-console\FLEx Scratchpad (console)\ffmpeg"
+          Copy-Item -Recurse build\rclone "build\dist-console\FLEx Scratchpad (console)\rclone"
           & $exe --selftest "$env:RUNNER_TEMP\selftest-console.json"
           $code = $LASTEXITCODE
           if ($code -ne 0) { Write-Error "self-test failed (exit $code)"; exit 1 }
@@ -99,7 +107,7 @@ jobs:
           # /D= must come last and unquoted (NSIS)
           $p = Start-Process -FilePath $setup -ArgumentList @('/S', "/D=$dir") -Wait -PassThru
           if ($p.ExitCode -ne 0) { Write-Error "Setup failed (exit $($p.ExitCode))"; exit 1 }
-          foreach ($f in @("$dir\FLEx Scratchpad.exe", "$dir\ffmpeg\ffmpeg.exe", "$dir\Uninstall.exe", "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\FLEx Scratchpad.lnk")) {
+          foreach ($f in @("$dir\FLEx Scratchpad.exe", "$dir\ffmpeg\ffmpeg.exe", "$dir\rclone\rclone.exe", "$dir\Uninstall.exe", "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\FLEx Scratchpad.lnk")) {
             if (-not (Test-Path $f)) { Write-Error "missing after install: $f"; exit 1 }
           }
           $key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\FLEx Scratchpad'
@@ -117,7 +125,7 @@ jobs:
           $p = Start-Process -FilePath "$dir\Uninstall.exe" -ArgumentList @('/S', "_?=$dir") -Wait -PassThru
           if ($p.ExitCode -ne 0) { Write-Error "uninstall failed (exit $($p.ExitCode))"; exit 1 }
           Remove-Item -Force "$dir\Uninstall.exe" -ErrorAction SilentlyContinue   # left by _?= by design
-          foreach ($f in @("$dir\FLEx Scratchpad.exe", "$dir\_internal", "$dir\ffmpeg", "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\FLEx Scratchpad.lnk")) {
+          foreach ($f in @("$dir\FLEx Scratchpad.exe", "$dir\_internal", "$dir\ffmpeg", "$dir\rclone", "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\FLEx Scratchpad.lnk")) {
             if (Test-Path $f) { Write-Error "left after uninstall: $f"; exit 1 }
           }
           if (Test-Path $key) { Write-Error "the Settings > Apps entry was left"; exit 1 }
