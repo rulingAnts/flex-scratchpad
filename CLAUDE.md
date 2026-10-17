@@ -293,6 +293,19 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
   one real deletion, asked first), clear cached audio clips. Snapshots are never offered for
   cleanup: they keep notes readable without FLEx. `--selftest` checks rclone and a Credential
   Manager round trip on Windows. Not verified on a real Windows / real bucket yet.
+  PROGRESS (Seth, 2026-10-17: "a progress bar on the backup … percent/ETA … (or when they exit)",
+  and it must say plainly that it FINISHED): `Backup.report` → `py:backup` events {phase
+  scanning|copying|finishing|done, percent, done/total bytes, files/filesTotal, eta}; the folder
+  mirror plans first (so the total is known) and copies in 1 MB pieces; rclone runs with
+  `--use-json-log --stats 1s` (its stats + eta). Updates are throttled to 5/s but a new phase or
+  the 100% is never dropped. `backup.js progressBar()` = an animated stripe until a percent is known,
+  then % · files · size · time left; the dialog's bar has Cancel (`Api.backup_cancel`: between
+  pieces, a `.part` is never left) and STAYS at the end — green "✓ Backed up at 10:42 — 3 files
+  (2.1 MB) copied to …" (`_summary`), or red; the ☁ line fills while it runs. CLOSING: the window
+  no longer closes first — `on_closing` returns False while `app.backup_then_close` backs up with
+  the page's locked "Backing up before closing" screen (bar; Close without backing up / Close now,
+  finish in the background → the old detached `--backup` process; after a failure Try again /
+  Close anyway; ✕ again = background), then destroys the window.
 - Exporting a collection's examples as a `.flextext` (`flex/flextext_writer.py`, `Api.export_note_flextext`,
   Seth, 2026-10-16): one `<interlinear-text>` PER BASELINE WRITING SYSTEM (a FLEx text has one
   vernacular WS), one paragraph per example, one phrase per segment, every writing-system

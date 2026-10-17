@@ -125,6 +125,10 @@ elif sys.argv[1:2] == ["purge"]:
     pass
 elif os.environ.get("FAKE_RCLONE_FAIL"):
     print("2026/10/17 ERROR : SignatureDoesNotMatch: the request signature", file=sys.stderr); sys.exit(1)
+elif "--use-json-log" in sys.argv:
+    for b, t in ((0, 0), (400, 0), (1000, 2)):
+        print(json.dumps({{"level": "info", "msg": "stats", "stats": {{"bytes": b * 3, "totalBytes": 3000, "transfers": t, "totalTransfers": 3, "checks": 0, "totalChecks": 0, "eta": 7 if t < 2 else 0}}}}))
+    print(json.dumps({{"level": "info", "msg": "stats", "stats": {{"bytes": 3000, "totalBytes": 3000, "transfers": 3, "totalTransfers": 3, "eta": 0}}}}))
 else:
     print("Transferred:   3 / 3, 100%")
 '''
@@ -146,8 +150,14 @@ def test_s3_through_rclone_keeps_the_keys_off_the_command_line_and_out_of_any_fi
     assert "SECRET-456" not in json.dumps(st)                    # secrets never come back to the page
     assert "SECRET-456" not in (tmp_path / "config.json").read_text(encoding="utf-8")
     assert api.backup_test()["ok"]
+    seen = []
+    b.report = seen.append
     r = api.backup_now()
     assert r["ok"], r
+    assert "3 files (2.9 KB) copied to field-notes/seth" in r["message"], r["message"]
+    copying = [x for x in seen if x["phase"] == "copying"]
+    assert copying and copying[-1]["percent"] == 100.0 and any(x["eta"] == 7 for x in copying), copying
+    assert [x["phase"] for x in seen][0] == "scanning" and seen[-1]["phase"] == "done"
     calls = [json.loads(x) for x in log.read_text(encoding="utf-8").splitlines()]
     sync = next(c for c in calls if c["argv"][0] == "sync")
     obscure = next(c for c in calls if c["argv"][0] == "obscure")
@@ -225,3 +235,88 @@ def test_storage_by_kind_and_the_cleanup_options(tmp_path):
     r = api.storage_empty_trash()
     assert r["files"] == 2 and not api._nb.trash_dir.exists()
     assert (api._nb.root / used["ref"]).exists()
+
+
+def test_a_folder_backup_reports_its_progress_and_says_what_it_did(tmp_path):
+    api, b = make(tmp_path)
+    big = tmp_path / "nb" / "attachments"
+    big.mkdir(parents=True)
+    (big / "rec1.wav").write_bytes(b"a" * (3 << 20))
+    (big / "rec2.wav").write_bytes(b"b" * (2 << 20))
+    api.backup_save({"kind": "folder", "folder": str(tmp_path / "OneDrive" / "bk")})
+    seen = []
+    b.report = seen.append
+    r = api.backup_now()
+    assert r["ok"] and "copied to" in r["message"] and "MB" in r["message"], r["message"]
+    phases = [x["phase"] for x in seen]
+    assert phases[0] == "scanning" and phases[-1] == "done" and "finishing" in phases
+    pcts = [x["percent"] for x in seen if x["phase"] == "copying" and x["percent"] is not None]
+    assert pcts == sorted(pcts) and pcts[-1] == 100.0 and len(pcts) >= 2
+    total = next(x["total"] for x in seen if x["phase"] == "copying")
+    assert total >= 5 << 20
+    # nothing changed: it says so, plainly
+    r = api.backup_now()
+    assert r["ok"] and r["message"].startswith("nothing had changed"), r["message"]
+
+
+def test_cancel_stops_between_pieces_and_never_leaves_half_a_file(tmp_path):
+    api, b = make(tmp_path)
+    big = tmp_path / "nb" / "attachments"
+    big.mkdir(parents=True)
+    (big / "rec1.wav").write_bytes(b"a" * (4 << 20))
+    (big / "rec2.wav").write_bytes(b"b" * (4 << 20))
+    dest = tmp_path / "bk"
+    api.backup_save({"kind": "folder", "folder": str(dest)})
+
+    def report(st):
+        if st["phase"] == "copying":
+            api.backup_cancel()
+    b.report = report
+    r = api.backup_now()
+    assert r.get("cancelled") and not r["ok"], r
+    # in the middle of a file: the piece being written is dropped, the older copy stays where it was
+    from flex_scratchpad.backup import BackupCancelled, _mirror_folder
+    stop = {"now": False}
+
+    def tick(phase, done=0, total=0, files=0, files_total=0, name="", force=False, eta=None):
+        if done > (1 << 20):
+            stop["now"] = True
+    with pytest.raises(BackupCancelled):
+        _mirror_folder(api._nb.root, tmp_path / "bk-mid", "2026-10-17_000000", tick=tick, cancelled=lambda: stop["now"])
+    assert not list((tmp_path / "bk-mid").rglob("*.part"))
+    assert not list((tmp_path / "bk-mid" / "current" / "attachments").glob("rec*.wav"))   # whichever came first
+    assert not list(dest.rglob("*.part"))
+    assert not (b.lock_dir / "backup.lock").exists() and not b.running
+    assert api.backup_cancel() is False                # nothing running any more
+    b.report = lambda st: None
+    r = api.backup_now()                               # and the next one finishes the job
+    assert r["ok"] and (dest / "current" / "attachments" / "rec2.wav").stat().st_size == 4 << 20
+
+
+def test_closing_backs_up_first_and_honours_each_choice(tmp_path):
+    import threading
+    from flex_scratchpad.app import backup_then_close
+    api, b = make(tmp_path)
+    events = []
+    api._emit = lambda ev, d: events.append((ev, d))
+    api.backup_save({"kind": "folder", "folder": str(tmp_path / "bk")})
+    closed, started = [], []
+    # 1. a backup is due: it runs, then the window closes
+    assert b.needed()
+    assert backup_then_close(api, lambda: closed.append(1), started.append) == "ok"
+    assert closed == [1] and not started and not b.needed()
+    assert ("backupClosing", {"state": "running"}) in events
+    # 2. "Close now, finish in the background": the run stops, a quiet process takes over
+    (tmp_path / "nb" / "attachments").mkdir(exist_ok=True)
+    (tmp_path / "nb" / "attachments" / "big.wav").write_bytes(b"x" * (4 << 20))
+    b.report = lambda st: st["phase"] == "copying" and st["done"] and api.backup_close_choice("background")
+    assert backup_then_close(api, lambda: closed.append(2), started.append) == "background"
+    assert started == [str(api._nb.root)] and closed[-1] == 2
+    # 3. a failure waits for the answer: "Close anyway"
+    b.report = lambda st: None
+    api.backup_save({"kind": "folder", "folder": str(tmp_path / "bk2")})
+    b.run = lambda reason="manual": {"ok": False, "message": "offline"}
+    t = threading.Timer(0.3, lambda: api.backup_close_choice("close"))
+    t.start()
+    assert backup_then_close(api, lambda: closed.append(3), started.append) == "failed"
+    assert ("backupClosing", {"state": "failed", "message": "offline"}) in events and closed[-1] == 3

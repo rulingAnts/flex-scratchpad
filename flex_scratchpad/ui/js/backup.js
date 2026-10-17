@@ -33,17 +33,125 @@
     try { renderPill(await FS.api.backup_status()); } catch (e) { /* no backup api (mock) */ }
   }
 
-  async function backupNow(statusEl) {
-    if (statusEl) statusEl.textContent = 'Backing up…';
-    try {
-      const r = await FS.api.backup_now();
-      const msg = r.busy ? 'A backup is already running.' : (r.ok ? '✓ ' : '✕ ') + (r.message || '');
-      if (statusEl) statusEl.textContent = msg;
-      FS.toast(msg, r.ok ? 'ok' : r.busy ? 'warn' : 'error');
-      return r;
-    } catch (e) { if (statusEl) statusEl.textContent = '✕ ' + e.message; FS.toast(e.message, 'error'); return null; }
-    finally { refreshPill(); }
+  /* ---------------------------------------------------------------- progress (Seth, 2026-10-17:
+   * "a progress bar on the backup … or at the very least some kind of processing animation (when
+   * the user clicks backup) … (or when they exit)"). Python reports {phase, percent, done, total,
+   * files, filesTotal, name} a few times a second ('py:backup'); every bar on screen follows it. A
+   * bar without a percentage yet (still looking for what changed) is an animated stripe. */
+  const bars = new Set();
+  function progressText(st) {
+    if (!st || st.phase === 'scanning') return 'Looking for what changed…';
+    if (st.phase === 'finishing') return 'Finishing…';
+    if (st.phase === 'done') return 'Done.';
+    const parts = [];
+    if (st.filesTotal) parts.push(Math.min(st.files, st.filesTotal) + ' of ' + st.filesTotal + ' file' + (st.filesTotal === 1 ? '' : 's'));
+    if (st.total) parts.push(size(st.done) + ' of ' + size(st.total));
+    if (!st.filesTotal && !st.total) parts.push('Nothing had changed');
+    if (st.eta != null && st.percent != null && st.percent < 100) parts.push(timeLeft(st.eta));
+    return 'Backing up' + (st.percent != null ? ' ' + Math.floor(st.percent) + '%' : '…') + (parts.length ? ' — ' + parts.join(', ') : '');
   }
+  function timeLeft(s) {
+    if (s < 10) return 'a few seconds left';
+    if (s < 60) return 'about ' + Math.round(s / 5) * 5 + ' seconds left';
+    if (s < 3600) { const m = Math.round(s / 60); return 'about ' + m + ' minute' + (m === 1 ? '' : 's') + ' left'; }
+    const h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60);
+    return 'about ' + h + ' h' + (m ? ' ' + m + ' min' : '') + ' left';
+  }
+  function progressBar() {
+    const fill = el('div', { class: 'bk-fill' });
+    const label = el('div', { class: 'bk-progress-label small', 'aria-live': 'polite' }, 'Looking for what changed…');
+    const track = el('div', { class: 'bk-track indeterminate', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': '100' }, fill);
+    const node = el('div', { class: 'bk-progress', 'data-test': 'bk-progress' }, track, label);
+    const api = {
+      node,
+      set(st) {
+        const pct = st && st.percent != null && st.phase !== 'scanning' ? st.percent : (st && (st.phase === 'finishing' || st.phase === 'done') ? 100 : null);
+        track.classList.toggle('indeterminate', pct == null);
+        fill.style.width = pct == null ? '' : pct + '%';
+        if (pct == null) track.removeAttribute('aria-valuenow'); else track.setAttribute('aria-valuenow', String(Math.round(pct)));
+        label.textContent = progressText(st);
+      },
+      /* the end, kept on screen until the next backup: full and green with what was done, or red */
+      finish(ok, text) { bars.delete(api); track.classList.remove('indeterminate'); fill.style.width = '100%'; node.classList.add(ok ? 'ok' : 'bad'); label.textContent = text; },
+      remove() { bars.delete(api); node.remove(); },
+    };
+    bars.add(api);
+    return api;
+  }
+  let lastState = null;
+  FS.on('py:backup', (st) => {
+    lastState = st;
+    for (const b of bars) { if (b.node.isConnected) b.set(st); else bars.delete(b); }
+    const pill = document.getElementById('backup-pill');
+    if (pill && st.phase !== 'done') {
+      pill.hidden = false;
+      pill.classList.add('running');
+      pill.style.setProperty('--bk-pct', st.percent != null ? st.percent + '%' : '0%');
+      pill.querySelector('.label').textContent = st.percent != null && st.phase === 'copying' ? 'Backing up ' + Math.floor(st.percent) + '%' : 'Backing up…';
+    } else if (pill && st.phase === 'done') {
+      pill.classList.remove('running');
+      refreshPill();
+    }
+  });
+
+  let shownBox = null;
+  async function backupNow(statusEl) {
+    if (statusEl) statusEl.textContent = '';
+    if (shownBox) shownBox.remove();
+    const bar = progressBar();
+    const cancel = el('button', { class: 'btn', 'data-test': 'bk-cancel', onclick: async () => { cancel.disabled = true; cancel.textContent = 'Stopping…'; try { await FS.api.backup_cancel(); } catch (e) { /* finished meanwhile */ } } }, 'Cancel');
+    const box = shownBox = el('div', { class: 'bk-running' }, bar.node, cancel);
+    if (statusEl) statusEl.before(box);
+    let r = null;
+    try {
+      r = await FS.api.backup_now();
+    } catch (e) { r = { ok: false, message: e.message }; }
+    cancel.remove();
+    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const msg = r.busy ? 'A backup is already running (closing the app started one); try again in a moment.'
+      : r.cancelled ? 'Stopped at ' + time + '. ' + (r.message || '')
+        : r.ok ? '✓ Backed up at ' + time + ' — ' + (r.message || 'done.') : '✕ The backup did not finish: ' + (r.message || '');
+    bar.finish(!!r.ok, msg);
+    if (statusEl) statusEl.textContent = '';
+    if (!statusEl || !statusEl.isConnected) box.remove();
+    FS.toast(msg, r.ok ? 'ok' : (r.busy || r.cancelled) ? 'warn' : 'error');
+    refreshPill();
+    return r;
+  }
+
+  /* Closing the app with a backup due: the window stays while it runs (app.py backup_then_close). */
+  let closing = null;
+  FS.on('py:backupClosing', (d) => {
+    if (!closing) {
+      const m = FS.modal({ title: 'Backing up before closing', class: 'narrow backup-closing', sticky: true, locked: true });
+      m.box.setAttribute('data-test', 'backup-closing');
+      m.box.querySelector('.modal-head .icon-btn').remove();       // the choices below are the way out
+      const bar = progressBar();
+      const msg = el('div', { class: 'small bk-closing-msg' }, 'FLEx Scratchpad closes by itself when the backup is done.');
+      const choose = (c) => FS.api.backup_close_choice(c).catch(() => {});
+      const running = el('div', { class: 'btn-row' },
+        el('button', { class: 'btn', 'data-test': 'close-skip', onclick: () => choose('skip') }, 'Close without backing up'),
+        el('button', { class: 'btn primary', 'data-test': 'close-background', title: 'The backup carries on, quietly, after the window has closed', onclick: () => choose('background') }, 'Close now, finish in the background'));
+      const failed = el('div', { class: 'btn-row', hidden: true },
+        el('button', { class: 'btn', 'data-test': 'close-anyway', onclick: () => choose('close') }, 'Close anyway'),
+        el('button', { class: 'btn primary', 'data-test': 'close-retry', onclick: () => choose('retry') }, 'Try again'));
+      m.body.append(bar.node, msg, running, failed);
+      closing = { m, bar, msg, running, failed };
+      if (lastState) bar.set(lastState);
+    }
+    if (d.state === 'failed') {
+      closing.msg.textContent = '✕ The backup did not finish: ' + (d.message || '');
+      closing.msg.classList.add('bad');
+      closing.running.hidden = true; closing.failed.hidden = false;
+      closing.bar.node.hidden = true;
+    } else {
+      closing.msg.textContent = 'FLEx Scratchpad closes by itself when the backup is done.';
+      closing.msg.classList.remove('bad');
+      closing.running.hidden = false; closing.failed.hidden = true;
+      closing.bar.node.hidden = false;
+      closing.bar.set({ phase: 'scanning' });
+    }
+  });
 
   async function open(opts) {
     opts = opts || {};
@@ -227,5 +335,5 @@
     return m;
   }
 
-  FS.backup = { open, refreshPill, renderPill, backupNow };
+  FS.backup = { open, refreshPill, renderPill, backupNow, progressBar, progressText, timeLeft };
 })();

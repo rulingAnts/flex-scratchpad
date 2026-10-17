@@ -2937,7 +2937,7 @@ def test_backup_to_a_sync_folder_and_storage_management(app):
     assert page.locator("[data-test=bk-kind-folder]").is_checked()
     page.fill("[data-test=bk-folder]", str(dest))
     page.locator("[data-test=bk-now]").click()
-    page.wait_for_function("() => /^✓/.test(document.querySelector('[data-test=bk-status]').textContent)", timeout=10000)
+    page.wait_for_selector("[data-test=bk-progress].ok", timeout=10000)
     assert (dest / "current" / "notebook.json").exists()
     assert h.api.backup_status()["settings"]["kind"] == "folder"
     assert "Backed up" in page.locator("[data-test=backup-pill]").inner_text()
@@ -3004,4 +3004,51 @@ def test_an_example_and_its_highlights_follow_their_lines_when_flex_changes_the_
     bold = page.locator("#editor .text-obj .st-b").first.inner_text()
     assert "Ɲamú" in marked and bold == "pemu", (marked, bold)
     assert "ka-nuwa" in page.locator("#editor .text-obj").inner_text()          # the split-off piece is in the example
+    assert not [e for e in errors if "Failed to load resource" not in e], errors
+
+
+def test_backup_progress_bar_finish_and_the_closing_screen(app):
+    """Seth, 2026-10-17: a progress bar (percent, time left) when backing up — and when the app
+    closes — and a clear word that it has finished."""
+    h, page, errors = app
+    h.api._secrets = __import__("flex_scratchpad.secrets_store", fromlist=["MemoryStore"]).MemoryStore()
+    h.api._backup_obj = None
+    h.api._backup.lock_dir = h.tmp / "local"
+    h.api.backup_save({"kind": "folder", "folder": str(h.tmp / "OneDrive" / "bk")})
+    page.reload()
+    page.wait_for_selector("[data-test=backup-pill]:not([hidden])")
+    page.locator("[data-test=backup-pill]").click()
+    page.wait_for_selector("[data-test=backup-dialog]")
+    page.locator("[data-test=bk-now]").click()
+    # the finish stays on screen: a full, green bar that says what was done
+    page.wait_for_selector("[data-test=bk-progress].ok", timeout=10000)
+    done = page.locator("[data-test=bk-progress].ok").inner_text()
+    assert "✓ Backed up at" in done and "copied to" in done, done
+    # while it runs: the bar follows Python's reports — a stripe until the size is known, then %
+    page.evaluate("() => { window.__bar = FS.backup.progressBar(); document.body.appendChild(window.__bar.node); }")
+    page.evaluate("() => FS.onEvent({event: 'backup', phase: 'scanning', percent: null})")
+    assert "indeterminate" in page.locator("body > [data-test=bk-progress] .bk-track").get_attribute("class")
+    page.evaluate("() => FS.onEvent({event: 'backup', phase: 'copying', percent: 42, done: 4404019, total: 10485760, files: 3, filesTotal: 7, eta: 95})")
+    label = page.locator("body > [data-test=bk-progress] .bk-progress-label").inner_text()
+    assert "42%" in label and "3 of 7 files" in label and "4.2 MB of 10 MB" in label and "about 2 minutes left" in label, label
+    assert page.locator("body > [data-test=bk-progress] .bk-track").get_attribute("aria-valuenow") == "42"
+    assert "Backing up 42%" in page.locator("[data-test=backup-pill]").inner_text()
+    page.evaluate("() => FS.onEvent({event: 'backup', phase: 'done'})")
+    page.locator(".modal .modal-head .icon-btn").first.click()
+    # closing with a backup due: the window stays, the bar shows, Esc does not dismiss it
+    page.evaluate("() => FS.onEvent({event: 'backupClosing', state: 'running'})")
+    page.wait_for_selector("[data-test=backup-closing]")
+    page.keyboard.press("Escape")
+    assert page.locator("[data-test=backup-closing]").is_visible()
+    assert page.locator("[data-test=backup-closing] [data-test=bk-progress]").is_visible()
+    page.locator("[data-test=close-background]").click()
+    page.wait_for_timeout(300)
+    assert h.api._close_choice == "background"
+    # a failed one says so and asks
+    page.evaluate("() => FS.onEvent({event: 'backupClosing', state: 'failed', message: 'offline'})")
+    assert "offline" in page.locator("[data-test=backup-closing]").inner_text()
+    assert page.locator("[data-test=close-retry]").is_visible() and page.locator("[data-test=close-anyway]").is_visible()
+    page.locator("[data-test=close-retry]").click()
+    page.wait_for_timeout(300)
+    assert h.api._close_choice == "retry"
     assert not [e for e in errors if "Failed to load resource" not in e], errors

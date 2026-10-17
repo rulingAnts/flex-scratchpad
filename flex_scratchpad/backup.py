@@ -25,6 +25,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -143,15 +144,72 @@ class BackupError(RuntimeError):
     pass
 
 
+class BackupCancelled(BackupError):
+    pass
+
+
 class Backup:
+    """`progress(message)` feeds the status pill; `report(state)` the progress bars (Seth,
+    2026-10-17: "a progress bar on the backup … or at the very least some kind of processing
+    animation … (or when they exit)"): {phase: scanning|copying|finishing|done, percent (None while
+    the size is not known yet), done, total (bytes), files, filesTotal, name}."""
+
     def __init__(self, config, secrets, notebook_root: Callable[[], Path], lock_dir: Path | None = None,
-                 progress: Callable[[str], None] | None = None):
+                 progress: Callable[[str], None] | None = None, report: Callable[[dict], None] | None = None):
         self.config = config
         self.secrets = secrets
         self.notebook_root = notebook_root
         self.progress = progress or (lambda m: None)
+        self.report = report or (lambda d: None)
         from .config import local_data_dir
         self.lock_dir = Path(lock_dir or local_data_dir())
+        self._cancel = threading.Event()
+        self._proc: subprocess.Popen | None = None
+        self._last_tick = 0.0
+        self._last_stats: dict | None = None
+        self._copy_t0: tuple | None = None
+        self._last_phase = ""
+        self.running = False
+
+    def cancel(self) -> bool:
+        """Stop a running backup: the file being copied is finished or dropped, never left half."""
+        if not self.running:
+            return False
+        self._cancel.set()
+        p = self._proc
+        if p is not None and p.poll() is None:
+            try:
+                p.terminate()
+            except OSError:
+                pass
+        return True
+
+    def _tick(self, phase: str, done: int = 0, total: int = 0, files: int = 0, files_total: int = 0, name: str = "",
+              force: bool = False, eta: float | None = None) -> None:
+        now = time.monotonic()
+        if phase == "copying" and not self._copy_t0:
+            self._copy_t0 = (now, done)
+        edge = phase != self._last_phase or (total > 0 and done >= total) or (files_total > 0 and files >= files_total)
+        if not force and not edge and now - self._last_tick < 0.2:      # a few updates a second is plenty,
+            return                                                        # but never drop a new phase or the 100%
+        self._last_tick = now
+        self._last_phase = phase
+        if eta is None and phase == "copying" and total > 0 and self._copy_t0:
+            t0, d0 = self._copy_t0
+            moved, spent = done - d0, now - t0
+            if moved > 0 and spent >= 1.0:                  # a second of copying before guessing
+                eta = (total - done) / (moved / spent)
+        pct = None
+        if total > 0:
+            pct = max(0.0, min(100.0, 100.0 * done / total))
+        elif files_total > 0:
+            pct = max(0.0, min(100.0, 100.0 * files / files_total))
+        try:
+            self.report({"phase": phase, "percent": None if pct is None else round(pct, 1), "done": done, "total": total,
+                         "files": files, "filesTotal": files_total, "name": name,
+                         "eta": None if eta is None or eta < 0 else round(eta)})
+        except Exception:  # noqa: BLE001 — a closed window must not stop the backup
+            pass
 
     # -- settings -------------------------------------------------------------------
 
@@ -290,26 +348,55 @@ class Backup:
         except ValueError:
             raise BackupError("rclone answered something unexpected: " + (r.stdout or "")[:200])
 
-    def _run(self, rc: str, env: dict, args: list[str], timeout: int = 6 * 3600) -> str:
+    def _run(self, rc: str, env: dict, args: list[str], timeout: int = 6 * 3600, stats: bool = False) -> str:
+        """rclone, its output read line by line. With `stats` it reports progress every second as
+        JSON (`--use-json-log`: the stats ride in a "stats" field), which becomes the bar."""
         flags = ["--contimeout", "15s", "--timeout", "60s", "--retries", "2", "--low-level-retries", "3"]
+        if stats:
+            flags += ["--use-json-log", "--stats", "1s", "-v"]
         p = subprocess.Popen([rc, *args, *flags], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                              encoding="utf-8", errors="replace", creationflags=_NO_WINDOW)
+        self._proc = p
         lines: list[str] = []
+        errors: list[str] = []
         t0 = time.monotonic()
         assert p.stdout is not None
-        for line in p.stdout:
-            line = line.rstrip()
-            if line:
+        try:
+            for line in p.stdout:
+                line = line.rstrip()
+                if not line:
+                    continue
                 lines.append(line)
-                if "Transferred" in line or "ERROR" in line:
+                obj = None
+                if line.startswith("{"):
+                    try:
+                        obj = json.loads(line)
+                    except ValueError:
+                        obj = None
+                if obj is not None:
+                    st = obj.get("stats")
+                    if isinstance(st, dict):
+                        self._last_stats = st
+                        self._tick("copying", int(st.get("bytes") or 0), int(st.get("totalBytes") or 0),
+                                   int(st.get("transfers") or 0) + int(st.get("checks") or 0),
+                                   int(st.get("totalTransfers") or 0) + int(st.get("totalChecks") or 0),
+                                   eta=st.get("eta") if isinstance(st.get("eta"), (int, float)) else None)
+                    if str(obj.get("level", "")).lower() in ("error", "critical"):
+                        errors.append(str(obj.get("msg", "")))
+                        self.progress("Backup: " + str(obj.get("msg", ""))[:160])
+                elif "ERROR" in line or "Failed" in line:
+                    errors.append(line)
                     self.progress("Backup: " + re.sub(r"^.*?(INFO|NOTICE|ERROR)\s*:\s*", "", line)[:160])
-            if time.monotonic() - t0 > timeout:
-                p.kill()
-                raise BackupError("The backup took too long and was stopped.")
-        code = p.wait()
+                if time.monotonic() - t0 > timeout:
+                    p.kill()
+                    raise BackupError("The backup took too long and was stopped.")
+            code = p.wait()
+        finally:
+            self._proc = None
+        if self._cancel.is_set():
+            raise BackupCancelled("The backup was stopped.")
         if code != 0:
-            errs = [x for x in lines if "ERROR" in x or "Failed" in x] or lines
-            raise BackupError(_plain_error("\n".join(errs[-4:])))
+            raise BackupError(_plain_error("\n".join((errors or lines)[-4:])))
         return "\n".join(lines)
 
     # -- operations ---------------------------------------------------------------------
@@ -362,6 +449,11 @@ class Backup:
         lock = self._lock()
         if not lock:
             return {"ok": False, "busy": True, "message": "A backup is already running."}
+        self._cancel.clear()
+        self._last_stats = None
+        self._copy_t0 = None
+        self.running = True
+        self._tick("scanning", force=True)
         nb = Path(self.notebook_root())
         stamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
         t0 = time.monotonic()
@@ -370,20 +462,24 @@ class Backup:
             before = tree_stamp(nb)
             self.progress("Backing up the notebook…")
             if s["kind"] == "folder" and not s.get("encrypt"):
-                n = _mirror_folder(nb, Path(s["folder"]), stamp)
-                result["message"] = f"{n['copied']} file(s) copied, {n['kept']} older version(s) kept" if (n["copied"] or n["kept"]) else "Nothing had changed."
+                n = _mirror_folder(nb, Path(s["folder"]), stamp, tick=self._tick, cancelled=self._cancel.is_set)
+                result["message"] = _summary(n["copied"], n["bytes"], n["kept"], s["folder"])
             else:
                 rc, env, root = self._env(s)
                 self._run(rc, env, ["sync", str(nb), root + ("" if root.endswith(":") else "/") + "current",
                                     "--backup-dir", root + ("" if root.endswith(":") else "/") + "versions/" + stamp,
-                                    "--exclude", "*.tmp", "--exclude", "*.part", "--exclude", "~$*",
-                                    "--stats", "2s", "--stats-one-line", "-v"])
-                result["message"] = "Backed up."
+                                    "--exclude", "*.tmp", "--exclude", "*.part", "--exclude", "~$*"], stats=True)
+                st = self._last_stats or {}
+                result["message"] = _summary(int(st.get("transfers") or 0), int(st.get("bytes") or 0), None,
+                                             f"{s['bucket']}/{s['prefix']}" if s["kind"] == "s3" else s["folder"])
             result.update(ok=True, stamp=before, seconds=round(time.monotonic() - t0, 1))
+            self._tick("finishing", force=True)
             if int(s.get("keepDays") or 0) > 0:             # "keep old versions for N days"
                 gone = self.prune(older_than_days=int(s["keepDays"]), _locked=True)
                 if gone["versions"]:
                     result["message"] += f" {len(gone['versions'])} version(s) older than {s['keepDays']} days removed."
+        except BackupCancelled:
+            result.update(message="Stopped before it finished; the next backup carries on from there.", cancelled=True)
         except (BackupError, OSError) as e:
             result["message"] = str(e)
         finally:
@@ -391,7 +487,9 @@ class Backup:
                 lock.unlink()
             except OSError:
                 pass
+            self.running = False
             self.progress("")
+            self._tick("done", force=True)
         self.config.load()                  # another process (the backup on close) may have saved meanwhile
         self.config.data.setdefault("backup", {}).update({"last": result})
         self.config.save()
@@ -485,7 +583,7 @@ class Backup:
                 shutil.copytree(src, target, dirs_exist_ok=True)
             else:
                 rc, env, root = self._env(s)
-                self._run(rc, env, ["copy", self._dest_join(root, sub), str(target), "--stats", "2s", "--stats-one-line", "-v"])
+                self._run(rc, env, ["copy", self._dest_join(root, sub), str(target)], stats=True)
         finally:
             self.progress("")
         return target
@@ -516,6 +614,24 @@ def _dir_size(p: Path) -> dict:
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
 
 
+def _size(n: int) -> str:
+    for unit, k in (("GB", 1 << 30), ("MB", 1 << 20), ("KB", 1 << 10)):
+        if n >= k:
+            return f"{n / k:.1f} {unit}"
+    return f"{n} B"
+
+
+def _summary(files: int, size: int, kept: int | None, where: str) -> str:
+    """What a finished backup says (Seth, 2026-10-17: it should tell the user it has in fact
+    finished, and what it did)."""
+    if not files and not kept:
+        return f"nothing had changed since the last backup; {where} is up to date."
+    out = f"{files} file{'s' if files != 1 else ''} ({_size(size)}) copied to {where}" if files else f"{where} is up to date"
+    if kept:
+        out += f"; {kept} earlier cop{'ies' if kept != 1 else 'y'} kept in a dated version"
+    return out + "."
+
+
 def _plain_error(text: str) -> str:
     t = text or "rclone failed."
     if re.search(r"InvalidAccessKeyId|SignatureDoesNotMatch|AccessDenied|403", t):
@@ -527,10 +643,14 @@ def _plain_error(text: str) -> str:
     return t[-500:]
 
 
-def _mirror_folder(src: Path, dest: Path, stamp: str) -> dict:
+def _mirror_folder(src: Path, dest: Path, stamp: str, tick=None, cancelled=None) -> dict:
     """A plain folder backup without rclone: `dest/current` becomes a copy of `src`; a file that
     would be replaced or removed there is moved to `dest/versions/<stamp>/` first (nothing lost).
-    Unchanged files (same size and modification time) are not copied again."""
+    Unchanged files (same size and modification time) are not copied again. Two passes, so the
+    progress (`tick`) knows the total before it starts; `cancelled()` is asked between pieces of a
+    file — a file is copied to `.part` and only then put in place, so a stop never leaves half a file."""
+    tick = tick or (lambda *a, **k: None)
+    cancelled = cancelled or (lambda: False)
     cur, ver = dest / "current", dest / "versions" / stamp
     cur.mkdir(parents=True, exist_ok=True)
     copied = kept = 0
@@ -544,6 +664,7 @@ def _mirror_folder(src: Path, dest: Path, stamp: str) -> dict:
         kept += 1
 
     wanted: set[str] = set()
+    plan: list[tuple[Path, Path, int]] = []
     for dirpath, dirnames, files in os.walk(src):
         rel_dir = Path(dirpath).relative_to(src)
         for fn in files:
@@ -561,14 +682,38 @@ def _mirror_folder(src: Path, dest: Path, stamp: str) -> dict:
                 dt = d_file.stat()
                 if dt.st_size == st.st_size and dt.st_mtime_ns == st.st_mtime_ns:   # else copied again: the safe side
                     continue
-                set_aside(d_file)
-            elif d_file.exists():          # a folder where a file now is
-                set_aside(d_file)
-            d_file.parent.mkdir(parents=True, exist_ok=True)
-            tmp = d_file.with_name(d_file.name + ".part")
-            shutil.copy2(s_file, tmp)
+            plan.append((s_file, d_file, st.st_size))
+    total = sum(x[2] for x in plan)
+    done = 0
+    tick("copying", 0, total, 0, len(plan), force=True)
+    for i, (s_file, d_file, size) in enumerate(plan):
+        if cancelled():
+            raise BackupCancelled("The backup was stopped.")
+        if d_file.is_file() or d_file.exists():   # the older copy (or a folder where a file now is) is kept
+            set_aside(d_file)
+        d_file.parent.mkdir(parents=True, exist_ok=True)
+        tmp = d_file.with_name(d_file.name + ".part")
+        try:
+            with open(s_file, "rb") as fi, open(tmp, "wb") as fo:
+                while True:
+                    chunk = fi.read(1 << 20)
+                    if not chunk:
+                        break
+                    fo.write(chunk)
+                    done += len(chunk)
+                    tick("copying", done, total, i, len(plan), s_file.name)
+                    if cancelled():
+                        raise BackupCancelled("The backup was stopped.")
+            shutil.copystat(s_file, tmp)
             os.replace(tmp, d_file)
-            copied += 1
+        except BaseException:
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+            raise
+        copied += 1
+        tick("copying", done, total, i + 1, len(plan), s_file.name)
     # what is gone from the notebook is set aside, not deleted
     for dirpath, dirnames, files in os.walk(cur, topdown=False):
         for fn in files:
@@ -580,4 +725,5 @@ def _mirror_folder(src: Path, dest: Path, stamp: str) -> dict:
                 Path(dirpath).rmdir()          # only when empty
             except OSError:
                 pass
-    return {"copied": copied, "kept": kept}
+    tick("copying", total, total, len(plan), len(plan), force=True)
+    return {"copied": copied, "kept": kept, "bytes": done}

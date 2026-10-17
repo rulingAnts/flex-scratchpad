@@ -6,6 +6,7 @@ the page is a `file://` document and talks to Python only through the exposed `j
 from __future__ import annotations
 
 import sys
+import threading
 from pathlib import Path
 
 from . import APP_NAME
@@ -97,6 +98,21 @@ def run(notebook_dir: str | None = None, demo: bool = False, debug: bool = False
         state["maximized"] = False
 
     def on_closing():
+        # The backup on close (Seth, 2026-10-17: a progress bar "when they exit" too): the window
+        # stays open while it runs, the page showing its progress with "Close now, finish in the
+        # background" and "Close without backing up"; then it closes itself. Skipped when nothing
+        # changed since the last good backup.
+        if state.get("closing") and api._backup.running:
+            api.backup_close_choice("background")   # ✕ again while it runs: close now, finish quietly
+            return False
+        if not state.get("closing"):
+            try:
+                if api._backup.needed() and not api._backup.running:
+                    state["closing"] = True
+                    threading.Thread(target=lambda: backup_then_close(api, window.destroy), daemon=True).start()
+                    return False            # not yet: the page shows the backup
+            except Exception:  # noqa: BLE001 — a backup problem must never stop the app closing
+                pass
         try:
             if not state["maximized"]:      # a maximized window's size is the screen's, not a size to restore to
                 config.data["window"] = {"width": window.width, "height": window.height}
@@ -104,13 +120,6 @@ def run(notebook_dir: str | None = None, demo: bool = False, debug: bool = False
         except Exception:  # noqa: BLE001
             pass
         api._flex.close()
-        # the backup on close (Seth, 2026-10-17): a separate quiet process, so the window closes
-        # at once and the upload carries on; skipped when nothing changed since the last one
-        try:
-            if api._backup.needed():
-                _start_backup_process(str(api._nb.root))
-        except Exception:  # noqa: BLE001 — a backup problem must never stop the app closing
-            pass
 
     window.events.closing += on_closing
     for name, fn in (("maximized", on_maximized), ("restored", on_restored)):
@@ -186,3 +195,41 @@ def _start_backup_process(notebook: str) -> None:
     if sys.platform == "win32":
         flags = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
     subprocess.Popen(args, creationflags=flags, close_fds=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def backup_then_close(api, destroy, start_process=None) -> str:
+    """Back up while the window stays open, then close it (what closing the app does when a
+    backup is due). The page shows the progress and answers through `Api.backup_close_choice`:
+    'background' starts a quiet process to finish and closes, 'skip' closes; after a failure it
+    waits for 'retry' or 'close'. Returns how it ended: ok | background | skipped | failed."""
+    start_process = start_process or _start_backup_process
+    notebook = str(api._nb.root)
+    how = "failed"
+    try:
+        while True:
+            api._close_choice = None
+            api._close_evt.clear()
+            api._emit("backupClosing", {"state": "running"})
+            r = api._backup.run("close")
+            choice = api._close_choice
+            if choice == "background":
+                start_process(notebook)
+                how = "background"
+                break
+            if choice == "skip":
+                how = "skipped"
+                break
+            if r.get("ok") or r.get("busy"):
+                how = "ok"
+                break
+            api._emit("backupClosing", {"state": "failed", "message": r.get("message", "")})
+            api._close_evt.wait()
+            if api._close_choice != "retry":
+                break
+    except Exception:  # noqa: BLE001 — whatever happens, the window closes
+        pass
+    try:
+        destroy()
+    except Exception:  # noqa: BLE001
+        pass
+    return how

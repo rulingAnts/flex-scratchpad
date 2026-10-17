@@ -77,6 +77,8 @@ class Api:
         self._drop_cv = threading.Condition()
         self._secrets = None                    # the secret store (tests set one); else the platform's
         self._backup_obj = None
+        self._close_choice: str | None = None   # the answer while backing up before closing (app.py)
+        self._close_evt = threading.Event()
         self._open_notebook(notebook_dir or config.notebook_dir)
 
 
@@ -489,7 +491,8 @@ class Api:
         if getattr(self, "_backup_obj", None) is None:
             from .backup import Backup
             from .secrets_store import default_store
-            self._backup_obj = Backup(self._config, self._secrets or default_store(), lambda: self._nb.root, progress=self._progress)
+            self._backup_obj = Backup(self._config, self._secrets or default_store(), lambda: self._nb.root, progress=self._progress,
+                                      report=lambda st: self._emit("backup", st))
         return self._backup_obj
 
     def backup_status(self) -> dict:
@@ -505,6 +508,22 @@ class Api:
 
     def backup_now(self) -> dict:
         return self._backup.run("manual")
+
+    def backup_cancel(self) -> bool:
+        """Stop the running backup (the dialog's Cancel)."""
+        return self._backup.cancel()
+
+    def backup_close_choice(self, choice: str) -> bool:
+        """The page's answer while the app backs up before closing (app.py): 'background' (close
+        now, a quiet process finishes the backup), 'skip' (close without it), 'close' / 'retry'
+        after a failed one."""
+        if choice not in ("background", "skip", "close", "retry"):
+            return False
+        self._close_choice = choice
+        if choice in ("background", "skip"):
+            self._backup.cancel()
+        self._close_evt.set()
+        return True
 
     def backup_versions(self) -> list[str]:
         return self._backup.versions()

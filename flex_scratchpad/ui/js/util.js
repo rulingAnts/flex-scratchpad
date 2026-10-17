@@ -157,7 +157,7 @@
     box.append(head, body);
     root.appendChild(box);
     function close(result) { root.remove(); document.removeEventListener('keydown', onKey); if (opts.onClose) opts.onClose(result); }
-    function onKey(e) { if (e.key === 'Escape') { e.stopPropagation(); close(); } }
+    function onKey(e) { if (e.key === 'Escape' && !opts.locked) { e.stopPropagation(); close(); } }   // locked: only its own buttons close it
     document.addEventListener('keydown', onKey);
     root.addEventListener('mousedown', (e) => { if (e.target === root && !opts.sticky) close(); });
     document.body.appendChild(root);
