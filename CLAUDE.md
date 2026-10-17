@@ -20,8 +20,13 @@ Built 2026-10-12 with Seth; the decisions below are his.
   `webview.start(..., http_server=False)` says it too; `tests/test_app_url.py` guards both.
   Media and images are loaded as `file://` URLs.
 - **FLEx is read directly, read-only.** `OpenProject(name, writeEnabled=False)`. The app never
-  writes to a project. (Seth, 2026-10-13: the ONE write planned for later is correcting a
-  text's media source — `plans/BACKLOG.md`; nothing else, ever.) The `.flextext` file source is a *fallback* (texts only), the demo is for
+  writes to a project, and none is planned (Seth, 2026-10-17: "Read-only is good for this
+  project" — the media-source correction once planned is SHELVED in `plans/BACKLOG.md`); the site
+  promises it to users, and `tests/test_read_only.py` fails on any write access in the code
+  (`writeEnabled=True`, a unit of work, an undo task, a save). The only files written are the
+  notebook's own and the exports the user saves (a `.flextext` is a NEW text with new GUIDs,
+  imported by the user; its audio may go into LinkedFiles only when the user chooses that folder).
+  The `.flextext` file source is a *fallback* (texts only), the demo is for
   tests; LCM is the product.
 - **One LCM thread.** pywebview calls `js_api` methods on arbitrary threads and LCM is not
   thread-safe, so `flex/lcm.py` runs every flexicon call on its single `LcmWorker` and returns
