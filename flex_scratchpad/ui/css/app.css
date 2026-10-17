@@ -766,3 +766,8 @@ table.md-table td.drop-target, table.md-table th.drop-target { outline: 2px soli
 .backup-pill.running { background-image: linear-gradient(90deg, var(--accent-soft) var(--bk-pct, 0%), transparent var(--bk-pct, 0%)); }
 .backup-pill.running .bk-ico { color: var(--accent); animation: bk-pulse 1.2s ease-in-out infinite; }
 @keyframes bk-pulse { 50% { opacity: 0.35; } }
+
+/* playback (interlinear.js follow / playRange): the line under the playhead, and a player that
+   stays at the bottom of the view while its example runs past it, then rests at the example's end */
+.segment.playing-line { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); border-radius: 6px; scroll-margin: 64px 0 72px; transition: background 0.2s; }
+.text-obj .transport { position: sticky; bottom: 8px; z-index: 4; background: var(--bg); border: 1px solid var(--border); box-shadow: 0 4px 14px rgba(15, 23, 42, 0.12); }

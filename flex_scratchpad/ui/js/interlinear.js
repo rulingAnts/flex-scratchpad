@@ -262,7 +262,7 @@
     );
     const anyTimed = segs.some((s) => s.begin != null && s.end != null);
     if (anyTimed && segs.length > 1) {
-      head.appendChild(el('button', { class: 'lnk', title: 'Play this range', onclick: () => playRange(box, obj, segs, mediaByGuid, opts) }, '▶ Play ' + flexRange));
+      head.appendChild(el('button', { class: 'lnk play-range', title: 'Play this range', onclick: () => playRange(box, obj, segs, mediaByGuid, opts) }, '▶ Play ' + flexRange));
     }
     head.appendChild(el('button', { class: 'lnk', title: 'Reload from FLEx', onclick: () => opts.refresh && opts.refresh() }, '↻'));
     if (opts.editable && !opts.overlay && !opts.collection) head.appendChild(el('button', { class: 'lnk', title: 'Collapse to a chip', onclick: () => setCollapsed(spec, opts, true) }, '⤡'));
@@ -382,6 +382,39 @@
     return row;
   }
 
+  /* ------------------------------------------------------------------ following the playing line
+   * (Seth, 2026-10-17: "highlight the line that's playing … and auto-scroll to it if the user is
+   * not manually grabbing the scroll bar or clicking something in the preview pane"). The line
+   * under the playhead wears .playing-line; when it changes and is out of view it is scrolled
+   * into view — unless the user is busy: a wheel or touch scroll, a scrolling key, a press on a
+   * scroll bar (until it is let go), or a click inside an example or preview (other than its
+   * play controls) holds the following off for a few seconds. */
+  const follow = (() => {
+    let quietUntil = 0, grabbing = false;
+    const hush = (ms) => { quietUntil = Math.max(quietUntil, Date.now() + ms); };
+    document.addEventListener('wheel', () => hush(4000), { passive: true, capture: true });
+    document.addEventListener('touchmove', () => hush(4000), { passive: true, capture: true });
+    document.addEventListener('keydown', (e) => { if (/^(PageUp|PageDown|ArrowUp|ArrowDown|Home|End)$/.test(e.key)) hush(4000); }, true);
+    document.addEventListener('pointerdown', (e) => {
+      const t = e.target;
+      if (!t || t.nodeType !== 1) return;
+      // a press on a scroll bar lands on the scrolling element itself, past its content box
+      if ((t.scrollHeight > t.clientHeight || t.scrollWidth > t.clientWidth) && (e.offsetX > t.clientWidth || e.offsetY > t.clientHeight)) { grabbing = true; return; }
+      if (t.closest('.seg-play, .play-range, .transport')) return;      // starting / steering playback is not "busy"
+      if (t.closest('.text-obj, .flex-overlay, .context-text')) hush(4000);
+    }, true);
+    document.addEventListener('pointerup', () => { if (grabbing) { grabbing = false; hush(1500); } }, true);
+    return {
+      to(row) {
+        if (!row || !row.isConnected || grabbing || Date.now() < quietUntil) return;
+        row.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+      },
+      _state: () => ({ grabbing, quiet: Date.now() < quietUntil }),
+      _reset: () => { quietUntil = 0; grabbing = false; },
+    };
+  })();
+  FS.follow = follow;
+
   /* ------------------------------------------------------------------ audio in a text box */
   async function playRange(box, obj, segs, mediaByGuid, opts, btn) {
     const timed = segs.filter((s) => s.begin != null && s.end != null);
@@ -405,10 +438,24 @@
     if (info.needsCapture && !FS.isMock()) {
       try { capture = captureClip(a, begin, end, obj.guid); } catch (e) { capture = null; }
     }
+    // which line is playing: the file time under the playhead, against each line's span
+    let lit = null;
+    const light = (n) => {
+      if (lit && lit.dataset.n === String(n)) return;
+      if (lit) lit.classList.remove('playing-line');
+      lit = n == null ? null : box.querySelector('.segment[data-n="' + n + '"]');
+      if (lit) { lit.classList.add('playing-line'); follow.to(lit); }
+    };
+    const lineAt = (t) => {
+      const ft = info.clipUrl ? begin + t : t;
+      let hit = null;
+      for (const s2 of timed) if (ft >= s2.begin - 5 && ft < s2.end) hit = s2;
+      return hit ? hit.n : null;
+    };
     try {
       await audio.play(src, offBegin, offEnd, {
-        onTick: (t) => transport.tick(t),
-        onEnd: () => { transport.done(); if (btn) btn.classList.remove('playing'); if (captureClip.active) { try { captureClip.active.stop(); } catch (e) { /* ignore */ } captureClip.active = null; } },
+        onTick: (t) => { transport.tick(t); const n = lineAt(t); if (n != null) light(n); },
+        onEnd: () => { light(null); transport.done(); if (btn) btn.classList.remove('playing'); if (captureClip.active) { try { captureClip.active.stop(); } catch (e) { /* ignore */ } captureClip.active = null; } },
       });
       if (btn) btn.classList.add('playing');
       box.querySelectorAll('.seg-play.playing').forEach((b) => { if (b !== btn) b.classList.remove('playing'); });

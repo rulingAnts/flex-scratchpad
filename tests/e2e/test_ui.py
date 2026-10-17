@@ -3052,3 +3052,40 @@ def test_backup_progress_bar_finish_and_the_closing_screen(app):
     page.wait_for_timeout(300)
     assert h.api._close_choice == "retry"
     assert not [e for e in errors if "Failed to load resource" not in e], errors
+
+
+def test_playback_lights_the_playing_line_follows_it_and_keeps_its_controls_in_view(app):
+    """Seth, 2026-10-17: highlight the line that's playing, scroll to it unless the user is
+    scrolling or clicking, and keep the play controls at the bottom of the view."""
+    h, page, errors = app
+    page.set_viewport_size({"width": 1360, "height": 520})
+    tab = h.api.init()["config"]["tabs"][0]["dir"]
+    h.api.create_note(tab, "", "Listen", "Intro.\n\n{{flex:text %s seg=1-6}}\n\nAfter." % T_STORY)
+    page.reload()
+    page.wait_for_selector(".note-card")
+    page.locator(".note-card", has_text="Listen").click()
+    page.wait_for_selector("#editor .text-obj .play-range")
+    page.evaluate("FS.follow._reset()")
+    seen = "(n) => { const r = document.querySelector('#editor .segment[data-n=\"' + n + '\"]').getBoundingClientRect(), e = document.getElementById('editor').getBoundingClientRect(); return r.top >= e.top - 1 && r.bottom <= e.bottom + 1; }"
+    page.locator("#editor .text-obj .play-range").click()
+    page.wait_for_function("() => !!document.querySelector('#editor .segment.playing-line[data-n=\"1\"]')", timeout=4000)
+    # the player stays at the bottom of the view while the example runs on below it
+    tr = page.evaluate("() => { const t = document.querySelector('#editor .text-obj .transport'), e = document.getElementById('editor').getBoundingClientRect(), r = t.getBoundingClientRect(); return [getComputedStyle(t).position, r.bottom <= e.bottom + 1, r.top >= e.top]; }")
+    assert tr == ["sticky", True, True], tr
+    # the view moved away (not by the user): the next line is brought back into view
+    page.evaluate("() => { document.getElementById('editor').scrollTop = 0; }")
+    page.wait_for_function("() => !!document.querySelector('#editor .segment.playing-line[data-n=\"2\"]')", timeout=4000)
+    page.wait_for_timeout(700)
+    assert page.evaluate(seen, 2), "the playing line was scrolled into view"
+    # the user scrolls with the wheel: the view is left alone
+    page.mouse.move(700, 300)
+    page.mouse.wheel(0, -600)
+    page.wait_for_timeout(200)
+    assert page.evaluate("FS.follow._state().quiet")
+    page.evaluate("() => { document.getElementById('editor').scrollTop = 0; }")
+    top = page.evaluate("document.getElementById('editor').scrollTop")
+    page.wait_for_function("() => !!document.querySelector('#editor .segment.playing-line[data-n=\"3\"]')", timeout=4000)
+    page.wait_for_timeout(500)
+    assert page.evaluate("document.getElementById('editor').scrollTop") == top
+    page.wait_for_function("() => !document.querySelector('#editor .segment.playing-line')", timeout=8000)   # off when it ends
+    assert not [e for e in errors if "Failed to load resource" not in e], errors

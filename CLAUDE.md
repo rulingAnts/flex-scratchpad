@@ -355,6 +355,17 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
   the whole tree with each note's subfolder; a folder with notes only below it offers them; a
   selected tag still looks through the whole tab (Seth, 2026-10-16: "VERY cluttery if every
   parent folder shows ALL daughter notes").
+- PLAYBACK (Seth, 2026-10-17: "highlight the line that's playing … auto-scroll to it if the user is
+  not manually grabbing the scroll bar or clicking something in the preview pane … make the play
+  controls sticky … to the bottom of the current view window until the user scrolls to the bottom
+  of the object"): `playRange` maps the playhead (file time; a cached clip's time + its begin) to the
+  line whose span holds it and lights that `.segment[data-n]` with `.playing-line`;
+  `FS.follow.to(row)` scrolls a newly lit line into view (`block: nearest`, `scroll-margin` clears
+  the player) unless the user is busy — a wheel / touch scroll or a scrolling key (4 s), a press on a
+  scroll bar (until released), a click inside an example or preview other than its ▶ / Play /
+  player controls (4 s). The player (`.transport`) is `position: sticky; bottom` inside the
+  example, so it rides the bottom of the view while the example runs on below and rests at the
+  example's end once you scroll there.
 - Refreshing: what FieldWorks saved after the project was opened only shows after LCM's
   `RefreshFromDisk`. The ↻ on ONE example calls `Api.flex_reload` (RefreshFromDisk, indexes
   kept so the next paste stays fast) before re-fetching; "Refresh all" (the toolbar, and a
