@@ -108,6 +108,21 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
   (`::highlight(fs-msel)`) plus `.msel-block` on whole blocks. Drag out of a block, Shift+click,
   Shift+Arrow Up/Down extend it; Ctrl+A twice takes the note; cut / copy / paste / delete /
   type-over / Enter act on it (`deleteSelection` joins the two ends into one block).
+- Moving SEVERAL blocks (Seth, 2026-10-16: "select and move/copy/cut/etc multiple blocks at a
+  time (including FLEx objects)"): the ⋮ handle is also the block's DRAG GRIP (draggable; its
+  mousedown opens the menu WITHOUT preventDefault, which would stop the drag) — with a cross-block
+  selection it drags every selected block (`blockRangeFor`, whole blocks, a closed heading's
+  section included), dropped before/after a block (`blockDropAt`, `moveBlocksTo`; Ctrl/Alt copies).
+  Alt+Shift+↑/↓ moves the selection or the current block (`moveSelection` → `moveRange`, which
+  steps over closed sections), and the selection stays selected for the next move. The ⋮ menu
+  of a selected block offers Move / Cut / Copy / Duplicate / Delete for all of them.
+- THE VIEW NEVER JUMPS (Seth, 2026-10-16: "I don't want the scroll jumping to the end of the
+  document after edits or de-select/focus change"): a click on the editor's background only puts
+  the caret at the end of the note when it is BELOW the last block; anywhere else it lets go of
+  the cell / table / selection and `keepScroll` holds the position (now and two frames on). The
+  press must start on the background too: a table tool redraws under the pointer and the release
+  that lands on the background was the "+ Row jumps to the bottom". `renderAll` and the table's
+  `refresh` restore the scroll position. Explicit navigation (focus moves, Find) still scrolls.
 - Headings 1–6 FOLD (Seth, 2026-10-16): a closed heading hides everything after it up to the next
   heading of the same or a higher level (`markdown.hiddenByFolds` / `sectionEnd`, the editor's
   `applyFolds`, ▾/▸ in the left margin, "⋯ N blocks" under it). The state is the block's
@@ -182,6 +197,12 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
   higher level, sub-groups included (`blockOf`, `hiddenItems`), steps in by level, and ⇤ / ⇥ change
   it; a group moves whole with its sub-groups; adding or moving an example into a closed group opens
   every group around it (`openAround`). Old files' `## Group` is level 2. Still never exported.
+  SEVERAL ITEMS at once: a checkbox per card and group (Shift: a range, Ctrl+A: all) and a bar in
+  the sticky header — ↑ ↓ (Alt+Shift+↑/↓), Move into group…, Cut / Copy / Paste (Ctrl+X/C/V; the
+  copy is the collection's own markdown, `FS.collClip` too, so it pastes into a note or another
+  collection), Duplicate (Ctrl+D), Remove (Delete, with Undo); dragging a selected card moves them
+  all. A selected group stands for its whole block (`selectedIdx`). A redraw keeps the keyboard
+  focus in the collection.
 - Exporting a collection's examples as a `.flextext` (`flex/flextext_writer.py`, `Api.export_note_flextext`,
   Seth, 2026-10-16): one `<interlinear-text>` PER BASELINE WRITING SYSTEM (a FLEx text has one
   vernacular WS), one paragraph per example, one phrase per segment, every writing-system

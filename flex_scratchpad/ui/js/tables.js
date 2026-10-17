@@ -316,7 +316,11 @@
       const pane = container.closest('#editor');
       const top = pane ? pane.scrollTop : 0;
       const w2 = render(container, serialize(t), opts);
-      if (pane) pane.scrollTop = top;
+      if (pane) {
+        pane.scrollTop = top;
+        // and again once the reopened cell (or the browser) has moved the focus
+        requestAnimationFrame(() => { if (pane.scrollTop !== top) pane.scrollTop = top; });
+      }
       const want = reopen || (editing && focus ? { r: focus.r, c: focus.c, caret } : null);
       if (want && w2) {
         const cell = container.querySelector('[data-r="' + want.r + '"][data-c="' + want.c + '"]');

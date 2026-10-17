@@ -150,7 +150,27 @@
       this.findQuery = '';
       this.activeTable = null;      // the table widget whose cell is being edited
       root.classList.add('editor-root');
-      root.addEventListener('click', (e) => { if (e.target === root) this.focusBlock(this.blocks.length - 1, 'end', true); });
+      // A click on the page's background (Seth, 2026-10-16: "if I click outside the table, it
+      // scrolls to the same position, but deselects the cell/table"): only BELOW the last block
+      // does it put the caret at the end of the note; anywhere else it lets go of the cell, the
+      // table or the selection and the view stays exactly where it is. The press must start on
+      // the background too: a table tool redraws under the pointer, and the release that lands on
+      // the background then is not a click there.
+      let downOnRoot = false;
+      root.addEventListener('mousedown', (e) => { downOnRoot = e.target === root; }, true);
+      root.addEventListener('click', (e) => {
+        if (e.target !== root || !downOnRoot) return;
+        const last = this.blocks[this.blocks.length - 1];
+        const r = last && last.el ? last.el.getBoundingClientRect() : null;
+        if (!r || e.clientY > r.bottom) { this.focusBlock(this.blocks.length - 1, 'end', true); return; }
+        this.keepScroll(() => {
+          const ae = document.activeElement;
+          if (ae && root.contains(ae) && ae.blur) ae.blur();
+          this.clearMsel();
+          const sel = window.getSelection();
+          if (sel) sel.removeAllRanges();
+        });
+      });
       root.addEventListener('focusin', (e) => { const w = e.target.closest('.widget'); this.activeTable = w && w._table ? w._table : null; if (w && w._table) this.active = this.blocks.find((b) => b.el === w) || this.active; });
       this.wireDrag(root);
       this.wireMultiSelect(root);
@@ -358,6 +378,12 @@
     }
     onMselKey(e) {
       const mod = e.ctrlKey || e.metaKey;
+      if (e.altKey && e.shiftKey && !mod && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+        if (e.target.closest && e.target.closest('.cell-edit, input, textarea, select')) return;
+        e.preventDefault(); e.stopPropagation();
+        this.moveSelection(e.key === 'ArrowUp' ? -1 : 1);
+        return;
+      }
       if (mod && e.key.toLowerCase() === 'a' && !e.shiftKey && !e.altKey) {
         // Ctrl+A: the block first (native), the whole note the second time or from a focused
         // widget; never inside a table cell's editor or a form field (theirs)
@@ -400,6 +426,21 @@
      * Ctrl (or Alt) copies. Everything is string surgery on the markdown, then a redraw. */
     wireDrag(root) {
       root.addEventListener('dragstart', (e) => {
+        const grip = e.target && e.target.closest ? e.target.closest('.blk-handle button') : null;
+        if (grip && root.contains(grip)) {
+          const blkEl = grip.closest('.blk');
+          const b = this.blocks.find((x) => x.el === blkEl);
+          if (!b) return;
+          const [a, z] = this.blockRangeFor(b);
+          document.querySelectorAll('.popover').forEach((p) => p._close && p._close());
+          FS.drag = { type: 'blocks', ids: this.blocks.slice(a, z + 1).map((x) => x.id) };
+          e.dataTransfer.effectAllowed = 'copyMove';
+          e.dataTransfer.setData('application/x-fs-blocks', String(z - a + 1));
+          e.dataTransfer.setData('text/plain', MD.joinBlocks(this.blocks.slice(a, z + 1)));
+          try { e.dataTransfer.setDragImage(blkEl, 12, 12); } catch (err) { /* not everywhere */ }
+          for (let i = a; i <= z; i++) if (this.blocks[i].el) this.blocks[i].el.classList.add('dragging');
+          return;
+        }
         const h = e.target && e.target.closest ? e.target.closest('.md-embed, .flex-collapsed, .drag-handle') : null;
         if (!h || !root.contains(h)) return;
         const from = this.dragSourceOf(h);
@@ -412,6 +453,14 @@
       });
       root.addEventListener('dragend', () => { this.clearDropMarks(); document.querySelectorAll('.dragging').forEach((x) => x.classList.remove('dragging')); FS.drag = null; });
       root.addEventListener('dragover', (e) => {
+        if (FS.drag && FS.drag.type === 'blocks') {
+          const to = this.blockDropAt(e);
+          if (!to) { this.clearDropMarks(); return; }
+          e.preventDefault();
+          e.dataTransfer.dropEffect = (e.ctrlKey || e.altKey) ? 'copy' : 'move';
+          this.markDrop(to);
+          return;
+        }
         if (!this.dragPayload(e)) return;
         const to = this.dropTargetAt(e);
         if (!to) { this.clearDropMarks(); return; }
@@ -421,6 +470,17 @@
       });
       root.addEventListener('dragleave', (e) => { if (!e.relatedTarget || !root.contains(e.relatedTarget)) this.clearDropMarks(); });
       root.addEventListener('drop', (e) => {
+        if (FS.drag && FS.drag.type === 'blocks') {
+          const to = this.blockDropAt(e);
+          this.clearDropMarks();
+          const ids = FS.drag.ids;
+          FS.drag = null;
+          if (!to) return;
+          e.preventDefault(); e.stopPropagation();
+          const idx = ids.map((id) => this.blocks.findIndex((x) => x.id === id)).filter((i) => i >= 0);
+          if (idx.length) this.moveBlocksTo(Math.min(...idx), Math.max(...idx), to.index, !!(e.ctrlKey || e.altKey));
+          return;
+        }
         const payload = this.dragPayload(e, true);
         if (!payload) return;
         const to = this.dropTargetAt(e);
@@ -431,6 +491,23 @@
         this.moveEmbed(from, to, payload, !!(e.ctrlKey || e.altKey));
         FS.drag = null;
       });
+    }
+    /* Where dragged blocks would land: before or after the block under the pointer (its top or
+     * bottom half), never inside what is being dragged; below the last block at the end. */
+    blockDropAt(e) {
+      const ids = (FS.drag && FS.drag.ids) || [];
+      const el0 = e.target && e.target.nodeType === 1 ? e.target : (e.target && e.target.parentNode);
+      if (!el0 || !el0.closest) return null;
+      const blkEl = el0.closest('.blk');
+      const b = blkEl && this.root.contains(blkEl) ? this.blocks.find((x) => x.el === blkEl) : null;
+      if (!b) return el0 === this.root ? { type: 'between', index: this.blocks.length, el: this.blocks.length ? this.blocks[this.blocks.length - 1].el : null, after: true } : null;
+      if (ids.includes(b.id)) return null;
+      const rect = blkEl.getBoundingClientRect();
+      const after = e.clientY > rect.top + rect.height / 2;
+      let index = this.blocks.indexOf(b) + (after ? 1 : 0);
+      // after a closed heading means after its section
+      if (after && b.type === 'h' && b.folded) index = MD.sectionEnd(this.blocks, this.blocks.indexOf(b)) + 1;
+      return { type: 'between', index, el: blkEl, after };
     }
     dragPayload(e, final) {
       if (FS.drag && FS.drag.src) return FS.drag.src;
@@ -588,12 +665,30 @@
     }
 
     /* -- rendering --------------------------------------------------------------- */
+    /* Run `fn` and leave the view where it was (Seth, 2026-10-16: "I don't want the scroll
+     * jumping to the end of the document after edits or de-select/focus change"). The position
+     * is put back at once and on the next two frames, which covers a blur, a widget's redraw and
+     * a focus the browser moves on its own. Explicit navigation (focusBlock, Find) is not wrapped. */
+    keepScroll(fn) {
+      const sc = this.root;
+      const top = sc.scrollTop, left = sc.scrollLeft;
+      let out;
+      try { out = fn(); } finally {
+        const put = () => { if (sc.scrollTop !== top) sc.scrollTop = top; if (sc.scrollLeft !== left) sc.scrollLeft = left; };
+        put();
+        requestAnimationFrame(() => { put(); requestAnimationFrame(put); });
+      }
+      return out;
+    }
     renderAll() {
+      // a rebuild empties the page for a moment, which would clamp the scroll position to the top
+      const sc = this.root, top = sc.scrollTop;
       this.root.innerHTML = '';
       this.assignNumCtx();
       this.blocks.forEach((b, i) => this.root.appendChild(this.renderBlock(b, i)));
       this.renumberExamples();
       this.applyFolds();
+      sc.scrollTop = top;
     }
     /* -- collapsible headings (Seth, 2026-10-16) ----------------------------------------
      * A heading folds everything after it up to the next heading of the same or a higher level.
@@ -675,7 +770,9 @@
     renderBlock(b, i) {
       const wrap = el('div', { class: 'blk blk-' + b.type, dataset: { id: b.id } });
       b.el = wrap;
-      const handle = el('div', { class: 'blk-handle' }, el('button', { title: 'Block menu', onmousedown: (e) => { e.preventDefault(); this.blockMenu(e.currentTarget, b); } }, '⋮'));
+      // ⋮ opens the block menu and is the block's drag grip (with a selection: every selected
+      // block). No preventDefault on its mousedown: that would also stop the drag.
+      const handle = el('div', { class: 'blk-handle' }, el('button', { title: 'Block menu \u2014 or drag to move (Ctrl: copy)', draggable: 'true', tabindex: '-1', 'data-test': 'blk-grip', onmousedown: (e) => { if (e.button === 0) this.blockMenu(e.currentTarget, b); } }, '⋮'));
       wrap.appendChild(handle);
       if (b.type === 'h') {
         wrap.appendChild(el('button', { class: 'fold-tog', contenteditable: 'false', 'data-test': 'fold', onmousedown: (e) => { e.preventDefault(); this.setFold(b, !b.folded); } }, b.folded ? '\u25b8' : '\u25be'));
@@ -1390,26 +1487,93 @@
       this.changed({ force: true });
       this.focusBlock(Math.min(i, this.blocks.length - 1), 'end');
     }
-    /* Move a block one step up or down. A CLOSED heading moves with its section, and a closed
-     * section is stepped over whole, so moving never splits what is folded. */
-    moveBlock(b, dir) {
+    /* The blocks an action on `b` takes: the cross-block selection when `b` is in it (whole
+     * blocks, its ends included), else `b` — with its section when it is a closed heading. */
+    blockRangeFor(b) {
+      let i = this.blocks.indexOf(b);
+      const m = this.msel;
+      let a = i, z = i;
+      if (m) {
+        const ia = this.blocks.indexOf(m.a.b), iz = this.blocks.indexOf(m.z.b);
+        if (i >= ia && i <= iz) { a = ia; z = iz; }
+      }
+      const last = this.blocks[z];
+      if (last && last.type === 'h' && last.folded) z = MD.sectionEnd(this.blocks, z);
+      return [a, z];
+    }
+    /* Select blocks a..z whole (after a move, so the next move or Ctrl+C takes them again). */
+    selectBlocks(a, z) {
+      // keep the keyboard in the note (a redraw dropped the focus), so the next Alt+Shift+↑/↓
+      // or Ctrl+C reaches it; without moving the view
+      const first = this.blocks[a];
+      const tgt = first && first.el && (first.el.querySelector('.blk-body') || first.el);
+      if (tgt && tgt.focus) tgt.focus({ preventScroll: true });
+      this.active = first;
+      if (a === z) { this.clearMsel(); return; }
+      const last = this.blocks[z];
+      this.setMsel({ b: this.blocks[a], off: 0 }, { b: last, off: TEXT_TYPES.has(last.type) ? last.src.length : Infinity });
+    }
+    /* Move blocks a..z to before index `to` (in the current order), or copy them there. */
+    moveBlocksTo(a, z, to, copy) {
+      const n = z - a + 1;
+      if (!copy && to >= a && to <= z + 1) return;
+      const moving = this.blocks.slice(a, z + 1);
+      const put = copy ? moving.map((x) => ({ id: FS.uid(), type: x.type, src: x.src, level: x.level, folded: x.folded, lang: x.lang })) : moving;
+      if (!copy) { this.blocks.splice(a, n); if (to > z) to -= n; }
+      this.blocks.splice(to, 0, ...put);
+      this.msel = null;
+      this.renderAll();
+      this.changed({ force: true });
+      this.selectBlocks(to, to + n - 1);
+      if (n === 1) this.focusBlock(to, 0);
+    }
+    /* Move a block, or the selected blocks, one step up or down. A CLOSED heading moves with its
+     * section, and a closed section is stepped over whole, so moving never splits what is folded. */
+    moveBlock(b, dir) { const [a, z] = this.blockRangeFor(b); this.moveRange(a, z, dir); }
+    moveSelection(dir) {
+      const m = this.msel;
+      const b = m ? m.a.b : this.active;
+      if (!b || !this.blocks.includes(b)) return;
+      const [a, z] = this.blockRangeFor(b);
+      this.moveRange(a, z, dir);
+    }
+    moveRange(a, z, dir) {
       const unit = (k) => {                 // [first, last] of the visible unit at k
-        let a = k;
-        while (a > 0 && this.isHidden(this.blocks[a])) a--;
-        const h = this.blocks[a];
-        return [a, h.type === 'h' && h.folded ? MD.sectionEnd(this.blocks, a) : a];
+        let s0 = k;
+        while (s0 > 0 && this.isHidden(this.blocks[s0])) s0--;
+        const h = this.blocks[s0];
+        return [s0, h.type === 'h' && h.folded ? MD.sectionEnd(this.blocks, s0) : s0];
       };
-      const [a, z] = unit(this.blocks.indexOf(b));
       if (dir < 0 && a === 0) return;
       if (dir > 0 && z >= this.blocks.length - 1) return;
-      const moving = this.blocks.splice(a, z - a + 1);
+      const caretB = this.active, body = caretB && caretB.el && caretB.el.querySelector('.blk-body');
+      const caret = body && document.activeElement === body ? getCaret(body) : 0;
+      const n = z - a + 1;
+      const moving = this.blocks.splice(a, n);
       let at;
       if (dir < 0) at = unit(a - 1)[0];
       else { const [, nz] = unit(a); at = nz + 1; }
       this.blocks.splice(at, 0, ...moving);
+      const hadSel = !!this.msel;
+      this.msel = null;
       this.renderAll();
       this.changed({ force: true });
-      this.focusBlock(at, 0);
+      if (hadSel || n > 1) this.selectBlocks(at, at + n - 1);
+      else this.focusBlock(at, caret);
+    }
+    /* Whole-block actions on the selection (or `b`): copy, cut, duplicate, delete. */
+    blocksMarkdown(a, z) { return MD.joinBlocks(this.blocks.slice(a, z + 1)); }
+    copyBlocks(b) { const [a, z] = this.blockRangeFor(b); FS.copyText(this.blocksMarkdown(a, z)); FS.toast((z - a + 1) + (z > a ? ' blocks' : ' block') + ' copied', 'ok'); }
+    cutBlocks(b) { const [a, z] = this.blockRangeFor(b); FS.copyText(this.blocksMarkdown(a, z)); this.deleteBlocks(a, z); }
+    duplicateBlocks(b) { const [a, z] = this.blockRangeFor(b); this.moveBlocksTo(a, z, z + 1, true); }
+    deleteBlocks(a, z) {
+      this.blocks.splice(a, z - a + 1);
+      this.msel = null;
+      if (!this.blocks.length) this.blocks.push({ id: FS.uid(), type: 'p', src: '' });
+      this.renderAll();
+      this.paintMsel();
+      this.changed({ force: true });
+      this.focusBlock(Math.min(a, this.blocks.length - 1), 'end');
     }
     editSource(b) {
       const ta = el('textarea', { class: 'source-edit', spellcheck: 'false' });
@@ -1446,6 +1610,22 @@
     blockMenu(anchor, b) {
       FS.popover(anchor, (pop, close) => {
         const item = (label, fn, cls) => pop.appendChild(el('button', { class: 'menu-item ' + (cls || ''), onclick: () => { close(); fn(); } }, label));
+        const [ra, rz] = this.blockRangeFor(b);
+        const many = rz > ra;
+        if (many) {
+          // b is in a selection of several blocks (or heads a closed section): act on all of them
+          const n = rz - ra + 1;
+          pop.appendChild(el('div', { class: 'menu-label', 'data-test': 'blocks-label' }, n + ' blocks' + (this.msel ? ' selected' : ' (the closed section)')));
+          item('Move up\u2003Alt+Shift+\u2191', () => this.moveRange(ra, rz, -1));
+          item('Move down\u2003Alt+Shift+\u2193', () => this.moveRange(ra, rz, 1));
+          item('Cut', () => this.cutBlocks(b));
+          item('Copy', () => this.copyBlocks(b));
+          item('Duplicate', () => this.duplicateBlocks(b));
+          item('Delete', () => this.deleteBlocks(ra, rz), 'danger');
+          pop.appendChild(el('hr'));
+          this.insertSection(pop, close, b);
+          return;
+        }
         item('Move up', () => this.moveBlock(b, -1));
         item('Move down', () => this.moveBlock(b, 1));
         pop.appendChild(el('hr'));
@@ -1489,6 +1669,8 @@
           }
         }
         pop.appendChild(el('hr'));
+        item('Copy block', () => this.copyBlocks(b));
+        item('Cut block', () => this.cutBlocks(b));
         item('Duplicate', () => this.insertBlockAfter(b, { type: b.type, src: b.src, lang: b.lang }, false));
         item('Delete block', () => this.deleteBlock(b), 'danger');
       });

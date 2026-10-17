@@ -2347,7 +2347,7 @@ def test_insert_a_new_block_from_the_context_menu(app):
     assert re.search(r"\| a \| b \|\n\nAfter the table\.\n\nEnd\.", b), b
     # the ⋮ block menu: a numbered list above the closing paragraph
     page.locator("#editor .blk", has_text="End.").hover()
-    page.locator("#editor .blk", has_text="End.").locator(".blk-handle button[title='Block menu']").dispatch_event("mousedown")
+    page.locator("#editor .blk", has_text="End.").locator(".blk-handle button[data-test=blk-grip]").dispatch_event("mousedown")
     page.locator(".popover [data-ins-kind='ol'][data-ins-where='before']").click()
     page.keyboard.type("first")
     page.wait_for_timeout(900)
@@ -2568,4 +2568,180 @@ def test_collection_groups_nest_by_level_and_fold(app):
     assert r["examples"] == 3
     xml = out.read_text(encoding="utf-8")
     assert "Same subject" not in xml and "Chaining" in xml        # the title only
+    assert not errors
+
+
+def test_move_copy_and_drag_several_blocks_in_a_note(app):
+    """Seth, 2026-10-16: "select and move/copy/cut/etc multiple blocks at a time (including FLEx
+    objects) both within a note and within an example collection"."""
+    h, page, errors = app
+    new_note(page, "Blocks")
+    page.locator("#editor .blk-body").first.click()
+    paste(page, "Alpha\n\nBravo\n\n{{flex:text %s seg=1}}\n\nCharlie\n\nDelta" % T_STORY)
+    page.wait_for_selector("#editor .blk-flex .text-obj")
+    page.wait_for_timeout(300)
+    order = lambda: [x.split(" seg=")[0][:12] if x.startswith("{{") else x for x in body_of(h).strip().split("\n\n")]   # noqa: E731
+    # select Alpha … the example (Shift+click), then Alt+Shift+Down moves all three below Charlie
+    page.locator("#editor .blk-body", has_text="Alpha").click()
+    page.keyboard.press("Home")
+    page.locator("#editor .blk-flex").click(modifiers=["Shift"], position={"x": 30, "y": 8})
+    page.wait_for_function("!!window.__fsEditor.msel")
+    page.keyboard.press("Alt+Shift+ArrowDown")
+    page.wait_for_timeout(900)
+    assert order() == ["Charlie", "Alpha", "Bravo", "{{flex:text ", "Delta"], order()
+    assert page.locator("#editor .msel-block").count() >= 2                        # still selected: move again
+    page.keyboard.press("Alt+Shift+ArrowUp")
+    page.wait_for_timeout(900)
+    assert order() == ["Alpha", "Bravo", "{{flex:text ", "Charlie", "Delta"], order()
+    # the ⋮ menu of a selected block acts on all of them
+    page.locator("#editor .blk-p", has_text="Bravo").hover()
+    page.locator("#editor .blk-p", has_text="Bravo").locator(".blk-handle button").dispatch_event("mousedown")
+    assert page.locator("[data-test=blocks-label]").inner_text() == "3 blocks selected"
+    page.locator(".popover .menu-item", has_text="Duplicate").click()
+    page.wait_for_timeout(900)
+    assert order() == ["Alpha", "Bravo", "{{flex:text ", "Alpha", "Bravo", "{{flex:text ", "Charlie", "Delta"], order()
+    page.keyboard.press("Escape")
+    page.locator("#editor .blk-p", has_text="Delta").hover()
+    page.locator("#editor .blk-p", has_text="Delta").locator(".blk-handle button").dispatch_event("mousedown")
+    page.locator(".popover .menu-item", has_text="Delete block").click()
+    page.wait_for_timeout(900)
+    # dragging a block by ⋮: Charlie onto the top half of the first Alpha
+    n = page.locator("#editor > .blk").count()
+    charlie = [i for i in range(n) if page.locator("#editor > .blk").nth(i).inner_text().strip().endswith("Charlie")][0]
+    box = page.locator("#editor .blk-p", has_text="Alpha").first.bounding_box()
+    dnd(page, "#editor > .blk:nth-child(%d) .blk-handle button" % (charlie + 1), box["x"] + 40, box["y"] + 3)
+    assert order()[0] == "Charlie", order()
+    # with a selection, the drag takes every selected block (the example too); Ctrl copies
+    page.locator("#editor .blk-body", has_text="Bravo").first.click()
+    page.keyboard.press("Home")
+    page.locator("#editor .blk-flex").first.click(modifiers=["Shift"], position={"x": 30, "y": 8})
+    page.wait_for_function("!!window.__fsEditor.msel")
+    last = page.locator("#editor > .blk").last.bounding_box()
+    dnd(page, "#editor .blk-flex .blk-handle button", last["x"] + 40, last["y"] + last["height"] - 3)
+    assert order() == ["Charlie", "Alpha", "Alpha", "Bravo", "{{flex:text ", "Bravo", "{{flex:text "], order()
+    assert not errors
+
+
+def test_select_and_move_several_items_in_a_collection(app):
+    h, page, errors = app
+    page.locator("#btn-new-menu").click()
+    page.locator("[data-test='new-collection']").click()
+    page.wait_for_selector("#collection .coll-add")
+    page.locator("#note-title").fill("Sorting")
+    for seg in (1, 2, 4):
+        page.locator("#collection .coll-add").click()
+        paste(page, "{{flex:text %s seg=%d}}" % (T_STORY, seg))
+    page.once("dialog", lambda d: d.accept("Later"))
+    page.locator("[data-test='coll-add-group']").click()
+    page.wait_for_function("document.querySelectorAll('#collection .coll-item').length === 3 && document.querySelector('#collection .coll-group')")
+    cid = h.api.list_collections()[0]["id"]
+
+    def order():
+        page.wait_for_timeout(900)
+        out = []
+        for line in h.api.get_note(cid)["body"].split("\n"):
+            m = re.search(r"seg=(\d+)", line)
+            if m:
+                out.append(int(m.group(1)))
+            elif line.startswith("#"):
+                out.append(line.lstrip("# "))
+        return out
+    items = page.locator("#collection .coll-item")
+    items.nth(0).hover()
+    items.nth(0).locator("[data-test=coll-check]").click()
+    items.nth(1).hover()
+    items.nth(1).locator("[data-test=coll-check]").click(modifiers=["Shift"])
+    assert "2 items selected" in page.locator("[data-test=coll-selbar]").inner_text()
+    page.keyboard.press("Alt+Shift+ArrowDown")
+    assert order() == [4, 1, 2, "Later"], order()
+    # into the group, then copy and paste after the selection
+    page.locator("[data-test=coll-into]").select_option(label="Later")
+    assert order() == [4, "Later", 1, 2], order()
+    page.locator("[data-test=coll-sel-copy]").click()
+    page.locator("[data-test=coll-sel-paste]").click()
+    assert order() == [4, "Later", 1, 2, 1, 2], order()
+    # the pasted copies are the selection now; Delete removes them, Undo brings them back
+    page.keyboard.press("Delete")
+    assert order() == [4, "Later", 1, 2], order()
+    page.locator(".coll-undo button", has_text="Undo").click()
+    assert order() == [4, "Later", 1, 2, 1, 2], order()
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(200)
+    # Ctrl+A selects everything; dragging a selected card moves them all (here: nowhere new)
+    page.locator("#collection .coll-head").click(position={"x": 5, "y": 5})
+    page.keyboard.press("Control+a")
+    assert "items selected" in page.locator("[data-test=coll-selbar]").inner_text()
+    page.keyboard.press("Escape")
+    # select the last two, drag them by a grip to the top
+    items = page.locator("#collection .coll-item")
+    for k in (3, 4):
+        items.nth(k).hover()
+        items.nth(k).locator("[data-test=coll-check]").click(modifiers=["Shift"] if k == 4 else [])
+    items.nth(0).scroll_into_view_if_needed()
+    top = items.nth(0).bounding_box()
+    page.evaluate("""([x, y]) => {
+      const dt = new DataTransfer();
+      const s = document.querySelectorAll('#collection .coll-item')[3].querySelector('.coll-grip');
+      s.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: dt }));
+      const t = document.elementFromPoint(x, y);
+      t.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt, clientX: x, clientY: y }));
+      t.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt, clientX: x, clientY: y }));
+      s.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: dt }));
+    }""", [top["x"] + 60, top["y"] + 4])
+    assert order() == [1, 2, 4, "Later", 1, 2], order()
+    assert not errors
+
+
+def window_last(info):
+    return info[2][-1].split(":", 1)[1]
+
+
+def test_the_view_stays_put_on_a_click_beside_a_table_and_on_table_tools(app):
+    """Seth, 2026-10-16: "if I click outside the table, it scrolls to the same position, but
+    deselects the cell/table … I don't want the scroll jumping to the end of the document after
+    edits or de-select/focus change" — "When I add rows or columns … it jumps to the bottom"."""
+    h, page, errors = app
+    new_note(page, "Tall")
+    page.locator("#editor .blk-body").first.click()
+    paras = "\n\n".join(f"Paragraph {i} with some words in it." for i in range(30))
+    paste(page, paras + "\n\n| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n\n" + paras.replace("Paragraph", "After"))
+    page.wait_for_selector("table.md-table")
+    page.wait_for_timeout(900)
+    st = lambda: page.evaluate("() => document.getElementById('editor').scrollTop")   # noqa: E731
+    page.evaluate("() => document.querySelector('table.md-table').scrollIntoView({block: 'center'})")
+    page.wait_for_timeout(200)
+    s0 = st()
+    # a cell open, then a click on the background beside the table: the cell closes, the view stays
+    page.locator("table.md-table td").first.click()
+    page.keyboard.type("x")
+    tb = page.locator("table.md-table").bounding_box()
+    ed = page.locator("#editor").bounding_box()
+    page.mouse.click(ed["x"] + ed["width"] - 14, tb["y"] + tb["height"] / 2)
+    page.wait_for_timeout(300)
+    assert abs(st() - s0) <= 2, (s0, st())
+    assert page.locator("table.md-table .cell-edit").count() == 0                     # deselected
+    page.wait_for_timeout(700)
+    assert "| 1x |" in body_of(h) or "| x1 |" in body_of(h), body_of(h)
+    # a press on a tool whose release lands on the background (the table redrew under it) is
+    # not a background click
+    page.locator("table.md-table").hover()
+    btn = page.locator(".tbl-tools").first.locator("button", has_text="+ Row")
+    b = btn.bounding_box()
+    page.mouse.move(b["x"] + 5, b["y"] + 5)
+    page.mouse.down()
+    page.mouse.move(ed["x"] + ed["width"] - 14, b["y"] + 5)
+    page.mouse.up()
+    page.wait_for_timeout(300)
+    assert abs(st() - s0) <= 2, (s0, st())
+    for label in ("+ Row", "+ Column"):
+        page.locator("table.md-table").hover()
+        page.locator(".tbl-tools").first.locator("button", has_text=label).click()
+        page.wait_for_timeout(300)
+        assert abs(st() - s0) <= 2, (label, s0, st())
+    # below the last block a click still means "type at the end"
+    page.evaluate("() => { const e = document.getElementById('editor'); e.scrollTop = e.scrollHeight; }")
+    last = page.locator("#editor > .blk").last.bounding_box()
+    page.mouse.click(last["x"] + 40, last["y"] + last["height"] + 40)
+    info = page.evaluate("() => [document.activeElement.className, document.activeElement.textContent, window.__fsEditor.blocks.slice(-2).map((b) => b.type + ':' + b.src)]")
+    assert info[0] == "blk-body" and info[1] == window_last(info), info
     assert not errors

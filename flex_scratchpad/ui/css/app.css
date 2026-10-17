@@ -645,3 +645,18 @@ table.md-table td.drop-target, table.md-table th.drop-target { outline: 2px soli
 .heading-menu .hp1 .hp-label { font-size: 20px; } .heading-menu .hp2 .hp-label { font-size: 17.5px; }
 .heading-menu .hp3 .hp-label { font-size: 15.5px; } .heading-menu .hp4 .hp-label, .heading-menu .hp5 .hp-label, .heading-menu .hp6 .hp-label { font-size: 14px; }
 .heading-menu .hp5 .hp-label { color: var(--muted); } .heading-menu .hp6 .hp-label { color: var(--muted); font-style: italic; }
+
+/* moving several blocks (Seth, 2026-10-16): the dragged blocks fade; the menu names how many */
+.blk.dragging { opacity: 0.45; }
+.popover > .menu-label { color: var(--muted); font-size: 12px; padding: 4px 8px 2px; }
+/* selecting several items in a collection */
+.coll-check { width: 15px; height: 15px; margin: 0; accent-color: var(--accent); cursor: pointer; opacity: 0; transition: opacity .12s; }
+.coll-item:hover .coll-check, .coll-group:hover .coll-check, .has-sel .coll-check, .coll-check:checked, .coll-check:focus-visible { opacity: 1; }
+.coll-item.selected, .coll-group.selected { outline: 2px solid var(--accent); outline-offset: -1px; background: color-mix(in srgb, var(--accent) 7%, var(--paper, #fff)); }
+.coll-item.dragging, .coll-group.dragging { opacity: 0.45; }
+.coll-selbar { flex-basis: 100%; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 6px 0 4px; padding: 6px 10px; border-radius: var(--radius); background: var(--panel); border: 1px solid var(--accent-soft, var(--border)); box-shadow: var(--shadow); }
+.coll-selbar b { margin-right: 6px; font-size: 13.5px; }
+.coll-selbar .btn { padding: 3px 10px; }
+.coll-selbar .btn.danger { color: var(--danger); }
+.coll-into { font: inherit; font-size: 13px; padding: 3px 6px; border-radius: 6px; border: 1px solid var(--border); background: var(--paper, #fff); color: inherit; }
+#collection:focus { outline: none; }
