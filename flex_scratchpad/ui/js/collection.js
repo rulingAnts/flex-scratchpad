@@ -390,6 +390,7 @@
         el('button', { class: 'btn', 'data-test': 'coll-sel-copy', title: 'Copy (Ctrl+C) \u2014 paste into a note or another collection', onclick: () => this.copySel() }, 'Copy'),
         FS.collClip ? el('button', { class: 'btn', 'data-test': 'coll-sel-paste', title: 'Paste after the selection (Ctrl+V)', onclick: () => this.pasteText(FS.collClip) }, 'Paste') : null,
         el('button', { class: 'btn', title: 'Duplicate (Ctrl+D)', onclick: () => this.duplicateSel() }, 'Duplicate'),
+        this.opts.onTextsUsed ? el('button', { class: 'btn', 'data-test': 'coll-sel-texts', title: 'The FLEx texts the selected examples come from', onclick: () => this.opts.onTextsUsed(this.selMarkdown()) }, 'Texts used\u2026') : null,
         el('button', { class: 'btn danger', 'data-test': 'coll-sel-delete', title: 'Remove (Delete)', onclick: () => this.deleteSel() }, 'Remove'),
         el('span', { class: 'spacer' }),
         el('button', { class: 'icon-btn', title: 'Clear the selection (Esc)', onclick: () => this.clearSel() }, '\u2715'));

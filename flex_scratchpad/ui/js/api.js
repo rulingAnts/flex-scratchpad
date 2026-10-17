@@ -93,6 +93,27 @@
       get_note: async (id) => ({ ...notes[id], inlineTags: summary(notes[id]).inlineTags }),
       create_note: async (tab, folder, title, body, kind) => ({ ...mk(tab || 'Notes', folder || '', title || '', body || '', null, kind || '') }),
       list_collections: async () => Object.values(notes).filter((n) => n.kind === 'examples').sort((a, b) => b.updated.localeCompare(a.updated)).map((n) => ({ id: n.id, title: n.title, tab: n.tab, folder: n.folder, updated: n.updated, count: (n.body.match(/^\s*\{\{flex:text\b[^\n]*\}\}\s*$/gm) || []).length })),
+      texts_used: async (scope) => {
+        // the mock's version of Api.texts_used: one row per text the examples come from
+        scope = scope || {};
+        const src = scope.note ? [[notes[scope.note], scope.markdown != null ? scope.markdown : notes[scope.note].body]]
+          : Object.values(notes).filter((n) => (!scope.tab || n.tab === scope.tab) && (!scope.folder || n.folder === scope.folder || n.folder.startsWith(scope.folder + '/'))).map((n) => [n, n.body]);
+        const rows = {};
+        for (const [n, body] of src) {
+          for (const [re, key] of [[/\{\{\s*flex:text\s+([0-9a-fA-F-]{36})/g, 'examples'], [/\(flex:text\/([0-9a-fA-F-]{36})/g, 'links']]) {
+            let m;
+            while ((m = re.exec(body || ''))) {
+              const g = m[1].toLowerCase();
+              const r = rows[g] = rows[g] || { guid: g, examples: 0, links: 0, notes: [] };
+              r[key]++;
+              if (!r.notes.some((x) => x.id === n.id)) r.notes.push({ id: n.id, title: n.title });
+            }
+          }
+        }
+        const out = Object.values(rows).map((r) => Object.assign(r, { title: (demo.texts[r.guid] || {}).title || '(a text not in this project)', url: 'silfw://localhost/link?app=flex&server=&database=Demo&tool=interlinearEdit&guid=' + r.guid }));
+        out.sort((a, b) => a.title.localeCompare(b.title));
+        return { texts: out, notes: src.length };
+      },
       add_to_collection: async (id, embeds) => { const n = notes[id]; if (!n || n.kind !== 'examples') throw new Error('Not an example collection'); const add = (embeds || []).map((e) => String(e).trim()).filter(Boolean); if (add.length) { const b = n.body.replace(/\n+$/, ''); n.body = (b.trim() ? b + '\n\n' : '') + add.join('\n\n') + '\n'; n.updated = now(); } return summary(n); },
       save_note: async (id, patch) => { const n = notes[id]; for (const k of ['title', 'body', 'tags', 'pinned']) if (patch[k] != null) n[k] = patch[k]; n.updated = now(); return summary(n); },
       move_note: async (id, tab, folder) => { notes[id].tab = tab; notes[id].folder = folder || ''; return summary(notes[id]); },

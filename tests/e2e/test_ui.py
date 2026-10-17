@@ -2761,3 +2761,56 @@ def test_the_export_dialog_shows_no_stray_null(app):
     page.wait_for_selector(".modal")
     assert "null" not in page.locator(".modal").inner_text()
     assert not errors
+
+
+def test_texts_used_in_a_note_a_selection_a_folder_and_a_collection(app):
+    h, page, errors = app
+    tab = h.api.init()["config"]["tabs"][0]["dir"]
+    h.api.create_folder(tab, "Grammar")
+    h.api.create_note(tab, "Grammar", "Chapter", "Intro.\n\n{{flex:text %s seg=1}}\n\n{{flex:text %s seg=2}}\n\nMore.\n\n{{flex:text %s seg=1}}" % (T_STORY, T_STORY, T_ARAB))
+    page.reload()
+    page.wait_for_selector(".folder-item")
+    page.locator(".folder-item[data-path='Grammar']").click()
+    page.locator(".note-card", has_text="Chapter").click()
+    page.wait_for_selector("#editor .blk-flex .text-obj")
+    page.wait_for_timeout(300)
+    # the note: two texts, one row each, with FLEx links
+    page.locator("#btn-note-menu").click()
+    page.locator(".popover .menu-item", has_text="Texts used in this note").click()
+    page.wait_for_selector("[data-test=texts-used]")
+    titles = page.locator("[data-test=texts-used-title]").all_inner_texts()
+    assert titles == ["The dog and the river", "الكلب والنهر"], titles
+    assert "2 examples" in page.locator(".texts-used-row").first.inner_text()
+    assert page.locator("[data-test=texts-used-title]").first.get_attribute("href").startswith("silfw://")
+    page.locator(".modal .btn.primary", has_text="Close").click()
+    # a selection that holds only the first example
+    page.locator("#editor .blk-body", has_text="Intro.").click()
+    page.keyboard.press("Home")
+    page.locator("#editor .blk-flex").first.click(modifiers=["Shift"], position={"x": 30, "y": 8})
+    page.wait_for_function("!!window.__fsEditor.msel")
+    page.locator("#btn-note-menu").dispatch_event("mousedown")
+    page.locator("#btn-note-menu").click()
+    page.locator(".popover .menu-item", has_text="Texts used in the selection").click()
+    page.wait_for_selector("[data-test=texts-used]")
+    assert page.locator("[data-test=texts-used-title]").all_inner_texts() == ["The dog and the river"]
+    page.locator(".modal .btn.primary", has_text="Close").click()
+    # the folder (its subfolders too)
+    page.locator(".folder-item[data-path='Grammar']").click(button="right")
+    page.locator(".popover .menu-item", has_text="Texts used in this folder").click()
+    page.wait_for_selector("[data-test=texts-used]")
+    assert len(page.locator("[data-test=texts-used-title]").all_inner_texts()) == 2
+    page.locator(".modal .btn.primary", has_text="Close").click()
+    # a collection's ticked cards
+    page.locator("#btn-new-menu").click()
+    page.locator("[data-test='new-collection']").click()
+    page.wait_for_selector("#collection .coll-add")
+    for src in ("{{flex:text %s seg=1}}" % T_STORY, "{{flex:text %s seg=1}}" % T_ARAB):
+        page.locator("#collection .coll-add").click()
+        paste(page, src)
+    page.wait_for_function("document.querySelectorAll('#collection .coll-item').length === 2")
+    page.locator("#collection .coll-item").nth(1).hover()
+    page.locator("#collection .coll-item").nth(1).locator("[data-test=coll-check]").click()
+    page.locator("[data-test=coll-sel-texts]").click()
+    page.wait_for_selector("[data-test=texts-used]")
+    assert page.locator("[data-test=texts-used-title]").all_inner_texts() == ["الكلب والنهر"]
+    assert not errors

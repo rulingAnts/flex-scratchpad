@@ -505,6 +505,31 @@ class Api:
         url = model.goto_url(self._flex.project_name, kind, guid)
         return self._open_url(url)
 
+    def texts_used(self, scope: dict) -> dict:
+        """The FLEx texts the examples come from, one row per text (Seth, 2026-10-16: "list which
+        texts are referenced in a [note], a folder, or a selected range … not individual items,
+        but texts they come from", and "a FLEx hyperlink for each"). scope: {"note": id} — that
+        note; {"note": id, "markdown": md} — the highlighted part of it; {"tab": t, "folder": f} —
+        every note in that folder AND its subfolders ("" = the whole tab).
+        → {texts: [FlexService.texts_used rows], notes: n notes looked at}."""
+        scope = scope or {}
+        sources: list[tuple[str, str, str]] = []
+        with self._lock:
+            if scope.get("note"):
+                n = self._nb.get_note(scope["note"])
+                sources.append((n.id, n.title, scope["markdown"] if scope.get("markdown") is not None else n.body))
+            else:
+                tab, folder = scope.get("tab") or "", (scope.get("folder") or "").strip("/")
+                for s in self._nb.list_notes():
+                    if tab and s.get("tab") != tab:
+                        continue
+                    f = s.get("folder") or ""
+                    if folder and not (f == folder or f.startswith(folder + "/")):
+                        continue
+                    n = self._nb.get_note(s["id"])
+                    sources.append((n.id, n.title, n.body))
+        return {"texts": self._flex.texts_used(sources), "notes": len(sources)}
+
     def open_in_flex(self, url: str) -> bool:
         """Hand a silfw:// link to the OS; Windows routes it to FieldWorks."""
         if not url or not url.lower().startswith("silfw:"):

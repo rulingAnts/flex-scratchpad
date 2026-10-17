@@ -135,6 +135,7 @@
       pop.appendChild(colors);
       pop.appendChild(el('hr'));
       item('New folder in this tab…', () => newFolder(t.dir));
+      item('Texts used in this tab\u2026', () => textsUsedDialog({ tab: t.dir, folder: '' }, 'in the tab \u201c' + t.name + '\u201d'), 'texts-used-tab');
       item('Delete tab', async () => { if (!confirm('Delete the tab “' + t.name + '”? It must be empty.')) return; try { await FS.api.delete_tab(t.dir); S.tab = null; applyInit(await FS.api.init()); } catch (e) { FS.toast(e.message, 'error'); } }, 'danger');
     });
   }
@@ -142,6 +143,7 @@
     FS.popover(anchor, (pop, close) => {
       const item = (label, fn, cls) => pop.appendChild(el('button', { class: 'menu-item ' + (cls || ''), onclick: () => { close(); fn(); } }, label));
       item('New subfolder…', () => newFolder(S.tab, path));
+      item('Texts used in this folder\u2026', () => textsUsedDialog({ tab: S.tab, folder: path }, 'in \u201c' + path.split('/').pop() + '\u201d and its subfolders'), 'texts-used-folder');
       item('Rename…', async () => { const name = prompt('Folder name', path.split('/').pop()); if (name && name.trim()) { try { const np = await FS.api.rename_folder(S.tab, path, name.trim()); if (S.folder === path) S.folder = np; await refreshLists(); } catch (e) { FS.toast(e.message, 'error'); } } });
       item('Delete folder', async () => { try { await FS.api.delete_folder(S.tab, path); if (S.folder === path) S.folder = null; await refreshLists(); } catch (e) { FS.toast(e.message, 'error'); } }, 'danger');
     });
@@ -367,6 +369,7 @@
       onChange: (md) => { if (!isCollection()) return; S.note.body = md; S.dirty = true; $('save-state').textContent = 'Editing…'; scheduleSave(); },
       onExport: () => exportCollection(),
       onRefreshAll: () => refreshAll(),
+      onTextsUsed: (md) => textsUsedDialog({ note: S.note.id, markdown: md }, 'in the selected items'),
       canLocate: () => !!(S.flex && S.flex.open),
     });
     window.__fsCollection = S.coll;      // for the tests and the console
@@ -531,6 +534,11 @@
         if (k) item('Collect the ' + k + ' selected example' + (k === 1 ? '' : 's') + ' into a new collection…', () => collectExamples(n, hl), 'collect-selection');
         else item('Collect the examples into a new collection…' + (hl ? '  (none selected: the whole note)' : ''), () => collectExamples(n));
       }
+      {
+        const hl2 = S.note && S.note.id === n.id ? (S.menuHighlight !== undefined ? S.menuHighlight : highlightedSource()) : null;
+        if (hl2 && examplesIn(hl2).length) item('Texts used in the selection\u2026', () => textsUsedDialog({ note: n.id, markdown: hl2 }, 'in the selection'), 'texts-used-selection');
+        else item('Texts used in this note\u2026', () => textsUsedDialog({ note: n.id }, 'in \u201c' + (n.title || 'Untitled') + '\u201d'), 'texts-used-note');
+      }
       S.menuHighlight = undefined;
       item('Copy markdown', async () => { const full = await FS.api.get_note(n.id); FS.copyText(full.body); FS.toast('Copied'); });
       item('Copy link to this note', () => { FS.copyText('flexscratchpad://note/' + n.id); FS.toast('Link copied — it opens this note in FLEx Scratchpad'); });
@@ -547,6 +555,54 @@
       pop.appendChild(el('hr'));
       item('Delete (to trash)', async () => { if (!confirm('Move “' + (n.title || 'Untitled') + '” to the trash?')) return; await FS.api.delete_note(n.id); if (S.note && S.note.id === n.id) { S.note = null; $('editor-pane').classList.add('no-note'); } await refreshLists(); }, 'danger');
     });
+  }
+  /* Which FLEx texts the examples come from (Seth, 2026-10-16: "list which texts are referenced in
+   * a [note], a folder, or a selected range … not individual items, but texts they come from",
+   * "a FLEx hyperlink for each"): one row per text with its count, the notes it is in, and its
+   * FLEx link; Copy list puts the titles (or titles with their links) on the clipboard. */
+  async function textsUsedDialog(scope, where) {
+    await flushSave();
+    let r;
+    try { r = await FS.api.texts_used(scope); } catch (e) { FS.toast(e.message, 'error'); return; }
+    const texts = r.texts || [];
+    const m = FS.modal({ title: 'Texts used ' + where });
+    const n = texts.length;
+    m.body.appendChild(el('p', { class: 'small muted', 'data-test': 'texts-used-summary' },
+      n ? n + (n === 1 ? ' text' : ' texts') + ' — the texts the examples come from' + (r.notes > 1 ? ', in ' + r.notes + ' notes' : '') + '.'
+        : 'No interlinear examples here' + (r.notes > 1 ? ' (' + r.notes + ' notes looked at).' : '.')));
+    const count = (t) => {
+      const parts = [];
+      if (t.examples) parts.push(t.examples + (t.examples === 1 ? ' example' : ' examples'));
+      if (t.links) parts.push(t.links + (t.links === 1 ? ' link' : ' links'));
+      if (t.notes.length > 1 || (r.notes > 1 && t.notes.length)) parts.push(t.notes.length === 1 ? 'in \u201c' + (t.notes[0].title || 'Untitled') + '\u201d' : 'in ' + t.notes.length + ' notes');
+      return parts.join(' \u00b7 ');
+    };
+    if (n) {
+      const list = el('div', { class: 'texts-used', 'data-test': 'texts-used' });
+      for (const t of texts) {
+        const row = el('div', { class: 'texts-used-row' },
+          el('div', { class: 'tu-main' },
+            el('a', { class: 'tu-title', dir: 'auto', href: t.url, title: 'Open this text in FLEx', 'data-test': 'texts-used-title', onclick: (e) => { e.preventDefault(); FS.api.open_in_flex(t.url); } }, t.title),
+            el('div', { class: 'small muted' }, count(t))),
+          el('button', { class: 'btn', title: 'Copy the FLEx link to this text', onclick: () => { FS.copyText(t.url); FS.toast('FLEx link copied'); } }, 'Copy link'),
+          el('button', { class: 'btn', title: 'Open this text in FLEx', onclick: () => FS.api.open_in_flex(t.url) }, 'Open in FLEx \u2197'));
+        if (t.notes.length > 1) {
+          const notesEl = el('div', { class: 'tu-notes small' });
+          for (const x of t.notes) notesEl.appendChild(el('a', { href: '#', onclick: (e) => { e.preventDefault(); m.close(); openNote(x.id); } }, x.title || 'Untitled'));
+          row.querySelector('.tu-main').appendChild(notesEl);
+        }
+        list.appendChild(row);
+      }
+      m.body.appendChild(list);
+    }
+    const row = el('div', { class: 'btn-row' });
+    if (n) {
+      row.appendChild(el('button', { class: 'btn', 'data-test': 'texts-used-copy', title: 'The titles, one per line', onclick: () => { FS.copyText(texts.map((t) => t.title).join('\n')); FS.toast('List copied'); } }, 'Copy list'));
+      row.appendChild(el('button', { class: 'btn', 'data-test': 'texts-used-copy-links', title: 'A Markdown list of the titles, each a FLEx link (paste it into a note)', onclick: () => { FS.copyText(texts.map((t) => '- [' + t.title.replace(/[\[\]]/g, '') + '](' + t.url + ')').join('\n')); FS.toast('List with FLEx links copied'); } }, 'Copy with FLEx links'));
+    }
+    row.appendChild(el('span', { class: 'spacer' }));
+    row.appendChild(el('button', { class: 'btn primary', onclick: () => m.close() }, 'Close'));
+    m.body.appendChild(row);
   }
   function moveDialog(n, copy) {
     const m = FS.modal({ title: copy ? 'Copy note to' : 'Move note', class: 'narrow' });

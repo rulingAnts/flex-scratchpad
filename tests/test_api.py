@@ -129,3 +129,36 @@ def test_build_fingerprint_is_short_hex_and_reported(tmp_path):
     b = build_id()
     assert len(b) == 7 and int(b, 16) >= 0 and build_id() == b
     assert make(tmp_path).init()["build"] == b
+
+
+def test_texts_used_lists_each_source_text_once(tmp_path):
+    """Seth, 2026-10-16: "list which texts are referenced in a [note], a folder, or a selected
+    range … not individual items, but texts they come from … a FLEx hyperlink for each"."""
+    from flex_scratchpad.api import Api
+    from flex_scratchpad.config import AppConfig
+    from flex_scratchpad.flex.demo import T_ARAB, T_STORY
+    api = Api(AppConfig(tmp_path / "c.json"), notebook_dir=tmp_path / "nb", demo=True)
+    tab = api.init()["config"]["tabs"][0]["dir"]
+    api.create_folder(tab, "Grammar")
+    api.create_folder(tab, "Grammar/Verbs")
+    a = api.create_note(tab, "Grammar", "A", "{{flex:text %s seg=1}}\n\n{{flex:text %s seg=2}}\n\nInline {{flex:text %s seg=4}} and [see](flex:text/%s)" % (T_STORY, T_STORY, T_STORY, T_ARAB))
+    api.create_note(tab, "Grammar/Verbs", "B", "{{flex:text %s seg=1}}\n\n{{flex:entry 6a5f3a2e-1b1e-4c2a-9f10-0d2c1a7e0001}}" % T_ARAB)
+    api.create_note(tab, "", "Elsewhere", "{{flex:text %s seg=3}}" % T_STORY)
+    # a folder takes its subfolders; three examples from one text and one from another: two rows
+    r = api.texts_used({"tab": tab, "folder": "Grammar"})
+    assert r["notes"] == 2
+    rows = {t["title"]: t for t in r["texts"]}
+    assert set(rows) == {"The dog and the river", "الكلب والنهر"}
+    assert rows["The dog and the river"]["examples"] == 3 and [n["title"] for n in rows["The dog and the river"]["notes"]] == ["A"]
+    assert rows["الكلب والنهر"]["examples"] == 1 and rows["الكلب والنهر"]["links"] == 1
+    assert {n["title"] for n in rows["الكلب والنهر"]["notes"]} == {"A", "B"}
+    for t in r["texts"]:                                         # a FLEx hyperlink for each
+        assert t["url"].startswith("silfw://localhost/link?app=flex") and "tool=interlinearEdit" in t["url"] and t["guid"] in t["url"]
+    # one note, and the highlighted part of it
+    assert [t["title"] for t in api.texts_used({"note": a["id"]})["texts"]] == ["The dog and the river", "الكلب والنهر"]
+    part = api.texts_used({"note": a["id"], "markdown": "{{flex:text %s seg=2}}" % T_STORY})["texts"]
+    assert len(part) == 1 and part[0]["examples"] == 1
+    # the whole tab, and a note with no examples
+    assert api.texts_used({"tab": tab, "folder": ""})["notes"] >= 3
+    empty = api.create_note(tab, "", "Plain", "No examples here.")
+    assert api.texts_used({"note": empty["id"]}) == {"texts": [], "notes": 1}

@@ -660,3 +660,13 @@ table.md-table td.drop-target, table.md-table th.drop-target { outline: 2px soli
 .coll-selbar .btn.danger { color: var(--danger); }
 .coll-into { font: inherit; font-size: 13px; padding: 3px 6px; border-radius: 6px; border: 1px solid var(--border); background: var(--paper, #fff); color: inherit; }
 #collection:focus { outline: none; }
+
+/* Texts used… (the FLEx texts a note's examples come from) */
+.texts-used { display: grid; gap: 6px; margin: 4px 0 14px; max-height: 60vh; overflow: auto; }
+.texts-used-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--border-soft); border-radius: var(--radius); background: var(--bg); }
+.texts-used-row .tu-main { flex: 1; min-width: 0; }
+.texts-used-row .tu-title { font-weight: 650; color: var(--accent); text-decoration: none; }
+.texts-used-row .tu-title:hover { text-decoration: underline; }
+.texts-used-row .tu-notes { display: flex; flex-wrap: wrap; gap: 2px 10px; margin-top: 2px; }
+.texts-used-row .tu-notes a { color: var(--muted); }
+.texts-used-row .btn { padding: 3px 9px; white-space: nowrap; }

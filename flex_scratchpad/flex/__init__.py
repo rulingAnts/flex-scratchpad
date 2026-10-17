@@ -734,6 +734,43 @@ class FlexService:
                 out["url"] = s
             return out
 
+    # -- which texts a note draws on (Seth, 2026-10-16) ----------------------------------
+
+    def texts_used(self, sources: list[tuple[str, str, str]]) -> list[dict]:
+        """The FLEx TEXTS that the examples in `sources` [(note id, note title, markdown)] come from —
+        not the examples themselves (three from one text and two from another: two rows). Each row
+        {guid, title, examples, links, notes: [{id, title}], url}: `examples` counts the rendered
+        examples ({{flex:text …}}, blocks and inline), `links` the plain links to the text, `url`
+        is its FLEx hyperlink. Titles come from the snapshot cache, else the open project, else
+        "(a text not in this project)"; sorted by title."""
+        rows: dict[str, dict] = {}
+        for note_id, note_title, body in sources:
+            for rx, key in ((EMBED_RE, "examples"), (LINK_RE, "links")):
+                for m in rx.finditer(body or ""):
+                    if m.group(1).lower() != "text":
+                        continue
+                    g = m.group(2).lower()
+                    r = rows.setdefault(g, {"guid": g, "examples": 0, "links": 0, "notes": []})
+                    r[key] += 1
+                    if not any(n["id"] == note_id for n in r["notes"]):
+                        r["notes"].append({"id": note_id, "title": note_title})
+        if not rows:
+            return []
+        live: dict[str, str] | None = None
+        for g, r in rows.items():
+            snap = self.cache.get(self.project_name, "text", g) or self.cache.find("text", g)
+            title = (snap or {}).get("title") or ""
+            if not title:
+                if live is None:
+                    try:
+                        live = {t["guid"].lower(): t.get("title", "") for t in self.list_texts()}
+                    except Exception:  # noqa: BLE001 — no project open: the cache is all there is
+                        live = {}
+                title = live.get(g, "")
+            r["title"] = title or "(a text not in this project)"
+            r["url"] = (snap or {}).get("url") or model.goto_url(self.project_name, "text", g)
+        return sorted(rows.values(), key=lambda r: (r["title"].casefold(), r["guid"]))
+
     # -- search index support -----------------------------------------------------
 
     def searchable_text_for_body(self, body: str) -> str:

@@ -203,6 +203,15 @@ meaning of an existing key. Python only needs the kind + guid (`flex/__init__.py
   collection), Duplicate (Ctrl+D), Remove (Delete, with Undo); dragging a selected card moves them
   all. A selected group stands for its whole block (`selectedIdx`). A redraw keeps the keyboard
   focus in the collection.
+- TEXTS USED (Seth, 2026-10-16: "list which texts are referenced in a [note], a folder, or a
+  selected range … not individual items, but texts they come from … a FLEx hyperlink for each"):
+  `Api.texts_used(scope)` → `FlexService.texts_used` — one row per source TEXT (the guid of every
+  `{{flex:text …}}` and `(flex:text/…)` link), with its example and link counts, the notes it is
+  in, its title (snapshot cache, else the open project) and its `silfw://` link. Scopes: a note,
+  the highlighted part of it (`markdown`), a folder WITH its subfolders, a whole tab. The dialog
+  (`textsUsedDialog`, app.js) is in the note menu ("…in this note" / "…in the selection"), the
+  folder and tab menus, and a collection's selection bar; Copy list / Copy with FLEx links (a
+  Markdown list of links) put it on the clipboard.
 - Exporting a collection's examples as a `.flextext` (`flex/flextext_writer.py`, `Api.export_note_flextext`,
   Seth, 2026-10-16): one `<interlinear-text>` PER BASELINE WRITING SYSTEM (a FLEx text has one
   vernacular WS), one paragraph per example, one phrase per segment, every writing-system
