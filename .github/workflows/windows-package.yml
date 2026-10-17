@@ -27,6 +27,7 @@ jobs:
     env:
       VERSION: ${{ inputs.version }}
       DIST: build\dist\FLEx Scratchpad
+      PYTHONUTF8: "1"           # the runner's console is cp1252; the build's own output is UTF-8
     steps:
       - uses: actions/checkout@v4
 

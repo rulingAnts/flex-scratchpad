@@ -32,7 +32,7 @@ jobs:
       - name: Unit tests (Python)
         run: python -m pytest tests --ignore=tests/e2e -q
       - name: Unit tests (JS logic, node:test)
-        run: node --test tests/js
+        run: node --test tests/js/*.test.js
       - name: End-to-end (Playwright, no server — file:// + bridged js_api)
         run: python -m pytest tests/e2e -q
 

@@ -55,7 +55,7 @@ def _retry(what: str, fn):
                 raise
             if k == TRIES:
                 raise
-            print(f"{what}: {e} — retrying in {delay}s ({k}/{TRIES})", file=sys.stderr)
+            print(f"{what}: {e} - retrying in {delay}s ({k}/{TRIES})", file=sys.stderr)
             time.sleep(delay)
             delay = min(delay * 2, 60)
 
@@ -153,7 +153,9 @@ def main(argv=None) -> int:
     for p in work.iterdir():
         p.unlink()
     work.rmdir()
-    print(f"ffmpeg: {ver} ({got[:12]}…) → {out / 'ffmpeg.exe'} ({(out / 'ffmpeg.exe').stat().st_size // 1_000_000} MB)")
+    # ASCII only: a Windows runner's console is cp1252 (an arrow here once failed a build that had
+    # already downloaded and verified everything)
+    print(f"ffmpeg: {ver} (sha256 {got[:12]}) -> {out / 'ffmpeg.exe'} ({(out / 'ffmpeg.exe').stat().st_size // 1_000_000} MB)")
     return 0
 
 
