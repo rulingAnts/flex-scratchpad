@@ -3348,3 +3348,109 @@ def test_flex_objects_get_a_readable_copy_in_the_file(app):
     assert re.search(r"\n\{\{flex:entry %s\}\}\n\[kabir[^\n]*\]\(silfw://[^ )]+ \"flex-copy\"\)\n```flex-copy\n1\. " % E1, body), body
     assert "flex-copy" not in next(l for l in body.split("\n") if l.startswith("| x |"))
     assert not errors
+
+
+def test_flex_text_markup_tags_render_and_are_styled_by_scope(app):
+    """Seth, 2026-10-17: FLEx's TextMarkup tags drawn in examples, styled per project / tab /
+    folder / example (the most specific wins), each switchable on and off where it applies, and
+    searchable: the picker's "FLEx tags" finds every place a tag is used."""
+    h, page, errors = app
+    tab = h.api.init()["config"]["tabs"][0]["dir"]
+    n = h.api.create_note(tab, "", "Markup", "{{flex:text %s seg=1-2}}\n\n{{flex:text %s seg=4-6}}\n" % (T_STORY, T_STORY))
+    page.reload()
+    page.wait_for_selector(".note-card")
+    page.locator(".note-card", has_text="Markup").first.click()
+    page.wait_for_selector("#editor .text-obj .tagbar")
+    first = page.locator("#editor .text-obj").first
+    # the tags under the words, with FLEx's own colour on Subject and the palette on Verb
+    assert first.locator(".segment").first.locator(".tagbar").all_inner_texts() == ["S", "V"]
+    assert first.locator(".segment").nth(1).locator(".tagbar").all_inner_texts() == ["Foc", "S", "V", "O"]
+    subj = first.locator(".segment").first.locator(".tagbar").first
+    assert subj.evaluate("(e) => getComputedStyle(e).backgroundColor") == "rgb(219, 234, 254)"
+    # a tag over two segments: the second half says it continues
+    second = page.locator("#editor .text-obj").nth(1)
+    assert second.locator(".segment").nth(0).locator(".tagbar").all_inner_texts() == ["Top", " "]
+    assert second.locator(".segment").nth(2).locator(".tagbar.cont").first.inner_text() == "…Top"
+    assert first.locator("[data-test=tag-btn]").inner_text() == "⚑ 4"
+    # the ⚑ popover: where each tag's look comes from, and a toggle that writes the example's own rule
+    first.locator("[data-test=tag-btn]").click()
+    page.wait_for_selector("[data-test=tag-popover]")
+    rows = page.locator("[data-test=tag-popover] .tagrow")
+    assert rows.locator("[data-test=tag-via]").all_inner_texts() == ["styled by FLEx’s own colours", "styled by the standard palette", "styled by the standard palette", "styled by FLEx’s own colours"]
+    rows.nth(0).locator("[data-test=tag-toggle]").click()
+    page.wait_for_function("() => !document.querySelector('#editor .text-obj .segment .tagbar') || document.querySelector('#editor .text-obj .segment').querySelectorAll('.tagbar').length === 1")
+    page.wait_for_timeout(900)
+    body = body_of(h)
+    assert re.search(r"seg=1-2( at=[0-9a-f-]+)? tags=Subject:off\}\}", body), body
+    assert page.locator("[data-test=tag-popover] [data-test=tag-via]").first.inner_text() == "hidden by this example"
+    page.keyboard.press("Escape")
+    # a TAB rule: Verb in a colour of the tab's, from the tab's menu; the examples redraw with it
+    page.locator(".tab-item", has_text="Notes").click(button="right")
+    page.locator(".popover .menu-item", has_text="FLEx tag styles for this tab").click()
+    page.wait_for_selector("[data-test=tag-dialog]")
+    verb = page.locator("[data-test=tag-dialog] .tagrow[data-tag='Verb']")
+    verb.locator("[data-test=tag-bg]").nth(3).click()                 # the 4th palette colour, #bdb2ff
+    page.wait_for_function("() => document.querySelector('[data-test=tag-dialog] .tagrow[data-tag=\"Verb\"] [data-test=tag-via]').textContent === 'styled by the tab'")
+    assert verb.locator("[data-test=tag-rule-on]").is_checked()
+    page.locator(".modal .btn.primary", has_text="Done").click()
+    page.wait_for_function("() => { const b = [...document.querySelectorAll('#editor .text-obj .segment')][0].querySelector('.tagbar'); return b && getComputedStyle(b).backgroundColor === 'rgb(189, 178, 255)'; }")
+    assert h.api.init()["config"]["tagStyles"]["tab"][tab] == [{"tag": "Verb", "enabled": True, "bg": "#bdb2ff"}]
+    # the example's own style wins over the tab's
+    first.locator("[data-test=tag-btn]").click()
+    page.wait_for_selector("[data-test=tag-popover]")
+    page.locator("[data-test=tag-popover] .tagrow[data-tag='Verb'] [data-test=tag-style]").click()
+    page.locator("[data-test=tag-popover] .tag-style-box [data-test=tag-bg]").nth(0).click()        # #ffd6a5
+    page.wait_for_function("() => { const b = [...document.querySelectorAll('#editor .text-obj .segment')][0].querySelector('.tagbar'); return b && getComputedStyle(b).backgroundColor === 'rgb(255, 214, 165)'; }")
+    assert page.locator("[data-test=tag-popover] .tagrow[data-tag='Verb'] [data-test=tag-via]").inner_text() == "styled by this example"
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(900)
+    assert "tags=Subject:off,Verb:bg#ffd6a5" in body_of(h), body_of(h)
+    # the picker's FLEx tags: Topic is used in two places; both inserted as examples
+    page.locator("#toolbar button", has_text="FLEx object").click()      # nothing focused: new blocks go after the last
+    page.locator(".picker-tabs button", has_text="FLEx tags").click()
+    page.wait_for_selector("[data-test=pick-tag]")
+    assert page.locator("[data-test=pick-tag] .hw").all_inner_texts() == ["Subject", "Object", "Verb", "Topic", "Focus"]
+    page.locator("[data-test=pick-tag]", has_text="Topic").click()
+    page.wait_for_selector("[data-test=pick-occurrence]")
+    occ = page.locator("[data-test=pick-occurrence]")
+    assert occ.count() == 2 and occ.nth(1).locator(".pos").inner_text() == "3.1–3.2" and occ.nth(0).locator(".gl").inner_text() == "Kabir pemu"
+    occ.nth(1).click()
+    page.wait_for_selector(".picker-preview .segment.in-range")
+    assert page.locator(".picker-preview .segment.in-range").count() == 2
+    page.locator("[data-test=insert-all-tagged]").click()
+    page.wait_for_timeout(1200)
+    body = body_of(h)
+    assert body.count("{{flex:text") == 4 and "seg=5-6 at=" in body and "seg=4 at=" in body, body
+    assert not errors
+
+
+def test_tag_styles_for_a_selection_of_examples(app):
+    """Seth, 2026-10-17: example-scoped tag styles "applyable to a group of examples by highlight" —
+    here the selected cards of a collection; the rule is written into each embed."""
+    h, page, errors = app
+    tab = h.api.init()["config"]["tabs"][0]["dir"]
+    c = h.api.create_note(tab, "", "Tagged set", "{{flex:text %s seg=1}}\n\n{{flex:text %s seg=2}}\n\n{{flex:text %s seg=4}}\n" % (T_STORY, T_STORY, T_STORY), "examples")
+    page.reload()
+    page.wait_for_selector(".note-card")
+    page.locator(".note-card", has_text="Tagged set").first.click()
+    page.wait_for_selector("#collection .coll-item .tagbar")
+    checks = page.locator("[data-test=coll-check]")
+    checks.nth(0).click()
+    checks.nth(1).click()
+    page.locator("[data-test=coll-sel-tags]").click()
+    page.wait_for_selector("[data-test=tag-dialog]")
+    assert "2 selected examples" in page.locator(".modal .modal-title, .modal h2, .modal header").first.inner_text()
+    page.locator("[data-test=tag-dialog] .tagrow[data-tag='Subject'] [data-test=tag-show]").select_option("hide")
+    page.locator("[data-test=tag-dialog] .tagrow[data-tag='Verb'] [data-test=tag-b]").click()
+    page.wait_for_function("() => document.querySelector('[data-test=tag-dialog] .tagrow[data-tag=\"Subject\"] [data-test=tag-via]').textContent === 'hidden by this example'")
+    page.locator(".modal .btn.primary", has_text="Done").click()
+    page.wait_for_timeout(1000)
+    body = without_flex_copies(h.api.get_note(c["id"])["body"])
+    assert body.count("tags=Subject:off,Verb:b") == 2 and "seg=4 " in body and "seg=4" in body.split("\n")[-2], body
+    assert "seg=4 at=" in body or "seg=4}}" in body
+    assert body.split("\n\n")[2].count("tags=") == 0            # the unselected example is untouched
+    # drawn accordingly: no S bar on the first two cards, bold words where Verb is
+    assert page.locator("#collection .coll-item").nth(0).locator(".tagbar", has_text="S").count() == 0
+    assert page.locator("#collection .coll-item").nth(0).locator(".il-txt.tag-b").count() == 1
+    assert page.locator("#collection .coll-item").nth(2).locator(".tagbar", has_text="Top").count() == 1
+    assert not errors

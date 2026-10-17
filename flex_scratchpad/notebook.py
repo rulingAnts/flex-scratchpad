@@ -302,6 +302,8 @@ def parse_query(q: str) -> dict:
         k, _, v = word.partition(":")
         if _ and k.lower() in filters and v:
             filters[k.lower()].append(v)
+        elif _ and k.lower() == "tagged" and v:
+            terms.append("\u2691" + v.replace(" ", "_"))      # a FLEx text markup tag on an example in the note (model.searchable_text)
         elif word.startswith("#") and len(word) > 1:
             filters["tag"].append(word[1:])
         else:
@@ -320,6 +322,7 @@ DEFAULT_CONFIG = {
     "flex": {"source": "lcm", "project": "", "flextextPath": ""},
     "media": {"byGuid": {}, "folders": []},
     "settings": {"diacriticsInsensitive": True},
+    "tagStyles": {"project": {}, "tab": {}, "folder": {}},   # FLEx text markup tag styles by scope (api.set_tag_styles)
 }
 
 

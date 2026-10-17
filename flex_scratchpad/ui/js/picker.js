@@ -25,7 +25,7 @@
   function open(onInsert, opts) {
     opts = opts || {};
     const m = FS.modal({ title: 'Insert from FieldWorks' });
-    const state = { mode: opts.mode || 'lexicon', sel: null, text: null, range: null, anchor: null, lines: null };
+    const state = { mode: opts.mode || 'lexicon', sel: null, text: null, range: null, anchor: null, lines: null, tag: null, occ: [] };
     const left = el('div', { class: 'picker-left' });
     const right = el('div', { class: 'picker-right' });
     const tabs = el('div', { class: 'picker-tabs' });
@@ -37,12 +37,13 @@
     left.append(tabs, search, results);
     right.append(preview, optsRow, btnRow);
     m.body.appendChild(el('div', { class: 'picker' }, left, right));
-    const modes = [['lexicon', 'Lexicon'], ['texts', 'Texts']];
+    // FLEx text markup TAGS as a way in (Seth, 2026-10-17): a tag, then every place it is used
+    const modes = [['lexicon', 'Lexicon'], ['texts', 'Texts'], ['tags', 'FLEx tags']];
     const setMode = (mode) => {
-      state.mode = mode; state.sel = null; state.text = null; state.range = null;
+      state.mode = mode; state.sel = null; state.text = null; state.range = null; state.tag = null;
       tabs.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.mode === mode));
-      search.placeholder = mode === 'lexicon' ? 'Search headword or gloss…' : 'Search text titles…';
-      preview.innerHTML = '<div class="muted small">' + (mode === 'lexicon' ? 'Pick an entry on the left.' : 'Pick a text, then click the first and last segment of the range.') + '</div>';
+      search.placeholder = mode === 'lexicon' ? 'Search headword or gloss…' : mode === 'tags' ? 'Search tags by name…' : 'Search text titles…';
+      preview.innerHTML = '<div class="muted small">' + (mode === 'lexicon' ? 'Pick an entry on the left.' : mode === 'tags' ? 'Pick a tag, then one of the places it is used.' : 'Pick a text, then click the first and last segment of the range.') + '</div>';
       optsRow.innerHTML = ''; btnRow.innerHTML = '';
       doSearch();
       search.focus();
@@ -58,6 +59,34 @@
           for (const h of hits) {
             const it = el('div', { class: 'pick-item' }, el('span', { class: 'hw' }, h.headword || h.lexeme || '?'), h.pos ? el('span', { class: 'pos' }, h.pos) : null, el('span', { class: 'gl' }, h.gloss || ''), h.senses > 1 ? el('span', { class: 'n' }, h.senses + ' senses') : null);
             it.addEventListener('click', () => { results.querySelectorAll('.on').forEach((x) => x.classList.remove('on')); it.classList.add('on'); pickEntry(h); });
+            results.appendChild(it);
+          }
+        } else if (state.mode === 'tags' && !state.tag) {
+          const q = search.value.trim().toLowerCase();
+          const tags = (await FS.api.flex_text_tags()).filter((t) => !q || (t.name + ' ' + t.abbr + ' ' + t.group).toLowerCase().includes(q));
+          if (FS.tagstyles) FS.tagstyles.setList(tags.length || q ? FS.tagstyles.list() : tags);
+          results.innerHTML = '';
+          if (!tags.length) results.appendChild(el('div', { class: 'pick-item muted' }, q ? 'No tag matches.' : 'This project has no text markup tags.'));
+          let group;
+          for (const t of tags) {
+            if (t.group !== group) { group = t.group; results.appendChild(el('div', { class: 'pick-group' }, group || 'Tags')); }
+            const look = FS.tagstyles ? FS.tagstyles.resolve(t, null) : { bg: '#ffd6a5' };
+            const it = el('div', { class: 'pick-item', 'data-test': 'pick-tag' }, el('span', { class: 'tag-sw', style: { background: look.bg } }), el('span', { class: 'hw' }, t.name), t.abbr && t.abbr !== t.name ? el('span', { class: 'pos' }, t.abbr) : null, t.count != null ? el('span', { class: 'n' }, t.count + ' place' + (t.count === 1 ? '' : 's')) : null);
+            it.addEventListener('click', () => { state.tag = t; search.value = ''; search.placeholder = 'Filter the places…'; doSearch(); });
+            results.appendChild(it);
+          }
+        } else if (state.mode === 'tags') {
+          const rows = await FS.api.flex_tag_occurrences(state.tag.guid, search.value.trim());
+          state.occ = rows;
+          results.innerHTML = '';
+          const back = el('button', { class: 'lnk', onclick: () => { state.tag = null; search.value = ''; search.placeholder = 'Search tags by name…'; doSearch(); } }, '\u2190 All tags');
+          results.appendChild(el('div', { class: 'pick-group', style: { display: 'flex', gap: '8px', alignItems: 'center' } }, back, el('b', {}, state.tag.name), el('span', { class: 'muted' }, rows.length + ' place' + (rows.length === 1 ? '' : 's'))));
+          if (rows.length) results.appendChild(el('div', { class: 'pick-item', style: { justifyContent: 'flex-end' } }, el('button', { class: 'btn', 'data-test': 'insert-all-tagged', title: 'One example per place, in text order', onclick: () => { onInsert(rows.map((o) => embedFor('text', o.text, { seg: [o.seg, o.segTo], at: o.at })).join('\n\n'), true); m.close(); } }, 'Insert all ' + rows.length + ' as examples')));
+          if (!rows.length) results.appendChild(el('div', { class: 'pick-item muted' }, search.value ? 'No place matches.' : 'This tag is not used anywhere.'));
+          for (const o of rows) {
+            const where = o.label + (o.segTo !== o.seg ? '\u2013' + o.labelTo : '');
+            const it = el('div', { class: 'pick-item', 'data-test': 'pick-occurrence' }, el('span', { class: 'hw' }, o.title || '(untitled)'), el('span', { class: 'pos' }, where), el('span', { class: 'gl' }, o.words || ''));
+            it.addEventListener('click', () => { results.querySelectorAll('.on').forEach((x) => x.classList.remove('on')); it.classList.add('on'); pickText({ guid: o.text, title: o.title, segmentCount: 0 }, [o.seg, o.segTo]); });
             results.appendChild(it);
           }
         } else {
@@ -100,12 +129,14 @@
         } }, 'Insert rendered'));
     }
 
-    async function pickText(h) {
+    async function pickText(h, range) {
       state.text = h; state.range = null; state.anchor = null;
       preview.innerHTML = '<div class="flex-loading">Loading…</div>';
       let obj;
-      try { obj = await FS.api.flex_get('text', h.guid, 1, Math.min(h.segmentCount || 60, 60)); }
-      catch (e) { preview.innerHTML = ''; preview.appendChild(el('div', { class: 'flex-err' }, e.message)); return; }
+      try {
+        obj = await FS.api.flex_get('text', h.guid, 1, Math.min(h.segmentCount || 60, 60));
+        if (range && range[1] > (obj.range ? obj.range[1] : 60)) obj = await FS.api.flex_get('text', h.guid, Math.max(1, range[0] - 5), range[1] + 30);   // a tagged place further down
+      } catch (e) { preview.innerHTML = ''; preview.appendChild(el('div', { class: 'flex-err' }, e.message)); return; }
       state.obj = obj;
       renderPreview();
       optsRow.innerHTML = '';
@@ -137,6 +168,7 @@
       const applyRange = () => { const a = Math.max(1, read(from.value, 1)), b = Math.max(a, read(to.value, a)); state.range = [a, b]; from.value = show(a); to.value = show(b); renderPreview(); };
       from.addEventListener('change', applyRange); to.addEventListener('change', applyRange);
       state.setRange = (a, b) => { from.value = show(a); to.value = show(b); state.range = [a, b]; renderPreview(); };
+      if (range) { state.setRange(range[0], range[1]); const segEl = preview.querySelector('.segment[data-n="' + range[0] + '"]'); if (segEl) segEl.scrollIntoView({ block: 'center' }); }
       find.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); findBtn.click(); } });
       optsRow.append(el('label', {}, 'Segments ', from, ' – ', to), el('span', { class: 'muted' }, 'of ' + obj.segmentCount), find, findBtn);
       btnRow.innerHTML = '';
@@ -165,6 +197,9 @@
     }
 
     setMode(state.mode);
+    if (opts.mode === 'tags' && opts.tag) {      // opened on one tag (an example's ⚑ → 🔍)
+      FS.api.flex_text_tags().then((l) => { state.tag = l.find((t) => t.guid === opts.tag) || { guid: opts.tag, name: 'this tag', abbr: '' }; search.placeholder = 'Filter the places…'; doSearch(); }, () => {});
+    }
     return m;
   }
 

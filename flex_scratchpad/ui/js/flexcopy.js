@@ -81,15 +81,15 @@
     segs.forEach((s, si) => {
       const cols = [];
       let lead = '';
-      for (const w of s.words || []) {
+      (s.words || []).forEach((w, ti) => {
         if (w.punct) {
           if (/^[(\[{«“‘'"¿¡]/.test(w.txt || '') || !cols.length) lead += w.txt || '';
           else cols[cols.length - 1].txt += w.txt || '';
-          continue;
+          return;
         }
-        cols.push({ w, txt: lead + (w.txt || '') });
+        cols.push({ w, txt: lead + (w.txt || ''), ai: w.ai != null ? w.ai : ti });
         lead = '';
-      }
+      });
       if (lead) { if (cols.length) cols[cols.length - 1].txt += lead; else cols.push({ w: {}, txt: lead }); }
       const rows = [];
       for (const line of lines) {
@@ -105,6 +105,12 @@
         }).map(flat);
         if (line !== 'txt' && !cells.some((c) => c)) continue;
         rows.push(cells);
+      }
+      // FLEx's text markup tags, a row per lane: the abbreviation under the first word, `—` on
+      if (lines.includes('tag') && FS.interlinear && FS.interlinear.segTags) {
+        const tg = FS.interlinear.segTags(obj, spec, s);
+        const lanes = tg.reduce((m, o) => Math.max(m, o.lane + 1), 0);
+        for (let l = 0; l < lanes; l++) rows.push(cols.map(({ ai }) => { const o = tg.find((x) => x.lane === l && ai >= x.a && ai <= x.z); return o ? (ai === o.firstAi ? (o.t.tag.abbr || o.t.tag.name) : '\u2014') : ''; }));
       }
       const widths = cols.map((_, i) => Math.max(0, ...rows.map((r) => width(r[i]))));
       const lab = (k) => pad(k === 0 ? labels[si] : '', lw) + (lw ? '  ' : '');

@@ -837,6 +837,28 @@ class FlexService:
             r["url"] = (snap or {}).get("url") or model.goto_url(self.project_name, "text", g)
         return sorted(rows.values(), key=lambda r: (r["title"].casefold(), r["guid"]))
 
+    # -- text markup tags (Seth, 2026-10-17) ----------------------------------------
+
+    def text_tags(self) -> list[dict]:
+        """The project's TextMarkupTags list; the last one seen is kept in the snapshot folder so
+        the style editors and the picker list the tags without FLEx."""
+        with self.lock:
+            try:
+                tags = self._live().list_text_tags()
+                self.cache.put(self.project_name, "list", "texttags", {"tags": tags})
+                return tags
+            except Exception:  # noqa: BLE001 — closed, or a backend without tags
+                snap = self.cache.get(self.project_name, "list", "texttags") if self.project_name else None
+                return list((snap or {}).get("tags") or [])
+
+    def tag_occurrences(self, tag_guid: str, q: str = "") -> list[dict]:
+        with self.lock:
+            rows = self._live().tag_occurrences(tag_guid)
+        ql = (q or "").strip().casefold()
+        if ql:
+            rows = [r for r in rows if ql in (r.get("title", "") + " " + r.get("words", "") + " " + r.get("label", "")).casefold()]
+        return rows
+
     # -- search index support -----------------------------------------------------
 
     def searchable_text_for_body(self, body: str) -> str:

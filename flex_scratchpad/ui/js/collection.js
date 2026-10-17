@@ -320,6 +320,17 @@
       FS.toast(moving.length + (moving.length === 1 ? ' item' : ' items') + ' moved into \u201c' + grp.label + '\u201d', 'ok');
     }
     selMarkdown() { return serialize(this.selectedItems()); }
+    /* Rewrite the selected examples' embeds (tag styles for several at once): fn(src) → src. */
+    mapSelected(fn) {
+      let n = 0;
+      for (const it of this.selectedItems()) {
+        if (it.t !== 'ex') continue;
+        const next = cleanEmbed(fn(it.src), true);
+        if (next && next !== it.src) { it.src = next; it.spec = R.parse(next); n++; }
+      }
+      if (n) { this.undo = null; this.changed(); this.render(); }
+      return n;
+    }
     copySel() {
       const md = this.selMarkdown();
       if (!md) return;
@@ -403,6 +414,7 @@
         FS.collClip ? el('button', { class: 'btn', 'data-test': 'coll-sel-paste', title: 'Paste after the selection (Ctrl+V)', onclick: () => this.pasteText(FS.collClip) }, 'Paste') : null,
         el('button', { class: 'btn', title: 'Duplicate (Ctrl+D)', onclick: () => this.duplicateSel() }, 'Duplicate'),
         this.opts.onTextsUsed ? el('button', { class: 'btn', 'data-test': 'coll-sel-texts', title: 'The FLEx texts the selected examples come from', onclick: () => this.opts.onTextsUsed(this.selMarkdown()) }, 'Texts used\u2026') : null,
+        this.opts.onTagStyles ? el('button', { class: 'btn', 'data-test': 'coll-sel-tags', title: 'How FLEx text markup tags look in the selected examples', onclick: () => this.opts.onTagStyles(this.selectedItems().filter((x) => x.t === 'ex').map((x) => x.src), (fn) => this.mapSelected(fn)) }, 'Tag styles\u2026') : null,
         el('button', { class: 'btn danger', 'data-test': 'coll-sel-delete', title: 'Remove (Delete)', onclick: () => this.deleteSel() }, 'Remove'),
         el('span', { class: 'spacer' }),
         el('button', { class: 'icon-btn', title: 'Clear the selection (Esc)', onclick: () => this.clearSel() }, '\u2715'));
@@ -636,8 +648,8 @@
       box.addEventListener('drop', (e) => { const t = e.dataTransfer && e.dataTransfer.getData('text/plain'); if (t) { e.preventDefault(); take(t); } });
       return box;
     }
-    pick(at) {
-      FS.picker.open((md) => { const n = this.add(md, at); if (n) FS.toast('Example added', 'ok'); }, { mode: 'texts' });
+    pick(at, pickOpts) {
+      FS.picker.open((md) => { const n = this.add(md, at); if (n) FS.toast('Example added', 'ok'); }, Object.assign({ mode: 'texts' }, pickOpts || {}));
     }
   }
 

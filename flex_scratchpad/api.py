@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import os
 import subprocess
 import sys
@@ -751,6 +752,49 @@ class Api:
             return self._flex.search_entries(q, limit)
         except FlexError as e:
             raise RuntimeError(e.message)
+
+    def flex_text_tags(self) -> list[dict]:
+        """The project's text markup tags (the picker's Tags search, the tag style editors)."""
+        return self._flex.text_tags()
+
+    def flex_tag_occurrences(self, tag_guid: str, q: str = "") -> list[dict]:
+        try:
+            return self._flex.tag_occurrences(tag_guid, q)
+        except FlexError as e:
+            raise RuntimeError(e.message) from e
+
+    # FLEx tag STYLES (Seth, 2026-10-17: project-, tab-, folder- and example-scoped, "the most
+    # specific one takes precedent"): the notebook keeps the first three in notebook.json
+    # (`tagStyles.project[<project>]`, `.tab[<dir>]`, `.folder[<tab>/<path>]`); an example's own
+    # are in its embed (`tags=`). A rule: {tag, enabled, hide, bg, fg, b, i, u, label}.
+    def set_tag_styles(self, kind: str, key: str, rules: list[dict]) -> dict:
+        if kind not in ("project", "tab", "folder"):
+            raise ValueError("tag styles are kept per project, tab or folder")
+        clean = []
+        for r in rules or []:
+            if not isinstance(r, dict) or not str(r.get("tag") or "").strip():
+                continue
+            out = {"tag": str(r["tag"]).strip()[:120], "enabled": r.get("enabled", True) is not False}
+            if r.get("hide") is not None:
+                out["hide"] = bool(r["hide"])
+            for k in ("bg", "fg"):
+                v = str(r.get(k) or "")
+                if re.fullmatch(r"#[0-9a-fA-F]{6}", v):
+                    out[k] = v.lower()
+            for k in ("b", "i", "u"):
+                if r.get(k):
+                    out[k] = True
+            if r.get("label") is False:
+                out["label"] = False
+            clean.append(out)
+        ts = self._nb.config.setdefault("tagStyles", {"project": {}, "tab": {}, "folder": {}})
+        bucket = ts.setdefault(kind, {})
+        if clean:
+            bucket[key or ""] = clean
+        else:
+            bucket.pop(key or "", None)
+        self._nb.save_config()
+        return ts
 
     def flex_texts(self, q: str = "") -> list[dict]:
         try:

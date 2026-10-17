@@ -52,8 +52,13 @@
     applyMarkers();
     FS.toast(hide ? 'Markdown markers hidden' : 'Markdown markers shown');
   }
+  // FLEx tag styles (tagstyles.js) resolve against the open note's place; a change anywhere redraws
+  FS.tagstyles.context = () => ({ project: (S.flex && S.flex.project) || '', tab: S.note ? S.note.tab : (S.tab || ''), folder: S.note ? (S.note.folder || '') : (S.folder || '') });
+  FS.on('tagstyles', () => { if (isCollection()) { if (S.coll) S.coll.render(); } else if (S.editor) S.editor.renderAll(); });
   function applyInit(init) {
     S.init = init; S.config = init.config; S.notes = init.notes; S.folders = init.folders; S.tags = init.tags; S.flex = init.flex;
+    FS.tagstyles.setConfig(S.config.tagStyles);
+    if (S.flex && S.flex.open) FS.tagstyles.loadList(true);
     applyMarkers();
     if (!S.tab || !S.config.tabs.some((t) => t.dir === S.tab)) S.tab = (S.config.tabs[0] || {}).dir || null;
     renderRail();
@@ -140,6 +145,7 @@
       pop.appendChild(el('hr'));
       item('New folder in this tab…', () => newFolder(t.dir));
       item('Texts used in this tab\u2026', () => textsUsedDialog({ tab: t.dir, folder: '' }, 'in the tab \u201c' + t.name + '\u201d'), 'texts-used-tab');
+      item('FLEx tag styles for this tab\u2026', () => FS.tagstyles.dialog({ kind: 'tab', key: t.dir, label: 'the tab \u201c' + t.name + '\u201d' }), 'tag-styles-tab');
       item('Delete tab', async () => { if (!confirm('Delete the tab “' + t.name + '”? It must be empty.')) return; try { await FS.api.delete_tab(t.dir); S.tab = null; applyInit(await FS.api.init()); } catch (e) { FS.toast(e.message, 'error'); } }, 'danger');
     });
   }
@@ -148,6 +154,7 @@
       const item = (label, fn, cls) => pop.appendChild(el('button', { class: 'menu-item ' + (cls || ''), onclick: () => { close(); fn(); } }, label));
       item('New subfolder…', () => newFolder(S.tab, path));
       item('Texts used in this folder\u2026', () => textsUsedDialog({ tab: S.tab, folder: path }, 'in \u201c' + path.split('/').pop() + '\u201d and its subfolders'), 'texts-used-folder');
+      item('FLEx tag styles for this folder\u2026', () => FS.tagstyles.dialog({ kind: 'folder', key: S.tab + '/' + path, label: 'the folder \u201c' + path.split('/').pop() + '\u201d' }), 'tag-styles-folder');
       item('Rename…', async () => { const name = prompt('Folder name', path.split('/').pop()); if (name && name.trim()) { try { const np = await FS.api.rename_folder(S.tab, path, name.trim()); if (S.folder === path) S.folder = np; await refreshLists(); } catch (e) { FS.toast(e.message, 'error'); } } });
       item('Delete folder', async () => { try { await FS.api.delete_folder(S.tab, path); if (S.folder === path) S.folder = null; await refreshLists(); } catch (e) { FS.toast(e.message, 'error'); } }, 'danger');
     });
@@ -381,6 +388,7 @@
       onExport: () => exportCollection(),
       onRefreshAll: () => refreshAll(),
       onTextsUsed: (md) => textsUsedDialog({ note: S.note.id, markdown: md }, 'in the selected items'),
+      onTagStyles: (srcs, map) => tagStylesForEmbeds(srcs, map),
       canLocate: () => !!(S.flex && S.flex.open),
     });
     window.__fsCollection = S.coll;      // for the tests and the console
@@ -557,6 +565,7 @@
       {
         const hl2 = S.note && S.note.id === n.id ? (S.menuHighlight !== undefined ? S.menuHighlight : highlightedSource()) : null;
         if (hl2 && examplesIn(hl2).length) item('Texts used in the selection\u2026', () => textsUsedDialog({ note: n.id, markdown: hl2 }, 'in the selection'), 'texts-used-selection');
+        if (hl2 && examplesIn(hl2).length) item('FLEx tag styles for the selected examples\u2026', () => tagStylesForEmbeds(examplesIn(hl2)), 'tag-styles-selection');
         else item('Texts used in this note\u2026', () => textsUsedDialog({ note: n.id }, 'in \u201c' + (n.title || 'Untitled') + '\u201d'), 'texts-used-note');
       }
       S.menuHighlight = undefined;
@@ -659,7 +668,18 @@
   }
 
   /* ------------------------------------------------------------------ insert / slash */
-  function insertFlex() { FS.picker.open((md, asBlock) => ensureEditor().insertMarkdown(md, asBlock)); }
+  function insertFlex() { FS.openPicker(); }
+  /* The picker, into whatever is open: a note's editor, or a collection (its own add). */
+  FS.openPicker = (o) => { if (isCollection()) { if (S.coll) S.coll.pick(undefined, o); return; } FS.picker.open((md, asBlock) => ensureEditor().insertMarkdown(md, asBlock), o); };
+  /* Tag styles for SEVERAL examples at once (Seth, 2026-10-17: "applyable to a group of examples by
+   * highlight"): the dialog in example scope, its rules written into each embed's `tags=`. */
+  function tagStylesForEmbeds(srcs, applyFn) {
+    srcs = (srcs || []).map((x) => (typeof x === 'string' ? x : x.src)).filter((src) => { const sp = FS.flexref.parse(src); return sp && sp.kind === 'text'; });
+    if (!srcs.length) { FS.toast('No interlinear examples are selected'); return; }
+    const fnFor = (rules) => (src) => { const sp = FS.flexref.parse(src); if (!sp || sp.kind !== 'text') return src; FS.flexref.setTagRules(sp, rules); return FS.flexref.serialize(sp); };
+    FS.tagstyles.dialog({ kind: 'example', label: srcs.length + ' selected example' + (srcs.length === 1 ? '' : 's'), rules: FS.flexref.tagRules(FS.flexref.parse(srcs[0])),
+      apply: (rules) => { const fn = fnFor(rules); if (applyFn) applyFn(fn); else ensureEditor().mapEmbeds(srcs, fn); srcs = srcs.map(fn); } });
+  }
   /* Attach files (Seth, 2026-10-17): COPIED into the notebook's attachments/ unless `link`,
    * then a file alone on its line becomes a card, after text a chip. */
   async function attachFiles(link) {
@@ -781,6 +801,9 @@
     body.appendChild(el('div', { class: 'setting-block' }, el('h3', {}, 'Backup & storage'),
       el('p', { class: 'muted small' }, 'Back the notebook up to a OneDrive, Google Drive or Dropbox folder, or to S3-compatible storage; see how much space the notebook and its backup take, and clean up.'),
       el('div', { class: 'btn-row', style: { justifyContent: 'flex-start' } }, el('button', { class: 'btn primary', 'data-test': 'open-backup', onclick: () => { m.close(); openBackup(); } }, 'Backup & storage…'))));
+    body.appendChild(el('div', { class: 'setting-block' }, el('h3', {}, 'FLEx text markup tags'),
+      el('p', { class: 'muted small' }, 'Tags from FieldWorks\u2019 Text Tagging view are drawn under the words of an example. How each tag looks can be set for the whole project here, for a tab or a folder (their right-click menus), or for chosen examples (the \u2691 on an example, or a selection); the most specific setting wins.'),
+      el('div', { class: 'btn-row', style: { justifyContent: 'flex-start' } }, el('button', { class: 'btn', 'data-test': 'open-tag-styles', onclick: () => { m.close(); FS.tagstyles.dialog({ kind: 'project', key: (S.flex && S.flex.project) || '', label: 'the project' + (S.flex && S.flex.project ? ' \u201c' + S.flex.project + '\u201d' : '') }); } }, 'Tag styles for this project\u2026'))));
     const fx = el('div', { class: 'setting-block' }, el('h3', {}, 'FieldWorks project'));
     const source = el('select');
     for (const [v, l] of [['lcm', 'FieldWorks project (direct, via flexicon)'], ['flextext', '.flextext export file (fallback)'], ['demo', 'Built-in demo project']]) source.appendChild(el('option', { value: v, selected: (S.flex.source || 'lcm') === v }, l));

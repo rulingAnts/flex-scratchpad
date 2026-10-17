@@ -94,6 +94,14 @@
         else if (line === 'gls') add('gls', (w, i) => styledRuns(w.gls || '', R.stylesFor(index, seg.n, 'gls', i), { color: '#2a6e2a' }));
         else if (line === 'pos') add('pos', (w, i) => styledRuns(w.pos || '', R.stylesFor(index, seg.n, 'pos', i), { color: '#7a3e9d', size: 9 }));
       }
+      // FLEx text markup tags: a line per lane, the abbreviation on the tag's first word, its colour behind
+      if (lines.includes('tag') && FS.interlinear.segTags) {
+        const toks = seg.words || [];
+        const aiOf = words.map((w) => (w.ai != null ? w.ai : toks.indexOf(w)));
+        const tg = FS.interlinear.segTags(obj, spec, seg);
+        const lanes = tg.reduce((m, o) => Math.max(m, o.lane + 1), 0);
+        for (let l = 0; l < lanes; l++) add('tag', (w, i) => { const ai = aiOf[i - 1]; const o = tg.find((x) => x.lane === l && ai >= x.a && ai <= x.z); return o ? [{ text: ai === o.firstAi ? (o.t.tag.abbr || o.t.tag.name) : '\u00a0', hl: o.res.bg, size: 8, b: true }] : [{ text: '' }]; });
+      }
       const out = { n: seg.n, label: seg.label || String(seg.n), lines: lineModels };
       if (lines.includes('ft') && seg.free) out.free = styledRuns(seg.free, R.stylesFor(index, seg.n, 'ft', 0), {});
       if (lines.includes('lit') && seg.lit) out.lit = styledRuns(seg.lit, R.stylesFor(index, seg.n, 'lit', 0), { color: '#68717d' });

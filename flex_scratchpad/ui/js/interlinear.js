@@ -328,6 +328,9 @@
     const segs = obj.segments || [];
     const mediaByGuid = new Map((obj.media || []).map((m) => [m.guid, m]));
     const box = el('div', { class: 'flex-obj text-obj' + (obj.cached ? ' cached' : '') });
+    // FLEx's text markup tags (Seth, 2026-10-17): drawn under the words when the `tag` line is on
+    const tagsHere = (obj.tags || []).length && FS.tagstyles ? FS.tagstyles.tagsIn(obj) : [];
+    box._showTags = tagsHere.length > 0 && R.showsTags(spec);
     const range = obj.range || [segs[0] && segs[0].n, segs.length && segs[segs.length - 1].n];
     // FLEx's own numbers (paragraph.segment, as its Gloss / Print views show them) are what a
     // reader knows the segments by; the running count is what `seg=` addresses.
@@ -350,6 +353,7 @@
       head.appendChild(el('button', { class: 'lnk play-range', title: 'Play this range', onclick: () => playRange(box, obj, segs.filter((x) => !blankSeg(x)), mediaByGuid, opts) }, '▶ Play ' + flexRange));
     }
     head.appendChild(el('button', { class: 'lnk', title: 'Reload from FLEx', onclick: () => opts.refresh && opts.refresh() }, '↻'));
+    if (opts.editable && tagsHere.length) head.appendChild(el('button', { class: 'lnk tag-btn', 'data-test': 'tag-btn', title: 'FLEx text markup tags in this example: show, hide, style', onclick: (e) => FS.tagstyles.examplePopover(e.currentTarget, spec, obj, opts) }, '\u2691 ' + tagsHere.length));
     if (opts.editable && !opts.overlay) head.appendChild(el('button', { class: 'lnk', 'data-test': 'collapse-obj', title: 'Collapse to a chip', onclick: () => setCollapsed(spec, opts, true) }, '⤡'));
     if (opts.editable && opts.inCell && opts.editCell && !opts.overlay) head.appendChild(el('button', { class: 'lnk', title: 'Edit the cell\u2019s text (type before or after this example, add another)', onclick: () => opts.editCell() }, '✎'));
     if (opts.editable && !opts.overlay && opts.duplicate) head.appendChild(el('button', { class: 'lnk', title: 'Duplicate this object', onclick: () => opts.duplicate() }, '⧉'));
@@ -374,6 +378,30 @@
     return box;
   }
 
+  /* The tags shown on one segment: [{t, res, a, z, lane, firstAi, lastAi}] — `a`..`z` the analysis
+   * indices the tag covers IN THIS SEGMENT (a tag over several segments covers all of the middle
+   * ones), `lane` so overlapping tags stack, first/lastAi its first and last word cell here. */
+  function segTags(obj, spec, seg) {
+    const out = [];
+    for (const t of obj.tags || []) {
+      if (!t.from || !t.to || seg.n < t.from.seg || seg.n > t.to.seg) continue;
+      const res = FS.tagstyles ? FS.tagstyles.resolve(t.tag, spec) : { bg: '#ffd6a5', fg: '#1a1d21', label: true };
+      if (res.hide) continue;
+      out.push({ t, res, a: seg.n === t.from.seg ? t.from.w : 0, z: seg.n === t.to.seg ? t.to.w : Infinity });
+    }
+    out.sort((x, y) => x.a - y.a || y.z - x.z);
+    const ais = (seg.words || []).map((w, i) => (w.punct ? null : (w.ai != null ? w.ai : i))).filter((x) => x != null);
+    const laneEnd = [];
+    for (const o of out) {
+      let l = 0;
+      while (laneEnd[l] != null && laneEnd[l] >= o.a) l++;
+      o.lane = l; laneEnd[l] = o.z;
+      o.firstAi = ais.find((x) => x >= o.a);
+      o.lastAi = [...ais].reverse().find((x) => x <= o.z);
+    }
+    return out.filter((o) => o.firstAi != null);
+  }
+
   function renderSegment(seg, obj, spec, lines, index, vern, anal, mediaByGuid, opts, box, sel) {
     const row = el('div', { class: 'segment', dataset: { n: seg.n } });
     const gutter = el('div', { class: 'seg-gutter' }, el('span', { class: 'segnum', title: 'FLEx segment ' + (seg.label || seg.n) + (seg.label && seg.label !== String(seg.n) ? ' (segment ' + seg.n + ' of the text, as seg= counts them)' : '') }, seg.label || String(seg.n)));
@@ -394,7 +422,10 @@
     const hasLine = (word, line) => line === 'txt' || (line === 'morph' && !!(word.morphs && word.morphs.length)) || (line === 'mgls' && !!(word.morphs && word.morphs.some((m) => m.gls))) || (line === 'cf' && !!(word.morphs && word.morphs.some((m) => m.cf))) || (line === 'gls' && !!word.gls) || (line === 'pos' && !!word.pos);
     const realWords = (seg.words || []).filter((x) => !x.punct);
     const present = lines.filter((line) => ['txt', 'morph', 'mgls', 'cf', 'gls', 'pos'].includes(line) && realWords.some((x) => hasLine(x, line)));
-    (seg.words || []).forEach((word) => {
+    // the segment's FLEx tags, each in a lane (overlapping tags stack), as rows under the words
+    const tags = box && box._showTags ? segTags(obj, spec, seg) : [];
+    const lanes = tags.reduce((m, o) => Math.max(m, o.lane + 1), 0);
+    (seg.words || []).forEach((word, ti) => {
       if (word.punct) {
         wordRow.appendChild(el('div', { class: 'word-cell punct-cell' }, el('div', Object.assign({ class: 'il-line il-txt' }, wsAttrs(vern)), word.txt)));
         return;
@@ -412,6 +443,20 @@
         else if (line === 'cf') cell.appendChild(el('div', { class: 'il-line il-cf', html: styledParts(word.morphs.map((m) => m.cf || ''), sf('cf')) }));
         else if (line === 'gls') cell.appendChild(el('div', { class: 'il-line il-gls', lang: anal.tag || null, html: styled(word.gls, sf('gls')) }));
         else if (line === 'pos') cell.appendChild(el('div', { class: 'il-line il-pos', html: styled(word.pos, sf('pos')) }));
+      }
+      const ai = word.ai != null ? word.ai : ti;        // FLEx's analysis index: what a tag's begin / end count
+      for (let l = 0; l < lanes; l++) {
+        const o = tags.find((x) => x.lane === l && ai >= x.a && ai <= x.z);
+        if (!o) { cell.appendChild(blank('il-tag')); continue; }
+        const first = ai === o.firstAi, last = ai === o.lastAi, t = o.t.tag;
+        const bar = el('span', { class: 'tagbar' + (first ? ' first' : '') + (last ? ' last' : '') + (seg.n > o.t.from.seg ? ' cont' : '') + (seg.n < o.t.to.seg ? ' more' : '') + (o.res.label ? '' : ' nolabel'),
+          style: { background: o.res.bg, color: o.res.fg }, title: t.name + (t.group ? ' \u2014 ' + t.group : '') + ' (FLEx text markup tag' + (o.res.styleVia ? '; styled by ' + o.res.styleVia.label : '') + ')' },
+          first && o.res.label ? (seg.n > o.t.from.seg ? '\u2026' : '') + (t.abbr || t.name) : '\u00a0');
+        cell.appendChild(el('div', { class: 'il-line il-tag', dataset: { tag: t.name } }, bar));
+        if (o.res.b || o.res.i || o.res.u) {
+          const te = cell.querySelector('.il-txt');
+          if (te) { if (o.res.b) te.classList.add('tag-b'); if (o.res.i) te.classList.add('tag-i'); if (o.res.u) { te.classList.add('tag-u'); te.style.setProperty('--tag-ul', o.res.bg); } }
+        }
       }
       if (opts.editable) {
         cell.addEventListener('click', (e) => {
@@ -742,7 +787,7 @@
         pop.appendChild(el('hr'));
       } else {
         pop.appendChild(el('div', { class: 'row' }, el('b', {}, 'Lines to show')));
-        const names = { txt: 'Word', morph: 'Morphemes', mgls: 'Morph glosses', cf: 'Lex. entries', gls: 'Word gloss', pos: 'Category', ft: 'Free translation', lit: 'Literal translation', note: 'Notes' };
+        const names = { txt: 'Word', morph: 'Morphemes', mgls: 'Morph glosses', cf: 'Lex. entries', gls: 'Word gloss', pos: 'Category', ft: 'Free translation', lit: 'Literal translation', note: 'Notes', tag: 'FLEx text markup tags' };
         const current = spec.lines && spec.lines.length ? spec.lines : R.DEFAULT_LINES;
         for (const l of R.LINES) {
           const cb = el('input', { type: 'checkbox', checked: current.includes(l) });
@@ -1248,5 +1293,5 @@
     });
   }
 
-  FS.interlinear = { blankSeg, peek, nowPlaying, render, renderText, renderEntry, renderWordform, renderChip, hydrateInline, openContext, wholeText, openOverlay, closeOverlay, isCollapsed, setCollapsed, styled, styledParts, invalidate, flexGet, openInFlex, labelOf, numberFor, flexTsv, HL_COLORS };
+  FS.interlinear = { blankSeg, peek, segTags, nowPlaying, render, renderText, renderEntry, renderWordform, renderChip, hydrateInline, openContext, wholeText, openOverlay, closeOverlay, isCollapsed, setCollapsed, styled, styledParts, invalidate, flexGet, openInFlex, labelOf, numberFor, flexTsv, HL_COLORS };
 })();

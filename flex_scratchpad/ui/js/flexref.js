@@ -23,9 +23,11 @@
   'use strict';
   const FS = (window.FS = window.FS || {});
 
-  const LINES = ['txt', 'morph', 'mgls', 'gls', 'pos', 'ft', 'lit', 'note', 'cf'];
+  // `tag` = FLEx's text markup tags, drawn under the words (Seth, 2026-10-17); on by default,
+  // off when an explicit `lines=` leaves it out, like any other line
+  const LINES = ['txt', 'morph', 'mgls', 'gls', 'pos', 'ft', 'lit', 'note', 'cf', 'tag'];
   const STYLES = ['hl', 'b', 'u', 'i', 's', 'color'];
-  const DEFAULT_LINES = ['txt', 'morph', 'mgls', 'gls', 'pos', 'ft'];
+  const DEFAULT_LINES = ['txt', 'morph', 'mgls', 'gls', 'pos', 'ft', 'tag'];
   // Entry embeds choose their FIELDS instead of lines (`fields=cf,mt,gl,def,ex,tr,sub`):
   // entry-level cf (citation form), lf (lexeme form), mt (morph type), hn (homograph number),
   // note; per sense sn (number), spos (category), gl (gloss), def (definition), ex (examples),
@@ -329,6 +331,47 @@
     return index.get(key(n, line, w)) || [];
   }
 
+  /* An example's OWN look for FLEx text markup tags (Seth, 2026-10-17: project-, tab-, folder- and
+   * example-scoped styles, the most specific winning; tagstyles.js resolves them): the `tags=`
+   * key, `tags=Subject:off,Topic:bg#d1fae5+b,*:nolabel` — per tag (its name with spaces as `_`,
+   * its abbreviation, its GUID, or `*` for all) tokens joined by `+`: `off` / `on` (hidden /
+   * shown here whatever the broader scopes say), `bg#rrggbb`, `fg#rrggbb`, `b`, `i`, `u`,
+   * `nolabel` / `label`. A rule = {tag, hide?, bg?, fg?, b?, i?, u?, label?}. */
+  const TAG_TOKEN = /^(off|on|b|i|u|nolabel|label|bg#[0-9a-f]{6}|fg#[0-9a-f]{6})$/;
+  const encodeTagKey = (t) => String(t).replace(/%/g, '%25').replace(/_/g, '%5F').replace(/,/g, '%2C').replace(/:/g, '%3A').replace(/\+/g, '%2B').replace(/ /g, '_');
+  const decodeTagKey = (k) => String(k).replace(/_/g, ' ').replace(/%([0-9A-Fa-f]{2})/g, (m, h) => String.fromCharCode(parseInt(h, 16)));
+  function parseTagRules(val) {
+    const out = [];
+    for (const item of String(val || '').split(',')) {
+      const i = item.indexOf(':');
+      if (i <= 0) continue;
+      const r = { tag: decodeTagKey(item.slice(0, i)) };
+      for (const tok of item.slice(i + 1).split('+')) {
+        const t = tok.trim().toLowerCase();
+        if (!TAG_TOKEN.test(t)) continue;
+        if (t === 'off') r.hide = true; else if (t === 'on') r.hide = false;
+        else if (t === 'nolabel') r.label = false; else if (t === 'label') r.label = true;
+        else if (t.startsWith('bg#')) r.bg = t.slice(2); else if (t.startsWith('fg#')) r.fg = t.slice(2);
+        else r[t] = true;
+      }
+      if (Object.keys(r).length > 1) out.push(r);
+    }
+    return out;
+  }
+  function serializeTagRules(rules) {
+    return (rules || []).map((r) => {
+      const toks = [];
+      if (r.hide === true) toks.push('off'); else if (r.hide === false) toks.push('on');
+      if (r.bg) toks.push('bg' + String(r.bg).toLowerCase()); if (r.fg) toks.push('fg' + String(r.fg).toLowerCase());
+      for (const k of ['b', 'i', 'u']) if (r[k]) toks.push(k);
+      if (r.label === false) toks.push('nolabel'); else if (r.label === true) toks.push('label');
+      return toks.length ? encodeTagKey(r.tag) + ':' + toks.join('+') : '';
+    }).filter(Boolean).join(',');
+  }
+  const tagRules = (spec) => parseTagRules(spec && spec.extra && spec.extra.tags);
+  function setTagRules(spec, rules) { spec.extra = spec.extra || {}; const v = serializeTagRules(rules); if (v) spec.extra.tags = v; else delete spec.extra.tags; }
+  const showsTags = (spec) => ((spec && spec.lines && spec.lines.length) ? spec.lines : DEFAULT_LINES).includes('tag');
+
   /* Find every embed in a markdown string: [{start, end, src, spec}]. */
   function findEmbeds(md) {
     const out = [];
@@ -360,6 +403,7 @@
     parse, serialize, parseTarget, serializeTarget, sameTarget,
     hasStyle, toggleStyle, clearStyles, resolveStyles, stylesFor, findAll,
     lineTextOfWord, lineTextOfSegment, findEmbeds,
+    parseTagRules, serializeTagRules, tagRules, setTagRules, showsTags,
     isEmbedLine: (line) => EMBED_LINE_RE.test(line || ''),
   };
 })();

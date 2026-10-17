@@ -847,6 +847,103 @@ class FlexiconBackend:
                 out.append({"n": n, "label": f"{pi}.{k}", "guid": _guid(seg)})
         return out
 
+    # -- text markup tags (Seth, 2026-10-17) -----------------------------------------
+    # IStText.TagsOC holds the text's ITextTags: BeginSegmentRA / EndSegmentRA, BeginAnalysisIndex /
+    # EndAnalysisIndex (0-based over the segment's analyses, punctuation included) and TagRA, an
+    # item of LangProject.TextMarkupTagsOA (a two-level list: a group, its tags). Unverified
+    # against a real project, like the rest of this file: every access is behind _t().
+    def _poss_dict(self, poss, group: str = "") -> dict:
+        p = self.project
+        poss = self._c(poss)
+        name = _s(_t(lambda: p.BestStr(poss.Name), ""))
+        abbr = _s(_t(lambda: p.BestStr(poss.Abbreviation), ""))
+        return model.tag_item(_guid(poss), name, abbr, group,
+                              model.fw_color(_t(lambda: poss.ForeColor, -1)), model.fw_color(_t(lambda: poss.BackColor, -1)))
+
+    def _tag_group(self, poss) -> str:
+        owner = self._c(_t(lambda: poss.Owner, None))
+        if owner is not None and _t(lambda: owner.ClassName, "") == "CmPossibility":
+            return _s(_t(lambda: self.project.BestStr(owner.Name), ""))
+        return ""
+
+    def _text_tags(self, text, seg_n: dict) -> list[dict]:
+        out = []
+        st = self._c(_t(lambda: text.ContentsOA, None))
+        if st is None:
+            return out
+        for tt in _t(lambda: list(st.TagsOC), []):
+            tt = self._c(tt)
+            poss = _t(lambda: tt.TagRA, None)
+            a = seg_n.get(_guid(_t(lambda: tt.BeginSegmentRA, None)))
+            b = seg_n.get(_guid(_t(lambda: tt.EndSegmentRA, None)))
+            if poss is None or a is None or b is None:
+                continue
+            out.append(model.make_tag(_guid(tt), self._poss_dict(poss, self._tag_group(poss)), a,
+                                      int(_t(lambda: tt.BeginAnalysisIndex, 0) or 0), b, int(_t(lambda: tt.EndAnalysisIndex, 0) or 0)))
+        out.sort(key=lambda t: (t["from"]["seg"], t["from"]["w"], t["to"]["seg"], t["to"]["w"]))
+        return out
+
+    def list_text_tags(self) -> list[dict]:
+        """The project's TextMarkupTags list, flat: each tag with its group (the picker, the
+        style editors). Counts come from tag_occurrences, not here (that walks every text)."""
+        def go():
+            self._need()
+            lst = _t(lambda: self.project.lp.TextMarkupTagsOA, None)
+            out = []
+            for top in _t(lambda: list(lst.PossibilitiesOS), []):
+                top = self._c(top)
+                subs = _t(lambda: list(top.SubPossibilitiesOS), [])
+                if subs:
+                    gname = _s(_t(lambda: self.project.BestStr(top.Name), ""))
+                    out.extend(self._poss_dict(sub, gname) for sub in subs)
+                else:
+                    out.append(self._poss_dict(top, ""))
+            return out
+        try:
+            return self.worker.call(go)
+        except BaseException as e:
+            raise _friendly(e, self.project_name)
+
+    def tag_occurrences(self, tag_guid: str) -> list[dict]:
+        """Every place one tag is used, across the project's texts (the picker's Tags search)."""
+        g = (tag_guid or "").lower()
+
+        def go():
+            self._need()
+            p = self.project
+            out = []
+            for text in _t(lambda: list(p.Texts.GetAll()), []):
+                text = self._c(text)
+                st = self._c(_t(lambda: text.ContentsOA, None))
+                tags = [self._c(tt) for tt in _t(lambda: list(st.TagsOC), []) if st is not None]
+                tags = [tt for tt in tags if _guid(_t(lambda: tt.TagRA, None)) == g]
+                if not tags:
+                    continue
+                segs = {}
+                n = 0
+                for pi, para in enumerate(_t(lambda: list(p.Paragraphs.GetAll(text)), []), 1):
+                    for k, seg in enumerate(_t(lambda: list(p.Segments.GetAll(para)), []), 1):
+                        n += 1
+                        segs[_guid(seg)] = (n, f"{pi}.{k}", seg)
+                title = self._text_title(text, "", self._baseline_ws(text)[1])
+                for tt in tags:
+                    a = segs.get(_guid(_t(lambda: tt.BeginSegmentRA, None)))
+                    b = segs.get(_guid(_t(lambda: tt.EndSegmentRA, None)))
+                    if not a or not b:
+                        continue
+                    wa, wb = int(_t(lambda: tt.BeginAnalysisIndex, 0) or 0), int(_t(lambda: tt.EndAnalysisIndex, 0) or 0)
+                    toks = model.tokenize(_s(_t(lambda: p.Segments.GetBaselineText(a[2]), "")))
+                    last = wb if a is b else len(toks) - 1
+                    words = " ".join(t["txt"] for t in toks[wa:last + 1] if not t["punct"])
+                    out.append({"text": _guid(text), "title": title, "seg": a[0], "segTo": b[0], "label": a[1], "labelTo": b[1],
+                                "at": [model.anchor_of(_guid(a[2])), model.anchor_of(_guid(b[2]))], "words": words + ("…" if a is not b else "")})
+            out.sort(key=lambda r: (r["title"].casefold(), r["seg"]))
+            return out
+        try:
+            return self.worker.call(go, timeout=OPEN_TIMEOUT)
+        except BaseException as e:
+            raise _friendly(e, self.project_name)
+
     def _text_dict(self, text, seg_from, seg_to, max_segments: int = 60, ws_sel: dict | None = None, diag: bool = False, at=None) -> dict:
         p = self.project
         ws = self._writing_systems()
@@ -885,12 +982,14 @@ class FlexiconBackend:
         d["anchorsLost"] = bool(r["lost"])
         n = 0
         pi = 0
+        seg_n: dict[str, int] = {}              # every segment's guid → running number (the tags)
         for para in _t(lambda: list(p.Paragraphs.GetAll(text)), []):
             pi += 1
             k = 0
             for seg in _t(lambda: list(p.Segments.GetAll(para)), []):
                 n += 1
                 k += 1
+                seg_n[_guid(seg)] = n
                 if n < a or (b is not None and n > b) or (n - a) >= max_segments:
                     continue
                 try:
@@ -901,6 +1000,7 @@ class FlexiconBackend:
         d["segmentCount"] = n
         d["range"] = [a, min(n, b or n)] if n else [0, 0]
         d["anchors"] = model.anchors_for(d["segments"])
+        d["tags"] = self._text_tags(text, seg_n)
         if getattr(self, "_alts", False):
             model.fill_alts(d)          # whatever LCM gave no alternative for keeps its one value
         return d
@@ -914,6 +1014,8 @@ class FlexiconBackend:
                 words.append(self._word_dict(tok))
             except Exception as exc:  # noqa: BLE001 — a word that cannot be read shows as "?" with the reason
                 words.append(model.make_word("?", gls=f"⚠ {exc}", guid=_guid(tok)))
+        for i, w in enumerate(words):
+            w["ai"] = i                 # FLEx's analysis index: what a text markup tag's begin / end count
         baseline = _s(_t(lambda: p.Segments.GetBaselineText(seg), ""))
         words = model.fill_punctuation(words, baseline)
         baseline = baseline or model.baseline_from_words(words)

@@ -1463,6 +1463,22 @@
     }
     /* Insert markdown at the current position: into a table cell, at the caret of a text block,
      * replacing an empty paragraph, or after the active widget. */
+    /* Rewrite several embeds at once (Seth, 2026-10-17: tag styles "applyable to a group of
+     * examples by highlight"): fn(src) → the new source of each of `srcs`, wherever it stands. */
+    mapEmbeds(srcs, fn) {
+      let n = 0;
+      for (const b of this.blocks) {
+        let src = b.src;
+        for (const old of new Set(srcs)) {
+          if (!src.includes(old)) continue;
+          const next = fn(old);
+          if (next && next !== old) { src = src.split(old).join(next); n++; }
+        }
+        if (src !== b.src) b.src = src;
+      }
+      if (n) { this.changed(); this.renderAll(); }
+      return n;
+    }
     insertMarkdown(md, asBlock) {
       if (this.activeTable && this.activeTable.insertText) { this.activeTable.insertText(md.replace(/\n/g, ' ')); return; }
       let b = this.active && this.blocks.includes(this.active) ? this.active : this.blocks[this.blocks.length - 1];

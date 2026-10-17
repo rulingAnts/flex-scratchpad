@@ -66,6 +66,49 @@ ENTRIES = [
 ]
 ENTRY_BY_GUID = {e["guid"]: e for e in ENTRIES}
 
+# The project's TextMarkupTags list (two levels in FLEx: a group, its tags) and a few tags on
+# the story, as FLEx's Text Tagging view would place them. Two carry FLEx's own colours, the
+# rest take the app's palette; one spans two segments.
+def _tag(n, name, abbr, group, back=""):
+    return model.tag_item(f"7a9d0c00-0000-4000-8000-0000000000{n:02d}", name, abbr, group, "", back)
+
+
+TAG_LIST = [
+    _tag(1, "Subject", "S", "Syntax", "#dbeafe"),
+    _tag(2, "Object", "O", "Syntax", "#fde68a"),
+    _tag(3, "Verb", "V", "Syntax"),
+    _tag(4, "Topic", "Top", "Discourse"),
+    _tag(5, "Focus", "Foc", "Discourse"),
+]
+TAG_BY_NAME = {t["name"]: t for t in TAG_LIST}
+# (tag, from segment, from word, to segment, to word) — words count the segment's tokens from 0
+STORY_TAGS = [("Subject", 1, 0, 1, 0), ("Verb", 1, 1, 1, 1), ("Focus", 2, 0, 2, 0), ("Subject", 2, 1, 2, 1),
+              ("Verb", 2, 2, 2, 2), ("Object", 2, 3, 2, 3), ("Topic", 4, 0, 4, 1), ("Topic", 5, 0, 6, 0)]
+
+
+def tag_occurrences_in(texts, tag_guid: str) -> list[dict]:
+    """Every place a tag is used, across texts: {text, title, seg, segTo, label, labelTo, at,
+    words} — `words` the tagged words of the first segment (the picker's row)."""
+    g = (tag_guid or "").lower()
+    out = []
+    for t in texts:
+        by_n = {s["n"]: s for s in t.get("segments") or []}
+        for tg in t.get("tags") or []:
+            if (tg.get("tag") or {}).get("guid") != g:
+                continue
+            a, b = by_n.get(tg["from"]["seg"]), by_n.get(tg["to"]["seg"])
+            if not a or not b:
+                continue
+            toks = a.get("words") or []
+            last = tg["to"]["w"] if a is b else len(toks) - 1
+            words = " ".join(w.get("txt", "") for w in toks[tg["from"]["w"]:last + 1] if not w.get("punct"))
+            out.append({"text": t["guid"], "title": t.get("title", ""), "seg": a["n"], "segTo": b["n"],
+                        "label": a.get("label") or str(a["n"]), "labelTo": b.get("label") or str(b["n"]),
+                        "at": [model.anchor_of(a.get("guid", "")), model.anchor_of(b.get("guid", ""))],
+                        "words": words + ("…" if a is not b else "")})
+    out.sort(key=lambda r: (r["title"].casefold(), r["seg"]))
+    return out
+
 
 def W(txt, gls="", pos="", morphs=None, punct=False):
     return model.make_word(txt, punct=punct, gls=gls, pos=pos,
@@ -113,6 +156,8 @@ def _story() -> dict:
             f"9b1c2d3e-4f50-4a6b-8c7d-0e1f2a3b1{i:03d}", i, para, base, words, free=free, k=kk[para],
             begin=b, end=e, media=MEDIA_STORY, notes=["Segment one has a note."] if i == 1 else []))
     t["segmentCount"] = len(t["segments"])
+    t["tags"] = [model.make_tag(f"7a9d0c01-0000-4000-8000-0000000000{i:02d}", TAG_BY_NAME[name], a, wa, b, wb)
+                 for i, (name, a, wa, b, wb) in enumerate(STORY_TAGS, 1)]
     # a second analysis writing system on the first segment (what a real project carries)
     t["segments"][0]["freeAlts"] = {"en": "The dog slept.", "id": "Anjing itu tidur."}
     t["segments"][0]["words"][0]["glsAlts"] = {"en": "dog", "id": "anjing"}
@@ -234,6 +279,16 @@ class DemoBackend:
         if not t:
             raise KeyError(f"No text with guid {guid}")
         return slice_text(t, seg_from, seg_to, max_segments, at=at, alts=alts)
+
+    def list_text_tags(self) -> list[dict]:
+        counts: dict[str, int] = {}
+        for t in self.texts.values():
+            for tg in t.get("tags") or []:
+                counts[tg["tag"]["guid"]] = counts.get(tg["tag"]["guid"], 0) + 1
+        return [dict(x, count=counts.get(x["guid"], 0)) for x in TAG_LIST]
+
+    def tag_occurrences(self, tag_guid: str) -> list[dict]:
+        return tag_occurrences_in(self.texts.values(), tag_guid)
 
     def all_baselines(self) -> dict:
         return {g: {"title": t["title"], "segments": [(sg["n"], sg["baseline"], sg.get("free", "")) + model.index_lines(sg) + (sg.get("label") or str(sg["n"]), sg.get("guid", "")) for sg in t["segments"]]}

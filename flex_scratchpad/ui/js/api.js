@@ -74,7 +74,7 @@
     };
     const notes = {};
     const config = { tabs: [{ dir: 'Notes', name: 'Notes', color: '#2f6fdb' }, { dir: 'Grammar', name: 'Grammar', color: '#0f766e' }],
-      tags: [{ name: 'todo', color: '#b45309' }], flex: { source: 'demo', project: 'Kalu Demo' }, media: { byGuid: {}, folders: [] }, settings: { diacriticsInsensitive: true } };
+      tags: [{ name: 'todo', color: '#b45309' }], flex: { source: 'demo', project: 'Kalu Demo' }, media: { byGuid: {}, folders: [] }, settings: { diacriticsInsensitive: true }, tagStyles: { project: {}, tab: {}, folder: {} } };
     const folders = { Notes: [], Grammar: ['Verbs', 'Verbs/Aspect'] };
     let seq = 0;
     const now = () => new Date().toISOString().slice(0, 19);
@@ -151,6 +151,20 @@
       flex_texts: async (q) => Object.values(demo.texts).filter((t) => !q || t.title.toLowerCase().includes(q.toLowerCase())).map((t) => ({ guid: t.guid, title: t.title, abbrev: t.abbrev, segmentCount: t.segments.length, hasMedia: false })),
       flex_find_in_text: async (guid, phrase) => { const t = demo.texts[guid]; const p = FS.normalize(phrase, true); return t ? t.segments.filter((s) => FS.normalize(s.baseline + ' ' + s.free, true).includes(p)).map((s) => s.n) : []; },
       flex_resolve_link: async (text) => { const m = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i.exec(text || ''); if (!m) return null; const g = m[1].toLowerCase(); const e = demo.entries.find((x) => x.guid === g); if (e) return { kind: 'entry', guid: g, title: e.headword }; if (demo.texts[g]) return { kind: 'text', guid: g, title: demo.texts[g].title }; return null; },
+      flex_text_tags: async () => (demo.tagList || []).map((t) => ({ ...t, count: Object.values(demo.texts).reduce((n, x) => n + (x.tags || []).filter((g) => g.tag.guid === t.guid).length, 0) })),
+      flex_tag_occurrences: async (guid, q) => {
+        const rows = [];
+        for (const t of Object.values(demo.texts)) for (const g of t.tags || []) {
+          if (g.tag.guid !== guid) continue;
+          const a = t.segments.find((s) => s.n === g.from.seg), b = t.segments.find((s) => s.n === g.to.seg);
+          if (!a || !b) continue;
+          const toks = a.words || [], last = a === b ? g.to.w : toks.length - 1;
+          rows.push({ text: t.guid, title: t.title, seg: a.n, segTo: b.n, label: a.label, labelTo: b.label, at: [a.guid.replace(/-/g, '').slice(-12), b.guid.replace(/-/g, '').slice(-12)], words: toks.slice(g.from.w, last + 1).filter((w) => !w.punct).map((w) => w.txt).join(' ') + (a === b ? '' : '…') });
+        }
+        const ql = (q || '').toLowerCase();
+        return rows.filter((r) => !ql || (r.title + ' ' + r.words + ' ' + r.label).toLowerCase().includes(ql));
+      },
+      set_tag_styles: async (kind, key, rules) => { config.tagStyles = config.tagStyles || { project: {}, tab: {}, folder: {} }; if (rules && rules.length) config.tagStyles[kind][key] = rules; else delete config.tagStyles[kind][key]; return config.tagStyles; },
       flex_choose_file: async () => null, flex_locate: async () => [],
       open_in_flex: async (url) => { FS.toast('Would open in FLEx: ' + url); return true; },
       flex_open_object: async (kind, guid) => { FS.toast('Would open in FLEx: ' + kind + ' ' + guid); return true; },

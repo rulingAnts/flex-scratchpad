@@ -282,6 +282,25 @@ Design points that follow, to check when this is built:
   Markdown export and the TSV / LaTeX copies must not see the copy twice. The note's Markdown export
   could keep the copies as they are (they are what a reader without the app sees).
 
+## Text Charts in notes (Seth, 2026-10-17 — "that's for later. Much later")
+
+> *"Later on, I'll want to add the ability to pull in a Text Chart, part of a text chart (including
+> the headers), a range of rows from a text chart, and styling for text chart markers (and also our
+> own custom system of row and word level text chart markers or collapsible custom columns)."*
+
+Not started. What FLEx holds (liblcm): a text's charts are `IDsConstChart` objects
+(`LangProject.DiscourseDataOA.ChartsOC`, each `BasedOnRA` a text), with a column template
+(`TemplateRA`, a CmPossibility tree — the headers and their groups) and `RowsOS` of `IConstChartRow`
+(label, `CellsOS`: `ConstChartWordGroup` spanning analyses `BeginSegmentRA / BeginAnalysisIndex …`
+like a text tag, `ConstChartMovedTextMarker`, `ConstChartClauseMarker`, `ConstChartTag` — the
+markers). The text markup tags (done 2026-10-17: `tags` on a text, `ui/js/tagstyles.js`) are the
+model to follow: read into plain dicts on the worker, a new embed kind (`{{flex:chart <guid>
+rows=3-7 cols=…}}`) drawn as a table of word groups under the template's headers, the markers
+styled through the same scoped rules (project / tab / folder / example), our own row- and
+word-level markers and collapsible columns as additive keys on the embed. FDAT
+(rulingAnts/fdat) already renders FLEx charts from the project XML and is the reference for the
+layout.
+
 ## Dekereke objects in notes (Seth, 2026-10-17 — "near future")
 
 > *"I'd also like our app to be able to have Dekereke objects (linked to Dekereke XML line/ref

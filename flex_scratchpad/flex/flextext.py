@@ -266,6 +266,12 @@ class FlextextBackend:
     def search_entries(self, q: str, limit: int = 30) -> list[dict]:
         return []
 
+    def list_text_tags(self) -> list[dict]:
+        return []                       # a .flextext carries no text markup tags
+
+    def tag_occurrences(self, tag_guid: str) -> list[dict]:
+        return []
+
     def get_entry(self, guid: str) -> dict:
         raise KeyError("Lexical entries are not available from a .flextext file; open the FLEx project.")
 

@@ -78,8 +78,47 @@ def empty_text(guid: str, title: str = "", ws_vern: dict | None = None, ws_anal:
     return {
         "kind": "text", "guid": guid, "title": title, "abbrev": "", "url": "",
         "segmentCount": 0, "ws": {"vern": ws_vern or make_ws(), "anal": ws_anal or make_ws()},
-        "media": [], "segments": [],
+        "media": [], "segments": [], "tags": [],
     }
+
+
+# FLEx TEXT MARKUP TAGS (Seth, 2026-10-17): what the Text Tagging view draws under a span of
+# words — an ITextTag on the text (begin / end segment, begin / end analysis index, a tag item
+# from the project's TextMarkupTags list). `w` counts the segment's analyses (our `words`, with
+# punctuation) from 0, as FLEx does. Tags ride on the text as `tags`, all of them whatever
+# range was fetched, so a note's snapshot always holds the full list.
+def tag_item(guid: str, name: str, abbr: str = "", group: str = "", fore: str = "", back: str = "") -> dict:
+    return {"guid": (guid or "").lower(), "name": name or abbr or "?", "abbr": abbr or name or "?",
+            "group": group or "", "fore": fore or "", "back": back or ""}
+
+
+def make_tag(guid: str, tag: dict, seg_from: int, w_from: int, seg_to: int, w_to: int) -> dict:
+    return {"guid": (guid or "").lower(), "tag": tag, "from": {"seg": int(seg_from), "w": int(w_from)},
+            "to": {"seg": int(seg_to), "w": int(w_to)}}
+
+
+def fw_color(v) -> str:
+    """A FieldWorks colour (an int holding BGR) as '#rrggbb'; '' when it is transparent / unset
+    (kclrTransparent and anything else outside 24 bits — liblcm's XmlImportData gives new items
+    kclrTransparent for all three colours)."""
+    try:
+        v = int(v)
+    except (TypeError, ValueError):
+        return ""
+    if v < 0 or v > 0xFFFFFF:
+        return ""
+    return "#%02x%02x%02x" % (v & 0xFF, (v >> 8) & 0xFF, (v >> 16) & 0xFF)
+
+
+def tag_names(obj: dict) -> list[str]:
+    """Every distinct tag name and abbreviation on a text, in first-seen order."""
+    out: list[str] = []
+    for t in obj.get("tags") or []:
+        for k in ("name", "abbr"):
+            v = (t.get("tag") or {}).get(k) or ""
+            if v and v not in out:
+                out.append(v)
+    return out
 
 
 def make_segment(guid: str, n: int, para: int, baseline: str, words: list[dict], free: str = "",
@@ -431,6 +470,9 @@ def searchable_text(obj: dict) -> str:
                 parts.append(w.get("gls", ""))
                 for m in w.get("morphs", []):
                     parts += [m.get("form", ""), m.get("gls", "")]
+        # its FLEx text markup tags: by name, and as ⚑name so `tagged:name` finds the note
+        for name in tag_names(obj):
+            parts += [name, "\u2691" + name.replace(" ", "_")]
     elif obj.get("kind") == "wordform":
         parts += [obj.get("form", "")] + list(obj.get("glosses", []))
     return " ".join(p for p in parts if p)
