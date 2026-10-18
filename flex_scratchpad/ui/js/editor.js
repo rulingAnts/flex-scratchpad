@@ -106,6 +106,8 @@
     ['flex', 'FLEx example', ''], ['file', 'Attached file', ''], ['hr', 'Divider', '---'],
   ];
   const TEXT_TYPES = new Set(['p', 'h', 'list', 'quote', 'code']);
+  /* What a block is called in a message ("Paragraph removed"). */
+  const blockLabel = (b) => ({ p: 'Paragraph', h: 'Heading', list: 'List', quote: 'Quote', code: 'Code block', table: 'Table', chart: 'Chart', hr: 'Divider', flex: 'Example' }[b.type] || 'Block');
   const PLACEHOLDER = 'Write something, or type / for a menu';
 
   /* ------------------------------------------------------------------ the editor */
@@ -222,16 +224,18 @@
       const hideSoon = () => { clearTimeout(hideT); hideT = setTimeout(() => { if (!bar.matches(':hover')) hide(); }, 160); };
       const shown = () => this.blocks.filter((b) => b.el && b.el.isConnected && b.el.offsetParent !== null && !b.hidden);
       // the gap under the pointer: {above, below} blocks (either may be null at the ends)
+      // the zone is the gap itself (8px) and a couple of pixels, not the blocks' edges (Seth,
+      // 2026-10-18: the bar was "frequently under foot and easy to click on accident")
       const gapAt = (y) => {
         const vis = shown();
         if (!vis.length) return null;
-        const pad = 6;
+        const pad = 2;
         for (let i = 0; i < vis.length; i++) {
           const r = vis[i].el.getBoundingClientRect();
           const next = vis[i + 1];
           const nr = next ? next.el.getBoundingClientRect() : null;
-          if (i === 0 && y < r.top && y > r.top - 14) return { above: null, below: vis[0], y: r.top - 2 };
-          if (nr ? (y >= r.bottom - pad && y <= nr.top + pad) : (y >= r.bottom - pad && y <= r.bottom + 18)) return { above: vis[i], below: next || null, y: nr ? (r.bottom + nr.top) / 2 : r.bottom + 2 };
+          if (i === 0 && y < r.top && y > r.top - 10) return { above: null, below: vis[0], y: r.top - 2 };
+          if (nr ? (y >= r.bottom - pad && y <= nr.top + pad) : (y >= r.bottom - pad && y <= r.bottom + 12)) return { above: vis[i], below: next || null, y: nr ? (r.bottom + nr.top) / 2 : r.bottom + 2 };
         }
         return null;
       };
@@ -240,7 +244,8 @@
         gap = g;
         bar.innerHTML = '';
         const ins = (kind) => () => { const g0 = gap; hide(); if (!g0) return; if (g0.above) this.insertNewBlock(g0.above, 'after', kind); else this.insertNewBlock(g0.below, 'before', kind); };
-        const rm = (b) => () => { hide(); if (b && this.blocks.includes(b)) this.deleteBlock(b); };
+        // a removal is undoable from the toast it leaves (and the button must be clicked twice)
+        const rm = (b) => () => { hide(); if (b && this.blocks.includes(b)) { const what = blockLabel(b); this.deleteBlock(b); FS.toast(what + ' removed', 'ok', { action: { label: 'Undo', fn: () => this.undoStep() } }); } };
         const btn = (label, title, fn, extra) => el('button', Object.assign({ title, onmousedown: (e) => e.preventDefault(), onclick: fn }, extra || {}), label);
         bar.append(
           btn('+ Paragraph', 'A new paragraph here', ins('p'), { 'data-gap': 'p' }),
@@ -257,22 +262,30 @@
             });
           }, { 'data-gap': 'more' }));
         if (g.above || g.below) bar.appendChild(el('span', { class: 'gap-sep' }));
-        if (g.above) bar.appendChild(btn('\u2212 Above', 'Remove the block above this line', rm(g.above), { 'data-gap': 'rm-above', onmouseenter: () => hint(g.above, true), onmouseleave: () => hint(g.above, false) }));
-        if (g.below) bar.appendChild(btn('\u2212 Below', 'Remove the block below this line', rm(g.below), { 'data-gap': 'rm-below', onmouseenter: () => hint(g.below, true), onmouseleave: () => hint(g.below, false) }));
+        if (g.above) bar.appendChild(FS.armed(btn('\u2212 Above', 'Remove the block above this line (click twice)', null, { 'data-gap': 'rm-above', onmouseenter: () => hint(g.above, true), onmouseleave: () => hint(g.above, false) }), rm(g.above)));
+        if (g.below) bar.appendChild(FS.armed(btn('\u2212 Below', 'Remove the block below this line (click twice)', null, { 'data-gap': 'rm-below', onmouseenter: () => hint(g.below, true), onmouseleave: () => hint(g.below, false) }), rm(g.below)));
         const pr = pane.getBoundingClientRect();
         bar.hidden = false;
         bar.style.top = Math.round(g.y - pr.top - bar.offsetHeight / 2) + 'px';
         const rr = root.getBoundingClientRect();
         bar.style.left = Math.round(rr.left - pr.left + rr.width / 2 - bar.offsetWidth / 2) + 'px';
       };
+      // the bar appears only once the pointer has RESTED in a gap (350 ms): passing through
+      // shows nothing; `gapBarOn` (Settings: "Show the bar between blocks") switches it off
+      let pendT = 0, pend = null;
+      const same = (a, b) => a && b && a.above === b.above && a.below === b.below;
       root.addEventListener('mousemove', (e) => {
-        if (FS.drag || e.buttons) { if (!bar.hidden) hide(); return; }
+        if (this.gapBarOn === false) { if (!bar.hidden) hide(); return; }
+        if (FS.drag || e.buttons) { clearTimeout(pendT); pend = null; if (!bar.hidden) hide(); return; }
         const g = gapAt(e.clientY);
-        if (!g) { if (!bar.hidden) hideSoon(); return; }
+        if (!g) { clearTimeout(pendT); pend = null; if (!bar.hidden) hideSoon(); return; }
         clearTimeout(hideT);
-        if (gap && gap.above === g.above && gap.below === g.below && !bar.hidden) return;
-        draw(g);
+        if (!bar.hidden && same(gap, g)) return;
+        if (same(pend, g)) return;
+        clearTimeout(pendT); pend = g;
+        pendT = setTimeout(() => { if (same(pend, g)) { pend = null; draw(g); } }, 350);
       });
+      root.addEventListener('mouseleave', () => { clearTimeout(pendT); pend = null; });
       root.addEventListener('mouseleave', () => hideSoon());
       bar.addEventListener('mouseleave', () => hideSoon());
       bar.addEventListener('mouseenter', () => clearTimeout(hideT));
@@ -1067,6 +1080,7 @@
       if (b.type === 'table') {
         wrap._table = FS.tables.render(host, b.src, {
           onChange: (src) => { b.src = src; this.changed(); },
+          onUndo: () => this.undoStep(),
           openLink: (href) => this.openLink(href),
           onPasteLink: (text, insert) => this.opts.onPasteLink && this.opts.onPasteLink(text, insert),
           onPasteLocate: (text, insert, fallback) => this.opts.onPasteLocate ? this.opts.onPasteLocate(text, insert, fallback) : fallback(),

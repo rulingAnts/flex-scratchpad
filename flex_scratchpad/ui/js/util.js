@@ -95,13 +95,34 @@
   FS.emit = (ev, data) => { for (const fn of listeners[ev] || []) { try { fn(data); } catch (e) { console.error(e); } } };
 
   /* Toasts. */
-  FS.toast = function (msg, kind) {
+  /* opts.action = {label, fn}: a button in the toast (an Undo after a removal — Seth, 2026-10-18:
+   * the bars are "easy to click on accident (with drastic consequences)"); opts.ms: how long. */
+  FS.toast = function (msg, kind, opts) {
+    opts = opts || {};
     let host = document.getElementById('toasts');
     if (!host) { host = FS.el('div', { id: 'toasts' }); document.body.appendChild(host); }
-    const t = FS.el('div', { class: 'toast ' + (kind || '') }, msg);
+    const t = FS.el('div', { class: 'toast ' + (kind || '') + (opts.action ? ' has-action' : '') }, msg);
+    const gone = () => { t.classList.remove('show'); setTimeout(() => t.remove(), 300); };
+    if (opts.action) t.appendChild(FS.el('button', { class: 'toast-act', 'data-test': 'toast-action', onclick: () => { gone(); opts.action.fn(); } }, opts.action.label));
     host.appendChild(t);
     setTimeout(() => t.classList.add('show'), 10);
-    setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 300); }, kind === 'error' ? 6000 : 2600);
+    setTimeout(gone, opts.ms || (kind === 'error' ? 6000 : opts.action ? 6000 : 2600));
+    return t;
+  };
+  /* A destructive button that must be clicked TWICE: the first click arms it ("Remove?", for
+   * 2 s), the second fires. A pointer passing through can never delete anything. */
+  FS.armed = function (btn, fn, armedLabel) {
+    const label = btn.textContent;
+    let t = 0;
+    const disarm = () => { clearTimeout(t); btn.classList.remove('armed'); btn.textContent = label; btn._armed = false; };
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (btn._armed) { disarm(); fn(e); return; }
+      btn._armed = true; btn.classList.add('armed'); btn.textContent = armedLabel || 'Remove?';
+      clearTimeout(t); t = setTimeout(disarm, 2000);
+    });
+    btn.addEventListener('mouseleave', () => { if (btn._armed) { clearTimeout(t); t = setTimeout(disarm, 1200); } });
+    return btn;
   };
 
   /* A "working on it" pill with a spinner, for a wait the user caused (a paste being looked up

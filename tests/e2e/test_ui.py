@@ -67,8 +67,10 @@ def body_of(h):
 
 
 def tool(page, text, nth=0):
-    """Click a button in the bar under the nth table; the bar shows while the table is hovered."""
+    """Click a button in the bar under the nth table; the bar shows once the table was clicked into
+    (not on mere hover — Seth, 2026-10-18), so press on it first."""
     page.locator("table.md-table").nth(nth).hover()
+    page.locator("table.md-table").nth(nth).dispatch_event("mousedown")
     page.locator(".tbl-tools").nth(nth).locator("button", has_text=text).click()
 
 
@@ -2013,13 +2015,26 @@ def test_table_insert_above_while_editing_and_paste_rows_from_the_menu(app):
     page.wait_for_timeout(900)
     b = body_of(h)
     assert "| p | q |\n| r | s |" in b, b
-    # "− Row" deletes the row SELECTED in the gutter, not the cell last edited
+    # the Row ▾ menu's Delete takes the row SELECTED in the gutter, not the cell last edited, and
+    # leaves a toast whose Undo brings it back (Seth, 2026-10-18: the bar's − buttons were "easy
+    # to click on accident (with drastic consequences)")
     page.locator("table.md-table th.gutter.row[data-gr='3']").click()          # the "a2 | b2+zz" row
     page.locator("table.md-table").hover()
-    tool(page, "− Row")
+    assert page.locator(".tbl-tools").first.locator("button", has_text="− Row").count() == 0
+    tool(page, "Row ▾")
+    page.locator("[data-test=row-delete]").click()
+    page.wait_for_selector(".toast:has-text('Row removed') [data-test=toast-action]")
     page.wait_for_timeout(900)
     b = body_of(h)
     assert "b2+zz" not in b and "| p | q |" in b, b
+    page.locator(".toast [data-test=toast-action]").click()
+    page.wait_for_timeout(900)
+    assert "b2+zz" in body_of(h), body_of(h)
+    page.locator("table.md-table th.gutter.row[data-gr='3']").click()
+    tool(page, "Row ▾")
+    page.locator("[data-test=row-delete]").click()
+    page.wait_for_timeout(900)
+    assert "b2+zz" not in body_of(h), body_of(h)
     assert not errors
 
 
@@ -2800,6 +2815,7 @@ def test_the_view_stays_put_on_a_click_beside_a_table_and_on_table_tools(app):
     # a press on a tool whose release lands on the background (the table redrew under it) is
     # not a background click
     page.locator("table.md-table").hover()
+    page.locator("table.md-table").dispatch_event("mousedown")
     btn = page.locator(".tbl-tools").first.locator("button", has_text="+ Row")
     b = btn.bounding_box()
     page.mouse.move(b["x"] + 5, b["y"] + 5)
@@ -2810,6 +2826,7 @@ def test_the_view_stays_put_on_a_click_beside_a_table_and_on_table_tools(app):
     assert abs(st() - s0) <= 2, (s0, st())
     for label in ("+ Row", "+ Column"):
         page.locator("table.md-table").hover()
+        page.locator("table.md-table").dispatch_event("mousedown")
         page.locator(".tbl-tools").first.locator("button", has_text=label).click()
         page.wait_for_timeout(300)
         assert abs(st() - s0) <= 2, (label, s0, st())
@@ -3851,6 +3868,8 @@ def test_gap_bar_between_blocks_adds_and_removes(app):
     x = page.evaluate("() => { const r = document.querySelector('#editor').getBoundingClientRect(); return r.left + r.width / 2; }")
     page.mouse.move(x, gap_y - 30)
     page.mouse.move(x, gap_y)
+    page.wait_for_timeout(120)
+    assert bar.is_hidden()                     # passing through shows nothing: the pointer has to REST in the gap
     page.wait_for_selector("[data-test=blk-gap]:not([hidden])")
     # the bar sits on the gap
     top, bottom = page.evaluate("() => { const r = document.querySelector('#blk-gap').getBoundingClientRect(); return [r.top, r.bottom]; }")
@@ -3871,11 +3890,30 @@ def test_gap_bar_between_blocks_adds_and_removes(app):
     page.wait_for_selector("[data-test=blk-gap]:not([hidden])")
     bar.locator("[data-gap=rm-below]").hover()
     assert page.evaluate("() => document.querySelectorAll('#editor .blk')[1].classList.contains('del-hint')")
+    # one click only ARMS the button ("Remove?"); it disarms by itself; two clicks remove
+    bar.locator("[data-gap=rm-below]").click()
+    assert bar.locator("[data-gap=rm-below]").inner_text() == "Remove?" and page.locator("#editor .blk").count() == 3
+    page.wait_for_timeout(2300)
+    assert bar.locator("[data-gap=rm-below]").inner_text() == "− Below"
+    bar.locator("[data-gap=rm-below]").click()
     bar.locator("[data-gap=rm-below]").click()
     page.wait_for_timeout(700)
     assert body_of(h).strip() == "first\n\nsecond", body_of(h)
     assert page.locator("#editor .blk").count() == 2
     assert page.locator("#editor .del-hint").count() == 0
+    # the toast's Undo brings the paragraph back
+    page.wait_for_selector(".toast:has-text('Paragraph removed') [data-test=toast-action]")
+    page.locator(".toast [data-test=toast-action]").click()
+    page.wait_for_timeout(700)
+    assert page.locator("#editor .blk").count() == 3 and body_of(h).strip() == "first\n\nmiddle\n\nsecond", body_of(h)
+    gap_y = page.evaluate("() => { const [a, b] = document.querySelectorAll('#editor .blk'); return (a.getBoundingClientRect().bottom + b.getBoundingClientRect().top) / 2; }")
+    page.mouse.move(x, gap_y + 40)
+    page.mouse.move(x, gap_y)
+    page.wait_for_selector("[data-test=blk-gap]:not([hidden])")
+    bar.locator("[data-gap=rm-below]").click()
+    bar.locator("[data-gap=rm-below]").click()
+    page.wait_for_timeout(700)
+    assert page.locator("#editor .blk").count() == 2
     # below the last block: no "− Below"; + More ▾ lists every kind, each inserting here
     last_bottom = page.evaluate("() => document.querySelector('#editor .blk:last-child').getBoundingClientRect().bottom")
     page.mouse.move(x, last_bottom + 6)
@@ -3891,6 +3929,32 @@ def test_gap_bar_between_blocks_adds_and_removes(app):
     page.mouse.move(x, 5)
     page.wait_for_timeout(300)
     assert bar.is_hidden()
+    # a table's bar shows once the table was clicked into, not on hover
+    page.locator("#editor .blk-body").first.click()
+    page.keyboard.press("Control+End")
+    page.locator("[data-ins=table]").dispatch_event("mousedown")
+    page.wait_for_selector("#editor table.md-table")
+    page.locator("#editor table.md-table").hover()
+    page.wait_for_timeout(200)
+    assert not page.locator("#editor .tbl-tools").is_visible()
+    page.locator("#editor table.md-table").dispatch_event("mousedown")
+    page.wait_for_selector("#editor .tbl-tools:visible")
+    page.locator("#editor .blk-body").first.click()
+    page.wait_for_timeout(200)
+    assert not page.locator("#editor .tbl-tools").is_visible()
+    # Settings can switch the bar between blocks off
+    page.locator("#btn-settings").click()
+    page.locator("[data-test=setting-gapbar]").uncheck()
+    page.keyboard.press("Escape")
+    gap_y = page.evaluate("() => { const [a, b] = document.querySelectorAll('#editor .blk'); return (a.getBoundingClientRect().bottom + b.getBoundingClientRect().top) / 2; }")
+    page.mouse.move(x, gap_y - 30)
+    page.mouse.move(x, gap_y)
+    page.wait_for_timeout(700)
+    assert bar.is_hidden()
+    assert h.api.init()["config"]["settings"]["gapBar"] is False
+    page.locator("#btn-settings").click()
+    page.locator("[data-test=setting-gapbar]").check()
+    page.keyboard.press("Escape")
     assert not errors
 
 

@@ -49,6 +49,8 @@
   }
   /* Sticky headings (Seth, 2026-10-17): on unless turned off in Settings or the H ▾ menu. */
   function stickyOn() { return (S.config && S.config.settings || {}).stickyHeadings !== false; }
+  function gapBarOn() { return (S.config && S.config.settings || {}).gapBar !== false; }
+  function applyGapBar() { if (S.editor) S.editor.gapBarOn = gapBarOn(); }
   function applySticky() { if (S.editor) S.editor.setSticky(stickyOn()); }
   async function toggleSticky() {
     try { S.config.settings = await FS.api.set_setting('stickyHeadings', !stickyOn()); } catch (e) { FS.toast(e.message, 'error'); return; }
@@ -70,6 +72,7 @@
     loadFtags();
     applyMarkers();
     applySticky();
+    applyGapBar();
     if (!S.tab || !S.config.tabs.some((t) => t.dir === S.tab)) S.tab = (S.config.tabs[0] || {}).dir || null;
     renderRail();
     renderList();
@@ -463,6 +466,7 @@
     });
     window.__fsEditor = S.editor;        // for the tests and the console
     applySticky();
+    applyGapBar();
     return S.editor;
   }
   async function openNote(id) {
@@ -1196,6 +1200,9 @@
     const mk = el('input', { type: 'checkbox', checked: !!(S.config.settings || {}).hideMarkers });
     mk.addEventListener('change', async () => { S.config.settings = await FS.api.set_setting('hideMarkers', mk.checked); applyMarkers(); });
     nb.appendChild(el('label', { class: 'small', style: { display: 'flex', gap: '6px', marginTop: '8px' } }, mk, 'Hide Markdown markers while editing (**bold**, # heading, - list) — the toolbar still formats, and typing the markers still works'));
+    const gb = el('input', { type: 'checkbox', checked: gapBarOn(), 'data-test': 'setting-gapbar' });
+    gb.addEventListener('change', async () => { S.config.settings = await FS.api.set_setting('gapBar', gb.checked); applyGapBar(); });
+    nb.appendChild(el('label', { class: 'small', style: { display: 'flex', gap: '6px', marginTop: '8px' } }, gb, 'Show the bar between blocks when the pointer rests in a gap (+ Paragraph, + Example, + Table, \u2212 Above / \u2212 Below; the right-click and \u22ee menus insert blocks either way)'));
     const sh = el('input', { type: 'checkbox', checked: stickyOn(), 'data-test': 'setting-sticky' });
     sh.addEventListener('change', async () => { S.config.settings = await FS.api.set_setting('stickyHeadings', sh.checked); applySticky(); });
     nb.appendChild(el('label', { class: 'small', style: { display: 'flex', gap: '6px', marginTop: '8px' } }, sh, 'Sticky headings: keep the headings above the part of the note in view at the top of the window (their \u25be collapses the section in place)'));

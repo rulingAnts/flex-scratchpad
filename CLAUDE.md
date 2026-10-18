@@ -142,7 +142,17 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   + More ▾ (`insertSection` with only the side that means "here") insert at that gap through
   `insertNewBlock`; − Above / − Below `deleteBlock` the neighbour, marked `.del-hint` while the
   button is hovered. It hides on scroll, keys, a drag and when the pointer leaves (160 ms grace
-  so it can be reached).
+  so it can be reached). SAFE TO HAVE AROUND (Seth, 2026-10-18: the bars are "frequently under
+  foot and easy to click on accident (with drastic consequences)"): the zone is the 8px gap
+  ± 2px, not the blocks' edges; the bar appears only once the pointer has RESTED in one gap for
+  350 ms (passing through shows nothing); the − buttons are `FS.armed` (util.js: the first click
+  turns the button into "Remove?" for 2 s, the second fires); every removal leaves
+  `FS.toast(…, {action: {label: 'Undo', fn}})` → `undoStep`; and Settings "Show the bar between
+  blocks" (`settings.gapBar`, `editor.gapBarOn`) turns it off. THE TABLE BAR shows for a table
+  that was CLICKED INTO (`.tbl-active` on the table's host: a mousedown or focusin inside it; a
+  press anywhere else takes it away), never on mere hover; − Row / − Column moved into the Row ▾ /
+  Column ▾ menus ("Delete row(s)", `row-delete` / `col-delete`) and, like the cell menu's
+  deletions, leave an Undo toast (`opts.onUndo` from the editor).
 - New blocks (Seth, 2026-10-16): right-click a block that is not running text (an example, a
   chart, a divider…) or the space between blocks, a table cell, or open the ⋮ block menu →
   "Insert a new block": paragraph, heading, bulleted / numbered list, checklist, quote, table,
