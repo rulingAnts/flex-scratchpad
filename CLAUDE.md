@@ -526,8 +526,12 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   fields directly (read-only, behind `_t()`; `plans/flexicon-requests.md` asks for them); the WHOLE
   chart is read and snapshotted (`chart-<guid>.json`; charts are small), `model.slice_chart` cuts the
   rows an embed asks for; `Api.flex_charts(text?)`, `flex_chart_markers()`, `flex_get('chart', …)`;
-  `--dump-charts [TEXT]` writes `flex-scratchpad-charts.json` (`lcm.explain_charts`: every chart, the
-  markers, the rows' cell parts raw) — ASK FOR THAT FIRST when a chart comes out wrong; the demo has
+  `--dump-charts [WHICH]` writes `flex-scratchpad-charts.json` (`lcm.explain_charts`: every chart with
+  every stored alternative of its name, the markers, and ONE chart's rows with their cell parts raw —
+  `pick_chart`: every word of WHICH in the text title / name / template / GUID, a chart with rows
+  first, so `Siakai` is the fullest Siakai chart and `"Siakai SVC"` the SVC one; `Siakai` alone once
+  picked the first of five charts on that text, an empty one) — ASK FOR THAT FIRST when a chart
+  comes out wrong; the demo has
   one chart on the story with every kind of cell. FIRST CONTACT (Seth's project, 2026-10-18): the
   reader worked as written — word groups with analysis indexes, columns under their groups
   ("Fronted Material › Outer" and "Post-Material › Outer" share a name), the text's tags, a

@@ -229,3 +229,22 @@ def test_a_text_knows_its_chart_spans_and_a_chart_its_text_tags(tmp_path):
     assert off["cached"] and len(off["chartSpans"]) == len(spans)
     c = api.flex_get("chart", CHART)
     assert [tg["tag"]["name"] for tg in c["tags"]][:3] == ["Subject", "Verb", "Focus"]
+
+
+def test_dump_charts_picks_a_chart_with_rows_that_matches_every_word():
+    from flex_scratchpad.flex.lcm import pick_chart
+    # Seth's project (2026-10-18): five nameless charts on "Siakai", the first two empty
+    charts = [
+        {"guid": "28d8", "name": "", "title": "Siakai", "rows": 0, "template": "Grammatical Relation Tracking"},
+        {"guid": "4c24", "name": "", "title": "Siakai", "rows": 0, "template": "Clause-Chain Analysis"},
+        {"guid": "7db4", "name": "", "title": "Siakai", "rows": 72, "template": "Default"},
+        {"guid": "97e1", "name": "", "title": "Siakai", "rows": 58, "template": "SVC Analysis"},
+        {"guid": "00d4", "name": "", "title": "Advice for a Fayu Husband", "rows": 9, "template": "Default"},
+    ]
+    assert pick_chart(charts, "Siakai") == 2            # the chart with most rows, never an empty one
+    assert pick_chart(charts, "siakai svc") == 3        # every word: the title and the template
+    assert pick_chart(charts, "97e1") == 3              # a GUID (prefix) works too
+    assert pick_chart(charts, "") == 2                  # no filter: the fullest chart
+    assert pick_chart(charts, "Clause-Chain") == 1      # an empty chart when only empty ones match
+    assert pick_chart(charts, "nothing like it") is None
+    assert pick_chart([], "") is None

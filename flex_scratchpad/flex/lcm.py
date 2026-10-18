@@ -158,6 +158,23 @@ def _ms(v) -> int | None:
         return None
 
 
+def pick_chart(summaries: list[dict], which: str = "") -> int | None:
+    """Which chart `--dump-charts [WHICH]` reports in full: every word of WHICH must appear in the
+    chart's text title, name, template name or GUID (so `Siakai SVC` picks the SVC chart on
+    Siakai), and among the matches a chart WITH rows comes first (Seth, 2026-10-18: `Siakai`
+    picked an empty chart — the first of five on that text), then the one with most rows.
+    None when nothing matches."""
+    words = [w for w in (which or "").casefold().split() if w]
+    best = None
+    for i, summ in enumerate(summaries):
+        hay = " ".join(str(summ.get(k) or "") for k in ("title", "name", "template", "guid")).casefold()
+        if all(w in hay for w in words):
+            key = (int(summ.get("rows") or 0) > 0, int(summ.get("rows") or 0), -i)
+            if best is None or key > best[0]:
+                best = (key, i)
+    return None if best is None else best[1]
+
+
 class FlexiconBackend:
     """The Backend protocol over a FLEx project opened read-only through flexicon."""
 
@@ -1488,10 +1505,11 @@ class FlexiconBackend:
         return out
 
     def explain_charts(self, which: str = "", max_rows: int = 40) -> dict:
-        """What the project's charts look like RAW, for `--dump-charts`: every chart's summary,
-        the markers list, and for the first chart whose text matches `which` (or the first chart)
-        the rows with each cell part's class and fields as read, plus the chart as this app
-        builds it. The first thing to ask for when a chart comes out wrong."""
+        """What the project's charts look like RAW, for `--dump-charts`: every chart's summary
+        (with every stored alternative of its name), the markers list, and for ONE chart — the
+        one `pick_chart` chooses for `which` — the rows with each cell part's class and fields
+        as read, plus the chart as this app builds it. The first thing to ask for when a chart
+        comes out wrong."""
         def go():
             self._need()
             charts = self._chart_objects()
@@ -1501,14 +1519,13 @@ class FlexiconBackend:
                     rep["charts"].append(self._chart_summary(ch))
                 except Exception as exc:  # noqa: BLE001
                     rep["charts"].append({"guid": _guid(ch), "error": str(exc)})
-            w = (which or "").casefold()
-            pick = None
             for ch, summ in zip(charts, rep["charts"]):
-                if not w or w in (summ.get("title", "") + " " + summ.get("name", "") + " " + summ.get("guid", "")).casefold():
-                    pick = ch
-                    break
-            if pick is None:
+                summ["nameAlts"] = self._ws_alternatives(_t(lambda: ch.Name, None))      # every stored alternative: is it really nameless?
+            i = pick_chart(rep["charts"], which)
+            rep["picked"] = i
+            if i is None:
                 return rep
+            pick = charts[i]
             for i, row in enumerate(_t(lambda: list(pick.RowsOS), []), 1):
                 if i > max_rows:
                     break

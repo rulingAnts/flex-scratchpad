@@ -32,7 +32,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--dump", metavar="TEXT", help="print the first segments of a text (title, part of a title, or GUID) as JSON and exit — for diagnosing what flexicon returns")
     ap.add_argument("--locate", metavar="SOURCE", help="explain where pasted FLEx rows land: SOURCE is 'clip' (the clipboard, Windows) or a text file; writes a JSON report (--out) and exits")
     ap.add_argument("--dump-tags", nargs="?", const="", metavar="TEXT", help="write what the project's text markup tags look like raw (the list, and the tags of the first texts that have any, or of TEXT) to a JSON report (--out) and exit")
-    ap.add_argument("--dump-charts", nargs="?", const="", metavar="TEXT", help="write what the project's text charts look like raw (every chart, the Chart Markers list, and the rows of the first chart — or of TEXT's — as read) to a JSON report (--out) and exit")
+    ap.add_argument("--dump-charts", nargs="?", const="", metavar="TEXT", help="write what the project's text charts look like raw (every chart, the Chart Markers list, and the rows of one chart as read: the first with rows, or the one whose text title, template or GUID holds every word of TEXT, e.g. \"Siakai SVC\") to a JSON report (--out) and exit")
     ap.add_argument("--out", default=None, help="report file for --locate (flex-scratchpad-locate.json), --dump-tags (flex-scratchpad-tags.json) or --dump-charts (flex-scratchpad-charts.json)")
     ap.add_argument("--backup", action="store_true", help="back the notebook up to the place set in Settings (what closing the app starts), then exit (0 = backed up)")
     ap.add_argument("--register-links", action="store_true", help="register flexscratchpad:// links for this user (Windows) and exit")
@@ -178,7 +178,7 @@ def charts_report(project: str | None, which: str, out: str, demo: bool = False)
         Path(out).write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
         ch = report.get("chart") or {}
         print(f"{len(report['charts'])} chart(s), {len(report['markers'])} marker(s) in the list"
-              + (f"; {ch.get('name') or 'chart'} on {ch.get('title') or '?'}: {ch.get('rowCount', 0)} row(s), {len((ch.get('template') or {}).get('columns') or [])} column(s)" if ch else "")
+              + (f"; {ch.get('name') or 'chart'} on “{ch.get('title') or '?'}” ({(ch.get('template') or {}).get('name') or 'no template'}): {ch.get('rowCount', 0)} row(s), {len((ch.get('template') or {}).get('columns') or [])} column(s)" if ch else "; no chart matches " + repr(which) if which else "")
               + f" → {out}")
         return 0
     except FlexError as e:
