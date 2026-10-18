@@ -369,8 +369,9 @@ order (Seth, 2026-10-18, "go ahead and start building all this"):
 
 1. ~~A chart note type~~ — DONE 2026-10-18 (CLAUDE.md › CHART NOTES).
 2. ~~Custom columns~~ — DONE 2026-10-18 (list / notes / rule columns, project-wide lists, rules
-   with row styles). Still open: the custom columns in the HTML / Word exports and the TSV copy;
-   counts in rule outputs; filtering the rows by a rule.
+   with row styles; since the same day the columns and row colours are in every export — HTML,
+   Word, Excel, PDF, slides, PowerPoint). Still open: the custom columns in the TSV copy; counts in
+   rule outputs; filtering the rows by a rule.
 3. ~~Visual filters on chart markers~~ — DONE 2026-10-18 (marker rules with `row`). Still open:
    pseudo-markers (clause:dependent, moved:preposed) as filter targets.
 4. ~~Search and collect~~ — DONE 2026-10-18 (`chart_search`, the column profile, chart collections
@@ -403,6 +404,24 @@ styled through the same scoped rules (project / tab / folder / example), our own
 word-level markers and collapsible columns as additive keys on the embed. FDAT
 (rulingAnts/fdat) already renders FLEx charts from the project XML and is the reference for the
 layout.
+
+## Exports (Seth, 2026-10-18 — shipped the same day: HTML with embedded audio, Word, Excel, PDF, slideshow, PowerPoint)
+
+Open after the first build (CLAUDE.md › EXPORTS):
+
+- **The direct PDF on Windows** (`pdf_print.py`, WebView2's `PrintToPdfAsync` through a hidden
+  pywebview window) has not run on a real machine; the print dialog is the fallback. When it works,
+  consider a page-size / margin choice in the dialog, and headers / footers (note title, page n).
+- **PowerPoint audio**: the clips could be embedded as PowerPoint media (a `p:pic` with
+  `a:audioFile`, a media relationship and a `p:timing` tree); the slideshow page carries them today.
+- **Nested examples in table cells** are plain text in Excel and PowerPoint (their text; the HTML
+  and Word exports draw them).
+- **An export settings dialog** (which lines, fonts, paper size, "one example per page", a cover
+  page) instead of the one audio question; remember the last choices.
+- **Export a folder or a tab** as one document / deck / workbook (today: one note at a time; the
+  notebook zip holds everything).
+- **The slideshow's speaker notes** (a note's `> quote` block under an example as the presenter's
+  note; `S` to show them) and a "section" slide per H1 with its sub-headings as an agenda.
 
 ## Dekereke objects in notes (Seth, 2026-10-17 — "near future")
 

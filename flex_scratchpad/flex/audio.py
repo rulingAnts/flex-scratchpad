@@ -117,6 +117,39 @@ def cut_clip(src: str | Path, dst_wav: Path, begin_ms: int, end_ms: int, ffmpeg:
     return None
 
 
+EMBED_MIMES = {".ogg": "audio/ogg", ".opus": "audio/ogg", ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".wav": "audio/wav",
+               ".flac": "audio/flac", ".webm": "audio/webm"}
+
+
+def encode_for_embed(src: str | Path, dst_stem: Path, ffmpeg: str | None = None) -> tuple[Path, str] | None:
+    """A clip as the smallest file a web page can carry (Seth, 2026-10-18: "base64 embedded
+    audio"): Opus in Ogg at 40 kb/s mono through ffmpeg (an hour is ~18 MB), MP3 when the build
+    has no Opus encoder; without ffmpeg the clip itself (a WAV or FLAC slice, which Chromium
+    plays too — just bigger). Returns (path, mime) or None when nothing could be made."""
+    src = Path(src)
+    if not src.is_file():
+        return None
+    exe = ffmpeg or find_ffmpeg()
+    if exe:
+        for ext, codec in ((".ogg", ["-c:a", "libopus", "-b:a", "40k", "-ar", "48000", "-application", "voip"]), (".mp3", ["-c:a", "libmp3lame", "-q:a", "6"])):
+            dst = dst_stem.with_name(dst_stem.name + ext)      # <clip>.export.ogg: never mistaken for the clip itself (find_audio_clip matches stems)
+            if dst.is_file() and dst.stat().st_mtime >= src.stat().st_mtime:
+                return dst, EMBED_MIMES[ext]
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            tmp = dst.with_name(dst.stem + ".tmp" + ext)
+            try:
+                _run([exe, "-y", "-v", "error", "-i", str(src), "-vn", "-ac", "1", *codec, str(tmp)], 300)
+                tmp.replace(dst)
+                return dst, EMBED_MIMES[ext]
+            except (subprocess.SubprocessError, OSError):
+                try:
+                    tmp.unlink()
+                except OSError:
+                    pass
+    mime = EMBED_MIMES.get(src.suffix.lower())
+    return (src, mime) if mime else None
+
+
 def store_clip_bytes(dst: Path, data_base64: str) -> Path:
     dst.parent.mkdir(parents=True, exist_ok=True)
     raw = base64.b64decode(data_base64.split(",", 1)[-1])

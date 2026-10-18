@@ -264,7 +264,35 @@
     changed() { if (this.opts.onChange) this.opts.onChange(this.markdown()); }
     guid() { return this.st.spec ? this.st.spec.guid : (this.opts.chartGuid ? this.opts.chartGuid() : ''); }
     /* What the other exports read: the view as one block (the custom columns are not exported yet). */
-    asEditor() { return { blocks: this.st.view ? [{ type: 'flex', src: this.st.view }] : [], flextextItems: () => [] }; }
+    /* What the exporter sees (Seth, 2026-10-18: "pretty exports for chart-type notes"): the view
+     * embed with the custom columns and the rule / marker row styles attached (`extras`, read by
+     * export.js chartBlock), then the note's own text as ordinary markdown blocks. */
+    asEditor() {
+      const blocks = [];
+      if (this.st.view) blocks.push({ type: 'flex', src: this.st.view, extras: this.exportExtras() });
+      if (this.st.other && FS.markdown && FS.markdown.splitBlocks) for (const b of FS.markdown.splitBlocks(this.st.other)) blocks.push(b);
+      return { blocks, flextextItems: () => [] };
+    }
+    exportExtras() {
+      const self = this;
+      const ruleAnswer = (col, row, chart) => { const r = self.cases(col); if (r.error) return null; return applyRule(r.cases, rowCtx(row, chart, self.st.values, self.st.columns)); };
+      return {
+        cols: this.st.columns.map((c) => ({ name: c.name, kind: c.kind })),
+        cell(i, row, chart) {
+          const col = self.st.columns[i];
+          if (!col) return { text: '' };
+          if (col.kind !== 'rule') return { text: self.value(row, col) };
+          const ans = ruleAnswer(col, row, chart);
+          if (!ans) return { text: '' };
+          return Object.assign({ text: ans.text }, ans.style && ans.style.scope === 'cell' ? ans.style : {});
+        },
+        rowStyle(row, chart) {
+          const st = {};
+          for (const col of self.st.columns) { if (col.kind !== 'rule') continue; const ans = ruleAnswer(col, row, chart); if (ans && ans.style && ans.style.scope === 'row') Object.assign(st, ans.style); }
+          return st;
+        },
+      };
+    }
     cases(col) {
       if (!this.ruleCache.has(col)) { try { this.ruleCache.set(col, { cases: parseRule(col.settings) }); } catch (e) { this.ruleCache.set(col, { error: e.message }); } }
       return this.ruleCache.get(col);

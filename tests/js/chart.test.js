@@ -75,6 +75,10 @@ test('headers, visible columns, merged cells, free-translation runs', () => {
   const rows = [{ cells: [seg(1, 0), seg(2, 0)] }, { cells: [seg(2, 1)] }, { cells: [seg(2, 2)] }, { cells: [{ kind: 'tag', tag: {} }] }];
   assert.deepEqual(C.freeRuns(rows).map((r) => [r.from, r.to, r.segs]), [[0, 0, [1]], [1, 3, [2]]]);
   assert.deepEqual(C.freeRuns([]), []);
+  // playback: a timed line's ▶ sits on the FIRST row holding its words (Seth, 2026-10-18)
+  const timed = [{ n: 1, begin: 0, end: 1000 }, { n: 2, begin: 1000, end: 2000 }, { n: 3 }];
+  assert.deepEqual([...C.lineStarts(rows, timed)].map(([i, ss]) => [i, ss.map((s) => s.n)]), [[0, [1, 2]]]);
+  assert.deepEqual([...C.lineStarts(c.rows, c.segments)].map(([i, ss]) => [i, ss.map((s) => s.n)]), [[0, [1]], [1, [2]], [2, [3]], [4, [4]], [5, [5]], [6, [6]]]);
   assert.deepEqual(C.freeText(c, [1, 2], true), ['‘The dog slept.’ (1.1)', '‘Yesterday the child saw the river.’ (1.2)']);
 });
 

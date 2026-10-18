@@ -150,6 +150,7 @@ def _chart(story: dict) -> dict:
     ch["abbrev"] = story.get("abbrev", "")
     ch["url"] = story.get("url", "")
     g = lambda n: f"d15c0000-0000-4000-8000-0000000000{n:02x}"   # noqa: E731 — row / cell guids
+    ch["media"] = [dict(m) for m in story.get("media") or []]
     W = lambda guid, col, seg, a, b=None, seg_to=None, **kw: model.make_word_cell(guid, col, by_n[seg], a, by_n[seg_to or seg], a if b is None else b, **kw)  # noqa: E731
     rows = [
         # 1a  Kabir | ka-nuwa-mo lo .          (seg 1: ai 0 Kabir, 1 ka-nuwa-mo, 2 lo, 3 .)

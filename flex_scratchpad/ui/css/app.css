@@ -840,7 +840,7 @@ table.md-table td.drop-target, table.md-table th.drop-target { outline: 2px soli
 /* playback (interlinear.js follow / playRange): the line under the playhead, and a player that
    stays at the bottom of the view while its example runs past it, then rests at the example's end */
 .segment.playing-line { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); border-radius: 6px; scroll-margin: 64px 0 72px; transition: background 0.2s; }
-.text-obj .transport { position: sticky; bottom: 8px; z-index: 4; background: var(--bg); border: 1px solid var(--border); box-shadow: 0 4px 14px rgba(15, 23, 42, 0.12); }
+.text-obj .transport, .chart-obj .transport { position: sticky; bottom: 8px; z-index: 4; background: var(--bg); border: 1px solid var(--border); box-shadow: 0 4px 14px rgba(15, 23, 42, 0.12); }
 
 /* now playing (interlinear.js nowPlaying): whenever audio plays and the example's own player is
    not on screen — always a way to pause and to stop it */
@@ -1021,3 +1021,8 @@ table.md-table td.drop-target, table.md-table th.drop-target { outline: 2px soli
 .pivot-table td.n.zero { color: var(--faint); }
 .pivot-table td.n.total { font-weight: 700; }
 .pivot-table tr.totals th, .pivot-table tr.totals td { border-top: 2px solid var(--border); }
+
+/* chart playback (Seth, 2026-10-18): ▶ on the first row of each timed line, the cells holding the playing line lit */
+.tchart .rlab .seg-play, .tchart .th-lab .seg-play { width: 18px; height: 18px; font-size: 8px; margin-right: 4px; vertical-align: middle; }
+.tchart td.ccell.playing-line { background: var(--accent-soft); box-shadow: inset 0 0 0 2px var(--accent); transition: background 0.2s; }
+.tchart tr.crow { scroll-margin: 64px 0 72px; }

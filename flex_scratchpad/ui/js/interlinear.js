@@ -687,12 +687,18 @@
       try { capture = captureClip(a, begin, end, obj.guid); } catch (e) { capture = null; }
     }
     // which line is playing: the file time under the playhead, against each line's span
-    let lit = null;
+    // the playing line wears .playing-line: an example's .segment, or every cell of a chart
+    // that holds words from that line (Seth, 2026-10-18: "highlighting (while playing) the
+    // cells that contain data from that line")
+    let litN = null;
     const light = (n) => {
-      if (lit && lit.dataset.n === String(n)) return;
-      if (lit) lit.classList.remove('playing-line');
-      lit = n == null ? null : box.querySelector('.segment[data-n="' + n + '"]');
-      if (lit) { lit.classList.add('playing-line'); follow.to(lit); }
+      if (litN === n) return;
+      box.querySelectorAll('.playing-line').forEach((x) => x.classList.remove('playing-line'));
+      litN = n;
+      if (n == null) return;
+      const hits = box.querySelectorAll('.segment[data-n="' + n + '"], .ccell[data-segs~="' + n + '"]');
+      hits.forEach((x) => x.classList.add('playing-line'));
+      if (hits[0]) follow.to(hits[0].closest('tr') || hits[0]);
     };
     const lineAt = (t) => {
       const ft = info.clipUrl ? begin + t : t;
@@ -1425,5 +1431,5 @@
     });
   }
 
-  FS.interlinear = { blankSeg, peek, segTags, chartTags, withChartTags, nowPlaying, render, renderText, renderEntry, renderWordform, renderChip, hydrateInline, openContext, wholeText, openOverlay, closeOverlay, isCollapsed, setCollapsed, styled, styledParts, invalidate, flexGet, openInFlex, labelOf, numberFor, flexTsv, HL_COLORS };
+  FS.interlinear = { playRange, audio, blankSeg, peek, segTags, chartTags, withChartTags, nowPlaying, render, renderText, renderEntry, renderWordform, renderChip, hydrateInline, openContext, wholeText, openOverlay, closeOverlay, isCollapsed, setCollapsed, styled, styledParts, invalidate, flexGet, openInFlex, labelOf, numberFor, flexTsv, HL_COLORS };
 })();

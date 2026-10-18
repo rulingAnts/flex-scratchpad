@@ -118,6 +118,24 @@
     if (runs.length && from < rows.length) runs[runs.length - 1].to = rows.length - 1;
     return runs;
   }
+  /* Where a timed line STARTS in the chart (Seth, 2026-10-18: "play controls on the first row
+   * that starts an interlinear line"): row index → the timed segments whose first words are in
+   * that row, in the chart's order. */
+  function lineStarts(rows, segments) {
+    const timed = new Map((segments || []).filter((s) => s.begin != null && s.end != null).map((s) => [s.n, s]));
+    const out = new Map();
+    const seen = new Set();
+    rows.forEach((r, i) => {
+      for (const n of rowSegs(r)) {
+        if (seen.has(n)) continue;
+        seen.add(n);
+        if (!timed.has(n)) continue;
+        if (!out.has(i)) out.set(i, []);
+        out.get(i).push(timed.get(n));
+      }
+    });
+    return out;
+  }
   const segsByN = (chart) => new Map((chart.segments || []).map((s) => [s.n, s]));
   /* ‘The dog slept.’ (1.1) · ‘Yesterday…’ (1.2) — the free translations of some segments. */
   function freeText(chart, segs, withLabels) {
@@ -192,6 +210,14 @@
 
     if (opts.onObject) { try { opts.onObject(obj); } catch (e) { /* the owner's problem */ } }
     const xcols = opts.extraCols || [];               // a chart note's custom columns (chartnote.js)
+    // audio: ▶ on the first row of each timed line, ▶ all in the corner; the clip machinery is
+    // the examples' (interlinear.playRange keyed on the TEXT's guid), the lit cells carry data-segs
+    const starts = lineStarts(rows, obj.segments);
+    const timedAll = (obj.segments || []).filter((s) => s.begin != null && s.end != null);
+    const mediaByGuid = new Map((obj.media || []).map((m) => [m.guid, m]));
+    const textObj = Object.assign({}, obj, { guid: obj.text || obj.guid, title: obj.title });
+    const play = (segs, btn) => FS.interlinear.playRange && FS.interlinear.playRange(box, textObj, segs, mediaByGuid, opts, btn);
+    const playBtn = (segs, title, cls) => el('button', { class: 'seg-play ' + (cls || ''), 'data-test': cls || 'chart-play', title, onclick: (e) => { e.stopPropagation(); play(segs, e.currentTarget); } }, '▶');
     const table = el('table', { class: 'tchart' + (vern.rtl ? ' rtl' : '') });
     const extraCols = (free === 'col' ? 1 : 0) + (notesOn ? 1 : 0) + xcols.length;
     if (headers) {
@@ -199,7 +225,7 @@
       const hrows = headerRows(cols);
       hrows.forEach((hr, hi) => {
         const tr = el('tr', { class: hi === hrows.length - 1 ? 'th-cols' : 'th-groups' });
-        if (hi === 0) tr.appendChild(el('th', { class: 'th-lab', rowspan: hrows.length }, '#'));
+        if (hi === 0) tr.appendChild(el('th', { class: 'th-lab', rowspan: hrows.length }, timedAll.length && starts.size ? playBtn(timedAll, 'Play the lines of these rows', 'chart-play-all') : null, '#'));
         for (const h of hr) {
           const th = el('th', { colspan: h.span > 1 ? h.span : null, class: h.col ? 'th-col' : 'th-group', title: h.col ? ((h.col.path || []).concat([h.col.name]).join(' › ') + (h.col.abbr && h.col.abbr !== h.col.name ? ' (' + h.col.abbr + ')' : '')) : h.text, dataset: h.col ? { col: h.col.n } : null }, h.text);
           if (h.col && opts.editable) th.addEventListener('click', (e) => stylePopover(e.currentTarget, spec, { col: h.col.n }, opts, 'column ' + h.col.name));
@@ -239,12 +265,14 @@
         if (look.u) tr.style.textDecoration = 'underline';
         if (look.c) tr.style.color = look.c;
       }
-      const lab = el('th', { class: 'rlab', title: 'Row ' + row.label + (row.clause && row.clause !== 'normal' ? ' — ' + row.clause + ' clause' : '') + (row.endSent ? '; ends the sentence' : '') + (row.endPara ? '; ends the paragraph' : '') + (opts.editable ? '. Click to style the row.' : '') }, row.label);
+      const lab = el('th', { class: 'rlab', title: 'Row ' + row.label + (row.clause && row.clause !== 'normal' ? ' — ' + row.clause + ' clause' : '') + (row.endSent ? '; ends the sentence' : '') + (row.endPara ? '; ends the paragraph' : '') + (opts.editable ? '. Click to style the row.' : '') },
+        (starts.get(ri) || []).map((sg) => playBtn([sg], 'Play line ' + (sg.label || sg.n) + ' (' + FS.fmtTime(sg.begin) + '–' + FS.fmtTime(sg.end) + ')', 'chart-play')), row.label);
       if (opts.editable) lab.addEventListener('click', (e) => stylePopover(e.currentTarget, spec, { row: row.n }, opts, 'row ' + row.label));
       tr.appendChild(lab);
       for (const slot of layoutRow(row, cols)) {
         const cellStyles = R.chartStylesFor(index, row.n, slot.col.n, 0, '');
-        const td = el('td', { class: 'ccell' + (slot.parts.length ? '' : ' empty'), colspan: slot.span > 1 ? slot.span : null, dataset: { row: row.n, col: slot.col.n } });
+        const segsHere = [...new Set(slot.parts.filter((p) => p.kind === 'words' && p.seg).flatMap((p) => { const a = []; for (let n = p.seg; n <= (p.segTo || p.seg); n++) a.push(n); return a; }))];
+        const td = el('td', { class: 'ccell' + (slot.parts.length ? '' : ' empty'), colspan: slot.span > 1 ? slot.span : null, dataset: { row: row.n, col: slot.col.n, segs: segsHere.length ? segsHere.join(' ') : null } });
         applyCellStyles(td, cellStyles);
         for (const part of slot.parts) td.appendChild(renderPart(part, row, slot.col, obj, spec, opts, { lines, index, vern, anal, wordGroups, movedTargets, tbody, showTextTags }));
         if (opts.editable) td.addEventListener('click', (e) => { if (e.target.closest('.cw, .cclause, .ctag, .cmoved, button, a')) return; stylePopover(td, spec, { row: row.n, col: slot.col.n }, opts, 'row ' + row.label + ', ' + slot.col.name); });
@@ -571,5 +599,5 @@
       el('div', { class: 'btn-row' }, el('button', { class: 'btn', 'data-test': 'pivot-copy', onclick: () => { FS.copyText(tsv); FS.toast('Copied as TSV'); } }, 'Copy as TSV'), el('button', { class: 'btn primary', onclick: () => m.close() }, 'Done')));
   }
 
-  FS.chart = { renderChart, visibleColumns, headerRows, layoutRow, rowSegs, freeRuns, freeText, chartGrid, chartTsv, markerLook, pivot, pivotDialog, LINE_NAMES, FREE_NAMES };
+  FS.chart = { renderChart, visibleColumns, headerRows, layoutRow, rowSegs, freeRuns, lineStarts, freeText, chartGrid, chartTsv, markerLook, pivot, pivotDialog, LINE_NAMES, FREE_NAMES };
 })();

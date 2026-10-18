@@ -528,7 +528,7 @@ def make_chart(guid: str, name: str, text_guid: str, title: str = "", ws_vern: d
             "title": title or "", "abbrev": "", "url": "",
             "ws": {"vern": ws_vern or make_ws(), "anal": ws_anal or make_ws()},
             "template": template or {"guid": "", "name": "", "columns": []}, "markers": list(markers or []),
-            "rows": [], "rowCount": 0, "index": [], "segments": [], "range": [0, 0], "anchors": ["", ""]}
+            "rows": [], "rowCount": 0, "index": [], "segments": [], "media": [], "range": [0, 0], "anchors": ["", ""]}
 
 
 def make_row(guid: str, n: int, label: str, clause: str | int = "normal", end_sent: bool = False,

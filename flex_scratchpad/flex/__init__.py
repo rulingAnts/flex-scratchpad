@@ -1129,6 +1129,46 @@ class FlexService:
                 "needsCapture": bool(found and not clip),
             }
 
+    def export_clips(self, items: list[dict]) -> list[dict]:
+        """The recordings an HTML export embeds (Seth, 2026-10-18: "audio players and base64
+        embedded audio where audio files and segmentation data are available and match"): per
+        item {id, text, media?, begin, end} — ONE clip per example or chart, its first timed line's
+        begin to its last one's end, so the page seeks inside it per line — the clip is cut as for
+        playback (the cache, else the live file) and compressed for the page
+        (`audio.encode_for_embed`), returned as {id, mime, base64, bytes, begin, end}; an item
+        whose audio cannot be had says `error` instead and the page shows that example without
+        a player. The compressed copies live beside the clips (`<text>_<b>-<e>.export.ogg`) so a
+        second export is instant."""
+        import base64
+        from .audio import encode_for_embed, find_ffmpeg
+        exe = find_ffmpeg(self.nb.config.get("settings", {}).get("ffmpegPath", ""))
+        out = []
+        for it in items or []:
+            rid = it.get("id")
+            try:
+                begin, end = int(it.get("begin", 0)), int(it.get("end", 0))
+                if end <= begin or not it.get("text"):
+                    out.append({"id": rid, "error": "no timing"})
+                    continue
+                info = self.ensure_clip(it["text"], it.get("media"), begin, end)
+                src = info.get("clipPath")
+                if not src:
+                    out.append({"id": rid, "error": "The recording is not available on this computer." if not info.get("found") else "This recording cannot be cut here (a non-WAV file needs ffmpeg)."})
+                    continue
+                stem = self.cache.audio_clip_path(self.project_name, it["text"], begin, end, ".export")
+                enc = encode_for_embed(src, stem, exe)
+                if not enc:
+                    out.append({"id": rid, "error": "The clip could not be encoded."})
+                    continue
+                data = Path(enc[0]).read_bytes()
+                out.append({"id": rid, "mime": enc[1], "base64": base64.b64encode(data).decode("ascii"), "bytes": len(data), "begin": begin, "end": end})
+            except FlexError as e:
+                out.append({"id": rid, "error": e.message})
+            except Exception as e:  # noqa: BLE001
+                LOG.warning("export_clips: %s", e)
+                out.append({"id": rid, "error": str(e)})
+        return out
+
     def store_captured_clip(self, text_guid: str, begin: int, end: int, data_base64: str, mime: str = "audio/webm") -> dict:
         ext = ".webm" if "webm" in mime else ".ogg" if "ogg" in mime else ".wav" if "wav" in mime else ".bin"
         with self.lock:

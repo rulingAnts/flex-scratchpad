@@ -54,6 +54,8 @@ flex_scratchpad/
   flex/cache.py snapshots + clip paths            flex/audio.py     wave / ffmpeg cutting
   flex/tracking.py  keeps an example on its lines when FLEx splits, merges, deletes or rebuilds them
   flex/chart_export.py  a text chart as FieldWorks' discourse-chart XML (GUIDs added) or as JSON
+  docx_writer.py xlsx_writer.py pptx_writer.py  Word / Excel / PowerPoint from the page's export model, stdlib only
+  pdf_print.py  a PDF written by WebView2 itself on Windows (the print dialog elsewhere)
   ui/index.html, ui/css/app.css, ui/js/
     util.js api.js(+mock) flexref.js markdown.js interlinear.js files.js backup.js charts.js tables.js editor.js picker.js
     export.js collection.js (example collections) flexcopy.js (the readable copies in the file)
@@ -573,9 +575,17 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   word/gloss. Exports: `export.js chartBlock` → `{type: 'chart'}` → an HTML `table.tchart`, a Word
   table (`docx_writer.chart`: header spans, a cell's own `bg` shades it). Search: `marker:Topic`
   = the ⚐name token `model.chart_searchable_text` adds; `texts_used` counts a chart under its
-  text (`charts`). A chart link (`flex:chart/<guid>`) opens the TEXT in FLEx. The chart NOTE
-  kind, the marker filters, the chart search / profile / collections and the columns-as-tags are
-  the three bullets below; what is still open is in plans/BACKLOG.md › Text Charts.
+  text (`charts`). A chart link (`flex:chart/<guid>`) opens the TEXT in FLEx. PLAYBACK (Seth,
+  2026-10-18: "audio playback in the chart, with play controls on the first row that starts an
+  interlinear line. And highlighting (while playing) the cells that contain data from that line"):
+  a chart carries its text's `media` (lcm `_chart_dict`, the demo); `chart.lineStarts(rows,
+  segments)` puts a ▶ (`.seg-play`) in the label cell of the FIRST row holding a timed line's words
+  (▶ in the `#` corner plays every line of the rows shown); it calls the examples' own
+  `interlinear.playRange` with the chart as a text (`guid` = the TEXT's, for the clip cache), and
+  `light()` there now marks every `.ccell[data-segs~="n"]` of the playing line as well as an
+  example's `.segment` (`playing-line`). The chart NOTE kind, the marker filters, the chart search /
+  profile / collections and the columns-as-tags are the three bullets below; what is still open is
+  in plans/BACKLOG.md › Text Charts.
 - CHART NOTES (Seth, 2026-10-18: "a text chart note type (similar to the example collection, except
   that it would focus on one text chart …)" with "custom columns … (a) a user-custom-defined list of
   choices … project-wide … (b) some kind of formula or rule … (c) just an extra notes column …
@@ -607,8 +617,10 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   view — every editor guard uses it), `ensureChartNote()`, `newChartNoteDialog()` (New ▾ → "New chart
   note…", a list of the project's charts), `FS.newChartNote(guid, view)` (a chart embed's ⋯ → "Open
   as a chart note…" carries its view over), the `#chartnote` host, the "Chart" badge on the card.
-  Exports: `asEditor()` gives the view as one block (the custom columns are NOT exported yet — on
-  the backlog). The in-browser mock has `create_chart_note`, `chart_lists`, `set_chart_list`.
+  Exports: `asEditor()` gives the view embed with `extras` (`exportExtras()`: the custom columns and
+  the rule / marker row styles, read by export.js `chartBlock`) and then the note's own text as
+  markdown blocks — see EXPORTS below. The in-browser mock has `create_chart_note`, `chart_lists`,
+  `set_chart_list`.
 - CHART MARKER FILTERS AND CHART SEARCH (Seth, 2026-10-18: "visual filters using textchartmarkers
   instead of textmarkuptags … 'row-level' markers, so that when they are found anywhere in a row,
   that whole row is styled"; "FLEx does not give us great ways to search text charts … returning
@@ -665,6 +677,70 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   text and clause marker; columns = the visible template columns; a cell counts the rows carrying
   the marker with words in the column; Copy as TSV. The entry card's "▦ In charts" opens the
   column profile for the lexeme form (`FS.chartProfile`).
+- EXPORTS (Seth, 2026-10-18: "pretty exports for chart-type notes. HTML, DOCX, Excel, and PDF … for
+  our collection-type and regular notes, too … including audio players and base64 embedded audio
+  where audio files and segmentation data are available and match"; "Slideshow HTML export (and
+  PowerPoint?)"). ONE MODEL: `FS.exporter.buildDoc(note, editor)` (export.js) turns a note into
+  `{title, where, project, date, blocks}` — the shapes in docx_writer.py's docstring; a chart block
+  carries `columns`, `xcols` (a chart note's custom columns), per row `xcells`, `rowStyle` (a marker's
+  whole-row look, a rule's row case — `tint()` blends the app's alpha onto white), `segs`, per cell
+  `segs` and `plain` {txt, gls, marks, moved, clauses}; an interlinear segment its `begin / end /
+  media`. Every writer reads that model: `toHtml` (the page), `toSlides` (the slideshow),
+  `docx_writer.build_docx`, `xlsx_writer.build_xlsx`, `pptx_writer.build_pptx` (from `slidesOf(doc)`),
+  the PDF (the page, printed). A collection exports through `asEditor()` as before; a chart note's
+  `asEditor()` adds `extras` (CHART NOTES). THE PAGE (`toHtml`): a header (title, tab › folder, FLEx
+  project, date), the stylesheet `CSS` with a print half (`@page landscape` and `body.wide` when the
+  note holds a chart, `thead` repeated, rows never split, colours kept, players hidden), a footer.
+  AUDIO IN THE PAGE: `timedBlocks(doc)` = every example and chart with timed lines; `embedAudio(doc)`
+  asks Python for ONE clip per object (`Api.export_clips` → `FlexService.export_clips`: `ensure_clip`
+  from the object's first timed begin to its last end — the cache, else the live file — then
+  `audio.encode_for_embed`: Opus in Ogg at 40 kb/s mono through ffmpeg, MP3 when there is no Opus,
+  the WAV / FLAC slice itself without ffmpeg; the copy is kept as `<clip>.export.ogg`, a name
+  `find_audio_clip` never mistakes for the clip) and puts it in the block as a `data:` URL
+  (`block.audio = {id, src, begin, segs: {n: [b, e]}}`); the markup is an `<audio data-a data-begin
+  data-segs>` per object and a `button.play[data-a][data-segs]` per line, per example and in a
+  chart's `#` corner and first rows (the same `lineStarts`); `PLAYER_JS`, a plain script in the page,
+  seeks inside the clip, lights `.seg[data-n]` / `td[data-segs~=n]` (`.playing`), and runs the `#np`
+  bar (pause, stop, seek, Esc). `askEmbedAudio` asks first (the file grows ~300 KB a minute
+  compressed); an object whose recording is not there exports without a player. THE SLIDESHOW
+  (`slidesOf` → `toSlides`): a title slide; every heading starts a slide; every example, chart,
+  table, entry and picture gets a slide of its own, titled by its section, a short lead-in line
+  ending in ":" riding along; running text fills slides and continues on "(cont.)" slides;
+  `SLIDES_CSS` / `SLIDES_JS` scale a 1280×720 slide to the window and shrink content that overflows,
+  keys → ← Space PgUp/PgDn Home End, T contents, F full screen, P print (one slide a page), `#n`
+  in the URL; the players ride along. WORD (docx_writer): every table now writes `<w:tblGrid>` with
+  widths from its content (`grid_widths`; LibreOffice shows nothing without it) and every cell
+  ends in a paragraph; a CHART gets a LANDSCAPE section of its own (`SECT_PORTRAIT` /
+  `SECT_LANDSCAPE` paragraphs around it, never inside a table cell), its label column narrow, its
+  cells' words as a nested borderless `wordgrid` (each word's lines under it) plus a line of marker
+  chips, custom columns and row shading; an example's free translation / literal / notes are RUNS
+  (they were printed as dictionaries before 2026-10-18). EXCEL (xlsx_writer, inline rich strings,
+  styles built as used, merges, frozen headers): sheet "Note" (the blocks in order, an example as
+  rows per line with the words across, the chart named and pointed at its sheet), a sheet per chart
+  ("Chart", "Chart 2"…: the table with merged header groups, two-colour `word⏎gloss` cells, Free
+  / Notes / custom columns, the row colours) with "Chart rows" after it (one FLAT row per chart row:
+  label, clause type, flags, each template column's words and then their glosses, markers, moved
+  text, clause refs, custom columns, free translation, notes — what Excel filters and pivots), and
+  "Examples" (one row per interlinear line across the note). POWERPOINT (pptx_writer: the smallest
+  package PowerPoint opens — one master, one blank layout, a theme; checked in LibreOffice): a title
+  slide on blue, a heading bar per slide, text as paragraphs, an example as a borderless table per
+  line (fonts shrink to fit, `fit_widths` from the words), a chart as a table filling the slide
+  (header groups merged, a cell's words on one line and glosses on the next, markers, Free, custom
+  columns, row fills), a Markdown table, an entry, a picture; no audio (the slideshow carries it).
+  PDF (`Api.export_note_pdf` → pdf_print.py): on Windows a HIDDEN pywebview window loads the page
+  (a `file://` temp file in `.scratchpad/export-tmp`) and `CoreWebView2.PrintToPdfAsync` writes the
+  PDF (landscape when the page says so, backgrounds on) — pywebview exposes none of this, so the
+  WebView2 control is reached through `window.native.browser.web_view.CoreWebView2` with every step
+  guarded; anywhere else, or when that fails, `{"fallback": True}` and the page prints the same
+  HTML in a hidden frame (the browser's dialog has "Save as PDF"). NOT YET RUN ON WINDOWS: the
+  direct PDF; when it fails the log says "direct PDF: …". The note menu: Markdown, Web page,
+  Word, Excel, PDF, Slideshow, PowerPoint (+ FLEx text for a collection). Tests:
+  tests/test_xlsx.py (openpyxl reads it back when installed, dev only), tests/test_pptx.py,
+  tests/test_pdf_print.py, tests/test_export.py, the e2e `test_html_export_embeds_the_recordings_as_players`
+  (the written page is opened in a second tab and plays), `test_a_chart_note_with_custom_columns`
+  (HTML, Word, Excel of a chart note), `test_a_chart_plays_its_lines_and_lights_their_cells`. Look
+  at the outputs when a writer changes: LibreOffice (`soffice --headless --convert-to pdf`) renders
+  .docx / .xlsx / .pptx here, `pdftoppm` makes PNGs of them.
 - TROUBLESHOOTING LOG (Seth, 2026-10-18: "make our cli, interpreted python very verbose so that it's
   easy to troubleshoot … What I install and test via pip install, I'd like to see verbose debugging
   output to tty that I can copy and send to you"): `flex_scratchpad/log.py`. From a pip install in a

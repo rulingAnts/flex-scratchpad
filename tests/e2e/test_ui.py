@@ -237,6 +237,110 @@ def test_audio_segment_plays_and_clip_is_cached(app):
     assert info["found"] is False and re.search(r"_1500-3200\.(wav|flac)$", info["clipUrl"])
 
 
+def test_a_chart_plays_its_lines_and_lights_their_cells(app):
+    """Seth, 2026-10-18: "audio playback in the chart, with play controls on the first row that
+    starts an interlinear line. And highlighting (while playing) the cells that contain data
+    from that line"."""
+    h, page, errors = app
+    new_note(page, "Chart audio")
+    page.keyboard.type("{{flex:chart %s rows=1-3}}" % CHART)
+    page.keyboard.press("Enter")
+    page.wait_for_selector(".tchart .rlab .seg-play")
+    # one ▶ per timed line, on the row where it starts (demo: rows 1, 2a, 2b start lines 1, 2, 3)
+    assert page.locator(".tchart .rlab .seg-play").count() == 3
+    assert page.locator(".tchart .th-lab .seg-play").count() == 1
+    page.locator(".tchart .rlab .seg-play").nth(1).click()
+    page.wait_for_selector(".chart-obj .transport")
+    page.wait_for_timeout(400)
+    assert page.evaluate("!!FS.interlinear.audio.current")
+    # the cells holding line 2's words are lit, nothing else
+    lit = page.locator(".tchart td.playing-line")
+    assert lit.count() >= 1
+    assert all("2" in (lit.nth(i).get_attribute("data-segs") or "").split() for i in range(lit.count()))
+    page.wait_for_timeout(2600)
+    assert page.evaluate("!!FS.interlinear.audio.current") is False
+    assert page.locator(".tchart td.playing-line").count() == 0
+
+
+def test_html_export_embeds_the_recordings_as_players(app):
+    """Seth, 2026-10-18: "pretty exports … including audio players and base64 embedded audio where
+    audio files and segmentation data are available and match" — for examples and charts alike."""
+    h, page, errors = app
+    new_note(page, "Players")
+    page.keyboard.type("{{flex:text %s seg=1-2}}" % T_STORY)
+    page.keyboard.press("Enter")
+    page.keyboard.type("{{flex:chart %s rows=1-2}}" % CHART)
+    page.keyboard.press("Enter")
+    page.keyboard.type("{{flex:text %s}}" % T_ARAB)        # no recording: no player, the page still exports
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#editor .chart-obj tr.crow")
+    page.wait_for_function("() => document.getElementById('save-state').textContent === 'Saved'", timeout=5000)
+    html_path = str(h.tmp / "players.html")
+    res = page.evaluate("""async (hp) => {
+      const api = window.pywebview.api;
+      const notes = await api.list_notes(); const note = (await Promise.all(notes.map((n) => api.get_note(n.id)))).find((n) => n.title === 'Players');
+      const editor = new FS.Editor(document.createElement('div'), {}); editor.load(FS.flexcopy.strip(note.body));
+      const doc = await FS.exporter.buildDoc(note, editor);
+      const timed = FS.exporter.timedBlocks(doc).length;
+      const stats = await FS.exporter.embedAudio(doc);
+      await api.export_note_html(note.id, FS.exporter.toHtml(doc), hp);
+      return { timed, stats, html: FS.exporter.toHtml(doc) };
+    }""", html_path)
+    assert res["timed"] == 2 and res["stats"]["count"] == 2 and res["stats"]["missing"] == 0, res["stats"]
+    html = res["html"]
+    assert html.count('<audio data-a=') == 2 and 'src="data:audio/' in html and '<div id="np"' in html
+    assert '<button class="play" data-a="a1" data-segs="1"' in html and 'data-segs="1 2"' in html      # a line, the whole example
+    assert 'class="tchart"' in html and '<td data-segs="1">' in html.split('class="tchart"')[1]      # the cells a line lights
+    assert '@page { size: landscape' in html and 'header class="doc"' in html
+    # the slideshow: a title slide, the two examples and the chart on slides of their own
+    deck = page.evaluate("""async () => {
+      const api = window.pywebview.api;
+      const notes = await api.list_notes(); const note = (await Promise.all(notes.map((n) => api.get_note(n.id)))).find((n) => n.title === 'Players');
+      const editor = new FS.Editor(document.createElement('div'), {}); editor.load(FS.flexcopy.strip(note.body));
+      const doc = await FS.exporter.buildDoc(note, editor);
+      const deck = FS.exporter.slidesOf(doc);
+      await api.export_note_pptx(note.id, deck, %r);
+      return { kinds: deck.slides.map((s) => s.kind + ':' + (s.blocks[0] ? s.blocks[0].type : '')), html: FS.exporter.toSlides(doc) };
+    }""" % str(h.tmp / "deck.pptx"))
+    assert deck["kinds"] == ["title:", "object:interlinear", "object:chart", "object:interlinear"], deck["kinds"]
+    assert deck["html"].count('<section class="slide') == 4 and 'id="toc"' in deck["html"]
+    import zipfile
+    zp = zipfile.ZipFile(str(h.tmp / "deck.pptx"))
+    assert zp.testzip() is None and "Kabir" in zp.read("ppt/slides/slide2.xml").decode("utf-8") and "<a:tbl>" in zp.read("ppt/slides/slide3.xml").decode("utf-8")
+    slides_path = str(h.tmp / "slides.html")
+    Path(slides_path).write_text(deck["html"], encoding="utf-8")
+    pg = page.context.new_page()
+    try:
+        pg.goto(Path(slides_path).resolve().as_uri())
+        pg.wait_for_selector(".slide.on")
+        assert pg.locator(".slide.on").get_attribute("data-n") == "0"
+        pg.keyboard.press("ArrowRight")
+        assert pg.locator(".slide.on").get_attribute("data-n") == "1" and pg.locator(".slide.on .seg").count() == 2
+        pg.keyboard.press("End")
+        assert pg.locator(".slide.on").get_attribute("data-n") == "3"
+        pg.keyboard.press("Home")
+        assert pg.locator("#ctr").inner_text() == "1 / 4"
+    finally:
+        pg.close()
+    # the written page plays on its own: open it in the browser and press a line's ▶
+    pg = page.context.new_page()
+    try:
+        pg.goto(Path(html_path).resolve().as_uri())
+        pg.wait_for_selector(".seg .play")
+        pg.locator(".seg .play").first.click()
+        pg.wait_for_selector(".seg.playing", timeout=5000)
+        assert pg.locator("#np").is_visible()
+        assert pg.evaluate("document.querySelector('.seg.playing').dataset.n") == "1"
+        pg.locator(".tchart tbody th .play").first.click()
+        pg.wait_for_selector(".tchart td.playing", timeout=5000)
+        assert "1" in pg.locator(".tchart td.playing").first.get_attribute("data-segs").split()
+        pg.locator("#np .st").click()
+        assert pg.locator(".playing").count() == 0
+    finally:
+        pg.close()
+    assert not errors
+
+
 def test_search_tags_and_folders(app):
     h, page, errors = app
     new_note(page, "Harmony")
@@ -4256,7 +4360,7 @@ def test_text_chart_rows_from_the_picker_with_headings_markers_and_translations(
     obj = page.locator("#editor .chart-obj")
     assert obj.locator("thead th.th-group").evaluate_all("els => els.map((e) => e.textContent)") == ["Prenuclear", "Nucleus", "Postnuclear"]
     assert "Subject" in obj.locator("thead th.th-col").all_inner_texts()
-    assert obj.locator("tbody tr.crow th.rlab").all_inner_texts() == ["1b", "2a", "2b"]
+    assert obj.locator("tbody tr.crow th.rlab").evaluate_all("els => els.map((e) => [...e.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join(''))") == ["1b", "2a", "2b"]   # the ▶ buttons aside
     assert "rows 1b–2b of 7" in obj.locator("[data-test=chart-range]").inner_text()
     assert obj.locator(".cmoved").inner_text() == "‹‹" and obj.locator(".cclause").inner_text() == "[2a]"
     # the free translations: one row after each segment's rows, naming them (2a and 2b share a segment)
@@ -4264,7 +4368,7 @@ def test_text_chart_rows_from_the_picker_with_headings_markers_and_translations(
     assert frees.count() == 2
     assert "Yesterday the child saw the river." in frees.nth(0).inner_text() and frees.nth(0).locator(".cfree-rows").inner_text() == "1b"
     assert frees.nth(1).locator(".cfree-rows").inner_text() == "2a–2b"
-    assert obj.locator("tr.cl-speech th.rlab").inner_text().strip() == "2a"
+    assert obj.locator("tr.cl-speech th.rlab").inner_text().strip().lstrip("▶") == "2a"
     # a word styled from its popover; a column from its heading
     obj.locator("tr.crow[data-label='1b'] td[data-col='3'] .cw").first.click()
     page.locator(".popover button.tog", has_text="Bold").click()
@@ -4389,6 +4493,27 @@ def test_a_chart_note_with_custom_columns(app):
     body = page.evaluate("() => window.__fsChartNote.markdown()")
     assert "## Custom columns" in body and "| Status | list | Information status |" in body and "| Role | rule | marker:new" in body
     assert "| 1b #" in body and "| Subject fronted |" in body and "| 1a #" in body and "| given |" in body, body
+    # the exports carry the custom columns and the rule's row style (Seth, 2026-10-18: "pretty exports for chart-type notes")
+    html_path, docx_path = str(h.tmp / "cn.html"), str(h.tmp / "cn.docx")
+    html = page.evaluate("""async ([hp, dp]) => {
+      const api = window.pywebview.api; const id = document.querySelector('.note-card.active').dataset.id; const note = await api.get_note(id);
+      const doc = await FS.exporter.buildDoc(note, window.__fsChartNote.asEditor());
+      await api.export_note_html(id, FS.exporter.toHtml(doc), hp); await api.export_note_docx(id, doc, dp); await api.export_note_xlsx(id, doc, dp.replace('.docx', '.xlsx')); return FS.exporter.toHtml(doc);
+    }""", [html_path, docx_path])
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(str(h.tmp / "cn.xlsx"))
+        assert wb.sheetnames == ["Note", "Chart", "Chart rows"], wb.sheetnames
+        ws = wb["Chart rows"]; head = [c.value for c in ws[1]]
+        rows = [{k: v for k, v in zip(head, [c.value for c in r])} for r in ws.iter_rows(min_row=2)]
+        assert [r["Role"] for r in rows] == ["N", "S", None, None, "S", "S", "S"] and rows[1]["Comment"] == "Subject fronted" and rows[0]["Status"] == "given", rows
+        assert rows[0]["Nucleus/Subject"] == "Kabir" and rows[0]["Markers"] == "New"
+    except ImportError:
+        pass
+    assert '<th class="xh" rowspan="2">Role</th>' in html and "Subject fronted" in html and "background:#fde68a" in html and ">given<" in html, html[:600]
+    import zipfile
+    xml = zipfile.ZipFile(docx_path).read("word/document.xml").decode("utf-8")
+    assert "Subject fronted" in xml and ">Role<" in xml and 'w:fill="FDE68A"' in xml.upper().replace('W:FILL', 'w:fill'), xml[:300]
     # found by search, and still there after a reload
     nid = page.evaluate("() => window.__fsChartNote && document.querySelector('.note-card.active').dataset.id")
     assert any(hit["id"] == nid for hit in h.api.search("fronted"))
@@ -4456,7 +4581,7 @@ def test_chart_search_rows_profile_and_a_collection_of_rows(app):
     page.wait_for_selector("#editor .chart-obj tr.crow")
     page.wait_for_function("() => document.getElementById('save-state').textContent === 'Saved'", timeout=5000)
     assert "{{flex:chart %s rows=5 at=" % CHART in body_of(h)
-    assert page.locator("#editor .chart-obj tr.crow th.rlab").all_inner_texts() == ["2c"]
+    assert [x.lstrip("▶") for x in page.locator("#editor .chart-obj tr.crow th.rlab").all_inner_texts()] == ["2c"]
     assert page.locator("#editor .chart-obj thead th.th-col").count() == 7            # the headings always come along
     # the column profile
     page.keyboard.press("Control+Shift+L")

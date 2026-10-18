@@ -42,11 +42,56 @@ def _hex(c: str | None) -> str:
     return names.get(c.lower(), "")
 
 
+PAGE_W, PAGE_H, MARGIN = 11906, 16838, 1134           # A4 in twentieths of a point
+TEXT_W_PORTRAIT = PAGE_W - 2 * MARGIN                 # 9638
+TEXT_W_LANDSCAPE = PAGE_H - 2 * MARGIN                # 14570
+SECT_PORTRAIT = f'<w:sectPr><w:pgSz w:w="{PAGE_W}" w:h="{PAGE_H}"/><w:pgMar w:top="{MARGIN}" w:right="{MARGIN}" w:bottom="{MARGIN}" w:left="{MARGIN}" w:header="708" w:footer="708" w:gutter="0"/></w:sectPr>'
+SECT_LANDSCAPE = f'<w:sectPr><w:pgSz w:w="{PAGE_H}" w:h="{PAGE_W}" w:orient="landscape"/><w:pgMar w:top="{MARGIN}" w:right="{MARGIN}" w:bottom="{MARGIN}" w:left="{MARGIN}" w:header="708" w:footer="708" w:gutter="0"/></w:sectPr>'
+
+
+def _text_len(runs) -> int:
+    """The longest line of a cell's runs, in characters (a rough width)."""
+    text = "".join(str(r.get("text") or "") for r in (runs or []))
+    return max((len(x) for x in text.split("\n")), default=0)
+
+
+def grid_widths(rows: list[list[dict]], text_w: int, fixed: dict | None = None, min_w: int = 500, char_w: int = 105) -> list[int]:
+    """Column widths (twips) from the longest text in each column, scaled to fit the text width.
+    Word reads them from <w:tblGrid>; LibreOffice needs them to lay a table out at all."""
+    ncols = max((len(r) for r in rows), default=0)
+    want = [min_w] * ncols
+    for r in rows:
+        for ci, c in enumerate(r):
+            if c.get("covered") or ci >= ncols:
+                continue
+            n = _text_len(c.get("runs"))
+            for b in c.get("blocks") or []:
+                if b.get("type") == "wordgrid":       # the grid's own widths (130 twips a character + 200), in this column's units
+                    n = max(n, int(sum(min(40, max((_text_len(ln) for ln in w), default=1)) * 130 + 200 for w in b.get("words") or []) / char_w) + 2)
+                elif b.get("type") == "p":
+                    n = max(n, _text_len(b.get("runs")))
+                else:
+                    n = max(n, 24)
+            span = max(1, int(c.get("colspan") or 1))
+            if span == 1:
+                want[ci] = max(want[ci], min(n, 40) * char_w + 220)
+    for ci, w in (fixed or {}).items():
+        if 0 <= ci < ncols:
+            want[ci] = w
+    total = sum(want)
+    if total > text_w and total:
+        scale = text_w / total
+        want = [max(min_w // 2, int(w * scale)) for w in want]
+    return want
+
+
 class Docx:
     def __init__(self):
         self.body: list[str] = []
         self.media: list[tuple[str, bytes]] = []   # (name, png bytes)
         self.rels: list[str] = []
+        self.in_cell = False                       # a sub-document for a table cell: no section breaks
+        self.landscape = False                     # the current section's orientation
 
     # -- runs ---------------------------------------------------------------------
 
@@ -123,6 +168,9 @@ class Docx:
 
     def add(self, block: dict) -> None:
         t = block.get("type")
+        if self.landscape and t != "chart":
+            self.body.append(f"<w:p><w:pPr>{SECT_LANDSCAPE}</w:pPr></w:p>")
+            self.landscape = False
         if t == "h":
             self.body.append(self.para(block.get("runs"), f"Heading{min(6, max(1, int(block.get('level', 1))))}"))
         elif t == "p":
@@ -146,6 +194,12 @@ class Docx:
             self.body.append(xml)
             self.body.append("<w:p/>")
         elif t == "chart":
+            # a chart gets a LANDSCAPE section of its own: the paragraph before it closes the
+            # portrait section, the paragraph after it closes the landscape one
+            wide = not self.in_cell
+            if wide and not self.landscape:
+                self.body.append(f"<w:p><w:pPr>{SECT_PORTRAIT}</w:pPr></w:p>")
+                self.landscape = True
             parts = self.chart(block)
             if block.get("exNum"):
                 parts.insert(0, self.para([{"text": str(block["exNum"]), "color": "#68717d"}]))
@@ -160,6 +214,8 @@ class Docx:
             if block.get("indent"):
                 parts = [self._indent(x, 360 * int(block["indent"])) for x in parts]
             self.body.extend(parts)
+        elif t == "wordgrid":
+            self.body.append(self.wordgrid(block))
         elif t == "image":
             self.body.append(self.image(block))
         elif t == "wordform":
@@ -196,12 +252,15 @@ class Docx:
                 sub = Docx()
                 sub.media = self.media
                 sub.rels = self.rels
+                sub.in_cell = True
                 sub.add(b)
                 inner.extend(sub.body)
         if cell.get("runs") is not None or not inner:
             align = cell.get("align")
             jc = f'<w:jc w:val="{ {"center": "center", "right": "right"}.get(align, "left") }"/>' if align in ("center", "right") else ""
             inner.insert(0, self.para(cell.get("runs") or [], extra=jc))
+        if inner[-1].endswith("</w:tbl>"):
+            inner.append('<w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="20" w:lineRule="exact"/></w:pPr></w:p>')   # Word requires a paragraph after a nested table
         return f"<w:tc><w:tcPr>{''.join(tcpr)}</w:tcPr>{''.join(inner)}</w:tc>"
 
     def table(self, block: dict) -> str:
@@ -219,9 +278,27 @@ class Docx:
                  f'<w:bottom w:val="{border}" w:sz="4" w:color="{color}"/><w:right w:val="{border}" w:sz="4" w:color="{color}"/>'
                  f'<w:insideH w:val="{border}" w:sz="4" w:color="{color}"/><w:insideV w:val="{border}" w:sz="4" w:color="{color}"/>'
                  f'</w:tblBorders><w:tblCellMar><w:left w:w="100" w:type="dxa"/><w:right w:w="100" w:type="dxa"/></w:tblCellMar></w:tblPr>')
-        out = [f"<w:tbl>{tblpr}"]
         cols = style.get("cols", {}) or {}
         rowst = style.get("rows", {}) or {}
+        fixed = {}
+        for k, col in cols.items():
+            w = col.get("width") if isinstance(col, dict) else None
+            if isinstance(w, str) and w.endswith("px"):
+                try:
+                    fixed[int(k) - 1] = int(float(w[:-2]) * 15)
+                except ValueError:
+                    pass
+        span_anchors = {}
+        for key, v in (style.get("spans") or {}).items():
+            try:
+                ar, ac = (int(x) - 1 for x in str(key).split("."))
+                span_anchors[(ar, ac)] = int(v.get("cols", 1))
+            except (TypeError, ValueError, AttributeError):
+                continue
+        measured = [[dict(c, colspan=max(int(c.get("colspan") or 1), span_anchors.get((ri, ci), 1))) for ci, c in enumerate(r)] for ri, r in enumerate(rows)]
+        widths = grid_widths(measured, (TEXT_W_LANDSCAPE if self.landscape else TEXT_W_PORTRAIT) - (360 * int(block.get("indent") or 0)), fixed, min_w=block.get("minColW", 500))
+        grid = "<w:tblGrid>" + "".join(f'<w:gridCol w:w="{w}"/>' for w in widths) + "</w:tblGrid>"
+        out = [f"<w:tbl>{tblpr}{grid}"]
         spans: dict = {}
         covered: dict = {}
         for key, v in (style.get("spans") or {}).items():
@@ -251,13 +328,7 @@ class Docx:
                 if rs.get("italic") or col.get("italic"):
                     c["runs"] = [dict(r, i=True) for r in (c.get("runs") or [])]
                 c["align"] = rs.get("align") or col.get("align") or (block.get("aligns") or [None] * 99)[ci] if ci < len(block.get("aligns") or []) else rs.get("align") or col.get("align")
-                width = None
-                w = col.get("width")
-                if isinstance(w, str) and w.endswith("px"):
-                    try:
-                        width = int(float(w[:-2]) * 15)   # px → twentieths of a point (~96 dpi)
-                    except ValueError:
-                        width = None
+                width = widths[ci] if ci < len(widths) else None
                 # merged cells: a horizontal span is one <w:tc> with gridSpan; a vertical one is
                 # the anchor marked vMerge="restart" and each covered cell below it a vMerge
                 # continuation (Word needs the continuation cells to exist).
@@ -266,13 +337,14 @@ class Docx:
                     ar, ac, rows_n, cols_n = cov
                     if ci != ac:
                         continue                     # inside a horizontal span: no cell at all
-                    cells.append(self.cell({"runs": []}, width, shade, extra=(f'<w:gridSpan w:val="{cols_n}"/>' if cols_n > 1 else "") + "<w:vMerge/>"))
+                    cells.append(self.cell({"runs": []}, sum(widths[ac:ac + cols_n]) or width, shade, extra=(f'<w:gridSpan w:val="{cols_n}"/>' if cols_n > 1 else "") + "<w:vMerge/>"))
                     continue
                 sp = spans.get((ri, ci))
                 extra = ""
                 if sp:
                     if sp[1] > 1:
                         extra += f'<w:gridSpan w:val="{sp[1]}"/>'
+                        width = sum(widths[ci:ci + sp[1]]) or width
                     if sp[0] > 1:
                         extra += '<w:vMerge w:val="restart"/>'
                 cells.append(self.cell(c, width, shade, extra=extra))
@@ -295,7 +367,8 @@ class Docx:
         spans: dict = {}
         headers = block.get("headers") or []
         ncols = int(block.get("cols") or 0)
-        extra = (1 if block.get("freeCol") else 0) + (1 if block.get("notesCol") else 0)
+        xcols = block.get("xcols") or []          # a chart note's custom columns (export.js chartBlock extras)
+        extra = len(xcols) + (1 if block.get("freeCol") else 0) + (1 if block.get("notesCol") else 0)
         width = 1 + ncols + extra
         for hi, hr in enumerate(headers):
             row = [{"runs": [{"text": "#" if hi == 0 else "", "b": True, "color": "#68717d"}]}]
@@ -308,6 +381,10 @@ class Docx:
                         row.append({"runs": []})
                 ci += int(h.get("span") or 1)
             if hi == 0:
+                for xc in xcols:
+                    row.append({"runs": [{"text": xc.get("name") or "", "b": True, "color": "#68717d"}], "align": "center"})
+                    if len(headers) > 1:
+                        spans[f"1.{len(row)}"] = {"rows": len(headers), "cols": 1}
                 if block.get("freeCol"):
                     row.append({"runs": [{"text": "Free", "b": True, "color": "#68717d"}]})
                     if len(headers) > 1:
@@ -325,25 +402,36 @@ class Docx:
         for r in block.get("rows") or []:
             row = [{"runs": [{"text": r.get("label") or "", "b": True, "color": "#68717d"}], "align": "right"}]
             for c in r.get("cells") or []:
-                runs: list[dict] = []
-                for wi, w in enumerate(c.get("words") or []):
-                    if wi:
-                        runs.append({"text": " "})
-                    runs.extend(dict(x) for x in w)
+                def dress(runs):
+                    out_runs = []
+                    for x in runs:
+                        x = dict(x)
+                        if c.get("b"):
+                            x["b"] = True
+                        if c.get("i"):
+                            x["i"] = True
+                        if c.get("u"):
+                            x["u"] = True
+                        if c.get("color") and not x.get("color"):
+                            x["color"] = c["color"]
+                        out_runs.append(x)
+                    return out_runs
+                # a word's runs come with '\n' runs between its lines: split them into lines
+                words = []
+                for w in c.get("words") or []:
+                    lines: list[list[dict]] = [[]]
+                    for x in w:
+                        if str(x.get("text")) == "\n":
+                            lines.append([])
+                        else:
+                            lines[-1].append(x)
+                    words.append([dress(ln) for ln in lines])
+                blocks = []
+                if words:
+                    blocks.append({"type": "wordgrid", "words": words})
                 if c.get("marks"):
-                    if runs:
-                        runs.append({"text": " "})
-                    runs.extend(dict(x) for x in c["marks"])
-                for x in runs:
-                    if c.get("b"):
-                        x["b"] = True
-                    if c.get("i"):
-                        x["i"] = True
-                    if c.get("u"):
-                        x["u"] = True
-                    if c.get("color") and not x.get("color"):
-                        x["color"] = c["color"]
-                cell = {"runs": runs}
+                    blocks.append({"type": "p", "runs": dress(c["marks"])})
+                cell = {"runs": None, "blocks": blocks} if blocks else {"runs": []}
                 if c.get("hl"):
                     cell["bg"] = c["hl"]
                 row.append(cell)
@@ -351,6 +439,17 @@ class Docx:
                     spans[f"{len(rows) + 1}.{len(row)}"] = {"rows": 1, "cols": int(c["span"])}
                     for _ in range(int(c["span"]) - 1):
                         row.append({"runs": []})
+            for xc in r.get("xcells") or []:
+                xr = {"text": xc.get("text") or ""}
+                for k in ("b", "i", "u"):
+                    if xc.get(k):
+                        xr[k] = True
+                if xc.get("color"):
+                    xr["color"] = xc["color"]
+                xcell = {"runs": [xr]}
+                if xc.get("hl"):
+                    xcell["bg"] = xc["hl"]
+                row.append(xcell)
             if block.get("freeCol"):
                 fr = r.get("free")
                 row.append({"runs": [{"text": fr["text"], "i": True}] if fr else []})
@@ -358,6 +457,30 @@ class Docx:
                     spans[f"{len(rows) + 1}.{len(row)}"] = {"rows": int(fr["span"]), "cols": 1}
             if block.get("notesCol"):
                 row.append({"runs": [{"text": r.get("notes") or "", "color": "#68717d"}]})
+            rs = r.get("rowStyle") or {}
+            if rs:                                   # a marker's "whole row" look, a rule's row case
+                def all_runs(cell):
+                    for x in cell.get("runs") or []:
+                        yield x
+                    for b in cell.get("blocks") or []:
+                        for x in b.get("runs") or []:
+                            yield x
+                        for w in b.get("words") or []:
+                            for ln in w:
+                                for x in ln:
+                                    yield x
+                for cell in row[1:]:
+                    if rs.get("bg") and not cell.get("bg"):
+                        cell["bg"] = rs["bg"]
+                    for x in all_runs(cell):
+                        if rs.get("b"):
+                            x["b"] = True
+                        if rs.get("i"):
+                            x["i"] = True
+                        if rs.get("u"):
+                            x["u"] = True
+                        if rs.get("color") and not x.get("color"):
+                            x["color"] = rs["color"]
             rows.append(row)
             if r.get("freeRow") and (r["freeRow"].get("text") or "").strip():
                 frow = [{"runs": []}, {"runs": [{"text": r["freeRow"]["text"], "i": True}, {"text": "   " + (r["freeRow"].get("rows") or ""), "color": "#68717d"}]}]
@@ -369,9 +492,26 @@ class Docx:
         for i, r in enumerate(rows):
             if i < len(headers):
                 rowst[str(i + 1)] = {"bg": "#f3f4f6"}
-        tbl = {"rows": rows, "header": False, "style": {"spans": spans, "rows": rowst, "flags": ["borders-light"]}}
+        tbl = {"rows": rows, "header": False, "style": {"spans": spans, "rows": rowst, "flags": ["borders-light"]}, "minColW": 700}
         out.append(self.table(tbl))
         return out
+
+    def wordgrid(self, block: dict) -> str:
+        """A chart cell's words side by side, each word's lines under it (`words`: per word a
+        list of lines, each a list of runs) — a borderless table, as the example tables are."""
+        words = block.get("words") or []
+        nlines = max((len(w) for w in words), default=0)
+        if not words or not nlines:
+            return "<w:p/>"
+        widths = [max(300, min(40, max((_text_len(ln) for ln in w), default=1)) * 130 + 200) for w in words]   # 130 twips a character: Charis at 11 pt
+        rows = []
+        for li in range(nlines):
+            cells = [self.cell({"runs": w[li] if li < len(w) else []}, widths[wi], borders=False) for wi, w in enumerate(words)]
+            rows.append(f"<w:tr>{''.join(cells)}</w:tr>")
+        tblpr = (f'<w:tblPr><w:tblW w:w="{sum(widths)}" w:type="dxa"/><w:tblLayout w:type="fixed"/>'
+                 '<w:tblCellMar><w:left w:w="20" w:type="dxa"/><w:right w:w="100" w:type="dxa"/></w:tblCellMar></w:tblPr>')
+        grid = "<w:tblGrid>" + "".join(f'<w:gridCol w:w="{w}"/>' for w in widths) + "</w:tblGrid>"
+        return f"<w:tbl>{tblpr}{grid}{''.join(rows)}</w:tbl>"
 
     def interlinear(self, block: dict) -> list[str]:
         out = []
@@ -386,24 +526,29 @@ class Docx:
             lines = seg.get("lines", [])
             ncols = max((len(l.get("cells", [])) for l in lines), default=0)
             if ncols:
+                model = [[{"runs": [{"text": str(seg.get("label") or seg.get("n", "")) if li == 0 else ""}]}] + [{"runs": line["cells"][ci] if ci < len(line["cells"]) else []} for ci in range(ncols)] for li, line in enumerate(lines)]
+                widths = grid_widths(model, TEXT_W_LANDSCAPE if self.landscape else TEXT_W_PORTRAIT, {0: 500}, min_w=400, char_w=120)
                 rows = []
                 for li, line in enumerate(lines):
                     cells = []
                     num = {"runs": [{"text": str(seg.get("label") or seg.get("n", "")) if li == 0 else "", "color": "#a8b0ba", "size": 9}]}
-                    cells.append(self.cell(num, 500, borders=False))
+                    cells.append(self.cell(num, widths[0], borders=False))
                     for ci in range(ncols):
                         runs = line["cells"][ci] if ci < len(line["cells"]) else []
-                        cells.append(self.cell({"runs": runs}, None, borders=False))
+                        cells.append(self.cell({"runs": runs}, widths[ci + 1], borders=False))
                     rows.append(f"<w:tr>{''.join(cells)}</w:tr>")
                 tblpr = ('<w:tblPr><w:tblW w:w="0" w:type="auto"/><w:tblLayout w:type="autofit"/>'
                          '<w:tblCellMar><w:left w:w="60" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tblCellMar></w:tblPr>')
-                out.append(f"<w:tbl>{tblpr}{''.join(rows)}</w:tbl>")
+                grid = "<w:tblGrid>" + "".join(f'<w:gridCol w:w="{w}"/>' for w in widths) + "</w:tblGrid>"
+                out.append(f"<w:tbl>{tblpr}{grid}{''.join(rows)}</w:tbl>")
+            # free / literal translation: one paragraph of runs each; notes: one paragraph per note
             for key, lab in (("free", "Free"), ("lit", "Lit."), ("notes", "Note")):
                 vals = seg.get(key)
                 if not vals:
                     continue
-                for v in (vals if isinstance(vals, list) else [vals]):
-                    runs = v if isinstance(v, list) else [{"text": str(v)}]
+                paras = vals if key == "notes" else [vals]
+                for v in paras:
+                    runs = [dict(x) for x in v] if isinstance(v, list) else [{"text": str(v)}]
                     out.append(self.para([{"text": lab + "  ", "color": "#a8b0ba", "size": 8}] + runs, extra='<w:ind w:left="360"/>'))
             out.append("<w:p/>")
         return out
@@ -465,8 +610,8 @@ class Docx:
     def build(self, title: str = "") -> bytes:
         document = (f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document {W_NS}><w:body>'
                     + "".join(self.body)
-                    + '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="708" w:footer="708" w:gutter="0"/></w:sectPr>'
-                    '</w:body></w:document>')
+                    + (SECT_LANDSCAPE if self.landscape else SECT_PORTRAIT)
+                    + '</w:body></w:document>')
         styles = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
                   '<w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Charis SIL" w:eastAsia="Calibri"/><w:sz w:val="22"/><w:lang w:val="en-US"/></w:rPr></w:rPrDefault>'
                   '<w:pPrDefault><w:pPr><w:spacing w:after="120" w:line="276" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults>'

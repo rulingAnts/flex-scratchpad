@@ -1419,7 +1419,8 @@ class FlexiconBackend:
                              _t(lambda: self.list_chart_markers_on_worker(), []))
         d["abbrev"] = _s(_t(lambda: p.Texts.GetAbbreviation(text), ""))
         d["url"] = self._goto(text, "text")
-        media_by_guid = {m["guid"]: m for m in self._media(text)}
+        d["media"] = self._media(text)                       # the text's recordings: a chart plays its lines (Seth, 2026-10-18)
+        media_by_guid = {m["guid"]: m for m in d["media"]}
         # every segment of the text by guid → (n, paragraph, k, object); read only the ones the rows touch
         segs: dict[str, tuple] = {}
         n = 0

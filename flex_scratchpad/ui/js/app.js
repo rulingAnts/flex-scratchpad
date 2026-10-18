@@ -931,7 +931,10 @@
       item('Markdown (.md)', () => doExport('md'));
       item('Web page (.html)', () => doExport('html'));
       item('Word (.docx)', () => doExport('docx'));
-      item('PDF (print…)', () => doExport('pdf'));
+      item('Excel (.xlsx)', () => doExport('xlsx'));
+      item('PDF (.pdf)', () => doExport('pdf'));
+      item('Slideshow (.html)', () => doExport('slides'));
+      item('PowerPoint (.pptx)', () => doExport('pptx'));
       if (S.init.canBrowse) item('Show file', () => FS.api.reveal_note(n.id));
       pop.appendChild(el('hr'));
       item('Delete (to trash)', async () => { if (!confirm('Move “' + (n.title || 'Untitled') + '” to the trash?')) return; await FS.api.delete_note(n.id); if (S.note && S.note.id === n.id) { S.note = null; $('editor-pane').classList.add('no-note'); } await refreshLists(); }, 'danger');

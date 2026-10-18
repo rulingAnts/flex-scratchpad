@@ -366,10 +366,11 @@ class Api:
             return d
         return None
 
-    def export_note_html(self, note_id: str, html: str, path: str | None = None) -> str | None:
-        """Save a self-contained HTML export (built by the page) through a save dialog."""
+    def export_note_html(self, note_id: str, html: str, path: str | None = None, suffix: str = "") -> str | None:
+        """Save a self-contained HTML export (built by the page) through a save dialog; `suffix`
+        is added to the suggested name (" slides" for a slideshow)."""
         n = self._nb.get_note(note_id)
-        target = path or self._save_dialog((n.title or "note") + ".html")
+        target = path or self._save_dialog((n.title or "note") + (suffix or "") + ".html")
         if not target:
             return None
         Path(target).write_text(html, encoding="utf-8", newline="\n")
@@ -425,6 +426,42 @@ class Api:
         if not target:
             return None
         Path(target).write_bytes(build_docx(doc))
+        return target
+
+    def export_note_pdf(self, note_id: str, html: str, path: str | None = None, landscape: bool = False) -> dict:
+        """A PDF of the page's HTML export, written directly through WebView2 on Windows
+        (pdf_print.py); {"fallback": True} tells the page to use the browser's print dialog
+        instead (any other platform, or a WebView2 we cannot reach — the save dialog is then
+        never shown, the print dialog has its own)."""
+        from . import pdf_print
+        if not pdf_print.available(self._window):
+            return {"fallback": True}
+        n = self._nb.get_note(note_id)
+        target = path or self._save_dialog((n.title or "note") + ".pdf")
+        if not target:
+            return {"cancelled": True}
+        ok = pdf_print.print_to_pdf(html, target, self._nb.private_dir / "export-tmp", landscape=landscape)
+        return {"path": target} if ok else {"fallback": True, "failed": True, "path": target}
+
+    def export_note_pptx(self, note_id: str, deck: dict, path: str | None = None) -> str | None:
+        """PowerPoint from the page's slide model (export.js slidesOf; zero-dependency writer)."""
+        from .pptx_writer import build_pptx
+        n = self._nb.get_note(note_id)
+        target = path or self._save_dialog((n.title or "note") + ".pptx")
+        if not target:
+            return None
+        Path(target).write_bytes(build_pptx(deck))
+        return target
+
+    def export_note_xlsx(self, note_id: str, doc: dict, path: str | None = None) -> str | None:
+        """Excel workbook from the page's export model (zero-dependency writer): the note, an
+        Examples sheet, a rows sheet per chart."""
+        from .xlsx_writer import build_xlsx
+        n = self._nb.get_note(note_id)
+        target = path or self._save_dialog((n.title or "note") + ".xlsx")
+        if not target:
+            return None
+        Path(target).write_bytes(build_xlsx(doc))
         return target
 
     def export_note_flextext(self, note_id: str, items: list[dict], opts: dict | None = None, path: str | None = None) -> dict | None:
@@ -1077,6 +1114,10 @@ class Api:
         except FlexError as e:
             raise RuntimeError(e.message)
 
+    def export_clips(self, items: list[dict]) -> list[dict]:
+        """The recordings an HTML export embeds, one compressed clip per example (base64)."""
+        return self._flex.export_clips(items or [])
+
     def audio_store_clip(self, text_guid: str, begin: int, end: int, data_base64: str, mime: str = "audio/webm") -> dict:
         return self._flex.store_captured_clip(text_guid, begin, end, data_base64, mime)
 
@@ -1136,7 +1177,7 @@ class Api:
         return self._dialog("open", allow_multiple=False, file_types=tuple(types))
 
     _SAVE_TYPES = {".flextext": "FLEx interlinear text", ".html": "Web page", ".md": "Markdown",
-                   ".docx": "Word document", ".zip": "Zip archive", ".wav": "WAV audio"}
+                   ".docx": "Word document", ".xlsx": "Excel workbook", ".pptx": "PowerPoint presentation", ".pdf": "PDF document", ".zip": "Zip archive", ".wav": "WAV audio"}
 
     def _save_dialog(self, name: str) -> str | None:
         """A save dialog suggesting `name`, made safe for a Windows filename, and a path that

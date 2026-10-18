@@ -317,9 +317,9 @@
       open_in_flex: async (url) => { FS.toast('Would open in FLEx: ' + url); return true; },
       flex_open_object: async (kind, guid) => { FS.toast('Would open in FLEx: ' + kind + ' ' + guid); return true; },
       audio_clip: async () => ({ found: false, fileUrl: '', clipUrl: '', needsCapture: false, mediaGuid: '' }),
-      audio_store_clip: async () => ({ clipUrl: '' }), audio_browse_media: async () => null, audio_set_media_path: async () => ({}),
+      audio_store_clip: async () => ({ clipUrl: '' }), export_clips: async (items) => (items || []).map((it) => ({ id: it.id, error: 'no audio in the browser demo' })), audio_browse_media: async () => null, audio_set_media_path: async () => ({}),
       save_file_as: async () => null, notebook_stamp: async () => ({ stamp: 'mock' }), note_changed_on_disk: async () => null,
-      export_note_markdown: async () => null, export_note_html: async () => null, export_note_docx: async () => null, export_notebook_zip: async () => null, import_notebook_zip: async () => null, choose_notebook_folder: async () => null, open_notebook: async () => init(), reveal_notebook: async () => false, reveal_note: async () => false,
+      export_note_markdown: async () => null, export_note_html: async () => null, export_note_docx: async () => null, export_note_xlsx: async () => null, export_note_pptx: async () => null, export_note_pdf: async () => ({ fallback: true }), export_notebook_zip: async () => null, import_notebook_zip: async () => null, choose_notebook_folder: async () => null, open_notebook: async () => init(), reveal_notebook: async () => false, reveal_note: async () => false,
     };
   };
 })();
