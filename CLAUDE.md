@@ -528,7 +528,14 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   rows an embed asks for; `Api.flex_charts(text?)`, `flex_chart_markers()`, `flex_get('chart', …)`;
   `--dump-charts [TEXT]` writes `flex-scratchpad-charts.json` (`lcm.explain_charts`: every chart, the
   markers, the rows' cell parts raw) — ASK FOR THAT FIRST when a chart comes out wrong; the demo has
-  one chart on the story with every kind of cell. The dict: `flex/model.py` "text charts" (rows
+  one chart on the story with every kind of cell. FIRST CONTACT (Seth's project, 2026-10-18): the
+  reader worked as written — word groups with analysis indexes, columns under their groups
+  ("Fronted Material › Outer" and "Post-Material › Outer" share a name), the text's tags, a
+  142-item marker list three levels deep. What it taught: FLEx charts have NO name of their own
+  (none of 80 did), so a nameless chart goes by its template ("Default chart", `named: false`),
+  and a text has one chart PER TEMPLATE it was ever opened with, most of them empty — the picker
+  and the chart-note dialog list the charts with rows first and say "empty", and the search
+  index (`chart_rows`) reads only charts with rows, with a progress message per chart. The dict: `flex/model.py` "text charts" (rows
   numbered 1.. through the chart = what `rows=` counts; `index` is the rows' index so
   `resolve_range` / `at=` anchors work unchanged, by ROW GUIDs; `segments` = the text's segments
   the rows touch, for the free translations). THE EMBED (flexref.js): `{{flex:chart <guid>

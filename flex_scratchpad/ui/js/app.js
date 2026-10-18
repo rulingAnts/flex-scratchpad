@@ -531,11 +531,11 @@
       let all = [];
       try { all = await FS.api.flex_charts(''); } catch (e) { list.innerHTML = ''; list.appendChild(el('div', { class: 'pick-item', style: { color: 'var(--danger)' } }, e.message)); return; }
       const q = search.value.trim().toLowerCase();
-      const hits = all.filter((c) => !q || ((c.title || '') + ' ' + (c.name || '') + ' ' + (c.template || '')).toLowerCase().includes(q));
+      const hits = all.filter((c) => !q || ((c.title || '') + ' ' + (c.name || '') + ' ' + (c.template || '')).toLowerCase().includes(q)).sort((a, b) => (b.rows ? 1 : 0) - (a.rows ? 1 : 0) || (a.title || '').localeCompare(b.title || '') || (a.template || '').localeCompare(b.template || ''));
       list.innerHTML = '';
       if (!hits.length) list.appendChild(el('div', { class: 'pick-item muted' }, all.length ? 'No chart matches.' : 'This project has no text charts yet.'));
       for (const c of hits) {
-        const it = el('div', { class: 'pick-item', 'data-test': 'pick-chart-note' }, el('span', { class: 'hw' }, c.title || '(untitled text)'), el('span', { class: 'pos' }, c.name || 'chart'), el('span', { class: 'n' }, (c.rows || 0) + ' row' + (c.rows === 1 ? '' : 's') + (c.template ? ' · ' + c.template : '')));
+        const it = el('div', { class: 'pick-item' + (c.rows ? '' : ' muted'), 'data-test': 'pick-chart-note' }, el('span', { class: 'hw' }, c.title || '(untitled text)'), el('span', { class: 'pos' }, c.name || 'chart'), el('span', { class: 'n' }, c.rows ? c.rows + ' row' + (c.rows === 1 ? '' : 's') : 'empty'));
         it.addEventListener('click', () => { m.close(); newChartNote(c.guid, ''); });
         list.appendChild(it);
       }

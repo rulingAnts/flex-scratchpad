@@ -65,11 +65,12 @@
           const q = search.value.trim();
           const ql = q.toLowerCase();
           const all = await FS.api.flex_charts('');
-          const hits = all.filter((c) => !ql || ((c.title || '') + ' ' + (c.name || '') + ' ' + (c.template || '')).toLowerCase().includes(ql));
+          // charts with rows first (FLEx makes an empty chart whenever a template's tab is opened)
+          const hits = all.filter((c) => !ql || ((c.title || '') + ' ' + (c.name || '') + ' ' + (c.template || '')).toLowerCase().includes(ql)).sort((a, b) => (b.rows ? 1 : 0) - (a.rows ? 1 : 0) || (a.title || '').localeCompare(b.title || '') || (a.template || '').localeCompare(b.template || ''));
           results.innerHTML = '';
           if (!hits.length && !q) results.appendChild(el('div', { class: 'pick-item muted' }, all.length ? 'No chart matches.' : 'This project has no text charts yet (Texts & Words › Text Chart in FieldWorks).'));
           for (const c of hits) {
-            const it = el('div', { class: 'pick-item', 'data-test': 'pick-chart' }, el('span', { class: 'hw' }, c.title || '(untitled text)'), el('span', { class: 'pos' }, c.name || 'chart'), el('span', { class: 'n' }, (c.rows || 0) + ' row' + (c.rows === 1 ? '' : 's') + (c.template ? ' · ' + c.template : '') + (c.cached ? ' · cached' : '')));
+            const it = el('div', { class: 'pick-item' + (c.rows ? '' : ' muted'), 'data-test': 'pick-chart' }, el('span', { class: 'hw' }, c.title || '(untitled text)'), el('span', { class: 'pos' }, c.name || 'chart'), el('span', { class: 'n' }, (c.rows ? c.rows + ' row' + (c.rows === 1 ? '' : 's') : 'empty') + (c.cached ? ' · cached' : '')));
             it.addEventListener('click', () => { results.querySelectorAll('.on').forEach((x) => x.classList.remove('on')); it.classList.add('on'); pickChart(c); });
             results.appendChild(it);
           }

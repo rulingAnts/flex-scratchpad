@@ -521,7 +521,10 @@ def make_column(guid: str, name: str, abbr: str = "", path: list | None = None, 
 
 def make_chart(guid: str, name: str, text_guid: str, title: str = "", ws_vern: dict | None = None,
                ws_anal: dict | None = None, template: dict | None = None, markers: list | None = None) -> dict:
-    return {"kind": "chart", "guid": (guid or "").lower(), "name": name or "", "text": (text_guid or "").lower(),
+    tname = (template or {}).get("name") or ""
+    # FieldWorks' charts usually have no name of their own (Seth's project, 2026-10-18: none of 80
+    # did): a nameless chart goes by its template, which is what tells a text's charts apart
+    return {"kind": "chart", "guid": (guid or "").lower(), "name": name or (tname + " chart" if tname else ""), "named": bool(name), "text": (text_guid or "").lower(),
             "title": title or "", "abbrev": "", "url": "",
             "ws": {"vern": ws_vern or make_ws(), "anal": ws_anal or make_ws()},
             "template": template or {"guid": "", "name": "", "columns": []}, "markers": list(markers or []),

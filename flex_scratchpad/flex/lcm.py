@@ -1339,10 +1339,12 @@ class FlexiconBackend:
     def _chart_summary(self, ch) -> dict:
         text = self._chart_text(ch)
         tmpl = self._c(_t(lambda: ch.TemplateRA, None))
-        return {"guid": _guid(ch), "name": _s(_t(lambda: self._best(ch.Name), "")),
+        tname = _s(_t(lambda: self._best(tmpl.Name), "")) if tmpl is not None else ""
+        name = _s(_t(lambda: self._best(ch.Name), ""))
+        return {"guid": _guid(ch), "name": name or (tname + " chart" if tname else ""), "named": bool(name),
                 "text": _guid(text) if text is not None else "", "title": self._text_title(text) if text is not None else "",
                 "rows": int(_t(lambda: ch.RowsOS.Count, 0) or 0),
-                "template": _s(_t(lambda: self._best(tmpl.Name), "")) if tmpl is not None else "",
+                "template": tname,
                 "columns": len(self._template_columns(tmpl))}
 
     def list_charts(self, text_guid: str | None = None) -> list[dict]:

@@ -1010,12 +1010,20 @@ class FlexService:
             if self._chart_rows is not None and not refresh:
                 return self._chart_rows
             rows: list[dict] = []
-            for summ in self.charts():
+            # only the charts that have rows are read (Seth's project, 2026-10-18: 80 charts, most of
+            # them the empty chart FLEx makes when a template's tab is opened); each one is snapshotted
+            # on the way, so the second build is quick
+            todo = [s for s in self.charts() if s.get("rows")]
+            for i, summ in enumerate(todo, 1):
+                self.progress(f"Reading chart {i} of {len(todo)}: {summ.get('title') or ''}…")
                 try:
                     chart = self.get_object("chart", summ["guid"])
-                except FlexError:
+                except FlexError as e:
+                    LOG.warning("chart %s not read for the index: %s", summ["guid"][:8], e.message)
                     continue
                 rows.extend(_chart_index_rows(chart))
+            self.progress("")
+            LOG.info("chart index: %d rows from %d charts", len(rows), len(todo))
             self._chart_rows = rows
             return rows
 

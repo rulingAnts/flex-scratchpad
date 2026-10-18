@@ -178,7 +178,7 @@ def charts_report(project: str | None, which: str, out: str, demo: bool = False)
         Path(out).write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
         ch = report.get("chart") or {}
         print(f"{len(report['charts'])} chart(s), {len(report['markers'])} marker(s) in the list"
-              + (f"; {ch.get('name') or '?'}: {ch.get('rowCount', 0)} row(s), {len((ch.get('template') or {}).get('columns') or [])} column(s)" if ch else "")
+              + (f"; {ch.get('name') or 'chart'} on {ch.get('title') or '?'}: {ch.get('rowCount', 0)} row(s), {len((ch.get('template') or {}).get('columns') or [])} column(s)" if ch else "")
               + f" → {out}")
         return 0
     except FlexError as e:
