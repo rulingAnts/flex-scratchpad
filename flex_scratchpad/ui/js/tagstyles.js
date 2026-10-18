@@ -105,7 +105,8 @@
     return (rules || []).filter((r) => r && r.enabled !== false && matches(r, tag)).sort((a, b) => rank(a) - rank(b));
   }
   const TEXT_KEYS = ['br', 'hl', 'tile', 'box', 'c'];
-  const hasStyle = (r) => !!(r && (r.bg || r.fg || r.b || r.i || r.u || r.label === false || r.bar != null || TEXT_KEYS.some((k) => r[k])));
+  const BORDER_STYLES = ['solid', 'dashed', 'dotted', 'double'];
+  const hasStyle = (r) => !!(r && (r.bg || r.fg || r.b || r.i || r.u || r.label === false || r.bar != null || r.bs || r.bw || r.tc || TEXT_KEYS.some((k) => r[k])));
   const textStyled = (res) => !!(res && (res.br || res.hl || res.tile || res.box || res.c));
   /* '#rrggbb' at an opacity (the overlays blend where tags overlap). */
   const rgba = (hex, a) => { const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex || ''); return m ? 'rgba(' + parseInt(m[1], 16) + ',' + parseInt(m[2], 16) + ',' + parseInt(m[3], 16) + ',' + a + ')' : hex; };
@@ -122,11 +123,12 @@
     const c = Object.assign({}, ctx || T.context());
     if (spec && spec.guid && !c.text) c.text = spec.guid;       // the example's source text is a scope of its own
     const scopes = scopesFor(c, spec ? R.tagRules(spec) : null, override);
-    const out = { hide: false, bg: '', fg: '', b: false, i: false, u: false, label: true, br: '', hl: false, tile: false, box: false, c: '', bar: null, hideVia: null, styleVia: null };
+    const out = { hide: false, bg: '', fg: '', b: false, i: false, u: false, label: true, br: '', hl: false, tile: false, box: false, c: '', bar: null, bs: '', bw: 0, tc: '', hideVia: null, styleVia: null };
     for (const sc of scopes) {
       for (const r of rulesIn(sc.rules, tag)) {
         if (!out.hideVia && r.hide != null) { out.hide = !!r.hide; out.hideVia = sc; }
-        if (!out.styleVia && hasStyle(r)) Object.assign(out, { bg: r.bg || '', fg: r.fg || '', b: !!r.b, i: !!r.i, u: !!r.u, label: r.label !== false, br: BRACKETS[r.br] ? r.br : '', hl: !!r.hl, tile: !!r.tile, box: !!r.box, c: r.c || '', bar: r.bar == null ? null : !!r.bar, styleVia: sc });
+        // the border's line style / thickness and the tile's own colour ride with the style (Seth, 2026-10-18)
+        if (!out.styleVia && hasStyle(r)) Object.assign(out, { bg: r.bg || '', fg: r.fg || '', b: !!r.b, i: !!r.i, u: !!r.u, label: r.label !== false, br: BRACKETS[r.br] ? r.br : '', hl: !!r.hl, tile: !!r.tile, box: !!r.box, c: r.c || '', bar: r.bar == null ? null : !!r.bar, bs: BORDER_STYLES.includes(r.bs) ? r.bs : '', bw: r.bw >= 1 && r.bw <= 6 ? Math.round(r.bw) : 0, tc: r.tc || '', styleVia: sc });
       }
       if (out.hideVia && out.styleVia) break;
     }
@@ -262,7 +264,21 @@
     br.addEventListener('change', () => set({ br: br.value || undefined }));
     txt.appendChild(br);
     for (const [k, l, ttl] of [['hl', 'highlight', 'A marker over the words'], ['tile', 'tile', 'A tinted box behind the words and their lines'], ['box', 'border', 'A border around the words and their lines']]) {
-      txt.appendChild(el('button', { class: 'tog' + (r[k] ? ' on' : ''), 'data-test': 'tag-' + k, title: ttl, onclick: () => set({ [k]: r[k] ? undefined : true }) }, l));
+      txt.appendChild(el('button', { class: 'tog' + (r[k] ? ' on' : ''), 'data-test': 'tag-' + k, title: ttl, onclick: () => set({ [k]: r[k] ? undefined : true, ...(k === 'box' && r.box ? { bs: undefined, bw: undefined } : {}), ...(k === 'tile' && r.tile ? { tc: undefined } : {}) }) }, l));
+      if (k === 'tile' && r.tile) {        // the tile's own colour (Seth, 2026-10-18: "edit the background color"); unset = the tag's colour, tinted
+        const tc = el('input', { type: 'color', value: r.tc || r.bg || '#ffd6a5', 'data-test': 'tag-tc', title: 'Colour of the tile (the tag’s colour, tinted, when unset)' });
+        tc.addEventListener('change', () => set({ tc: tc.value }));
+        txt.appendChild(el('span', { class: 'tag-ctl', title: 'Colour of the tile' }, tc, r.tc ? el('button', { class: 'tog', 'data-test': 'tag-tc-auto', title: 'Back to the tag’s colour, tinted', onclick: () => set({ tc: undefined }) }, 'auto') : null));
+      }
+      if (k === 'box' && r.box) {          // the border's line (Seth, 2026-10-18: "edit line style and thickness")
+        const bs = el('select', { 'data-test': 'tag-bs', title: 'Line style of the border' });
+        for (const v of BORDER_STYLES) bs.appendChild(el('option', { value: v, selected: (r.bs || 'solid') === v }, v));
+        bs.addEventListener('change', () => set({ bs: bs.value === 'solid' ? undefined : bs.value }));
+        const bw = el('select', { 'data-test': 'tag-bw', title: 'Thickness of the border' });
+        for (const v of [1, 2, 3, 4, 6]) bw.appendChild(el('option', { value: String(v), selected: (r.bw || 2) === v }, v + ' px'));
+        bw.addEventListener('change', () => set({ bw: +bw.value === 2 ? undefined : +bw.value }));
+        txt.append(bs, bw);
+      }
     }
     const c = el('input', { type: 'color', value: r.c || '#1a1d21', title: 'Colour of the words' });
     c.addEventListener('change', () => set({ c: c.value }));
@@ -478,7 +494,8 @@
   /* The swatch of a resolved look: its colour, and a hint of brackets / border when the text is styled. */
   function swatchStyle(res) {
     const st = { background: res.hide ? 'transparent' : (res.hl || res.tile || res.showBar ? res.bg : rgba(res.bg, 0.35)), borderStyle: res.hide ? 'dashed' : 'solid' };
-    if (!res.hide && res.box) st.borderColor = res.ink;
+    if (!res.hide && res.box) { st.borderColor = res.ink; st.borderStyle = res.bs || 'solid'; }
+    if (!res.hide && res.tile && res.tc) st.background = rgba(res.tc, 0.55);
     if (!res.hide && res.br) st.boxShadow = 'inset 0 0 0 2px ' + res.ink;
     return st;
   }

@@ -3557,7 +3557,7 @@ def test_tags_style_the_text_and_visual_filters_and_the_rail_filters_by_tag(app)
     # the third example is a collapsed chip, the fourth a chip in a line of text: both count
     h.api.create_note(tab, "", "Markup", "Intro.\n\n{{flex:text %s seg=1-2}}\n\n{{flex:text %s seg=4-6}}\n\n{{flex:text %s seg=5 collapsed}}\n\nSee {{flex:text %s seg=1}} here.\n" % (T_STORY, T_STORY, T_STORY, T_STORY))
     h.api.create_note(tab, "", "Plain", "No examples here.")
-    h.api.set_tag_styles("tab", tab, [{"tag": "Subject", "br": "sq", "hl": True}, {"tag": "Verb", "box": True}, {"tag": "Topic", "tile": True, "bar": True}, {"tag": "Object", "c": "#b45309", "b": True}])
+    h.api.set_tag_styles("tab", tab, [{"tag": "Subject", "br": "sq", "hl": True}, {"tag": "Verb", "box": True, "bs": "dashed", "bw": 3}, {"tag": "Topic", "tile": True, "bar": True, "tc": "#fde68a"}, {"tag": "Object", "c": "#b45309", "b": True}])
     h.api.set_tag_filters([{"id": "f1", "name": "Discourse", "enabled": True, "rules": [{"tag": "group:Discourse", "br": "an"}]}])
     page.reload()
     page.wait_for_selector(".note-card")
@@ -3573,12 +3573,36 @@ def test_tags_style_the_text_and_visual_filters_and_the_rail_filters_by_tag(app)
     assert box.count() == 1
     geo = page.evaluate("() => { const b = document.querySelector('#editor .text-obj .segment .tag-ov-box').getBoundingClientRect(); const c = document.querySelector('#editor .text-obj .segment .word-cell[data-w=\"2\"]').getBoundingClientRect(); return [b.left <= c.left, b.right >= c.right, b.top <= c.top, b.bottom >= c.bottom]; }")
     assert geo == [True, True, True, True], geo
+    # the border's line style and thickness, the tile's own colour (Seth, 2026-10-18)
+    assert box.evaluate("(e) => [getComputedStyle(e).borderTopStyle, getComputedStyle(e).borderTopWidth]") == ["dashed", "3px"]
     seg2 = first.locator(".segment").nth(1)
     assert seg2.locator(".word-cell[data-w='4'] .il-txt").evaluate("(e) => [getComputedStyle(e).color, getComputedStyle(e).fontWeight]") == ["rgb(180, 83, 9)", "700"]
     # the visual filter puts angle brackets round the Focus tag (by its FLEx group); Topic keeps its bar beside its tile
     assert seg2.locator(".br-cell.br-open").all_inner_texts() == ["⟨", "["]
     second = page.locator("#editor .text-obj").nth(1)
     assert second.locator(".segment").first.locator(".tag-ov-tile").count() == 1 and second.locator(".segment").first.locator(".tagbar", has_text="Top").count() == 1
+    assert second.locator(".segment").first.locator(".tag-ov-tile").evaluate("(e) => getComputedStyle(e).backgroundColor") == "rgba(253, 230, 138, 0.55)"
+    # the controls: with "border" on, its line style and thickness; with "tile" on, its colour (aimed at the tab, where the rules are)
+    first.locator("[data-test=tag-btn]").click()
+    page.wait_for_selector("[data-test=tag-popover]")
+    page.locator("[data-test=tag-scope-pick]").select_option(label="this tab")
+    page.locator("[data-test=tag-popover] .tagrow[data-tag='Verb'] [data-test=tag-style]").click()
+    sb = page.locator("[data-test=tag-popover] .tag-style-box")
+    assert sb.locator("[data-test=tag-box]").first.evaluate("(e) => e.classList.contains('on')")
+    assert sb.locator("[data-test=tag-bs]").input_value() == "dashed" and sb.locator("[data-test=tag-bw]").input_value() == "3"
+    sb.locator("[data-test=tag-bw]").select_option("6")
+    page.wait_for_function("() => getComputedStyle(document.querySelector('#editor .text-obj .segment .tag-ov-box')).borderTopWidth === '6px'")
+    page.keyboard.press("Escape")
+    second.locator("[data-test=tag-btn]").click()                       # Topic is on the second example's lines
+    page.wait_for_selector("[data-test=tag-popover] .tagrow[data-tag='Topic']")
+    page.locator("[data-test=tag-scope-pick]").select_option(label="this tab")
+    page.locator("[data-test=tag-popover] .tagrow[data-tag='Topic'] [data-test=tag-style]").click()
+    assert page.locator("[data-test=tag-popover] .tag-style-box [data-test=tag-tc]").input_value() == "#fde68a"
+    page.locator("[data-test=tag-popover] .tag-style-box [data-test=tag-tc-auto]").click()
+    page.wait_for_function("() => getComputedStyle(document.querySelector('#editor .text-obj:nth-of-type(2) .segment .tag-ov-tile, #editor .text-obj .tag-ov-tile')).backgroundColor !== 'rgba(253, 230, 138, 0.55)'")
+    page.keyboard.press("Escape")
+    assert h.api.init()["config"]["tagStyles"]["tab"][tab][1] == {"tag": "Verb", "enabled": True, "box": True, "bs": "dashed", "bw": 6}
+    assert h.api.init()["config"]["tagStyles"]["tab"][tab][2] == {"tag": "Topic", "enabled": True, "tile": True, "bar": True}
     # the toolbar's ⚑ Filters is a VIEW setting (Seth: "for the whole app or for notebook pages"):
     # off for THIS NOTE first — the angle brackets go here, the filter stays on by default…
     page.locator("#btn-filters").click()

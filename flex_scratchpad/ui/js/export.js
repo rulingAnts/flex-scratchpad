@@ -95,7 +95,7 @@
         const ai = aiOf[i - 1];
         const runs = styledRuns(w.txt, R.stylesFor(index, seg.n, 'txt', i), vbase);
         const on = tg.filter((o) => ai >= o.a && ai <= o.z);
-        for (const o of on) { if (o.res.hl || o.res.tile) for (const r of runs) if (!r.hl) r.hl = o.res.bg; if (o.res.c) for (const r of runs) r.color = o.res.c; if (o.res.b) for (const r of runs) r.b = true; if (o.res.i) for (const r of runs) r.i = true; }
+        for (const o of on) { if (o.res.hl || o.res.tile) for (const r of runs) if (!r.hl) r.hl = (o.res.tile && o.res.tc) || o.res.bg; if (o.res.c) for (const r of runs) r.color = o.res.c; if (o.res.b) for (const r of runs) r.b = true; if (o.res.i) for (const r of runs) r.i = true; }
         const open = on.filter((o) => o.res.br && BR[o.res.br] && o.firstAi === ai && seg.n === o.t.from.seg).sort((x, y) => y.span - x.span).map((o) => BR[o.res.br][0]).join('');
         const close = on.filter((o) => o.res.br && BR[o.res.br] && o.lastAi === ai && seg.n === o.t.to.seg).sort((x, y) => x.span - y.span).map((o) => BR[o.res.br][1] + (o.res.label && !o.res.showBar ? (o.t.tag.abbr || o.t.tag.name) : '')).join('');
         if (open) runs.unshift({ text: open, color: vbase.color });

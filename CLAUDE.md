@@ -410,7 +410,12 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   ResizeObserver re-places them), so `.word-row` is `position: relative` and `.word-cell` sits
   above the layer; `segTags` gives a LANE only to bar tags (lane -1 otherwise) and `depth` to the
   overlays. Exports and the plain copy wrap the baseline in the brackets (HTML / Word also tint
-  hl/tile words). A rule's `tag` may also be `group:<FLEx group>` (every tag of the group; its own
+  hl/tile words). A BORDER's line (Seth, 2026-10-18: "edit line style and thickness"): `bs`
+  (solid | dashed | dotted | double) and `bw` (1–6 px; the overlay's borderStyle / borderWidth,
+  2px solid when unset) — `bsdashed+bw3` in `tags=`; a TILE's own colour ("edit the background
+  color"): `tc#rrggbb`, drawn at 0.55 alpha (the tag's colour at 0.38 when unset — a chosen colour
+  is meant to be seen), `tc#…` in `tags=`; the controls appear under the border / tile toggles
+  (`tag-bs`, `tag-bw`, `tag-tc`), switching the toggle off drops them. A rule's `tag` may also be `group:<FLEx group>` (every tag of the group; its own
   rule still wins) — the dialog lists a row per group. VISUAL FILTERS: `tagStyles.filters =
   [{id, name, enabled, rules}]` (`Api.set_tag_filters`), consulted in order between the tab and the
   project (`scopesFor`); a scope turns one on/off for itself with a rule on the pseudo-tag

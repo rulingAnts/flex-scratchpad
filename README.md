@@ -223,7 +223,7 @@ that for one tag, for every tag of a FLEx group (*All of "Syntax"*), or for all 
 
 | the bar | the text itself |
 |---|---|
-| its colour and text colour; the abbreviation on or off; `bar: always / never` | brackets round the tagged words — `[ ]`, `( )`, `{ }`, `⟨ ⟩`, `⟦ ⟧`, `⌈ ⌉`, `⌊ ⌋`, `\| \|` — with the abbreviation on the closing one; a **highlight** marker over the word line; a **tile** (a tinted box) or a **border** round the words *and the glosses under them*; the words' colour; **B** / *I* / U |
+| its colour and text colour; the abbreviation on or off; `bar: always / never` | brackets round the tagged words — `[ ]`, `( )`, `{ }`, `⟨ ⟩`, `⟦ ⟧`, `⌈ ⌉`, `⌊ ⌋`, `\| \|` — with the abbreviation on the closing one; a **highlight** marker over the word line; a **tile** (a tinted box, in the tag's colour or one of your own) or a **border** (solid, dashed, dotted or double, 1–6 px) round the words *and the glosses under them*; the words' colour; **B** / *I* / U |
 
 A rule that styles the text hides the bar unless you ask for both; tags that overlap nest their
 brackets and boxes. A rule can also just switch a tag **off** (or back **on**).

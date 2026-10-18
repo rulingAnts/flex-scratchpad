@@ -91,11 +91,20 @@ test('tagsIn: the distinct tags on the segments an example shows, blank lines le
 });
 
 test('text styles round-trip through `tags=`: brackets, marker, tile, border, the words’ colour, the bar switch', () => {
-  const rules = [{ tag: 'Subject', br: 'sq', hl: true }, { tag: 'Verb', box: true, bar: true }, { tag: 'Object', tile: true, c: '#b45309', b: true, bar: false }, { tag: 'group:Discourse', br: 'an' }, { tag: 'filter:f1', hide: true }];
+  const rules = [{ tag: 'Subject', br: 'sq', hl: true }, { tag: 'Verb', box: true, bar: true, bs: 'dashed', bw: 3 }, { tag: 'Object', tile: true, c: '#b45309', b: true, bar: false, tc: '#fde68a' }, { tag: 'group:Discourse', br: 'an' }, { tag: 'filter:f1', hide: true }];
   const v = R.serializeTagRules(rules);
-  assert.strictEqual(v, 'Subject:hl+brsq,Verb:box+bar,Object:c#b45309+b+tile+nobar,group%3ADiscourse:bran,filter%3Af1:off');
+  // the border's line style / thickness and the tile's own colour (Seth, 2026-10-18) ride along
+  assert.strictEqual(v, 'Subject:hl+brsq,Verb:box+bsdashed+bw3+bar,Object:c#b45309+b+tile+tc#fde68a+nobar,group%3ADiscourse:bran,filter%3Af1:off');
   assert.deepStrictEqual(plain(R.parseTagRules(v)), rules);
-  assert.deepStrictEqual(plain(R.parseTagRules('Subject:brxx+purple')), []);          // unknown brackets / tokens are dropped
+  assert.deepStrictEqual(plain(R.parseTagRules('Subject:brxx+purple+bswavy+bw9')), []);          // unknown brackets / tokens / line styles / widths are dropped
+  const VERB = { guid: 'v', name: 'Verb', abbr: 'V' };
+  T.setList([VERB]);
+  T.setConfig({ project: { Kalu: [{ tag: 'Verb', box: true, bs: 'dotted', bw: 4, tile: true, tc: '#abcdef' }] }, tab: {}, folder: {}, filters: [] });
+  const res = T.resolve(VERB, null, { project: 'Kalu', tab: 'Notes', folder: '' });
+  assert.ok(res.box && res.bs === 'dotted' && res.bw === 4 && res.tile && res.tc === '#abcdef', JSON.stringify(res));
+  T.setConfig({ project: { Kalu: [{ tag: 'Verb', box: true, bs: 'wavy', bw: 9 }] }, tab: {}, folder: {}, filters: [] });
+  const r2 = T.resolve(VERB, null, { project: 'Kalu', tab: 'Notes', folder: '' });
+  assert.ok(r2.box && r2.bs === '' && r2.bw === 0);                                   // nonsense falls back to 2px solid
 });
 
 test('a rule styles the TEXT and the bar steps back unless asked for; a group rule covers its tags; visual filters sit between the tab and the project', () => {

@@ -107,11 +107,12 @@ def test_scoped_tag_styles_are_kept_in_notebook_json_and_cleaned(tmp_path):
 def test_visual_filters_and_text_styles_are_kept_in_notebook_json(tmp_path):
     api = make(tmp_path)
     tab = api.init()["config"]["tabs"][0]["dir"]
-    ts = api.set_tag_styles("tab", tab, [{"tag": "Subject", "br": "sq", "hl": True, "c": "#B45309", "bar": False}, {"tag": "Verb", "br": "nonsense", "box": True, "bar": True},
-                                        {"tag": "group:Syntax", "tile": True}, {"tag": "filter:abc", "hide": False}])
+    ts = api.set_tag_styles("tab", tab, [{"tag": "Subject", "br": "sq", "hl": True, "c": "#B45309", "bar": False}, {"tag": "Verb", "br": "nonsense", "box": True, "bar": True, "bs": "dashed", "bw": "3"},
+                                        {"tag": "group:Syntax", "tile": True, "tc": "#FDE68A", "bs": "wavy", "bw": 9}, {"tag": "filter:abc", "hide": False}])
+    # the border's line style / thickness and the tile's own colour (Seth, 2026-10-18) are kept when they make sense
     assert ts["tab"][tab] == [{"tag": "Subject", "enabled": True, "c": "#b45309", "hl": True, "br": "sq", "bar": False},
-                              {"tag": "Verb", "enabled": True, "box": True, "bar": True},
-                              {"tag": "group:Syntax", "enabled": True, "tile": True}, {"tag": "filter:abc", "enabled": True, "hide": False}]
+                              {"tag": "Verb", "enabled": True, "box": True, "bar": True, "bs": "dashed", "bw": 3},
+                              {"tag": "group:Syntax", "enabled": True, "tile": True, "tc": "#fde68a"}, {"tag": "filter:abc", "enabled": True, "hide": False}]
     ts = api.set_tag_filters([{"id": "Disc 1!", "name": " Discourse ", "rules": [{"tag": "group:Discourse", "br": "an"}]}, {"name": "Second", "enabled": False, "rules": "junk"}, "junk", {"id": "disc1", "name": "dup"}])
     assert [f["id"] for f in ts["filters"]] == ["disc1", ts["filters"][1]["id"]] and ts["filters"][1]["id"].startswith("f")
     assert ts["filters"][0] == {"id": "disc1", "name": "Discourse", "enabled": True, "rules": [{"tag": "group:Discourse", "enabled": True, "br": "an"}]}

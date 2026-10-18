@@ -828,10 +828,19 @@ class Api:
             out = {"tag": str(r["tag"]).strip()[:120], "enabled": r.get("enabled", True) is not False}
             if r.get("hide") is not None:
                 out["hide"] = bool(r["hide"])
-            for k in ("bg", "fg", "c"):
+            for k in ("bg", "fg", "c", "tc"):
                 v = str(r.get(k) or "")
                 if re.fullmatch(r"#[0-9a-fA-F]{6}", v):
                     out[k] = v.lower()
+            # the border's line style and thickness (Seth, 2026-10-18)
+            if r.get("bs") in ("solid", "dashed", "dotted", "double"):
+                out["bs"] = r["bs"]
+            try:
+                bw = int(r.get("bw") or 0)
+            except (TypeError, ValueError):
+                bw = 0
+            if 1 <= bw <= 6:
+                out["bw"] = bw
             for k in ("b", "i", "u", "hl", "tile", "box"):
                 if r.get(k):
                     out[k] = True
