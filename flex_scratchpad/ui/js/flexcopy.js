@@ -107,8 +107,18 @@
         rows.push(cells);
       }
       // FLEx's text markup tags, a row per lane: the abbreviation under the first word, `—` on
+      // the rest; a tag drawn as brackets wraps the words of the first row instead
       if (lines.includes('tag') && FS.interlinear && FS.interlinear.segTags) {
         const tg = FS.interlinear.segTags(obj, spec, s);
+        const BR = (FS.tagstyles && FS.tagstyles.BRACKETS) || {};
+        if (rows.length && tg.some((o) => o.res.br && BR[o.res.br])) {
+          rows[0] = rows[0].map((c, i) => {
+            const ai = cols[i].ai;
+            const open = tg.filter((o) => o.res.br && BR[o.res.br] && o.firstAi === ai && s.n === o.t.from.seg).sort((x, y) => y.span - x.span).map((o) => BR[o.res.br][0]).join('');
+            const close = tg.filter((o) => o.res.br && BR[o.res.br] && o.lastAi === ai && s.n === o.t.to.seg).sort((x, y) => x.span - y.span).map((o) => BR[o.res.br][1] + (o.res.label && !o.res.showBar ? (o.t.tag.abbr || o.t.tag.name) : '')).join('');
+            return open + c + close;
+          });
+        }
         const lanes = tg.reduce((m, o) => Math.max(m, o.lane + 1), 0);
         for (let l = 0; l < lanes; l++) rows.push(cols.map(({ ai }) => { const o = tg.find((x) => x.lane === l && ai >= x.a && ai <= x.z); return o ? (ai === o.firstAi ? (o.t.tag.abbr || o.t.tag.name) : '\u2014') : ''; }));
       }

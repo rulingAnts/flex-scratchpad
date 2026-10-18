@@ -33,6 +33,10 @@
       <h4>Tags <span class="spacer"></span><button id="btn-edit-tags" title="Edit tags">&#9998;</button></h4>
       <div id="tags"></div>
     </div>
+    <div class="rail-section" id="ftags-section" hidden>
+      <h4>FLEx tags <span class="spacer"></span><button id="btn-tag-filters" title="Visual filters: named sets of tag styles, switched on and off together">&#9873;</button></h4>
+      <div id="ftags"></div>
+    </div>
     <div class="rail-foot">
       <div class="flex-pill" id="flex-pill" title="FieldWorks connection"><span class="led"></span><span class="label">FLEx: not connected</span></div>
       <div class="flex-pill backup-pill" id="backup-pill" data-test="backup-pill" hidden title="Backup & storage"><span class="bk-ico">&#9729;</span><span class="label">Backup</span></div>
@@ -92,6 +96,7 @@
       <span class="spacer"></span>
       <button class="tb" id="btn-markers" title="Show or hide the Markdown markers (**bold**, # heading, - list) while editing">&#42;&#42; Markup</button>
     </div>
+    <div class="tagfocus" id="tagfocus" hidden></div>
     <div class="findbar" id="findbar" hidden>
       <input id="find-input" type="text" placeholder="Find in note" autocomplete="off">
       <span class="cnt" id="find-count"></span>

@@ -331,6 +331,7 @@
     // FLEx's text markup tags (Seth, 2026-10-17): drawn under the words when the `tag` line is on
     const tagsHere = (obj.tags || []).length && FS.tagstyles ? FS.tagstyles.tagsIn(obj) : [];
     box._showTags = tagsHere.length > 0 && R.showsTags(spec);
+    if (tagsHere.length) box.dataset.tags = tagsHere.map((x) => x.tag.name).join('\n');   // app.js: filtering the note's examples by tag
     const range = obj.range || [segs[0] && segs[0].n, segs.length && segs[segs.length - 1].n];
     // FLEx's own numbers (paragraph.segment, as its Gloss / Print views show them) are what a
     // reader knows the segments by; the running count is what `seg=` addresses.
@@ -391,15 +392,68 @@
     }
     out.sort((x, y) => x.a - y.a || y.z - x.z);
     const ais = (seg.words || []).map((w, i) => (w.punct ? null : (w.ai != null ? w.ai : i))).filter((x) => x != null);
+    // a LANE under the words only for a tag drawn as a bar (res.showBar); a tag styling the text
+    // itself (brackets, a marker, a tile, a border) has lane -1 and its own place in the row
     const laneEnd = [];
     for (const o of out) {
+      o.firstAi = ais.find((x) => x >= o.a);
+      o.lastAi = [...ais].reverse().find((x) => x <= o.z);
+      o.span = (o.t.to.seg - o.t.from.seg) * 10000 + (o.t.to.w - o.t.from.w);
+      if (!o.res.showBar) { o.lane = -1; continue; }
       let l = 0;
       while (laneEnd[l] != null && laneEnd[l] >= o.a) l++;
       o.lane = l; laneEnd[l] = o.z;
-      o.firstAi = ais.find((x) => x >= o.a);
-      o.lastAi = [...ais].reverse().find((x) => x <= o.z);
     }
-    return out.filter((o) => o.firstAi != null);
+    const live = out.filter((o) => o.firstAi != null && o.lastAi != null);
+    // nesting depth among the overlays (tile / border / marker): the longer span is outside
+    const ov = live.filter((o) => o.res.hl || o.res.tile || o.res.box).sort((x, y) => y.span - x.span || x.a - y.a);
+    ov.forEach((o, i) => { o.depth = ov.slice(0, i).filter((p) => p.firstAi <= o.firstAi && p.lastAi >= o.lastAi).length; });
+    return live;
+  }
+
+  /* The text styles of the tags on a segment, laid over its word row: a marker over the word
+   * line (hl), a tinted tile behind the whole column (tile), a border round it (box). Drawn from
+   * the cells' geometry once they are laid out, again when the row's size changes (a font that
+   * arrives late, a narrower window wrapping the row), one piece per visual line. */
+  const ovRows = new WeakMap();
+  const ovObserver = typeof ResizeObserver === 'function' ? new ResizeObserver((entries) => { for (const e of entries) { const fn = ovRows.get(e.target); if (fn) fn(); } }) : null;
+  function placeTagOverlays(row, items) {
+    let layer = row.querySelector(':scope > .tag-ovl');
+    if (!items.length) { if (layer) layer.remove(); return; }
+    if (!layer) { layer = el('div', { class: 'tag-ovl' }); row.insertBefore(layer, row.firstChild); }
+    const TS = FS.tagstyles;
+    const draw = () => {
+      if (!row.isConnected) return;
+      layer.innerHTML = '';
+      const cells = [...row.querySelectorAll(':scope > .word-cell[data-ai]')];
+      for (const o of items) {
+        const covered = cells.filter((c) => { const ai = +c.dataset.ai; return ai >= o.firstAi && ai <= o.lastAi; });
+        const lines = new Map();
+        for (const c of covered) { const k = c.offsetTop; if (!lines.has(k)) lines.set(k, []); lines.get(k).push(c); }
+        for (const group of lines.values()) {
+          const left = Math.min(...group.map((c) => c.offsetLeft)), right = Math.max(...group.map((c) => c.offsetLeft + c.offsetWidth));
+          const top = Math.min(...group.map((c) => c.offsetTop)), bottom = Math.max(...group.map((c) => c.offsetTop + c.offsetHeight));
+          const d = (o.depth || 0) * 3;
+          const frame = { left: (left - 3 + d) + 'px', top: (top - 2 + d) + 'px', width: Math.max(0, right - left + 6 - 2 * d) + 'px', height: Math.max(0, bottom - top + 4 - 2 * d) + 'px' };
+          const title = o.t.tag.name + (o.t.tag.group ? ' \u2014 ' + o.t.tag.group : '');
+          if (o.res.tile) layer.appendChild(el('div', { class: 'tag-ov tag-ov-tile', dataset: { tag: o.t.tag.name }, title, style: Object.assign({ background: TS.rgba(o.res.bg, 0.38) }, frame) }));
+          if (o.res.box) layer.appendChild(el('div', { class: 'tag-ov tag-ov-box', dataset: { tag: o.t.tag.name }, title, style: Object.assign({ borderColor: o.res.ink }, frame) }));
+          if (o.res.hl) {
+            const txts = group.map((c) => [c, c.querySelector(':scope > .il-txt')]).filter((x) => x[1]);
+            if (txts.length) {
+              const t0 = Math.min(...txts.map(([c, t]) => c.offsetTop + t.offsetTop)), t1 = Math.max(...txts.map(([c, t]) => c.offsetTop + t.offsetTop + t.offsetHeight));
+              const dd = (o.depth || 0) * 2;
+              layer.appendChild(el('div', { class: 'tag-ov tag-ov-hl', dataset: { tag: o.t.tag.name }, title, style: { left: (left - 2 + dd) + 'px', top: (t0 + 1 + dd) + 'px', width: Math.max(0, right - left + 4 - 2 * dd) + 'px', height: Math.max(0, t1 - t0 - 2 - 2 * dd) + 'px', background: TS.rgba(o.res.bg, 0.75) } }));
+            }
+          }
+        }
+      }
+    };
+    ovRows.set(row, draw);
+    if (ovObserver) ovObserver.observe(row);
+    draw();
+    requestAnimationFrame(draw);
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(draw);
   }
 
   function renderSegment(seg, obj, spec, lines, index, vern, anal, mediaByGuid, opts, box, sel) {
@@ -425,6 +479,16 @@
     // the segment's FLEx tags, each in a lane (overlapping tags stack), as rows under the words
     const tags = box && box._showTags ? segTags(obj, spec, seg) : [];
     const lanes = tags.reduce((m, o) => Math.max(m, o.lane + 1), 0);
+    // brackets round a tagged span (Seth, 2026-10-18): a cell of its own before the first word
+    // and after the last, the outer tag's outside the inner's; the abbreviation rides the closing
+    // one when the tag has no bar
+    const bracketCell = (o, close) => {
+      const [a, z] = FS.tagstyles.BRACKETS[o.res.br];
+      const t = o.t.tag;
+      const line = el('div', Object.assign({ class: 'il-line il-txt tag-br', style: { color: o.res.ink } }, wsAttrs(vern)), close ? z : a);
+      if (close && o.res.label && !o.res.showBar) line.appendChild(el('sub', { class: 'tag-br-label' }, t.abbr || t.name));
+      return el('div', { class: 'word-cell br-cell' + (close ? ' br-close' : ' br-open'), dataset: { tag: t.name }, title: t.name + (t.group ? ' \u2014 ' + t.group : '') + ' (FLEx text markup tag)' }, line);
+    };
     (seg.words || []).forEach((word, ti) => {
       if (word.punct) {
         wordRow.appendChild(el('div', { class: 'word-cell punct-cell' }, el('div', Object.assign({ class: 'il-line il-txt' }, wsAttrs(vern)), word.txt)));
@@ -432,7 +496,9 @@
       }
       w++;
       const wi = w;                      // this cell's ordinal — captured per cell, not the loop counter
-      const cell = el('div', { class: 'word-cell', dataset: { w: wi } });
+      const ai = word.ai != null ? word.ai : ti;        // FLEx's analysis index: what a tag's begin / end count
+      for (const o of tags.filter((x) => x.res.br && x.firstAi === ai && seg.n === x.t.from.seg).sort((x, y) => y.span - x.span)) wordRow.appendChild(bracketCell(o, false));
+      const cell = el('div', { class: 'word-cell', dataset: { w: wi, ai } });
       const sf = (line) => R.stylesFor(index, seg.n, line, wi);
       const blank = (cls) => el('div', { class: 'il-line il-empty ' + cls, html: '&nbsp;' });
       for (const line of present) {
@@ -444,7 +510,6 @@
         else if (line === 'gls') cell.appendChild(el('div', { class: 'il-line il-gls', lang: anal.tag || null, html: styled(word.gls, sf('gls')) }));
         else if (line === 'pos') cell.appendChild(el('div', { class: 'il-line il-pos', html: styled(word.pos, sf('pos')) }));
       }
-      const ai = word.ai != null ? word.ai : ti;        // FLEx's analysis index: what a tag's begin / end count
       for (let l = 0; l < lanes; l++) {
         const o = tags.find((x) => x.lane === l && ai >= x.a && ai <= x.z);
         if (!o) { cell.appendChild(blank('il-tag')); continue; }
@@ -453,10 +518,15 @@
           style: { background: o.res.bg, color: o.res.fg }, title: t.name + (t.group ? ' \u2014 ' + t.group : '') + ' (FLEx text markup tag' + (o.res.styleVia ? '; styled by ' + o.res.styleVia.label : '') + ')' },
           first && o.res.label ? (seg.n > o.t.from.seg ? '\u2026' : '') + (t.abbr || t.name) : '\u00a0');
         cell.appendChild(el('div', { class: 'il-line il-tag', dataset: { tag: t.name } }, bar));
-        if (o.res.b || o.res.i || o.res.u) {
-          const te = cell.querySelector('.il-txt');
-          if (te) { if (o.res.b) te.classList.add('tag-b'); if (o.res.i) te.classList.add('tag-i'); if (o.res.u) { te.classList.add('tag-u'); te.style.setProperty('--tag-ul', o.res.bg); } }
-        }
+      }
+      // the words themselves: bold / italic / underline / a colour, from every tag on this word
+      for (const o of tags) {
+        if (ai < o.a || ai > o.z || !(o.res.b || o.res.i || o.res.u || o.res.c)) continue;
+        const te = cell.querySelector('.il-txt');
+        if (!te) continue;
+        if (o.res.b) te.classList.add('tag-b'); if (o.res.i) te.classList.add('tag-i');
+        if (o.res.u) { te.classList.add('tag-u'); te.style.setProperty('--tag-ul', o.res.ink); }
+        if (o.res.c) te.style.color = o.res.c;
       }
       if (opts.editable) {
         cell.addEventListener('click', (e) => {
@@ -497,9 +567,12 @@
         });
       }
       wordRow.appendChild(cell);
+      for (const o of tags.filter((x) => x.res.br && x.lastAi === ai && seg.n === x.t.to.seg).sort((x, y) => x.span - y.span)) wordRow.appendChild(bracketCell(o, true));
     });
     if (!(seg.words || []).length) wordRow.appendChild(el('span', Object.assign({ class: 'il-txt' }, wsAttrs(vern)), seg.baseline || ''));
     main.appendChild(wordRow);
+    const overlays = tags.filter((o) => o.res.hl || o.res.tile || o.res.box);
+    if (overlays.length) { wordRow.classList.add('has-tag-ov'); queueMicrotask(() => placeTagOverlays(wordRow, overlays)); }
     const lineEl = (cls, line, text) => {
       const d = el('div', { class: cls, lang: anal.tag || null, html: styled(text, R.stylesFor(index, seg.n, line, 0)) });
       // a click styles the whole line; a drag-selection inside it styles just those characters

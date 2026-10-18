@@ -337,7 +337,11 @@
    * its abbreviation, its GUID, or `*` for all) tokens joined by `+`: `off` / `on` (hidden /
    * shown here whatever the broader scopes say), `bg#rrggbb`, `fg#rrggbb`, `b`, `i`, `u`,
    * `nolabel` / `label`. A rule = {tag, hide?, bg?, fg?, b?, i?, u?, label?}. */
-  const TAG_TOKEN = /^(off|on|b|i|u|nolabel|label|bg#[0-9a-f]{6}|fg#[0-9a-f]{6})$/;
+  // the look of one tag in `tags=`: on/off, the bar's colours (bg/fg), B I U and a colour (c) on the
+  // words, brackets around the span (brsq [], brrd (), brcu {}, bran ⟨⟩, brdb ⟦⟧, brce ⌈⌉, brfl ⌊⌋,
+  // brbar ||), hl (a marker over the words), tile (a box behind the whole column), box (a border),
+  // bar / nobar (the lane under the words, otherwise shown only when no text style is on)
+  const TAG_TOKEN = /^(off|on|b|i|u|nolabel|label|hl|tile|box|bar|nobar|br(sq|rd|cu|an|db|ce|fl|bar)|bg#[0-9a-f]{6}|fg#[0-9a-f]{6}|c#[0-9a-f]{6})$/;
   const encodeTagKey = (t) => String(t).replace(/%/g, '%25').replace(/_/g, '%5F').replace(/,/g, '%2C').replace(/:/g, '%3A').replace(/\+/g, '%2B').replace(/ /g, '_');
   const decodeTagKey = (k) => String(k).replace(/_/g, ' ').replace(/%([0-9A-Fa-f]{2})/g, (m, h) => String.fromCharCode(parseInt(h, 16)));
   function parseTagRules(val) {
@@ -351,7 +355,9 @@
         if (!TAG_TOKEN.test(t)) continue;
         if (t === 'off') r.hide = true; else if (t === 'on') r.hide = false;
         else if (t === 'nolabel') r.label = false; else if (t === 'label') r.label = true;
-        else if (t.startsWith('bg#')) r.bg = t.slice(2); else if (t.startsWith('fg#')) r.fg = t.slice(2);
+        else if (t.startsWith('bg#')) r.bg = t.slice(2); else if (t.startsWith('fg#')) r.fg = t.slice(2); else if (t.startsWith('c#')) r.c = t.slice(1);
+        else if (t.startsWith('br')) r.br = t.slice(2);
+        else if (t === 'bar') r.bar = true; else if (t === 'nobar') r.bar = false;
         else r[t] = true;
       }
       if (Object.keys(r).length > 1) out.push(r);
@@ -363,7 +369,10 @@
       const toks = [];
       if (r.hide === true) toks.push('off'); else if (r.hide === false) toks.push('on');
       if (r.bg) toks.push('bg' + String(r.bg).toLowerCase()); if (r.fg) toks.push('fg' + String(r.fg).toLowerCase());
-      for (const k of ['b', 'i', 'u']) if (r[k]) toks.push(k);
+      if (r.c) toks.push('c' + String(r.c).toLowerCase());
+      for (const k of ['b', 'i', 'u', 'hl', 'tile', 'box']) if (r[k]) toks.push(k);
+      if (r.br && /^(sq|rd|cu|an|db|ce|fl|bar)$/.test(r.br)) toks.push('br' + r.br);
+      if (r.bar === true) toks.push('bar'); else if (r.bar === false) toks.push('nobar');
       if (r.label === false) toks.push('nolabel'); else if (r.label === true) toks.push('label');
       return toks.length ? encodeTagKey(r.tag) + ':' + toks.join('+') : '';
     }).filter(Boolean).join(',');

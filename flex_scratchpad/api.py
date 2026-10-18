@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import json
 import re
+import uuid
 import os
 import subprocess
 import sys
@@ -743,9 +744,16 @@ class Api:
     def flex_get(self, kind: str, guid: str, seg_from: int | None = None, seg_to: int | None = None,
                  prefer_cache: bool = False, ws: dict | None = None, at: list | None = None) -> dict:
         try:
-            return self._flex.get_object(kind, guid, seg_from, seg_to, prefer_cache, ws or None, at or None)
+            obj = self._flex.get_object(kind, guid, seg_from, seg_to, prefer_cache, ws or None, at or None)
         except FlexError as e:
             raise RuntimeError(e.message)
+        if not obj.get("cached"):
+            # the snapshot just gained this object's words and tags: the notes quoting it are searchable by them now
+            try:
+                self._nb.reindex_mentioning(guid)
+            except Exception:  # noqa: BLE001 — never let the index fail a rendering
+                pass
+        return obj
 
     def flex_search_entries(self, q: str, limit: int = 30) -> list[dict]:
         try:
@@ -767,9 +775,13 @@ class Api:
     # specific one takes precedent"): the notebook keeps the first three in notebook.json
     # (`tagStyles.project[<project>]`, `.tab[<dir>]`, `.folder[<tab>/<path>]`); an example's own
     # are in its embed (`tags=`). A rule: {tag, enabled, hide, bg, fg, b, i, u, label}.
-    def set_tag_styles(self, kind: str, key: str, rules: list[dict]) -> dict:
-        if kind not in ("project", "tab", "folder"):
-            raise ValueError("tag styles are kept per project, tab or folder")
+    _BRACKETS = ("sq", "rd", "cu", "an", "db", "ce", "fl", "bar")
+
+    @classmethod
+    def _clean_tag_rules(cls, rules) -> list[dict]:
+        """A rule list as the page sends it, kept to what tagstyles.js understands: the tag (a
+        name, abbreviation, GUID, `group:<name>`, `filter:<id>` or `*`), on/off, the bar's colours,
+        B I U, and the text styles (brackets, hl, tile, box, the words' colour, the bar switch)."""
         clean = []
         for r in rules or []:
             if not isinstance(r, dict) or not str(r.get("tag") or "").strip():
@@ -777,17 +789,34 @@ class Api:
             out = {"tag": str(r["tag"]).strip()[:120], "enabled": r.get("enabled", True) is not False}
             if r.get("hide") is not None:
                 out["hide"] = bool(r["hide"])
-            for k in ("bg", "fg"):
+            for k in ("bg", "fg", "c"):
                 v = str(r.get(k) or "")
                 if re.fullmatch(r"#[0-9a-fA-F]{6}", v):
                     out[k] = v.lower()
-            for k in ("b", "i", "u"):
+            for k in ("b", "i", "u", "hl", "tile", "box"):
                 if r.get(k):
                     out[k] = True
+            if r.get("br") in cls._BRACKETS:
+                out["br"] = r["br"]
+            if r.get("bar") is not None:
+                out["bar"] = bool(r["bar"])
             if r.get("label") is False:
                 out["label"] = False
             clean.append(out)
-        ts = self._nb.config.setdefault("tagStyles", {"project": {}, "tab": {}, "folder": {}})
+        return clean
+
+    def _tag_styles(self) -> dict:
+        ts = self._nb.config.setdefault("tagStyles", {})
+        for k in ("project", "tab", "folder"):
+            ts.setdefault(k, {})
+        ts.setdefault("filters", [])
+        return ts
+
+    def set_tag_styles(self, kind: str, key: str, rules: list[dict]) -> dict:
+        if kind not in ("project", "tab", "folder"):
+            raise ValueError("tag styles are kept per project, tab or folder")
+        clean = self._clean_tag_rules(rules)
+        ts = self._tag_styles()
         bucket = ts.setdefault(kind, {})
         if clean:
             bucket[key or ""] = clean
@@ -795,6 +824,28 @@ class Api:
             bucket.pop(key or "", None)
         self._nb.save_config()
         return ts
+
+    def set_tag_filters(self, filters: list[dict]) -> dict:
+        """The notebook's visual filters (Seth, 2026-10-18: "various 'visual filters' based on text
+        tags like … in Logos"): [{id, name, enabled, rules}], in the order they are consulted."""
+        clean = []
+        seen = set()
+        for f in filters or []:
+            if not isinstance(f, dict):
+                continue
+            fid = re.sub(r"[^a-z0-9_-]", "", str(f.get("id") or "").lower())[:40] or ("f" + uuid.uuid4().hex[:10])
+            if fid in seen:
+                continue
+            seen.add(fid)
+            clean.append({"id": fid, "name": str(f.get("name") or "").strip()[:80], "enabled": f.get("enabled", True) is not False,
+                          "rules": self._clean_tag_rules(f.get("rules"))})
+        ts = self._tag_styles()
+        ts["filters"] = clean
+        self._nb.save_config()
+        return ts
+
+    def flex_tags_used(self) -> dict:
+        return self._nb.flex_tags_used()
 
     def flex_texts(self, q: str = "") -> list[dict]:
         try:

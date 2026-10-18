@@ -86,8 +86,24 @@
       const words = (seg.words || []).filter((w) => !w.punct);
       const lineModels = [];
       const add = (name, cellsFn) => { const cells = words.map((w, i) => cellsFn(w, i + 1)); if (cells.some((c) => c.some((r) => r.text))) lineModels.push({ name, cells }); };
+      // FLEx text markup tags styling the TEXT: brackets round the span and a marker behind the words
+      const toks = seg.words || [];
+      const aiOf = words.map((w) => (w.ai != null ? w.ai : toks.indexOf(w)));
+      const tg = lines.includes('tag') && FS.interlinear.segTags ? FS.interlinear.segTags(obj, spec, seg) : [];
+      const BR = (FS.tagstyles && FS.tagstyles.BRACKETS) || {};
+      const txtRuns = (w, i) => {
+        const ai = aiOf[i - 1];
+        const runs = styledRuns(w.txt, R.stylesFor(index, seg.n, 'txt', i), vbase);
+        const on = tg.filter((o) => ai >= o.a && ai <= o.z);
+        for (const o of on) { if (o.res.hl || o.res.tile) for (const r of runs) if (!r.hl) r.hl = o.res.bg; if (o.res.c) for (const r of runs) r.color = o.res.c; if (o.res.b) for (const r of runs) r.b = true; if (o.res.i) for (const r of runs) r.i = true; }
+        const open = on.filter((o) => o.res.br && BR[o.res.br] && o.firstAi === ai && seg.n === o.t.from.seg).sort((x, y) => y.span - x.span).map((o) => BR[o.res.br][0]).join('');
+        const close = on.filter((o) => o.res.br && BR[o.res.br] && o.lastAi === ai && seg.n === o.t.to.seg).sort((x, y) => x.span - y.span).map((o) => BR[o.res.br][1] + (o.res.label && !o.res.showBar ? (o.t.tag.abbr || o.t.tag.name) : '')).join('');
+        if (open) runs.unshift({ text: open, color: vbase.color });
+        if (close) runs.push({ text: close, color: vbase.color });
+        return runs;
+      };
       for (const line of lines) {
-        if (line === 'txt') add('txt', (w, i) => styledRuns(w.txt, R.stylesFor(index, seg.n, 'txt', i), vbase));
+        if (line === 'txt') add('txt', txtRuns);
         else if (line === 'morph') add('morph', (w, i) => styledRuns((w.morphs || []).map((m) => m.form).join(' '), R.stylesFor(index, seg.n, 'morph', i), { font: vern.font || undefined, color: '#4a4f57' }));
         else if (line === 'mgls') add('mgls', (w, i) => styledRuns((w.morphs || []).map((m) => m.gls).join(' '), R.stylesFor(index, seg.n, 'mgls', i), { color: '#2a6e2a' }));
         else if (line === 'cf') add('cf', (w, i) => styledRuns((w.morphs || []).map((m) => m.cf || '').join(' '), R.stylesFor(index, seg.n, 'cf', i), { color: '#68717d' }));
@@ -95,10 +111,7 @@
         else if (line === 'pos') add('pos', (w, i) => styledRuns(w.pos || '', R.stylesFor(index, seg.n, 'pos', i), { color: '#7a3e9d', size: 9 }));
       }
       // FLEx text markup tags: a line per lane, the abbreviation on the tag's first word, its colour behind
-      if (lines.includes('tag') && FS.interlinear.segTags) {
-        const toks = seg.words || [];
-        const aiOf = words.map((w) => (w.ai != null ? w.ai : toks.indexOf(w)));
-        const tg = FS.interlinear.segTags(obj, spec, seg);
+      if (tg.length) {
         const lanes = tg.reduce((m, o) => Math.max(m, o.lane + 1), 0);
         for (let l = 0; l < lanes; l++) add('tag', (w, i) => { const ai = aiOf[i - 1]; const o = tg.find((x) => x.lane === l && ai >= x.a && ai <= x.z); return o ? [{ text: ai === o.firstAi ? (o.t.tag.abbr || o.t.tag.name) : '\u00a0', hl: o.res.bg, size: 8, b: true }] : [{ text: '' }]; });
       }

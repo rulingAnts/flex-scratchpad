@@ -322,7 +322,7 @@ DEFAULT_CONFIG = {
     "flex": {"source": "lcm", "project": "", "flextextPath": ""},
     "media": {"byGuid": {}, "folders": []},
     "settings": {"diacriticsInsensitive": True},
-    "tagStyles": {"project": {}, "tab": {}, "folder": {}},   # FLEx text markup tag styles by scope (api.set_tag_styles)
+    "tagStyles": {"project": {}, "tab": {}, "folder": {}, "filters": []},   # FLEx text markup tag styles by scope, and the named visual filters (api.set_tag_styles / set_tag_filters)
 }
 
 
@@ -487,6 +487,29 @@ class Notebook:
             if t["dir"] == tab:
                 return t
         return None
+
+    def reindex_mentioning(self, guid: str) -> int:
+        """Re-index the notes whose body names a FLEx object (just fetched: its snapshot now
+        holds words, glosses and tags the index did not have). Returns how many."""
+        g = (guid or "").lower()
+        if not g:
+            return 0
+        with self.lock:
+            hit = [n for n in self.notes.values() if g in n.body.lower()]
+            for n in hit:
+                self._reindex(n)
+            return len(hit)
+
+    def flex_tags_used(self) -> dict[str, list[str]]:
+        """The FLEx text markup tags on the examples of the notebook's notes, from the index's
+        ⚑ tokens (model.searchable_text): {token (casefolded, spaces as _): [note ids]} — the rail's
+        "FLEx tags" (Seth, 2026-10-18: "search or filter notes … by text markup tags")."""
+        with self.lock:
+            out: dict[str, list[str]] = {}
+            for nid, blob in self._index.items():
+                for tok in set(re.findall(r"\u2691(\S+)", blob)):
+                    out.setdefault(tok, []).append(nid)
+            return out
 
     def list_notes(self) -> list[dict]:
         with self.lock:

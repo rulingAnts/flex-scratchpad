@@ -89,3 +89,37 @@ test('tagsIn: the distinct tags on the segments an example shows, blank lines le
     tags: [{ tag: SUBJ, from: { seg: 1, w: 0 }, to: { seg: 2, w: 0 } }, { tag: TOPIC, from: { seg: 3, w: 0 }, to: { seg: 3, w: 1 } }, { tag: SUBJ, from: { seg: 2, w: 1 }, to: { seg: 2, w: 1 } }, { tag: TOPIC, from: { seg: 9, w: 0 }, to: { seg: 9, w: 0 } }] };
   assert.deepStrictEqual(plain(T.tagsIn(obj).map((x) => [x.tag.name, x.count])), [['Subject', 2]]);
 });
+
+test('text styles round-trip through `tags=`: brackets, marker, tile, border, the words’ colour, the bar switch', () => {
+  const rules = [{ tag: 'Subject', br: 'sq', hl: true }, { tag: 'Verb', box: true, bar: true }, { tag: 'Object', tile: true, c: '#b45309', b: true, bar: false }, { tag: 'group:Discourse', br: 'an' }, { tag: 'filter:f1', hide: true }];
+  const v = R.serializeTagRules(rules);
+  assert.strictEqual(v, 'Subject:hl+brsq,Verb:box+bar,Object:c#b45309+b+tile+nobar,group%3ADiscourse:bran,filter%3Af1:off');
+  assert.deepStrictEqual(plain(R.parseTagRules(v)), rules);
+  assert.deepStrictEqual(plain(R.parseTagRules('Subject:brxx+purple')), []);          // unknown brackets / tokens are dropped
+});
+
+test('a rule styles the TEXT and the bar steps back unless asked for; a group rule covers its tags; visual filters sit between the tab and the project', () => {
+  T.setList([SUBJ, TOPIC]);
+  T.setConfig({ project: { Kalu: [{ tag: '*', bg: '#111111' }] }, tab: {}, folder: {},
+    filters: [{ id: 'f1', name: 'Discourse', enabled: true, rules: [{ tag: 'group:Discourse', br: 'an', hl: true }] }, { id: 'f2', name: 'Syntax', enabled: false, rules: [{ tag: 'Subject', box: true }] }] });
+  const ctx = { project: 'Kalu', tab: 'Notes', folder: '' };
+  let r = T.resolve(TOPIC, null, ctx);
+  assert.ok(r.br === 'an' && r.hl && !r.showBar && r.styleVia.kind === 'filter' && r.styleVia.label.includes('Discourse'));
+  assert.ok(T.textStyled(r) && r.ink.startsWith('rgb('));
+  r = T.resolve(SUBJ, null, ctx);                                   // f2 is off: the project's `*` decides, a bar
+  assert.ok(!r.box && r.showBar && r.styleVia.kind === 'project' && r.bg === '#111111');
+  // the tab turns f2 on for itself with a `filter:` rule; the bar can be asked for alongside the text style
+  T.setConfig({ project: { Kalu: [{ tag: '*', bg: '#111111' }] }, tab: { Notes: [{ tag: 'filter:f2', hide: false }, { tag: 'Subject', bar: true }] }, folder: {},
+    filters: [{ id: 'f2', name: 'Syntax', enabled: false, rules: [{ tag: 'Subject', box: true }] }] });
+  r = T.resolve(SUBJ, null, ctx);
+  assert.ok(r.showBar && r.bar === true && r.styleVia.kind === 'tab');      // the tab's own rule wins over the filter's…
+  r = T.resolve(SUBJ, null, { project: 'Kalu', tab: 'Other', folder: '' });
+  assert.ok(!r.box && r.showBar);                                           // …and elsewhere f2 stays off
+  // an example can switch a filter off for itself
+  T.setConfig({ project: {}, tab: {}, folder: {}, filters: [{ id: 'f1', name: 'Discourse', enabled: true, rules: [{ tag: 'group:Discourse', br: 'an' }] }] });
+  assert.strictEqual(T.resolve(TOPIC, R.parse('{{flex:text ' + G + ' tags=filter%3Af1:off}}'), ctx).br, '');
+  assert.strictEqual(T.resolve(TOPIC, null, ctx).br, 'an');
+  // the scopes list names the filters that are on, between the tab and the project
+  assert.deepStrictEqual(plain(T.scopesFor(ctx).map((s) => s.kind)), ['tab', 'filter', 'project']);
+  assert.ok(!T.filterOn({ id: 'f1', enabled: true }, [{ rules: [{ tag: 'filter:f1', hide: true }] }]));
+});

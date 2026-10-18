@@ -74,7 +74,7 @@
     };
     const notes = {};
     const config = { tabs: [{ dir: 'Notes', name: 'Notes', color: '#2f6fdb' }, { dir: 'Grammar', name: 'Grammar', color: '#0f766e' }],
-      tags: [{ name: 'todo', color: '#b45309' }], flex: { source: 'demo', project: 'Kalu Demo' }, media: { byGuid: {}, folders: [] }, settings: { diacriticsInsensitive: true }, tagStyles: { project: {}, tab: {}, folder: {} } };
+      tags: [{ name: 'todo', color: '#b45309' }], flex: { source: 'demo', project: 'Kalu Demo' }, media: { byGuid: {}, folders: [] }, settings: { diacriticsInsensitive: true }, tagStyles: { project: {}, tab: {}, folder: {}, filters: [] } };
     const folders = { Notes: [], Grammar: ['Verbs', 'Verbs/Aspect'] };
     let seq = 0;
     const now = () => new Date().toISOString().slice(0, 19);
@@ -126,7 +126,12 @@
       save_note: async (id, patch) => { const n = notes[id]; for (const k of ['title', 'body', 'tags', 'pinned']) if (patch[k] != null) n[k] = patch[k]; n.updated = now(); return summary(n); },
       move_note: async (id, tab, folder) => { notes[id].tab = tab; notes[id].folder = folder || ''; return summary(notes[id]); },
       delete_note: async (id) => { delete notes[id]; return true; },
-      search: async (q, f) => { const ql = FS.normalize(q.replace(/\b(tag|tab|folder):\S+/g, '').trim(), true); f = f || {}; return list().filter((n) => (!f.tab || n.tab === f.tab) && (!f.tags || !f.tags.length || f.tags.every((t) => n.tags.includes(t) || n.inlineTags.includes(t))) && (!ql || FS.normalize(n.title + ' ' + n.body, true).includes(ql))).map((n) => ({ ...n, snippet: n.excerpt, snippetMarks: [], score: 1 })); },
+      search: async (q, f) => {
+        const tagged = [...q.matchAll(/\btagged:(\S+)/g)].map((m) => m[1].toLowerCase());
+        const used = tagged.length ? await api.flex_tags_used() : {};
+        const ql = FS.normalize(q.replace(/\b(tag|tab|folder|tagged):\S+/g, '').trim(), true); f = f || {};
+        return list().filter((n) => (!f.tab || n.tab === f.tab) && (!f.tags || !f.tags.length || f.tags.every((t) => n.tags.includes(t) || n.inlineTags.includes(t))) && tagged.every((t) => (used[t] || []).includes(n.id)) && (!ql || FS.normalize(n.title + ' ' + n.body, true).includes(ql))).map((n) => ({ ...n, snippet: n.excerpt, snippetMarks: [], score: 1 }));
+      },
       rescan: async () => init(),
       add_tab: async (name, color) => { const t = { dir: name, name, color: color || '#7c3aed' }; config.tabs.push(t); folders[name] = []; return t; },
       update_tab: async (dir, patch) => { const t = config.tabs.find((x) => x.dir === dir); Object.assign(t, patch); return t; },
@@ -164,7 +169,13 @@
         const ql = (q || '').toLowerCase();
         return rows.filter((r) => !ql || (r.title + ' ' + r.words + ' ' + r.label).toLowerCase().includes(ql));
       },
-      set_tag_styles: async (kind, key, rules) => { config.tagStyles = config.tagStyles || { project: {}, tab: {}, folder: {} }; if (rules && rules.length) config.tagStyles[kind][key] = rules; else delete config.tagStyles[kind][key]; return config.tagStyles; },
+      set_tag_filters: async (filters) => { config.tagStyles = config.tagStyles || { project: {}, tab: {}, folder: {}, filters: [] }; config.tagStyles.filters = (filters || []).map((f, i) => ({ id: f.id || 'f' + i, name: f.name || '', enabled: f.enabled !== false, rules: f.rules || [] })); return config.tagStyles; },
+      flex_tags_used: async () => {
+        const out = {};
+        for (const n of list()) for (const m of (n.body || '').matchAll(/\{\{flex:text ([0-9a-f-]{36})/g)) for (const g of ((demo.texts[m[1]] || {}).tags || [])) for (const tok of [g.tag.name, g.tag.abbr]) if (tok) { const k = tok.toLowerCase().replace(/ /g, '_'); (out[k] = out[k] || []).includes(n.id) || out[k].push(n.id); }
+        return out;
+      },
+      set_tag_styles: async (kind, key, rules) => { config.tagStyles = config.tagStyles || { project: {}, tab: {}, folder: {}, filters: [] }; if (rules && rules.length) config.tagStyles[kind][key] = rules; else delete config.tagStyles[kind][key]; return config.tagStyles; },
       flex_choose_file: async () => null, flex_locate: async () => [],
       open_in_flex: async (url) => { FS.toast('Would open in FLEx: ' + url); return true; },
       flex_open_object: async (kind, guid) => { FS.toast('Would open in FLEx: ' + kind + ' ' + guid); return true; },

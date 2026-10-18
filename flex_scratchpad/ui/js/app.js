@@ -9,6 +9,7 @@
   const S = {
     init: null, notes: [], folders: {}, tags: [], config: null, flex: null,
     tab: null, folder: null, tag: null, query: '', results: null,
+    ftag: null, ftags: {},          // the FLEx text markup tag the list is filtered by; {token: [note ids]} from the index
     note: null, editor: null, dirty: false, saving: false, sort: 'updated',
     openFolders: new Set(),
     // a folder (or tab) lists only its OWN notes unless this is on (Seth, 2026-10-16: "VERY
@@ -61,11 +62,12 @@
   }
   // FLEx tag styles (tagstyles.js) resolve against the open note's place; a change anywhere redraws
   FS.tagstyles.context = () => ({ project: (S.flex && S.flex.project) || '', tab: S.note ? S.note.tab : (S.tab || ''), folder: S.note ? (S.note.folder || '') : (S.folder || '') });
-  FS.on('tagstyles', () => { if (isCollection()) { if (S.coll) S.coll.render(); } else if (S.editor) S.editor.renderAll(); });
+  FS.on('tagstyles', () => { if (isCollection()) { if (S.coll) S.coll.render(); } else if (S.editor) S.editor.renderAll(); renderRail(); });
   function applyInit(init) {
     S.init = init; S.config = init.config; S.notes = init.notes; S.folders = init.folders; S.tags = init.tags; S.flex = init.flex;
     FS.tagstyles.setConfig(S.config.tagStyles);
-    if (S.flex && S.flex.open) FS.tagstyles.loadList(true);
+    if (S.flex && S.flex.open) FS.tagstyles.loadList(true).then(renderRail);
+    loadFtags();
     applyMarkers();
     applySticky();
     if (!S.tab || !S.config.tabs.some((t) => t.dir === S.tab)) S.tab = (S.config.tabs[0] || {}).dir || null;
@@ -81,8 +83,96 @@
   async function refreshLists() {
     const [notes, folders, tags] = await Promise.all([FS.api.list_notes(), FS.api.folders(), FS.api.tags()]);
     S.notes = notes; S.folders = folders; S.tags = tags;
+    loadFtags();
     renderRail();
-    if (S.query) await runSearch(); else renderList();
+    if (S.query || S.ftag) await runSearch(); else renderList();
+  }
+  /* The FLEx text markup tags on the notes' examples (Seth, 2026-10-18: "filter notes and specific
+   * flex objects in notes by text markup tags"): {token: [note ids]} from the search index. */
+  let ftagsReq = 0;
+  async function loadFtags() {
+    if (!FS.api.flex_tags_used) return;
+    const n = ++ftagsReq;
+    try { const m = await FS.api.flex_tags_used(); if (n === ftagsReq) { S.ftags = m || {}; renderRail(); } } catch (e) { /* no index yet */ }
+  }
+  const ftagToken = (name) => String(name || '').toLowerCase().replace(/ /g, '_');
+  /* The rail's rows: one per tag of the project's list that the notes of this tab use (its name
+   * and abbreviation tokens merged), plus tokens the list does not know, with note counts. */
+  function ftagRows() {
+    const inTab = new Set(S.notes.filter((n) => n.tab === S.tab).map((n) => n.id));
+    const rows = new Map();
+    for (const [tok, ids] of Object.entries(S.ftags || {})) {
+      const here = ids.filter((id) => inTab.has(id));
+      if (!here.length) continue;
+      const item = FS.tagstyles.list().find((t) => ftagToken(t.name) === tok || ftagToken(t.abbr) === tok);
+      const key = item ? item.guid : tok;
+      const row = rows.get(key) || { key, name: item ? item.name : tok.replace(/_/g, ' '), item, tokens: [], ids: new Set() };
+      row.tokens.push(tok);
+      here.forEach((id) => row.ids.add(id));
+      rows.set(key, row);
+    }
+    return [...rows.values()].sort((a, b) => b.ids.size - a.ids.size || a.name.localeCompare(b.name));
+  }
+  function renderFtags() {
+    const sec = $('ftags-section'), host = $('ftags');
+    if (!sec || !host) return;
+    const rows = ftagRows();
+    const filters = (FS.tagstyles.filters && FS.tagstyles.filters()) || [];
+    sec.hidden = !rows.length && !filters.length && !(S.flex && S.flex.open);
+    host.innerHTML = '';
+    for (const r of rows) {
+      const active = S.ftag && r.tokens.includes(S.ftag);
+      const item = el('div', { class: 'tag-item ftag-item' + (active ? ' active' : ''), 'data-test': 'ftag', dataset: { tag: r.name }, title: r.item && r.item.group ? r.item.group : '' },
+        el('span', { class: 'mark' }, '\u2691'), el('span', {}, r.name), el('span', { class: 'count' }, String(r.ids.size)));
+      item.addEventListener('click', () => { setFtag(active ? null : r.tokens[0]); });
+      host.appendChild(item);
+    }
+    if (!rows.length && !sec.hidden) host.appendChild(el('div', { class: 'muted small', style: { padding: '2px 10px' } }, 'No note in this tab shows a tagged example yet.'));
+  }
+  function setFtag(tok) {
+    S.ftag = tok || null;
+    renderRail();
+    runSearch();
+    applyTagFocus();
+  }
+  /* In the open note: the examples that carry the rail's tag stand out, the others step back,
+   * and a bar over the note walks through them. */
+  let focusReq = 0;
+  function applyTagFocus() {
+    const bar = $('tagfocus');
+    const objs = [...document.querySelectorAll('#editor .text-obj, #collection .text-obj')];
+    if (!S.ftag || !S.note) { if (bar) { bar.hidden = true; } objs.forEach((o) => o.classList.remove('tag-hit', 'tag-miss')); return; }
+    const want = S.ftag;
+    const row = ftagRows().find((r) => r.tokens.includes(want));
+    const toks = new Set(row ? row.tokens : [want]);
+    let hits = 0;
+    for (const o of objs) {
+      const hit = (o.dataset.tags || '').split('\n').some((n) => toks.has(ftagToken(n)));
+      o.classList.toggle('tag-hit', hit); o.classList.toggle('tag-miss', !hit);
+      if (hit) hits++;
+    }
+    if (!bar) return;
+    bar.hidden = false;
+    bar.innerHTML = '';
+    const go = (dir) => {
+      const hitEls = objs.filter((o) => o.classList.contains('tag-hit'));
+      if (!hitEls.length) return;
+      const sc = document.getElementById(isCollection() ? 'collection' : 'editor');
+      const top = sc.getBoundingClientRect().top + 40;
+      let i = dir > 0 ? hitEls.findIndex((o) => o.getBoundingClientRect().top > top + 1) : hitEls.map((o) => o.getBoundingClientRect().top < top - 1).lastIndexOf(true);
+      if (i < 0) i = dir > 0 ? 0 : hitEls.length - 1;
+      hitEls[i].scrollIntoView({ block: 'start', behavior: 'smooth' });
+    };
+    bar.append(el('span', {}, '\u2691 '), el('b', {}, row ? row.name : want.replace(/_/g, ' ')),
+      el('span', { 'data-test': 'tagfocus-count' }, hits + ' of ' + objs.length + (objs.length === 1 ? ' example' : ' examples') + ' in this note'),
+      el('button', { class: 'icon-btn', title: 'Previous tagged example', onclick: () => go(-1) }, '\u25b2'), el('button', { class: 'icon-btn', title: 'Next tagged example', onclick: () => go(1) }, '\u25bc'),
+      el('span', { class: 'spacer' }), el('button', { class: 'lnk', 'data-test': 'tagfocus-clear', onclick: () => setFtag(null) }, 'Show all notes and examples'));
+  }
+  // examples are drawn asynchronously: re-apply the focus whenever the note's objects change
+  // (watching the note and the collection only — the bar itself lives beside them)
+  if (typeof MutationObserver === 'function') {
+    const mo = new MutationObserver(() => { if (!S.ftag || focusReq) return; focusReq = requestAnimationFrame(() => { focusReq = 0; applyTagFocus(); }); });
+    document.addEventListener('DOMContentLoaded', () => { for (const id of ['editor', 'collection']) { const h = $(id); if (h) mo.observe(h, { childList: true, subtree: true }); } });
   }
 
   /* ------------------------------------------------------------------ rail */
@@ -93,7 +183,7 @@
       const count = S.notes.filter((n) => n.tab === t.dir).length;
       const item = el('div', { class: 'tab-item' + (S.tab === t.dir && !S.query ? ' active' : ''), draggable: 'true', dataset: { dir: t.dir } },
         el('span', { class: 'dot', style: { background: t.color } }), el('span', { class: 'label' }, t.name), el('span', { class: 'count' }, String(count)));
-      item.addEventListener('click', () => { S.tab = t.dir; S.folder = null; S.tag = null; clearSearch(); renderRail(); renderList(); });
+      item.addEventListener('click', () => { S.tab = t.dir; S.folder = null; S.tag = null; S.ftag = null; clearSearch(); renderRail(); renderList(); applyTagFocus(); });
       item.addEventListener('contextmenu', (e) => { e.preventDefault(); tabMenu(item, t); });
       item.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/tab', t.dir); e.dataTransfer.effectAllowed = 'move'; });
       item.addEventListener('dragover', (e) => { if (e.dataTransfer.types.includes('text/tab') || e.dataTransfer.types.includes('text/note')) { e.preventDefault(); item.style.outline = '2px solid var(--accent)'; } });
@@ -138,9 +228,10 @@
     for (const t of S.tags.slice().sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))) {
       const item = el('div', { class: 'tag-item' + (S.tag === t.name ? ' active' : '') },
         el('span', { class: 'chip', style: { background: t.color, color: FS.readableTextColor(t.color) } }, '#' + t.name), el('span', { class: 'count' }, String(t.count)));
-      item.addEventListener('click', () => { S.tag = S.tag === t.name ? null : t.name; renderRail(); if (S.query) runSearch(); else renderList(); });
+      item.addEventListener('click', () => { S.tag = S.tag === t.name ? null : t.name; renderRail(); if (S.query || S.ftag) runSearch(); else renderList(); });
       tags.appendChild(item);
     }
+    renderFtags();
   }
 
   function tabMenu(anchor, t) {
@@ -290,7 +381,7 @@
     $('chk-subfolders').checked = S.subfolders;
     const tabInfo = S.config.tabs.find((t) => t.dir === S.tab) || {};
     $('list-title').textContent = S.results ? 'Search results' : (S.folder ? S.folder.split('/').pop() : (tabInfo.name || 'Notes'));
-    $('list-sub').textContent = S.results ? list.length + ' match' + (list.length === 1 ? '' : 'es') : [S.folder ? tabInfo.name + ' / ' + S.folder : '', S.tag ? '#' + S.tag : ''].filter(Boolean).join('  ·  ');
+    $('list-sub').textContent = S.results ? list.length + ' match' + (list.length === 1 ? '' : 'es') + (S.ftag && !S.query ? ' with \u2691 ' + ((ftagRows().find((r) => r.tokens.includes(S.ftag)) || {}).name || S.ftag) : '') : [S.folder ? tabInfo.name + ' / ' + S.folder : '', S.tag ? '#' + S.tag : ''].filter(Boolean).join('  ·  ');
     if (!list.length && !S.results && !S.subfolders && below.length) {
       host.appendChild(el('div', { class: 'empty' }, el('b', {}, S.folder ? 'No notes directly in this folder' : 'No notes at the top of this tab'),
         el('button', { class: 'btn', 'data-test': 'show-below', onclick: () => setSubfolders(true) }, 'Show the ' + below.length + ' note' + (below.length === 1 ? '' : 's') + ' in its subfolders')));
@@ -330,12 +421,14 @@
   const runSearch = FS.debounce(async () => {
     const q = $('search').value.trim();
     S.query = q;
-    if (!q && !S.tag) { S.results = null; renderRail(); renderList(); return; }
-    if (!q) { S.results = null; renderList(); return; }
+    // the rail's FLEx tag is a `tagged:` term of the search (notebook.parse_query)
+    const full = [q, S.ftag ? 'tagged:' + S.ftag : ''].filter(Boolean).join(' ');
+    if (!full && !S.tag) { S.results = null; renderRail(); renderList(); return; }
+    if (!full) { S.results = null; renderList(); return; }
     try {
-      S.results = await FS.api.search(q, { tags: S.tag ? [S.tag] : [] });
+      S.results = await FS.api.search(full, { tags: S.tag ? [S.tag] : [] });
       renderRail(); renderList();
-      try { const recent = JSON.parse(localStorage.getItem('fs:recentSearches') || '[]').filter((x) => x !== q); recent.unshift(q); localStorage.setItem('fs:recentSearches', JSON.stringify(recent.slice(0, 10))); } catch (e) { /* ignore */ }
+      if (q) try { const recent = JSON.parse(localStorage.getItem('fs:recentSearches') || '[]').filter((x) => x !== q); recent.unshift(q); localStorage.setItem('fs:recentSearches', JSON.stringify(recent.slice(0, 10))); } catch (e) { /* ignore */ }
     } catch (e) { FS.toast(e.message, 'error'); }
   }, 150);
   function clearSearch() { S.query = ''; S.results = null; $('search').value = ''; }
@@ -522,7 +615,9 @@
   /* What FLEx says now differs from a plain-text copy the note's file holds (or the note was saved
    * this session and an object has no copy yet): save, so the file stays readable without the app
    * (Seth, 2026-10-17). Opening a note alone never rewrites it. */
+  const ftagsSoon = FS.debounce(loadFtags, 800);
   FS.flexcopy.onFetched(() => {
+    ftagsSoon();                       // the rail's FLEx tags: a fetched text's tags are in the index now
     // a save already pending writes the copies anyway: never postpone it
     if (!S.note || S.dirty || S.saving || !FS.flexcopy.stale(S.note.body || '', S.note.id)) return;
     S.dirty = true;
@@ -817,7 +912,9 @@
       el('div', { class: 'btn-row', style: { justifyContent: 'flex-start' } }, el('button', { class: 'btn primary', 'data-test': 'open-backup', onclick: () => { m.close(); openBackup(); } }, 'Backup & storage…'))));
     body.appendChild(el('div', { class: 'setting-block' }, el('h3', {}, 'FLEx text markup tags'),
       el('p', { class: 'muted small' }, 'Tags from FieldWorks\u2019 Text Tagging view are drawn under the words of an example. How each tag looks can be set for the whole project here, for a tab or a folder (their right-click menus), or for chosen examples (the \u2691 on an example, or a selection); the most specific setting wins.'),
-      el('div', { class: 'btn-row', style: { justifyContent: 'flex-start' } }, el('button', { class: 'btn', 'data-test': 'open-tag-styles', onclick: () => { m.close(); FS.tagstyles.dialog({ kind: 'project', key: (S.flex && S.flex.project) || '', label: 'the project' + (S.flex && S.flex.project ? ' \u201c' + S.flex.project + '\u201d' : '') }); } }, 'Tag styles for this project\u2026'))));
+      el('div', { class: 'btn-row', style: { justifyContent: 'flex-start' } },
+        el('button', { class: 'btn', 'data-test': 'open-tag-styles', onclick: () => { m.close(); FS.tagstyles.dialog({ kind: 'project', key: (S.flex && S.flex.project) || '', label: 'the project' + (S.flex && S.flex.project ? ' \u201c' + S.flex.project + '\u201d' : '') }); } }, 'Tag styles for this project\u2026'),
+        el('button', { class: 'btn', 'data-test': 'open-tag-filters', onclick: () => { m.close(); FS.tagstyles.filtersDialog(); } }, 'Visual filters\u2026'))));
     const fx = el('div', { class: 'setting-block' }, el('h3', {}, 'FieldWorks project'));
     const source = el('select');
     for (const [v, l] of [['lcm', 'FieldWorks project (direct, via flexicon)'], ['flextext', '.flextext export file (fallback)'], ['demo', 'Built-in demo project']]) source.appendChild(el('option', { value: v, selected: (S.flex.source || 'lcm') === v }, l));
@@ -975,6 +1072,7 @@
     $('btn-add-folder').addEventListener('click', () => newFolder(S.tab, S.folder || ''));
     $('chk-subfolders').addEventListener('change', (e) => setSubfolders(e.target.checked));
     $('btn-edit-tags').addEventListener('click', openSettings);
+    $('btn-tag-filters').addEventListener('click', (e) => FS.tagstyles.filtersPopover(e.currentTarget));
     $('btn-settings').addEventListener('click', openSettings);
     $('flex-pill').addEventListener('click', (e) => flexStatusPopover(e.currentTarget));
     $('flex-banner-fix').addEventListener('click', openSettings);

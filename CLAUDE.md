@@ -330,7 +330,38 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   tag names and `⚑name` tokens, `tagged:Topic` in the search box is that token; the picker's "FLEx
   tags" tab lists the tags, then every place one is used (click: the preview on that range; "Insert
   all N as examples"). Exports: a `tag` line per lane (HTML / Word / PDF, the colour behind the
-  abbreviation), the plain-text copy a row per lane. FIRST CONTACT (Seth's project, 2026-10-18:
+  abbreviation), the plain-text copy a row per lane.
+  TEXT STYLES AND VISUAL FILTERS (Seth, 2026-10-18: "the option to style the TEXT, not the tags …
+  brackets around words (and their glosses, etc), highlight/background/border/tile … 'visual
+  filters' based on text tags like … in Logos … search or filter notes and specific flex objects
+  in notes by text markup tags"). A rule's text keys: `br` (sq rd cu an db ce fl bar —
+  `tagstyles.BRACKETS`), `hl` (a marker over the word line), `tile` (a tinted box behind the whole
+  column), `box` (a border round it), `c` (the words' colour), and `bar` true/false; `res.showBar`
+  is `bar` when set, else "no text style is on" — "those styles can overlap with tags optionally
+  displayed underneath". In `tags=`: `brsq hl tile box c#rrggbb bar nobar`. DRAWN: brackets are
+  `.br-cell`s of their own in the word row (the outer tag's outside the inner's by span; the
+  abbreviation as a `<sub>` on the closing one when the tag has no bar); hl / tile / box are
+  `.tag-ov` overlays in a `.tag-ovl` layer of the `.word-row`, placed from the cells' geometry
+  (`placeTagOverlays`: one piece per visual line of a wrapped row, nesting depth insets them, a
+  ResizeObserver re-places them), so `.word-row` is `position: relative` and `.word-cell` sits
+  above the layer; `segTags` gives a LANE only to bar tags (lane -1 otherwise) and `depth` to the
+  overlays. Exports and the plain copy wrap the baseline in the brackets (HTML / Word also tint
+  hl/tile words). A rule's `tag` may also be `group:<FLEx group>` (every tag of the group; its own
+  rule still wins) — the dialog lists a row per group. VISUAL FILTERS: `tagStyles.filters =
+  [{id, name, enabled, rules}]` (`Api.set_tag_filters`), consulted in order between the tab and the
+  project (`scopesFor`); a scope turns one on/off for itself with a rule on the pseudo-tag
+  `filter:<id>` (`hide` = off; `filterSwitches` in the tab / folder dialogs and the ⚑ popover,
+  `tags=filter%3Aid:off` on an example). ⚑ in the rail's "FLEx tags" header = `filtersPopover`
+  (on/off), "Manage visual filters…" / Settings = `filtersDialog` (add, rename, order, Rules… =
+  the scope dialog in filter scope). FILTERING BY TAG: `Notebook.flex_tags_used()` reads the
+  index's ⚑ tokens → {token: [note ids]} (`Api.flex_tags_used`; `Api.flex_get` re-indexes the
+  notes quoting a text as soon as it is fetched, `reindex_mentioning`, so the rail does not wait
+  for a save); app.js `ftagRows` merges a tag's name and abbreviation tokens through the project
+  list and lists them for the tab; a click sets `S.ftag`, the list runs the search with
+  `tagged:<token>` (`runSearch`), and in the open note `applyTagFocus` (a MutationObserver on the
+  pane, since examples draw late) marks `.text-obj.tag-hit` / dims `.tag-miss` by the
+  `data-tags` the renderer puts on each example, with the `#tagfocus` bar (count, ▲▼, clear).
+  FIRST CONTACT (Seth's project, 2026-10-18:
   every tag "?" with a black bar): names must never go through flexicon's `BestStr` — it checks
   `isinstance(x, (IMultiUnicode, IMultiString))`, and pythonnet types what it hands out by the
   runtime class (liblcm's internal accessor), whose Python bases hold no interfaces, so it raises

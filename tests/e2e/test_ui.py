@@ -3513,3 +3513,55 @@ def test_tag_styles_for_a_selection_of_examples(app):
     assert page.locator("#collection .coll-item").nth(0).locator(".il-txt.tag-b").count() == 1
     assert page.locator("#collection .coll-item").nth(2).locator(".tagbar", has_text="Top").count() == 1
     assert not errors
+
+
+def test_tags_style_the_text_and_visual_filters_and_the_rail_filters_by_tag(app):
+    """Seth, 2026-10-18: "the option to style the TEXT, not the tags … brackets around words …
+    highlight/background/border/tile", visual filters "like you can do with visual filters in
+    Logos", and "the ability also to search or filter notes and specific flex objects in notes by
+    text markup tags"."""
+    h, page, errors = app
+    tab = h.api.init()["config"]["tabs"][0]["dir"]
+    h.api.create_note(tab, "", "Markup", "Intro.\n\n{{flex:text %s seg=1-2}}\n\n{{flex:text %s seg=4-6}}\n" % (T_STORY, T_STORY))
+    h.api.create_note(tab, "", "Plain", "No examples here.")
+    h.api.set_tag_styles("tab", tab, [{"tag": "Subject", "br": "sq", "hl": True}, {"tag": "Verb", "box": True}, {"tag": "Topic", "tile": True, "bar": True}, {"tag": "Object", "c": "#b45309", "b": True}])
+    h.api.set_tag_filters([{"id": "f1", "name": "Discourse", "enabled": True, "rules": [{"tag": "group:Discourse", "br": "an"}]}])
+    page.reload()
+    page.wait_for_selector(".note-card")
+    page.locator(".note-card", has_text="Markup").first.click()
+    page.wait_for_selector("#editor .text-obj .tag-ov-box")
+    first = page.locator("#editor .text-obj").first
+    seg1 = first.locator(".segment").first
+    # Subject: brackets round the word with the abbreviation on the closing one, a marker behind it, NO bar
+    assert seg1.locator(".br-cell.br-open").inner_text() == "[" and seg1.locator(".br-cell.br-close").inner_text() == "]S"
+    assert seg1.locator(".tag-ov-hl").count() == 1 and seg1.locator(".tagbar", has_text="S").count() == 0
+    # Verb: a border round the word's column, drawn over its cells; Object: the word coloured and bold
+    box = seg1.locator(".tag-ov-box")
+    assert box.count() == 1
+    geo = page.evaluate("() => { const b = document.querySelector('#editor .text-obj .segment .tag-ov-box').getBoundingClientRect(); const c = document.querySelector('#editor .text-obj .segment .word-cell[data-w=\"2\"]').getBoundingClientRect(); return [b.left <= c.left, b.right >= c.right, b.top <= c.top, b.bottom >= c.bottom]; }")
+    assert geo == [True, True, True, True], geo
+    seg2 = first.locator(".segment").nth(1)
+    assert seg2.locator(".word-cell[data-w='4'] .il-txt").evaluate("(e) => [getComputedStyle(e).color, getComputedStyle(e).fontWeight]") == ["rgb(180, 83, 9)", "700"]
+    # the visual filter puts angle brackets round the Focus tag (by its FLEx group); Topic keeps its bar beside its tile
+    assert seg2.locator(".br-cell.br-open").all_inner_texts() == ["⟨", "["]
+    second = page.locator("#editor .text-obj").nth(1)
+    assert second.locator(".segment").first.locator(".tag-ov-tile").count() == 1 and second.locator(".segment").first.locator(".tagbar", has_text="Top").count() == 1
+    # switch the filter off in the ⚑ Filters popover: the angle brackets go, the setting is kept
+    page.locator("#btn-tag-filters").click()
+    page.locator("[data-test=filter-on][data-filter=f1]").click()
+    page.wait_for_function("() => document.querySelectorAll('#editor .text-obj .br-cell.br-open').length === 2")
+    assert h.api.init()["config"]["tagStyles"]["filters"][0]["enabled"] is False
+    page.keyboard.press("Escape")
+    # the rail lists the FLEx tags the notes use; one click filters the list and dims the other examples
+    page.wait_for_selector("[data-test=ftag][data-tag='Topic']")
+    assert page.locator("[data-test=ftag]").count() == 5
+    page.locator("[data-test=ftag][data-tag='Topic']").click()
+    page.wait_for_selector("#tagfocus:not([hidden])")
+    page.wait_for_function("() => document.querySelectorAll('.note-card').length === 1")
+    assert "1 match with ⚑ Topic" in page.locator("#list-sub").inner_text()
+    assert page.locator("[data-test=tagfocus-count]").inner_text() == "1 of 2 examples in this note"
+    assert "tag-miss" in first.get_attribute("class") and "tag-hit" in second.get_attribute("class")
+    page.locator("[data-test=tagfocus-clear]").click()
+    page.wait_for_function("() => document.querySelectorAll('.note-card').length === 3 && document.getElementById('tagfocus').hidden")
+    assert "tag-miss" not in first.get_attribute("class")
+    assert not errors

@@ -99,3 +99,32 @@ def test_scoped_tag_styles_are_kept_in_notebook_json_and_cleaned(tmp_path):
     assert api.set_tag_styles("folder", tab + "/Verbs", [])["folder"] == {}        # no rules: the key goes
     with pytest.raises(ValueError):
         api.set_tag_styles("note", "x", [])
+
+
+def test_visual_filters_and_text_styles_are_kept_in_notebook_json(tmp_path):
+    api = make(tmp_path)
+    tab = api.init()["config"]["tabs"][0]["dir"]
+    ts = api.set_tag_styles("tab", tab, [{"tag": "Subject", "br": "sq", "hl": True, "c": "#B45309", "bar": False}, {"tag": "Verb", "br": "nonsense", "box": True, "bar": True},
+                                        {"tag": "group:Syntax", "tile": True}, {"tag": "filter:abc", "hide": False}])
+    assert ts["tab"][tab] == [{"tag": "Subject", "enabled": True, "c": "#b45309", "hl": True, "br": "sq", "bar": False},
+                              {"tag": "Verb", "enabled": True, "box": True, "bar": True},
+                              {"tag": "group:Syntax", "enabled": True, "tile": True}, {"tag": "filter:abc", "enabled": True, "hide": False}]
+    ts = api.set_tag_filters([{"id": "Disc 1!", "name": " Discourse ", "rules": [{"tag": "group:Discourse", "br": "an"}]}, {"name": "Second", "enabled": False, "rules": "junk"}, "junk", {"id": "disc1", "name": "dup"}])
+    assert [f["id"] for f in ts["filters"]] == ["disc1", ts["filters"][1]["id"]] and ts["filters"][1]["id"].startswith("f")
+    assert ts["filters"][0] == {"id": "disc1", "name": "Discourse", "enabled": True, "rules": [{"tag": "group:Discourse", "enabled": True, "br": "an"}]}
+    assert ts["filters"][1]["enabled"] is False and ts["filters"][1]["rules"] == []
+    cfg = json.loads((tmp_path / "nb" / "notebook.json").read_text(encoding="utf-8"))
+    assert cfg["tagStyles"]["filters"][0]["name"] == "Discourse"
+    assert api.init()["config"]["tagStyles"]["filters"][0]["id"] == "disc1"
+
+
+def test_the_notes_that_use_each_flex_tag_are_known_as_soon_as_a_text_is_fetched(tmp_path):
+    api = make(tmp_path)
+    tab = api.init()["config"]["tabs"][0]["dir"]
+    tagged = api.create_note(tab, "", "Tagged", "{{flex:text %s seg=4}}" % T_STORY)
+    api.create_note(tab, "", "Plain", "Nothing from FLEx here.")
+    assert api.flex_tags_used() == {}                       # nothing fetched yet: the index knows no tags
+    api.flex_get("text", T_STORY, 4, 4)                     # drawn once: the quoting note is re-indexed with the text's tags
+    used = api.flex_tags_used()
+    assert used["topic"] == [tagged["id"]] and used["top"] == [tagged["id"]] and used["subject"] == [tagged["id"]]
+    assert [h["id"] for h in api.search("tagged:topic")] == [tagged["id"]]
