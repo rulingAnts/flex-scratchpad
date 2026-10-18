@@ -4034,6 +4034,19 @@ def test_links_dialog_and_the_common_keyboard_shortcuts(app):
     page.locator("[data-test=link-ok]").click()
     page.wait_for_timeout(900)
     assert body_of(h) == "see [docs](https://example.org/x) here", body_of(h)
+    # the caret inside the link shows the pill under it: the address, Open · Edit · Copy · Unlink
+    # (Seth: "make it easy to click to follow or edit links")
+    page.evaluate("() => { const b = document.querySelector('#editor .blk-body'); FS.editor.setCaret(b, 7); b.focus(); }")
+    page.wait_for_selector("[data-test=link-pill]:not([hidden])")
+    assert page.locator("#link-pill .lp-href").inner_text() == "https://example.org/x"
+    page.locator("[data-test=lp-copy]").click()
+    page.wait_for_selector(".toast:has-text('Link copied')")
+    assert page.evaluate("() => document.activeElement.classList.contains('blk-body')")       # the caret stayed in the note
+    page.locator("[data-test=lp-edit]").click()
+    page.wait_for_selector(".link-dlg")
+    assert page.locator(".link-dlg .modal-title").inner_text() == "Edit link"
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(200)
     # the caret inside the link: Ctrl+K edits it; Update rewrites it in place
     page.evaluate("() => { const b = document.querySelector('#editor .blk-body'); FS.editor.setCaret(b, 7); b.focus(); }")
     page.keyboard.press("Control+k")
@@ -4060,6 +4073,21 @@ def test_links_dialog_and_the_common_keyboard_shortcuts(app):
     page.locator("[data-test=link-ok]").click()
     page.wait_for_timeout(900)
     assert body_of(h) == "see the docs here and [[Welcome to FLEx Scratchpad]]", body_of(h)
+    # a note link's pill opens the note; back in the note, Unlink keeps the title as text
+    page.evaluate("() => { const b = document.querySelector('#editor .blk-body'); FS.editor.setCaret(b, b.textContent.length - 4); b.focus(); }")
+    page.wait_for_selector("[data-test=link-pill]:not([hidden])")
+    assert page.locator("[data-test=lp-open]").inner_text() == "Open note"
+    page.locator("[data-test=lp-open]").click()
+    page.wait_for_function("() => document.getElementById('note-title').value === 'Welcome to FLEx Scratchpad'")
+    assert page.locator("[data-test=link-pill]").is_hidden()
+    page.locator(".note-card", has_text="Links").first.click()
+    page.wait_for_function("() => document.getElementById('note-title').value === 'Links'")
+    page.evaluate("() => { const b = document.querySelector('#editor .blk-body'); FS.editor.setCaret(b, b.textContent.length - 4); b.focus(); }")
+    page.wait_for_selector("[data-test=link-pill]:not([hidden])")
+    page.locator("[data-test=lp-unlink]").click()
+    page.wait_for_timeout(900)
+    assert body_of(h) == "see the docs here and Welcome to FLEx Scratchpad", body_of(h)
+    assert page.locator("[data-test=link-pill]").is_hidden()
     # the other common keys: Ctrl+E code, Ctrl+Shift+X strike, the lists, plain text, a paragraph above, duplicate
     page.keyboard.press("Control+Enter")
     page.keyboard.type("code strike")

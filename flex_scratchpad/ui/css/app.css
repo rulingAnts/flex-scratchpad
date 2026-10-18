@@ -219,6 +219,13 @@ body.resizing * { pointer-events: none; }
 .md-mark { background: var(--hl); border-radius: 2px; }
 .md-code { font-family: var(--mono); font-size: 0.92em; background: var(--panel-2); border-radius: 3px; padding: 0 1px; }
 .md-link, .md-wiki { color: var(--accent); }
+.blk-body .md-link:not(.md-marker):hover, .blk-body .md-wiki:not(.md-marker):hover { text-decoration: underline; cursor: pointer; }
+/* the strip under a link the caret is in (app.js setupLinkPill): its address, Open · Edit · Copy · Unlink */
+#link-pill { position: absolute; z-index: 6; display: flex; align-items: center; gap: 4px; max-width: 520px; padding: 3px 6px; border-radius: 8px; background: var(--bg); border: 1px solid var(--border); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1); font-size: 12px; }
+#link-pill[hidden] { display: none; }
+#link-pill .lp-href { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-family: var(--mono); font-size: 11.5px; padding: 0 4px; }
+#link-pill button { border: 1px solid var(--border); background: var(--bg); border-radius: 6px; padding: 0 7px; font-size: 12px; line-height: 18px; color: var(--text); }
+#link-pill button:hover { border-color: var(--accent); color: var(--accent); }
 .md-link.md-marker, .md-wiki.md-marker { color: var(--faint); }
 .md-tag { color: var(--gloss); background: rgba(42, 110, 42, 0.1); border-radius: 999px; padding: 0 5px; font-size: 0.9em; }
 /* An embed inside a line of text is a chip: the raw {{flex …}} stays as the span's text

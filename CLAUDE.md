@@ -248,7 +248,14 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   shortcuts is `SHORTCUTS` in app.js → `shortcutsDialog` (Ctrl+/, Settings): keep it true when a
   key is added. Shift+digit keys are matched by `e.code` (`Digit7`), since `e.key` is the shifted
   character on most layouts. Not added on purpose: Ctrl+U (Markdown has no underline), Ctrl+H
-  (no replace yet), Ctrl+P.
+  (no replace yet), Ctrl+P. THE LINK PILL (Seth: "make it easy to click to follow or edit links"):
+  `setupLinkPill` (app.js) watches `selectionchange` (one rAF) and, when `linkContext()` finds a
+  link under a collapsed caret, shows `#link-pill` (beside the root, in `#editor-pane`) under the
+  link's first `.md-link` / `.md-wiki` span: the address, Follow ↗ / Open note, Edit (the dialog),
+  Copy, Unlink (`replaceRange` with the text). Its buttons preventDefault on mousedown so the caret
+  stays in the block; it hides when the caret leaves, on Esc and on scroll. A link's text has a
+  pointer cursor and underlines on hover, so a click (caret → pill) then Follow is the two-click
+  path; Ctrl+click follows at once as before.
 
 ## Working here
 

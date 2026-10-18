@@ -1066,6 +1066,58 @@
   }
   FS.linkDialog = linkDialog;
 
+  /* THE LINK PILL (Seth, 2026-10-18: "make it easy to click to follow or edit links"): while the
+   * caret sits in a link of a text block, a small strip under the link shows its address with
+   * Open · Edit · Copy · Unlink — so one click on a link (which puts the caret there) shows it and
+   * a second click opens; Ctrl+click still follows at once. One element beside the editor root
+   * (renderAll empties the root), placed under the link's first span, hidden when the caret
+   * leaves, the note scrolls or the dialog opens. */
+  function setupLinkPill() {
+    const pane = $('editor-pane');
+    const pill = el('div', { id: 'link-pill', 'data-test': 'link-pill', hidden: true });
+    pane.appendChild(pill);
+    const hide = () => { pill.hidden = true; pill._key = null; };
+    let raf = 0;
+    const update = () => {
+      raf = 0;
+      if (!S.note || isCollection() || !S.editor) return hide();
+      const sel = window.getSelection();
+      if (!sel || !sel.rangeCount || !sel.isCollapsed) return hide();
+      const ctx = S.editor.linkContext();
+      if (!ctx || !ctx.link) return hide();
+      const link = ctx.link;
+      const node = sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentNode;
+      let span = node && node.closest ? node.closest('.md-link, .md-wiki') : null;
+      if (!span) return hide();
+      const cls = span.classList.contains('md-wiki') ? 'md-wiki' : 'md-link';
+      while (span.previousSibling && span.previousSibling.nodeType === 1 && span.previousSibling.classList.contains(cls)) span = span.previousSibling;
+      const key = ctx.b.id + ':' + link.start + ':' + link.href;
+      if (pill._key !== key) {
+        pill._key = key;
+        pill.innerHTML = '';
+        const isNote = link.href.startsWith('note:');
+        const shown = isNote ? link.href.slice(5) : link.href;
+        const btn = (label, title, fn, test) => el('button', { title, 'data-test': test, onmousedown: (e) => e.preventDefault(), onclick: fn }, label);
+        pill.append(
+          el('span', { class: 'lp-href', dir: 'ltr', title: link.href }, shown),
+          btn(isNote ? 'Open note' : 'Follow \u2197', isNote ? 'Open this note' : 'Follow the link: ' + link.href + ' (Ctrl+click does it at once)', () => { hide(); openLink(link.href); }, 'lp-open'),
+          btn('Edit', 'Change the text or the address (Ctrl+K)', () => { hide(); linkDialog(); }, 'lp-edit'),
+          btn('Copy', 'Copy the address', () => { FS.copyText(isNote ? shown : link.href); FS.toast('Link copied', 'ok'); }, 'lp-copy'),
+          btn('Unlink', 'Keep the text, drop the link', () => { hide(); S.editor.replaceRange(ctx.body, ctx.b, link.start, link.end, link.text); }, 'lp-unlink'));
+      }
+      const r = span.getBoundingClientRect(), pr = pane.getBoundingClientRect();
+      pill.hidden = false;
+      let left = r.left - pr.left;
+      if (left + pill.offsetWidth > pr.width - 8) left = Math.max(8, pr.width - pill.offsetWidth - 8);
+      pill.style.left = left + 'px';
+      pill.style.top = (r.bottom - pr.top + 4) + 'px';
+    };
+    const schedule = () => { if (!raf) raf = requestAnimationFrame(update); };
+    document.addEventListener('selectionchange', schedule);
+    $('editor').addEventListener('scroll', hide, { passive: true });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !pill.hidden) hide(); });
+  }
+
   /* Every keyboard shortcut in one place (Ctrl+/ and Settings), so they can be found. */
   const SHORTCUTS = [
     ['Notes', [['Ctrl+N', 'New note'], ['Ctrl+Shift+N', 'New example collection'], ['Ctrl+S', 'Save now (notes save by themselves)'], ['F2', 'Rename the note (its title)'], ['Ctrl+Shift+F', 'Search the notebook'], ['Ctrl+F', 'Find in the note (Enter / Shift+Enter: next / previous)'], ['Ctrl+,', 'Settings'], ['Ctrl+\\', 'Show / hide the left panes'], ['Ctrl+/', 'This list']]],
@@ -1410,6 +1462,7 @@
     document.addEventListener('dragover', (e) => { if (!e.defaultPrevented && FS.files.hasFiles(e.dataTransfer)) { e.preventDefault(); e.dataTransfer.dropEffect = 'none'; } });
     document.addEventListener('drop', (e) => { if (!e.defaultPrevented && e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) e.preventDefault(); });
     $('toolbar').querySelectorAll('[data-ins]').forEach((b) => b.addEventListener('mousedown', (e) => { e.preventDefault(); toolbarAction(b.dataset.ins, b); }));
+    setupLinkPill();
     $('btn-find').addEventListener('click', openFind);
     $('btn-markers').addEventListener('click', toggleMarkers);
     $('btn-refresh-all').addEventListener('click', refreshAll);
