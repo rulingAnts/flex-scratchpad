@@ -180,6 +180,84 @@ import. Embeds keep working through `{{flex:text <guid> …}}`; "Open in FLEx" i
 SFM / UFM (standard-format interlinear, Toolbox-style `\\tx \\mb \\gl \\ft`) later, by the same
 route (Seth, 2026-10-13: "Or SFM/UFM eventually. Later.").
 
+## Examples from FlexText Editor files, until FLEx has the text (Seth, 2026-10-18 — "to do soon")
+
+> *"I'd like to add a feature to copy examples from FLExText Editor apps (including text
+> title/flextext file name, which will get added to our text corpus audio segment timing and audio
+> file name, which we can browse for). Also, I'd like a way for it to recognize when that text has
+> been imported into FLEx and no longer needs to be kept as a separate flextext file embedded in
+> our notebook."*
+
+The situation: a text is transcribed, glossed and time-aligned in FlexText Editor (or the Audio
+Segmenter / Recorder) days or weeks before anyone imports it into FieldWorks. Its examples should
+be quotable in notes NOW, from the `.flextext` the editor saved, with the audio; and once the text
+is in FLEx the notebook should notice, switch the examples over to the project and let go of its
+private copy. The ELAN / SFM half of the older "Import .flextext and ELAN files as extra texts"
+entry above stays separate; this one is the FlexText-Editor path, which has the most to gain.
+
+**What the editor hands us** (read 2026-10-18 in flextext-editor's `docs/js/flextext.js`,
+`serializeFlextext`, and `app.js`):
+- The file is named after the title (`sanitizeBase(title) + '.flextext'`, app.js ~5929) and the
+  recording is paired with it BY BASENAME (`satBase`, app.js ~9008) — so "the flextext file name"
+  Seth mentions is also how we find the audio, and the title is `<item type="title">`.
+- `<interlinear-text>` carries `doc.textAttrs` — a `guid` ONLY when the document came out of FLEx
+  (an authored text has no text GUID); `<paragraph guid>` always; `<phrase>` keeps `seg.attrs`
+  (a GUID only for imported phrases) plus `begin-time-offset` / `end-time-offset` and `media-file`
+  → the `<media-files><media guid location="<audio name>"/>` block the editor mints; `<word guid>`.
+- No clipboard format exists: the editor offers no "copy example", and a web app cannot hand us a
+  file path. So "copy examples from the editor" = drop / browse the `.flextext` (and its audio)
+  into the notebook, then pick lines from it exactly like a FLEx text. (A real copy-paste from the
+  editor's page would need a text format we define on both sides — a `flextext-editor/` item in
+  its CLAUDE.md later, not a blocker: the file route gives everything, timing included.)
+
+**Design**
+1. **A corpus of embedded texts** in the notebook: `<notebook>/texts/<base>/` holding the
+   `.flextext` as dropped, the audio beside it (copied by default, linked on request — the same
+   choice as attachments; "browse for it" when the basename pairing finds nothing), and
+   `texts.json` (or front matter in a `<base>.md` note card) with: title, the text GUID (from the
+   file, or MINTED and WRITTEN BACK into our copy of the file as `<interlinear-text guid>` so the
+   notes' `{{flex:text <guid>}}` are stable and FLEx will keep it on import), segment GUIDs (same:
+   minted into our copy when the phrases have none — the importer reuses a phrase GUID when the
+   project has it and creates the segment WITH it when not, `BIRDInterlinearImporter.cs` ~108–120
+   / ~280), the audio file, when it was added, `inFlex: null | {project, seenAt}`.
+2. **A composite FLEx source.** `FlexService` today opens ONE backend (`lcm` | `flextext` | `demo`).
+   The corpus becomes a second, always-on backend layered under the project: `get_object('text',
+   guid)` asks the project first, then the corpus (`FlextextBackend` over the folder's files —
+   `flex/flextext.py` already parses media, offsets, alternatives); the picker's Texts tab lists
+   corpus texts with a badge ("from FlexText Editor · not in FLEx yet"); `all_baselines` /
+   `locate` include them so pasted rows from the editor's preview land; `texts_used`, snapshots,
+   the clip cutter and the `.flextext` export all work unchanged because they see plain text
+   dicts. "Open in FLEx ↗" is hidden for a corpus text until it is in FLEx.
+3. **Audio & timing**: the phrases' offsets drive ▶ and the clips as now (the fallback reader
+   already fills `begin/end/media`); the media record resolves to the file in the text's folder.
+   A text whose audio is missing shows the existing "media file not found — Browse…" affordance,
+   and the chosen file is copied into the folder.
+4. **Recognising the import.** On project open, after "Refresh all", and when a corpus text is
+   drawn: ask the project for the text GUID (`Object(guid)` → an `IText`). Found ⇒ mark
+   `inFlex = {project, seenAt}`, redraw the examples from the project (tracking.py's ledger maps
+   the segments: same GUIDs when the import kept them, else "found again by TEXT"), and show a
+   one-line notice on the text's card and in the picker: "This text is now in FLEx (imported
+   <date>). Keep the embedded copy? [Move to trash] [Keep]". Nothing is deleted on its own — the
+   copy goes to `.scratchpad/trash/` like a note. Fallback when the GUID was not kept (a text
+   re-created rather than imported): a title + first-baseline match offered as "This looks like
+   ‘<title>’ in FLEx — link them?", written as `inFlex.guid` so later lookups go straight there.
+   ⚠ Verify on a real project: whether FLEx's import keeps the `<interlinear-text guid>` for a NEW
+   text (the importer merges into an existing text by GUID, `MergeTextWithBIRDDoc`; what creates
+   the `IText` for a new one lives in the caller — read `LinguaLinksImport.ImportInterlinear` in
+   `Src/LexText/Interlinear/` before relying on it) and whether phrase GUIDs survive.
+5. **UI**: drop a `.flextext` (and its `.wav` / `.mp3`) on the note or the rail → "Add to the
+   notebook's texts" (vs. attach as a file); Settings › Texts (the corpus list: title, lines, audio
+   ✓/✗ Browse…, "in FLEx since …", Remove); the picker's Texts tab shows them; a text card note
+   (`kind: text`?) is optional — the folder is enough.
+6. **Tests**: a fixture `.flextext` written by the editor's own `serializeFlextext` (run in node, as
+   the Segmenter cross-check does) with timing and a `media-files` block; e2e: drop it, insert a
+   line, play its clip, "import" it into the demo backend (a test hook that adds the text to the
+   demo project under the same GUID) and see the notice + the switch-over.
+
+**Open questions for Seth**: copy the audio into the notebook (safe, bigger backups) or link it by
+default? Should a corpus text be exportable again (it is a source now, so the `.flextext` export
+of a collection quoting it just works)? Several notebooks sharing one corpus folder — later.
+
 ## Edit a table in Excel, round-trip in place (Seth, 2026-10-13, "a later feature")
 
 > *"open a table in Excel and then when they save it the results update in place (and using an
