@@ -88,6 +88,12 @@ def empty_text(guid: str, title: str = "", ws_vern: dict | None = None, ws_anal:
 # punctuation) from 0, as FLEx does. Tags ride on the text as `tags`, all of them whatever
 # range was fetched, so a note's snapshot always holds the full list.
 def tag_item(guid: str, name: str, abbr: str = "", group: str = "", fore: str = "", back: str = "") -> dict:
+    # A list item nobody coloured has 0 in all three colour fields (the model's default int; only
+    # an XML import writes kclrTransparent), which reads as black on black — not a look anyone
+    # chose (Seth's project, 2026-10-18: every tag a black bar). A black background with another
+    # text colour is kept.
+    if back == "#000000" and fore in ("", "#000000"):
+        fore = back = ""
     return {"guid": (guid or "").lower(), "name": name or abbr or "?", "abbr": abbr or name or "?",
             "group": group or "", "fore": fore or "", "back": back or ""}
 

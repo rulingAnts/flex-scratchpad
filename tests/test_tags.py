@@ -51,6 +51,22 @@ def test_the_tag_list_and_where_each_tag_is_used(tmp_path):
 def test_fw_colours_and_searchable_text():
     assert model.fw_color(0x00FF80) == "#80ff00"            # BGR → #rrggbb
     assert model.fw_color(-1073741824) == "" and model.fw_color(-1) == "" and model.fw_color("x") == ""
+    # an item nobody coloured reads 0/0 (black on black): no colour, so the palette takes over
+    # (Seth's project, 2026-10-18: every tag a black bar)
+    black = model.tag_item("g", "Subject", "S", "", model.fw_color(0), model.fw_color(0))
+    assert (black["fore"], black["back"]) == ("", "")
+    kept = model.tag_item("g", "Subject", "S", "", "#ffffff", "#000000")
+    assert (kept["fore"], kept["back"]) == ("#ffffff", "#000000")
+
+
+def test_lcm_never_reads_a_name_through_flexicon_s_beststr():
+    """Seth's project, 2026-10-18: every tag was "?" — flexicon's BestStr validates with
+    isinstance() against the multistring interfaces, which pythonnet's runtime-typed objects do
+    not satisfy. Names, abbreviations and notes go through our own _best()."""
+    src = Path("flex_scratchpad/flex/lcm.py").read_text(encoding="utf-8")
+    uses = [l for l in src.splitlines() if "BestStr(" in l and "explain_tags" not in l and "flexiconBestStr" not in l and not l.strip().startswith(("#", "*", '"""'))]
+    assert uses == [], uses
+    assert "def _best(self, multi)" in src
     text = {"kind": "text", "title": "T", "segments": [], "tags": [{"tag": {"name": "Topic shift", "abbr": "Top"}}]}
     st = model.searchable_text(text)
     assert "Topic shift" in st and "⚑Topic_shift" in st and "⚑Top" in st

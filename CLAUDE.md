@@ -330,7 +330,16 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   tag names and `⚑name` tokens, `tagged:Topic` in the search box is that token; the picker's "FLEx
   tags" tab lists the tags, then every place one is used (click: the preview on that range; "Insert
   all N as examples"). Exports: a `tag` line per lane (HTML / Word / PDF, the colour behind the
-  abbreviation), the plain-text copy a row per lane. Not run against a real project yet.
+  abbreviation), the plain-text copy a row per lane. FIRST CONTACT (Seth's project, 2026-10-18:
+  every tag "?" with a black bar): names must never go through flexicon's `BestStr` — it checks
+  `isinstance(x, (IMultiUnicode, IMultiString))`, and pythonnet types what it hands out by the
+  runtime class (liblcm's internal accessor), whose Python bases hold no interfaces, so it raises
+  for every real multistring; `lcm._best()` reads `BestAnalysisVernacularAlternative` & co.
+  directly (`tests/test_tags.py` keeps `BestStr` out of lcm.py). An item nobody coloured has 0 in
+  every colour field (black on black) — `model.tag_item` treats that as no colour. When tags
+  still look wrong, ask for `flex-scratchpad --project NAME --dump-tags [TEXT]` →
+  `flex-scratchpad-tags.json` (`lcm.explain_tags`: the list through every accessor, and per tag
+  its segments, analysis indexes and the first segment's analyses).
 - TEXTS USED (Seth, 2026-10-16: "list which texts are referenced in a [note], a folder, or a
   selected range … not individual items, but texts they come from … a FLEx hyperlink for each"):
   `Api.texts_used(scope)` → `FlexService.texts_used` — one row per source TEXT (the guid of every

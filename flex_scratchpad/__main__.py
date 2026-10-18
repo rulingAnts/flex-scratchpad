@@ -29,7 +29,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--project", help="FieldWorks project name (with --dump)")
     ap.add_argument("--dump", metavar="TEXT", help="print the first segments of a text (title, part of a title, or GUID) as JSON and exit — for diagnosing what flexicon returns")
     ap.add_argument("--locate", metavar="SOURCE", help="explain where pasted FLEx rows land: SOURCE is 'clip' (the clipboard, Windows) or a text file; writes a JSON report (--out) and exits")
-    ap.add_argument("--out", default="flex-scratchpad-locate.json", help="report file for --locate")
+    ap.add_argument("--dump-tags", nargs="?", const="", metavar="TEXT", help="write what the project's text markup tags look like raw (the list, and the tags of the first texts that have any, or of TEXT) to a JSON report (--out) and exit")
+    ap.add_argument("--out", default=None, help="report file for --locate (flex-scratchpad-locate.json) or --dump-tags (flex-scratchpad-tags.json)")
     ap.add_argument("--backup", action="store_true", help="back the notebook up to the place set in Settings (what closing the app starts), then exit (0 = backed up)")
     ap.add_argument("--register-links", action="store_true", help="register flexscratchpad:// links for this user (Windows) and exit")
     ap.add_argument("url", nargs="?", help="a flexscratchpad://note/<id> link to open (what Windows passes when such a link is clicked)")
@@ -54,7 +55,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.dump:
         return dump(args.project, args.dump)
     if args.locate:
-        return locate_report(args.project, args.locate, args.out, demo=args.demo)
+        return locate_report(args.project, args.locate, args.out or "flex-scratchpad-locate.json", demo=args.demo)
+    if args.dump_tags is not None:
+        return tags_report(args.project, args.dump_tags, args.out or "flex-scratchpad-tags.json")
     if args.list_projects:
         from .flex.lcm import FlexError, FlexiconBackend
         be = FlexiconBackend()
@@ -99,6 +102,36 @@ def dump(project: str | None, which: str) -> int:
             guid = hits[0]["guid"]
         page = be.get_text(guid, 1, 3, diag=True)
         print(json.dumps(page, ensure_ascii=False, indent=1))
+        return 0
+    except FlexError as e:
+        print(e.message, file=sys.stderr)
+        if e.detail:
+            print(e.detail, file=sys.stderr)
+        return 2
+    finally:
+        be.close()
+
+
+def tags_report(project: str | None, which: str, out: str) -> int:
+    """Write the project's text markup tags as read raw (FlexiconBackend.explain_tags) to a UTF-8
+    JSON file — the first thing to ask for when tags come out nameless or on the wrong words."""
+    import json
+    from pathlib import Path
+    from . import __version__, build_id
+    from .flex.lcm import FlexError, FlexiconBackend
+    be = FlexiconBackend(progress=lambda m: print(m, file=sys.stderr))
+    try:
+        if not project:
+            names = be.list_projects()
+            if len(names) != 1:
+                print("Several projects; pass --project NAME. Found: " + ", ".join(names), file=sys.stderr)
+                return 2
+            project = names[0]
+        be.open(project)
+        report = {"app": f"FLEx Scratchpad {__version__} (build {build_id()})", "project": project}
+        report.update(be.explain_tags(which))
+        Path(out).write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
+        print(f"{len(report['list'])} tag(s) in the list, {sum(t['tagCount'] for t in report['texts'])} use(s) in {len(report['texts'])} text(s) → {out}")
         return 0
     except FlexError as e:
         print(e.message, file=sys.stderr)

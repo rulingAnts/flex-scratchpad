@@ -347,6 +347,26 @@ class FlexiconBackend:
                 return s
         return ""
 
+    def _best(self, multi) -> str:
+        """The best alternative of an IMultiUnicode / IMultiString: analysis, then vernacular,
+        then whatever is stored. NOT flexicon's BestStr (Seth's project, 2026-10-18: every text
+        markup tag came back as "?"): that one validates its argument with isinstance() against
+        the IMultiUnicode / IMultiString interfaces, and pythonnet types the object it hands out
+        by its runtime class (liblcm's internal MultiUnicodeAccessor), whose Python bases do not
+        include the interfaces — so BestStr raises FP_ParameterError for every real multistring,
+        while the properties themselves work (the glosses were always read through them)."""
+        if multi is None:
+            return ""
+        for fn in (lambda: multi.BestAnalysisVernacularAlternative, lambda: multi.BestAnalysisAlternative,
+                   lambda: multi.BestVernacularAlternative):
+            s = _s(_t(fn, ""))
+            if s and s != "***":
+                return s
+        for v in self._ws_alternatives(multi).values():
+            if v:
+                return v
+        return ""
+
     def _anal_text(self, multi, ws_handle=None) -> str:
         if multi is None:
             return ""
@@ -520,7 +540,7 @@ class FlexiconBackend:
         mt = self._c(_t(lambda: self._c(e.LexemeFormOA).MorphTypeRA, None))
         if mt is None:
             return ""
-        return _s(_t(lambda: self.project.BestStr(mt.Name), ""))
+        return _s(_t(lambda: self._best(mt.Name), ""))
 
     def search_entries(self, q: str, limit: int = 30) -> list[dict]:
         def go():
@@ -855,15 +875,15 @@ class FlexiconBackend:
     def _poss_dict(self, poss, group: str = "") -> dict:
         p = self.project
         poss = self._c(poss)
-        name = _s(_t(lambda: p.BestStr(poss.Name), ""))
-        abbr = _s(_t(lambda: p.BestStr(poss.Abbreviation), ""))
+        name = _s(_t(lambda: self._best(poss.Name), ""))
+        abbr = _s(_t(lambda: self._best(poss.Abbreviation), ""))
         return model.tag_item(_guid(poss), name, abbr, group,
                               model.fw_color(_t(lambda: poss.ForeColor, -1)), model.fw_color(_t(lambda: poss.BackColor, -1)))
 
     def _tag_group(self, poss) -> str:
         owner = self._c(_t(lambda: poss.Owner, None))
         if owner is not None and _t(lambda: owner.ClassName, "") == "CmPossibility":
-            return _s(_t(lambda: self.project.BestStr(owner.Name), ""))
+            return _s(_t(lambda: self._best(owner.Name), ""))
         return ""
 
     def _text_tags(self, text, seg_n: dict) -> list[dict]:
@@ -894,7 +914,7 @@ class FlexiconBackend:
                 top = self._c(top)
                 subs = _t(lambda: list(top.SubPossibilitiesOS), [])
                 if subs:
-                    gname = _s(_t(lambda: self.project.BestStr(top.Name), ""))
+                    gname = _s(_t(lambda: self._best(top.Name), ""))
                     out.extend(self._poss_dict(sub, gname) for sub in subs)
                 else:
                     out.append(self._poss_dict(top, ""))
@@ -939,6 +959,74 @@ class FlexiconBackend:
                                 "at": [model.anchor_of(_guid(a[2])), model.anchor_of(_guid(b[2]))], "words": words + ("…" if a is not b else "")})
             out.sort(key=lambda r: (r["title"].casefold(), r["seg"]))
             return out
+        try:
+            return self.worker.call(go, timeout=OPEN_TIMEOUT)
+        except BaseException as e:
+            raise _friendly(e, self.project_name)
+
+    def explain_tags(self, which: str = "", max_texts: int = 3, max_tags: int = 12) -> dict:
+        """What the project's text markup tags look like RAW, for `flex-scratchpad --dump-tags`:
+        the list (each item's name through every accessor, its colours as stored) and, for the
+        first texts that carry tags (or the one named), each tag's segments, analysis indexes and
+        the analyses of its first segment — so a tag drawn on the wrong words can be traced."""
+        def go():
+            self._need()
+            p = self.project
+            rep: dict = {"list": [], "texts": []}
+            lst = _t(lambda: p.lp.TextMarkupTagsOA, None)
+            rep["listClass"] = _t(lambda: lst.ClassName, "") if lst is not None else None
+
+            def raw_poss(poss, depth=0):
+                c = self._c(poss)
+                return {"guid": _guid(c), "class": _t(lambda: c.ClassName, ""), "depth": depth,
+                        "name": {"bestAnalVern": _s(_t(lambda: c.Name.BestAnalysisVernacularAlternative, "")),
+                                 "bestAnal": _s(_t(lambda: c.Name.BestAnalysisAlternative, "")),
+                                 "alternatives": self._ws_alternatives(_t(lambda: c.Name, None)),
+                                 "flexiconBestStr": _s(_t(lambda: p.BestStr(c.Name), "⚠ raised"))},
+                        "abbr": self._ws_alternatives(_t(lambda: c.Abbreviation, None)),
+                        "foreColor": _t(lambda: int(c.ForeColor), None), "backColor": _t(lambda: int(c.BackColor), None),
+                        "underColor": _t(lambda: int(c.UnderColor), None), "asRead": self._poss_dict(c, self._tag_group(c))}
+            for top in _t(lambda: list(lst.PossibilitiesOS), []):
+                rep["list"].append(raw_poss(top))
+                for sub in _t(lambda: list(self._c(top).SubPossibilitiesOS), []):
+                    rep["list"].append(raw_poss(sub, 1))
+            want = (which or "").casefold()
+            for text in _t(lambda: list(p.Texts.GetAll()), []):
+                if len(rep["texts"]) >= max_texts:
+                    break
+                text = self._c(text)
+                title = self._text_title(text, "", self._baseline_ws(text)[1])
+                st = self._c(_t(lambda: text.ContentsOA, None))
+                tags = [self._c(tt) for tt in _t(lambda: list(st.TagsOC), [])] if st is not None else []
+                if want and want not in title.casefold() and want != _guid(text):
+                    continue
+                if not tags and not want:
+                    continue
+                segs, n = {}, 0
+                for pi, para in enumerate(_t(lambda: list(p.Paragraphs.GetAll(text)), []), 1):
+                    for k, seg in enumerate(_t(lambda: list(p.Segments.GetAll(para)), []), 1):
+                        n += 1
+                        segs[_guid(seg)] = (n, f"{pi}.{k}", seg)
+                tx = {"guid": _guid(text), "title": title, "segments": n, "tagCount": len(tags), "tags": []}
+                for tt in tags[:max_tags]:
+                    ga, gb = _guid(_t(lambda: tt.BeginSegmentRA, None)), _guid(_t(lambda: tt.EndSegmentRA, None))
+                    a, b = segs.get(ga), segs.get(gb)
+                    row = {"guid": _guid(tt), "class": _t(lambda: tt.ClassName, ""), "tag": _guid(_t(lambda: tt.TagRA, None)),
+                           "tagName": self._best(_t(lambda: self._c(tt.TagRA).Name, None)),
+                           "beginSegment": {"guid": ga, "n": a[0] if a else None, "label": a[1] if a else None},
+                           "endSegment": {"guid": gb, "n": b[0] if b else None, "label": b[1] if b else None},
+                           "beginAnalysisIndex": _t(lambda: int(tt.BeginAnalysisIndex), None), "endAnalysisIndex": _t(lambda: int(tt.EndAnalysisIndex), None)}
+                    if a:
+                        seg = a[2]
+                        row["beginSegmentBaseline"] = _s(_t(lambda: p.Segments.GetBaselineText(seg), ""))
+                        anals = []
+                        for an in _t(lambda: list(self._c(seg).AnalysesRS), []):
+                            an = self._c(an)
+                            anals.append({"class": _t(lambda: an.ClassName, ""), "form": self._vern_text(_t(lambda: an.Wordform.Form, None)) or self._vern_text(_t(lambda: an.Form, None))})
+                        row["beginSegmentAnalyses"] = anals
+                    tx["tags"].append(row)
+                rep["texts"].append(tx)
+            return rep
         try:
             return self.worker.call(go, timeout=OPEN_TIMEOUT)
         except BaseException as e:
@@ -1032,7 +1120,7 @@ class FlexiconBackend:
         notes = []
         for note in _t(lambda: list(p.Segments.GetNotes(seg)), []):
             note = self._c(note)
-            s = _s(_t(lambda: p.BestStr(note.Content), ""))
+            s = _s(_t(lambda: self._best(note.Content), ""))
             if s:
                 notes.append(s)
         media_guid = _guid(_t(lambda: seg.MediaURIRA, None)) or (next(iter(media_by_guid), None))
