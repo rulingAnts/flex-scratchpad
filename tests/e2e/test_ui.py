@@ -4449,6 +4449,9 @@ def test_a_chart_note_with_custom_columns(app):
     page.locator("[data-test=pick-chart-note]").first.click()
     page.wait_for_selector("#chartnote .tchart tr.crow")
     assert page.locator("#chartnote tr.crow").count() == 7
+    # the view scrolls (Seth, 2026-10-18: "I can't scroll down" — a 65-row chart ran off the pane)
+    assert page.evaluate("getComputedStyle(document.getElementById('chartnote')).overflowY") == "auto"
+    assert page.evaluate("() => { const e = document.getElementById('chartnote'); return e.clientHeight > 0 && e.clientHeight <= document.getElementById('editor-pane').clientHeight; }")
     assert page.input_value("#note-title") == "Story chart — The dog and the river"
     saved = lambda: page.wait_for_function("() => document.getElementById('save-state').textContent === 'Saved'", timeout=5000)  # noqa: E731
     # a notes column, typed into

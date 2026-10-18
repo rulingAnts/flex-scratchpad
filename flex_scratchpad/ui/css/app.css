@@ -980,7 +980,7 @@ table.md-table td.drop-target, table.md-table th.drop-target { outline: 2px soli
 .flex-collapsed.kind-chart .cicon { color: var(--pos); }
 
 /* ---- chart notes (chartnote.js) ------------------------------------------------------------ */
-#chartnote { padding-bottom: 40px; }
+#chartnote { flex: 1; overflow: auto; padding: 12px 28px 40px; }   /* scrolls like #collection: a long chart (65 rows on Seth's, 2026-10-18) ran off the pane */
 .cn-head .kind-badge { font-size: 11px; padding: 1px 7px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 .cn-head .btn.small { padding: 3px 9px; font-size: 12.5px; }
 .cn-body .chart-obj { border: 0; padding: 0; background: transparent; }
