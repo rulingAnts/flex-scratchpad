@@ -38,9 +38,11 @@
       if (offset < acc + len || (offset === acc + len && !n.nodeValue.endsWith('\n'))) return { node: n, offset: offset - acc };
       if (offset === acc + len) {
         // right after a line break: put the caret at the START of the next line's span (which
-        // may hold only a <br>), never at the tail of the "\n" text node
-        const next = n.nextSibling;
-        if (next && next.nodeType === 1) {
+        // may hold only a <br>), never at the tail of the "\n" text node — the "\n" ends the
+        // line's own span (markdown.decorate), so the next line is that span's next sibling
+        const line = n.parentNode && n.parentNode.closest ? n.parentNode.closest('.md-line') : null;
+        const next = line && line.parentNode === root ? line.nextElementSibling : n.nextSibling && n.nextSibling.nodeType === 1 ? n.nextSibling : null;
+        if (next) {
           const inner = firstText(next);
           return inner ? { node: inner, offset: 0 } : { node: next, offset: 0 };
         }
@@ -107,9 +109,14 @@
   const PLACEHOLDER = 'Write something, or type / for a menu';
 
   /* ------------------------------------------------------------------ the editor */
-  /* With markers hidden, show the markers of the styled run the caret is in (Typora-style), so
-   * a bold word being edited reads **bold** and the boundary is visible. Pure DOM: runs are the
-   * maximal sequences of decorated spans on the caret's line; line prefixes never reveal. */
+  /* With markers hidden, show ONLY the markup that applies at the caret (Seth, 2026-10-18:
+   * "whatever character or style markup applies to the current cursor position should be
+   * visible, but none of the rest of it … roughly how WhatsApp works"): the markers of every
+   * styled run that encloses or touches the caret (nested runs too: at a word that is bold and
+   * italic all four show) and the caret line's own heading `###` / quote `>`; a bullet, a
+   * number or a checkbox is drawn as its glyph and never as text. Pure DOM: the markers on the
+   * caret's line are paired left to right (the same delimiter text; `[`…`](…)`, `[[`…`]]`), and
+   * a pair whose span holds the caret reveals; a lone marker (<br>) reveals when touched. */
   function revealMarkers() {
     document.querySelectorAll('.md-marker.reveal').forEach((x) => x.classList.remove('reveal'));
     if (!document.body.classList.contains('md-hide')) return;
@@ -123,18 +130,28 @@
     r.setStart(line, 0);
     try { r.setEnd(sel.anchorNode, sel.anchorOffset); } catch (e) { return; }
     const caret = r.toString().length;
-    const runs = [];
-    let pos = 0, run = [], runStart = 0;
+    const marks = [];
+    let pos = 0;
     for (const ch of line.childNodes) {
-      if (ch.nodeType === 1 && ch.tagName !== 'BR') { if (!run.length) runStart = pos; run.push(ch); }
-      else if (run.length) { runs.push({ start: runStart, end: pos, els: run }); run = []; }
-      pos += ch.textContent.length;
+      const len = ch.textContent.length;
+      if (ch.nodeType === 1 && ch.classList.contains('md-marker')) {
+        if (pos === 0 && /\bmd-(h\d?|quote-mk)\b/.test(ch.className)) ch.classList.add('reveal');   // the line's own style
+        else if (!/\bmd-(bullet|num|task|ind)\b/.test(ch.className)) marks.push({ el: ch, s: pos, e: pos + len, t: ch.textContent });
+      }
+      pos += len;
     }
-    if (run.length) runs.push({ start: runStart, end: pos, els: run });
-    for (const rr of runs) {
-      if (caret < rr.start || caret > rr.end) continue;
-      for (const e of rr.els) if (e.classList.contains('md-marker') && !/\bmd-(h\d?|quote-mk|bullet|num|task)\b/.test(e.className)) e.classList.add('reveal');
+    const open = [], pairs = [];
+    const take = (t) => { const k = open.map((o) => o.t).lastIndexOf(t); return k >= 0 ? open.splice(k)[0] : null; };
+    for (const m of marks) {
+      if (m.t === '[' || m.t === '[[') { open.push(m); continue; }
+      if (m.t === ']]' || m.t.startsWith('](')) { const o = take(m.t === ']]' ? '[[' : '['); if (o) pairs.push([o, m]); continue; }
+      const o = take(m.t);
+      if (o) pairs.push([o, m]);
+      else if (/^(\*+|_+|~~|==|`+)$/.test(m.t)) open.push(m);
+      else pairs.push([m, m]);
     }
+    for (const o of open) pairs.push([o, o]);
+    for (const [a, z] of pairs) if (caret >= a.s && caret <= z.e) { a.el.classList.add('reveal'); z.el.classList.add('reveal'); }
   }
   document.addEventListener('selectionchange', revealMarkers);
 
@@ -183,6 +200,85 @@
       this.wireDrag(root);
       this.wireMultiSelect(root);
       this.wireInsertMenu(root);
+      this.wireGapBar(root);
+    }
+
+    /* -- the bar between blocks (Seth, 2026-10-18: "Between blocks an empty line is allowed —
+     * in fact, it would be a convenient place for an 'add/remove block' bar similar to the bar
+     * at the end of our table") ------------------------------------------------------------
+     * One floating strip, `#blk-gap`, shown while the pointer rests in the gap between two
+     * blocks (or just above the first / below the last): + Paragraph · + Example · + Table ·
+     * + More ▾ insert AT THAT GAP; − Above / − Below remove the neighbouring block (the one it
+     * would take is marked while the button is hovered). It lives beside the root (renderAll
+     * empties the root) and hides on scroll, during a drag and when the pointer leaves. */
+    wireGapBar(root) {
+      const pane = root.parentNode;
+      if (!pane) return;
+      const bar = el('div', { id: 'blk-gap', 'data-test': 'blk-gap', hidden: true });
+      pane.appendChild(bar);
+      this.gapBar = bar;
+      let gap = null, hideT = 0;
+      const hide = () => { bar.hidden = true; gap = null; this.root.querySelectorAll('.del-hint').forEach((x) => x.classList.remove('del-hint')); };
+      const hideSoon = () => { clearTimeout(hideT); hideT = setTimeout(() => { if (!bar.matches(':hover')) hide(); }, 160); };
+      const shown = () => this.blocks.filter((b) => b.el && b.el.isConnected && b.el.offsetParent !== null && !b.hidden);
+      // the gap under the pointer: {above, below} blocks (either may be null at the ends)
+      const gapAt = (y) => {
+        const vis = shown();
+        if (!vis.length) return null;
+        const pad = 6;
+        for (let i = 0; i < vis.length; i++) {
+          const r = vis[i].el.getBoundingClientRect();
+          const next = vis[i + 1];
+          const nr = next ? next.el.getBoundingClientRect() : null;
+          if (i === 0 && y < r.top && y > r.top - 14) return { above: null, below: vis[0], y: r.top - 2 };
+          if (nr ? (y >= r.bottom - pad && y <= nr.top + pad) : (y >= r.bottom - pad && y <= r.bottom + 18)) return { above: vis[i], below: next || null, y: nr ? (r.bottom + nr.top) / 2 : r.bottom + 2 };
+        }
+        return null;
+      };
+      const hint = (b, on) => { if (b && b.el) b.el.classList.toggle('del-hint', !!on); };
+      const draw = (g) => {
+        gap = g;
+        bar.innerHTML = '';
+        const ins = (kind) => () => { const g0 = gap; hide(); if (!g0) return; if (g0.above) this.insertNewBlock(g0.above, 'after', kind); else this.insertNewBlock(g0.below, 'before', kind); };
+        const rm = (b) => () => { hide(); if (b && this.blocks.includes(b)) this.deleteBlock(b); };
+        const btn = (label, title, fn, extra) => el('button', Object.assign({ title, onmousedown: (e) => e.preventDefault(), onclick: fn }, extra || {}), label);
+        bar.append(
+          btn('+ Paragraph', 'A new paragraph here', ins('p'), { 'data-gap': 'p' }),
+          btn('+ Example', 'A FLEx example here (opens the picker)', ins('flex'), { 'data-gap': 'flex' }),
+          btn('+ Table', 'A new table here', ins('table'), { 'data-gap': 'table' }),
+          btn('+ More \u25BE', 'Any other kind of block here', (e) => {
+            const g0 = gap; const anchor = e.currentTarget;
+            FS.popover(anchor, (pop, close) => {
+              pop.classList.add('menu');
+              const b = g0.above || g0.below;
+              this.insertSection(pop, close, b);
+              pop.querySelectorAll(g0.above ? '[data-ins-where="before"]' : '[data-ins-where="after"]').forEach((x) => x.remove());
+              pop.querySelectorAll('.ins-grid .tog').forEach((x) => { x.textContent = 'Insert'; });
+            });
+          }, { 'data-gap': 'more' }));
+        if (g.above || g.below) bar.appendChild(el('span', { class: 'gap-sep' }));
+        if (g.above) bar.appendChild(btn('\u2212 Above', 'Remove the block above this line', rm(g.above), { 'data-gap': 'rm-above', onmouseenter: () => hint(g.above, true), onmouseleave: () => hint(g.above, false) }));
+        if (g.below) bar.appendChild(btn('\u2212 Below', 'Remove the block below this line', rm(g.below), { 'data-gap': 'rm-below', onmouseenter: () => hint(g.below, true), onmouseleave: () => hint(g.below, false) }));
+        const pr = pane.getBoundingClientRect();
+        bar.hidden = false;
+        bar.style.top = Math.round(g.y - pr.top - bar.offsetHeight / 2) + 'px';
+        const rr = root.getBoundingClientRect();
+        bar.style.left = Math.round(rr.left - pr.left + rr.width / 2 - bar.offsetWidth / 2) + 'px';
+      };
+      root.addEventListener('mousemove', (e) => {
+        if (FS.drag || e.buttons) { if (!bar.hidden) hide(); return; }
+        const g = gapAt(e.clientY);
+        if (!g) { if (!bar.hidden) hideSoon(); return; }
+        clearTimeout(hideT);
+        if (gap && gap.above === g.above && gap.below === g.below && !bar.hidden) return;
+        draw(g);
+      });
+      root.addEventListener('mouseleave', () => hideSoon());
+      bar.addEventListener('mouseleave', () => hideSoon());
+      bar.addEventListener('mouseenter', () => clearTimeout(hideT));
+      root.addEventListener('scroll', () => { if (!bar.hidden) hide(); }, { passive: true });
+      root.addEventListener('dragstart', () => hide());
+      root.addEventListener('keydown', () => { if (!bar.hidden) hide(); });
     }
 
     /* -- selecting across blocks (Seth, 2026-10-16) --------------------------------------
@@ -1155,6 +1251,7 @@
       if (mod && e.shiftKey && e.key.toLowerCase() === 'h') { e.preventDefault(); this.wrapSelection('=='); return; }
       if (mod && e.key === 'Enter') { e.preventDefault(); this.insertBlockAfter(b, { type: 'p', src: '' }, true); return; }
       if (e.key === 'Tab' && (b.type === 'list' || b.type === 'code')) { e.preventDefault(); this.indent(body, b, e.shiftKey ? -1 : 1); return; }
+      if (mod && (e.key === ']' || e.key === '[') && b.type === 'list') { e.preventDefault(); this.indent(body, b, e.key === ']' ? 1 : -1); return; }
       if (e.key === 'Escape') { body.blur(); return; }
       if ((e.key === 'ArrowLeft' || e.key === 'Home') && !mod && !e.shiftKey && !e.altKey && document.body.classList.contains('md-hide')) {
         // markers hidden: Home lands after the prefix; Left from there steps over it to the line before
@@ -1366,16 +1463,42 @@
       setCaret(fresh.querySelector('.blk-body'), Math.max(0, a + (first === last ? delta : 0)));
       this.changed();
     }
+    /* Step the list items under the selection in or out by one level (two spaces; at most four
+     * levels), keeping the selection on the same text (Seth, 2026-10-18: lists "need to include
+     * the ability to increase and decrease the indent"). Tab / Shift+Tab, Ctrl+] / Ctrl+[, the
+     * toolbar's ⇥ ⇤ and the block menu all come here. */
     indent(body, b, dir) {
-      const a = getCaret(body);
+      const a = getCaret(body), z = getCaretEnd(body);
       const s = body.textContent;
-      const lineStart = s.lastIndexOf('\n', a - 1) + 1;
-      const line = s.slice(lineStart, s.indexOf('\n', lineStart) < 0 ? s.length : s.indexOf('\n', lineStart));
-      let newLine;
-      if (dir > 0) newLine = '  ' + line;
-      else newLine = line.replace(/^ {1,2}/, '');
-      const delta = newLine.length - line.length;
-      this.setText(body, b, s.slice(0, lineStart) + newLine + s.slice(lineStart + line.length), Math.max(lineStart, a + delta));
+      const lines = s.split('\n');
+      let pos = 0, first = -1, last = -1;
+      lines.forEach((ln, i) => { const end = pos + ln.length; if (first < 0 && a <= end) first = i; if (z >= pos && z <= end + (i < lines.length - 1 ? 1 : 0)) last = i; pos = end + 1; });
+      if (first < 0) first = 0;
+      if (last < first) last = first;
+      let dFirst = 0, dAll = 0;
+      for (let i = first; i <= last; i++) {
+        const line = lines[i];
+        let out = line;
+        if (dir > 0) { if ((line.match(/^ */)[0].length) < 8) out = '  ' + line; }
+        else out = line.replace(/^ {1,2}/, '');
+        const d = out.length - line.length;
+        if (i === first) dFirst = d;
+        dAll += d;
+        lines[i] = out;
+      }
+      if (!dAll) return;
+      const lineStart = s.split('\n').slice(0, first).reduce((n, ln) => n + ln.length + 1, 0);
+      this.setText(body, b, lines.join('\n'), Math.max(lineStart, a + dFirst), a === z ? undefined : Math.max(lineStart, z + dAll));
+    }
+    /* The toolbar's / menu's indent: the active list block, or nothing. */
+    indentActive(dir) {
+      const b = this.active;
+      if (!b || !b.el || (b.type !== 'list' && b.type !== 'code')) return false;
+      const body = b.el.querySelector('.blk-body');
+      if (!body) return false;
+      if (document.activeElement !== body) body.focus();
+      this.indent(body, b, dir);
+      return true;
     }
     toggleTask(body, b, span) {
       // the span's text is "[ ]" or "[x]"; find its offset in the block text
@@ -1865,6 +1988,12 @@
             pop.appendChild(row);
           }
           item('Turn into checklist', () => { this.active = b; this.focusBlock(this.blocks.indexOf(b), 0); this.linePrefix('task'); });
+          if (b.type === 'list') {
+            const row = el('div', { class: 'menu-row', 'data-test': 'list-indent' }, el('span', { class: 'menu-label' }, 'List indent'));
+            row.appendChild(el('button', { class: 'tog', title: 'Decrease indent (Shift+Tab, Ctrl+[)', onclick: () => { close(); this.active = b; if (document.activeElement !== b.el.querySelector('.blk-body')) this.focusBlock(this.blocks.indexOf(b), 0); this.indentActive(-1); } }, '\u21e4 Less'));
+            row.appendChild(el('button', { class: 'tog', title: 'Increase indent (Tab, Ctrl+])', onclick: () => { close(); this.active = b; if (document.activeElement !== b.el.querySelector('.blk-body')) this.focusBlock(this.blocks.indexOf(b), 0); this.indentActive(1); } }, '\u21e5 More'));
+            pop.appendChild(row);
+          }
           if (/^\s*\d+[.)]\s/.test(b.src)) {
             // the first item's typed number is where the list starts (markdown.numberLines)
             item('Start numbering at…', () => {

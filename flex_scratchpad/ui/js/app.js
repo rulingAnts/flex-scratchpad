@@ -857,6 +857,8 @@
       case 'list': return ed.linePrefix('list');
       case 'task': return ed.linePrefix('task');
       case 'quote': return ed.linePrefix('quote');
+      case 'indent': return ed.indentActive(1) || FS.toast('Put the caret in a list item first');
+      case 'outdent': return ed.indentActive(-1) || FS.toast('Put the caret in a list item first');
       case 'table': return ed.insertMarkdown(FS.tables.template(3, 3), true);
       case 'chart': return ed.insertMarkdown(FS.charts.template(), true);
       case 'hr': return ed.insertMarkdown('---', true);

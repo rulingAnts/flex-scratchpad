@@ -254,6 +254,18 @@
    * list), deeper levels restarting under each item, everything restarting after a line that
    * is not part of the list. `ctx.counters` carries the state from block to block. */
   function listLevel(pre) { return Math.min(4, Math.round((pre.indent || 0) / 2)); }
+  /* The label shown for the n-th item at a nesting level (Seth, 2026-10-18: nested lists "display
+   * prettily"): 1. at the top, a. one level in, i. two levels in, then round again. */
+  function numberLabel(n, level) {
+    if (!(n > 0)) return '';
+    const kind = (level || 0) % 3;
+    if (kind === 0) return n + '.';
+    if (kind === 1) { let s = '', k = n; while (k > 0) { k--; s = String.fromCharCode(97 + (k % 26)) + s; k = Math.floor(k / 26); } return s + '.'; }
+    const R = [[1000, 'm'], [900, 'cm'], [500, 'd'], [400, 'cd'], [100, 'c'], [90, 'xc'], [50, 'l'], [40, 'xl'], [10, 'x'], [9, 'ix'], [5, 'v'], [4, 'iv'], [1, 'i']];
+    let s = '', k = n;
+    for (const [v, r] of R) while (k >= v) { s += r; k -= v; }
+    return s + '.';
+  }
   /* The typed number COUNTS at the start of a list (Seth, 2026-10-16: "change the starting
    * number on a list, like if it needs to start with 2 or 3 or 1 again"): the first numbered
    * TOP-LEVEL item of a block (a block = the lines between blank lines) sets the number when it
@@ -298,7 +310,9 @@
       let start = 0;
       let lineCls = (pre && pre.lineCls) || '';
       if (pre) {
-        for (let i = 0; i < pre.len; i++) { out.marks[i].add('mk'); out.marks[i].add(pre.cls); }
+        // the indent spaces of a nested item are a zero-width span of their own (md-ind): inside
+        // the fixed-width bullet span they wrapped it onto a second line (Seth, 2026-10-18)
+        for (let i = 0; i < pre.len; i++) { out.marks[i].add('mk'); out.marks[i].add(i < (pre.indent || 0) ? 'md-ind' : pre.cls); }
         if (pre.taskPos) { for (let i = pre.taskPos[0]; i < pre.taskPos[1]; i++) { out.marks[i].delete(pre.cls); out.marks[i].add(pre.task ? 'md-task md-task-on' : 'md-task'); } lineCls += ' md-line-task' + (pre.task ? ' md-done' : ''); }
         if (pre.cls === 'md-num') lineCls += ' md-line-num';
         if (pre.cls === 'md-bullet') lineCls += ' md-line-bullet';
@@ -312,18 +326,23 @@
       } else {
         markInline(line.slice(start), out, start);
       }
-      // an empty line needs a <br> to have height and to count as a real line for Chromium
-      // (a bare trailing "\n" text node gets collapsed away when typing after it); <br> adds
-      // nothing to textContent, so the text-is-the-markdown invariant holds.
+      // The "\n" between two lines lives at the END of the first line's span: a newline text
+      // node BETWEEN two display:block spans is laid out as an empty line of its own under
+      // white-space: pre-wrap, which doubled the spacing of every list (Seth, 2026-10-18). An
+      // empty line that is not the last is then just its "\n"; the last line, when empty, needs
+      // a <br> to have height and to count as a real line for Chromium (a bare trailing "\n"
+      // text node gets collapsed away when typing after it); <br> adds nothing to textContent,
+      // so the text-is-the-markdown invariant holds.
       // the computed number rides on the number span itself: CSS attr() reads only the
       // element the ::before belongs to (the line's copy is for tests and tooling)
-      const numAttr = nums[li] != null ? ' data-num="' + nums[li] + '."' : '';
-      let inner = line.length ? emit(line, out) : '<br>';
+      const last = li === lines.length - 1;
+      const numAttr = nums[li] != null ? ' data-num="' + numberLabel(nums[li], pre ? listLevel(pre) : 0) + '"' : '';
+      let inner = line.length ? emit(line, out) : last ? '<br>' : '';
       if (numAttr) inner = inner.replace('<span class="md-marker md-num">', '<span class="md-marker md-num"' + numAttr + '>');
-      html.push('<span class="md-line ' + lineCls + '"' + numAttr + '>' + inner + '</span>');
+      html.push('<span class="md-line ' + lineCls + '"' + numAttr + '>' + inner + (last ? '' : '\n') + '</span>');
       offset += line.length + 1;
     });
-    return html.join('\n');
+    return html.join('');
   }
 
   function clsOf(set) {
@@ -407,5 +426,5 @@
       .replace(/^\s*([-*+]|\d+[.)])\s+(\[[ xX]\]\s*)?/gm, '').replace(/[*_~=]{1,2}/g, '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').trim();
   }
 
-  FS.markdown = { RE, splitBlocks, joinBlocks, headingLevel, hiddenByFolds, sectionEnd, classify, decorate, renderInline, plainText, linePrefix, markInline, numberLines, listLevel };
+  FS.markdown = { RE, splitBlocks, joinBlocks, headingLevel, hiddenByFolds, sectionEnd, classify, decorate, renderInline, plainText, linePrefix, markInline, numberLines, listLevel, numberLabel };
 })();

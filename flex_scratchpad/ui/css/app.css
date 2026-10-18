@@ -179,7 +179,15 @@ body.resizing * { pointer-events: none; }
 .no-note-msg .big { font-size: 40px; opacity: 0.4; }
 
 /* ---------- blocks ---------- */
-.blk { position: relative; margin: 0 0 2px; border-radius: 6px; }
+.blk { position: relative; margin: 0 0 8px; border-radius: 6px; }   /* a small gap between blocks; lines INSIDE a block are single-spaced (Seth, 2026-10-18) */
+.blk.del-hint { outline: 2px solid #d9534f; outline-offset: 1px; opacity: 0.7; }
+/* the bar between blocks: shown while the pointer rests in a gap (editor.js wireGapBar) */
+#blk-gap { position: absolute; z-index: 5; display: flex; gap: 4px; align-items: center; padding: 2px 4px; border-radius: 8px; background: color-mix(in srgb, var(--bg) 94%, transparent); border: 1px solid var(--border-soft); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08); white-space: nowrap; }
+#blk-gap[hidden] { display: none; }
+#blk-gap button { border: 1px solid var(--border); background: var(--bg); border-radius: 6px; padding: 0 7px; font-size: 12px; line-height: 18px; color: var(--muted); }
+#blk-gap button:hover { color: var(--text); border-color: var(--accent); }
+#blk-gap button[data-gap^="rm-"]:hover { color: #d9534f; border-color: #d9534f; }
+#blk-gap .gap-sep { width: 1px; height: 14px; background: var(--border); margin: 0 2px; }
 .blk:hover > .blk-handle, .blk.focus > .blk-handle { opacity: 1; }
 .blk-handle { position: absolute; left: -28px; top: 2px; opacity: 0; transition: opacity 0.12s; display: flex; flex-direction: column; gap: 2px; }
 .blk-handle button { border: 0; background: none; color: var(--faint); border-radius: 4px; padding: 0 4px; font-size: 15px; line-height: 20px; cursor: grab; }
@@ -230,11 +238,18 @@ body.resizing * { pointer-events: none; }
 .md-line-bullet { padding-left: 22px; text-indent: -22px; }
 .md-line-num { padding-left: 26px; text-indent: -26px; }
 .md-indent1 { margin-left: 22px; } .md-indent2 { margin-left: 44px; } .md-indent3 { margin-left: 66px; } .md-indent4 { margin-left: 88px; }
-.md-bullet { display: inline-block; width: 22px; text-indent: 0; color: var(--faint); }
+.md-bullet { display: inline-block; width: 22px; text-indent: 0; color: var(--faint); white-space: pre; }
+/* a nested item's typed indent spaces: kept in the text, given no width (the line's margin is the indent) */
+.md-ind { display: inline-block; width: 0; overflow: hidden; white-space: pre; text-indent: 0; vertical-align: baseline; }
 .md-bullet::before { content: "\2022"; color: var(--muted); font-weight: 700; margin-right: 6px; }
+/* nested lists (Seth, 2026-10-18): a different bullet at each level, like a word processor */
+.md-indent1 .md-bullet::before { content: "\25E6"; }
+.md-indent2 .md-bullet::before { content: "\25AA"; font-size: 0.8em; }
+.md-indent3 .md-bullet::before { content: "\2023"; }
+.md-indent4 .md-bullet::before { content: "\25E6"; }
 .md-line-task .md-bullet::before { content: ""; margin: 0; }
 .md-line-task .md-bullet { width: 4px; }
-.md-num { color: var(--muted); display: inline-block; min-width: 26px; text-indent: 0; position: relative; }
+.md-num { color: var(--muted); display: inline-block; min-width: 26px; text-indent: 0; position: relative; white-space: pre; }
 /* the typed number is kept in the text but shown as the computed outline number */
 .md-num[data-num] { color: transparent; }
 .md-num[data-num]::before { content: attr(data-num); position: absolute; right: 0.35em; top: 0; color: var(--muted); white-space: nowrap; }
@@ -257,6 +272,7 @@ body.md-hide .md-marker.reveal { display: inline; }
 /* a line that is only its prefix (a new heading, an empty quote line): the prefix shows, faint,
  * so the caret can sit after it and typing lands to its RIGHT (Seth, 2026-10-18) */
 body.md-hide .md-line-empty .md-marker { display: inline; opacity: 0.35; }
+body.md-hide .md-line-empty .md-marker.md-ind { display: inline-block; }
 body.md-hide .md-marker.md-task, body.md-hide .md-marker.md-num, body.md-hide .md-marker.md-bullet { display: inline-block; }
 body.md-hide .md-marker.md-bullet { color: transparent; }
 body.md-hide .blk-code .md-marker { display: inline; }

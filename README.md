@@ -20,7 +20,9 @@ project database and linked back to FLEx.
 - **Links both ways**: *Open in FLEx ↗* jumps to the object; FLEx's *Edit → Copy Location as
   Hyperlink* pasted into a note becomes a rendered embed or a chip.
 - **Markdown**, shown with the markers kept faint (`**bold**` reads bold, the stars stay as a
-  hint), checklists, quotes, code, images, `[[links to other notes]]`, `#tags`.
+  hint) or hidden — then only the markup at the caret shows, the way a chat app does it —
+  nested lists (Tab / Shift+Tab; a bullet per level, numbers 1. a. i.), checklists, quotes, code,
+  images, `[[links to other notes]]`, `#tags`. A bar between blocks adds or removes one.
 - **Tables** with line breaks in cells, interlinear examples in cells, and per-row/column styling
   (bold, alignment, width, colours, vernacular font, striped, borders).
 - **Charts** (bar, stacked, horizontal, line, area, pie, donut) from a small readable block.

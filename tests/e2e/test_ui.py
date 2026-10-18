@@ -415,7 +415,9 @@ def test_multiline_emphasis_wraps_per_line(app):
 def test_column_resize_writes_width_and_wide(app):
     h, page, errors = app
     th = page.locator("table.md-table thead th[data-c]").first
-    th.scroll_into_view_if_needed()
+    # the whole table in the middle of the view: at the bottom edge its sticky tool bar would sit over the header
+    page.evaluate("(el) => el.closest('.widget').scrollIntoView({ block: 'center' })", th.element_handle())
+    page.wait_for_timeout(200)
     handle = th.locator(".col-resizer")
     box = handle.bounding_box()
     page.mouse.move(box["x"] + 4, box["y"] + box["height"] / 2)
@@ -625,7 +627,9 @@ def test_hide_markers_toggle(app):
     assert page.locator(".md-marker").first.is_visible()
     page.locator("#btn-markers").click()
     page.wait_for_function("() => document.body.classList.contains('md-hide')")
-    # the heading's "# " is not displayed, the text is intact
+    # the heading's "# " is not displayed (the caret is elsewhere), the text is intact
+    page.evaluate("() => { const b = document.querySelector('#editor .blk-p .blk-body'); FS.editor.setCaret(b, 0); b.focus(); }")
+    page.wait_for_timeout(150)
     assert not page.locator(".blk-h .md-marker").first.is_visible()
     assert page.locator(".blk-h .blk-body").first.inner_text().strip() == "Welcome to FLEx Scratchpad"
     assert h.api._nb.config["settings"]["hideMarkers"] is True
@@ -1403,10 +1407,11 @@ def test_outline_numbering_and_enter(app):
     paste(page, "1. Symmetrical\n  2. Examples:\n\n2. One-word\n  3. Examples:\n\n3. Argument sharing\n  4. All\n  5. Shared subject")
     page.wait_for_timeout(400)
     shown = page.evaluate("() => [...document.querySelectorAll('#editor .md-line[data-num]')].map((l) => l.dataset.num + ' ' + l.textContent.trim().replace(/^\\d+\\.\\s*/, ''))")
-    assert shown == ["1. Symmetrical", "1. Examples:", "2. One-word", "1. Examples:", "3. Argument sharing", "1. All", "2. Shared subject"], shown
+    # nested items are lettered (a. b.), the level below in roman (i. ii.) — Seth, 2026-10-18: "display it prettily"
+    assert shown == ["1. Symmetrical", "a. Examples:", "2. One-word", "a. Examples:", "3. Argument sharing", "a. All", "b. Shared subject"], shown
     # what is DRAWN: the computed number via ::before, the typed digits invisible
     drawn = page.evaluate("() => [...document.querySelectorAll('#editor .md-num[data-num]')].map((n) => [getComputedStyle(n, '::before').content, getComputedStyle(n).color])")
-    assert [d[0] for d in drawn] == ['"1."', '"1."', '"2."', '"1."', '"3."', '"1."', '"2."'], drawn
+    assert [d[0] for d in drawn] == ['"1."', '"a."', '"2."', '"a."', '"3."', '"a."', '"b."'], drawn
     assert all(d[1] == "rgba(0, 0, 0, 0)" for d in drawn), drawn
     # Enter after the last sub-item continues ITS level with the shown number + 1
     last = page.locator("#editor .blk-list .blk-body").last
@@ -1417,7 +1422,7 @@ def test_outline_numbering_and_enter(app):
     page.wait_for_timeout(600)
     assert "  3. Shared object" in body_of(h)
     shown = page.evaluate("() => [...document.querySelectorAll('#editor .md-line[data-num]')].map((l) => l.dataset.num)")
-    assert shown[-1] == "3."
+    assert shown[-1] == "c."
     # inserting an item at the top renumbers the blocks below
     first = page.locator("#editor .blk-list .blk-body").first
     first.click()
@@ -3673,7 +3678,9 @@ def test_hidden_markers_type_to_the_right_of_a_prefix(app):
     page.keyboard.type("Title")
     page.wait_for_timeout(900)
     assert body_of(h).strip() == "## Title", body_of(h)
-    assert not page.locator("#editor .blk-h .md-marker").first.is_visible()        # hidden again once there is text
+    # the heading's own markup stays visible while the caret is on its line (Seth, 2026-10-18:
+    # "whatever … style markup applies to the current cursor position should be visible")
+    assert page.locator("#editor .blk-h .md-marker.reveal").first.is_visible()
     # Home then typing: still after the prefix; a click at the far left of the line too
     page.keyboard.press("Home")
     page.keyboard.type("A ")
@@ -3693,6 +3700,171 @@ def test_hidden_markers_type_to_the_right_of_a_prefix(app):
     page.keyboard.type("second")
     page.wait_for_timeout(900)
     assert body_of(h).strip() == "## BA Title\n\n- first\n- second", body_of(h)
+    # the caret has left the heading: its ## is hidden again; the bullets stay glyphs, never text
+    assert not page.locator("#editor .blk-h .md-marker").first.is_visible()
+    assert page.locator("#editor .blk-list .md-marker.reveal").count() == 0
     page.locator("#btn-markers").click()
     page.wait_for_function("() => !document.body.classList.contains('md-hide')")
+    assert not errors
+
+
+def test_hidden_markers_reveal_only_the_markup_at_the_caret(app):
+    """Seth, 2026-10-18: "whatever character or style markup applies to the current cursor
+    position should be visible, but none of the rest of it. I think this is roughly how WhatsApp
+    works": the enclosing runs' markers (nested ones too) and the line's heading mark, nothing else."""
+    h, page, errors = app
+    page.locator("#btn-markers").click()
+    page.wait_for_function("() => document.body.classList.contains('md-hide')")
+    new_note(page, "Reveal")
+    page.click(".blk-body")
+    paste(page, "### Head **bold** and *it* here\n\nPlain **one *two* three** and `code` [a link](http://x.y) end")
+    page.wait_for_timeout(400)
+    revealed = lambda: page.evaluate("() => [...document.querySelectorAll('#editor .md-marker.reveal')].map((m) => m.textContent)")   # noqa: E731
+    put = lambda sel, text, off: page.evaluate("([sel, text, off]) => { const b = document.querySelector(sel); FS.editor.setCaret(b, b.textContent.indexOf(text) + off); b.focus(); }", [sel, text, off])   # noqa: E731
+    # on the heading line, in the plain word "and": the ### shows, the bold and italic marks do not
+    put("#editor .blk-h .blk-body", "and", 1)
+    page.wait_for_timeout(150)
+    assert revealed() == ["### "], revealed()
+    # inside "bold": the ### and that word's ** **, not the italic's
+    put("#editor .blk-h .blk-body", "bold", 2)
+    page.wait_for_timeout(150)
+    assert revealed() == ["### ", "**", "**"], revealed()
+    # in the paragraph, inside "two": the outer bold AND the inner italic; inside "three": the bold only
+    put("#editor .blk-p .blk-body", "two", 1)
+    page.wait_for_timeout(150)
+    assert revealed() == ["**", "*", "*", "**"], revealed()
+    put("#editor .blk-p .blk-body", "three", 2)
+    page.wait_for_timeout(150)
+    assert revealed() == ["**", "**"], revealed()
+    # right after the closing ** (touching) still shows it; in "and" nothing; in the code its ticks; in the link its brackets
+    put("#editor .blk-p .blk-body", "three**", len("three**"))
+    page.wait_for_timeout(150)
+    assert revealed() == ["**", "**"], revealed()
+    put("#editor .blk-p .blk-body", "and `", 1)
+    page.wait_for_timeout(150)
+    assert revealed() == [], revealed()
+    put("#editor .blk-p .blk-body", "code", 2)
+    page.wait_for_timeout(150)
+    assert revealed() == ["`", "`"], revealed()
+    put("#editor .blk-p .blk-body", "link", 2)
+    page.wait_for_timeout(150)
+    assert revealed() == ["[", "](http://x.y)"], revealed()
+    assert page.locator("#editor .md-marker.reveal").first.is_visible()
+    page.locator("#btn-markers").click()
+    page.wait_for_function("() => !document.body.classList.contains('md-hide')")
+    assert not errors
+
+
+def test_list_items_indent_and_outdent_and_nest_prettily(app):
+    """Seth, 2026-10-18: lists "need to include the ability to increase and decrease the indent
+    (and display it prettily)": Tab / Shift+Tab, Ctrl+] / Ctrl+[, the toolbar's ⇥ ⇤ and the block
+    menu step the selected items in and out; each level gets its own bullet, nested numbers are
+    lettered, then roman."""
+    h, page, errors = app
+    new_note(page, "Nested")
+    page.click(".blk-body")
+    paste(page, "- one\n- two\n- three\n- four")
+    page.wait_for_timeout(300)
+    bullet = lambda i: page.evaluate("(i) => getComputedStyle(document.querySelectorAll('#editor .md-bullet')[i], '::before').content", i)   # noqa: E731
+    # Tab on "two", then on "three" twice: levels 1 and 2 with their own bullets
+    body = page.locator("#editor .blk-list .blk-body")
+    page.evaluate("() => { const b = document.querySelector('#editor .blk-list .blk-body'); FS.editor.setCaret(b, '- one\\n- t'.length); b.focus(); }")
+    page.keyboard.press("Tab")
+    page.keyboard.press("ArrowDown")
+    page.keyboard.press("Tab")
+    page.keyboard.press("Control+]")
+    page.wait_for_timeout(700)
+    assert body_of(h).strip() == "- one\n  - two\n    - three\n- four", body_of(h)
+    assert [bullet(i) for i in range(4)] == ['"•"', '"◦"', '"▪"', '"•"']
+    # the items are single-spaced: four lines take four line heights, not eight (Seth, 2026-10-18:
+    # "we don't really want double-line spacing in our list items within a single block")
+    h_body, lh = page.evaluate("() => { const b = document.querySelector('#editor .blk-list .blk-body'); return [b.getBoundingClientRect().height, parseFloat(getComputedStyle(b).lineHeight)]; }")
+    assert 3.5 * lh < h_body < 5 * lh, (h_body, lh)
+    # Shift+Tab brings "three" back one; the toolbar's ⇤ once more; ⇥ in again
+    page.keyboard.press("Shift+Tab")
+    page.locator("[data-test=tb-outdent]").dispatch_event("mousedown")
+    page.locator("[data-test=tb-indent]").dispatch_event("mousedown")
+    page.wait_for_timeout(700)
+    assert body_of(h).strip() == "- one\n  - two\n  - three\n- four", body_of(h)
+    # a selection over several items moves them together, and stays on the same text
+    page.evaluate("() => { const b = document.querySelector('#editor .blk-list .blk-body'); FS.editor.setCaret(b, '- one\\n  - t'.length, '- one\\n  - two\\n  - th'.length); b.focus(); }")
+    page.keyboard.press("Control+[")
+    page.wait_for_timeout(700)
+    assert body_of(h).strip() == "- one\n- two\n- three\n- four", body_of(h)
+    assert page.evaluate("() => getSelection().toString()") == "wo\n- th"
+    # numbered items: a. b. one level in, i. ii. two levels in, shown over the typed digits
+    page.keyboard.press("Control+End")
+    page.keyboard.press("Enter")
+    page.keyboard.press("Enter")
+    paste(page, "1. first\n  1. sub a\n  2. sub b\n    1. deep\n    2. deeper\n2. second")
+    page.wait_for_timeout(500)
+    shown = page.evaluate("() => [...document.querySelectorAll('#editor .md-line[data-num]')].map((l) => l.dataset.num)")
+    assert shown == ["1.", "a.", "b.", "i.", "ii.", "2."], shown
+    # the block menu has the indent row for a list
+    grip = page.locator("#editor .blk-list").last.locator("[data-test=blk-grip]")
+    page.locator("#editor .blk-list").last.hover()
+    grip.dispatch_event("mousedown")
+    page.wait_for_selector("[data-test=list-indent]")
+    page.keyboard.press("Escape")
+    assert not errors
+
+
+def test_gap_bar_between_blocks_adds_and_removes(app):
+    """Seth, 2026-10-18: the empty line between blocks is "a convenient place for an add/remove
+    block bar similar to the bar at the end of our table": hovering the gap shows + Paragraph /
+    + Example / + Table / + More and − Above / − Below."""
+    h, page, errors = app
+    new_note(page, "Gaps")
+    page.click(".blk-body")
+    paste(page, "first\n\nsecond")
+    page.wait_for_timeout(300)
+    page.keyboard.press("Backspace")          # the empty paragraph the paste leaves after itself
+    page.wait_for_timeout(300)
+    assert page.locator("#editor .blk").count() == 2
+    bar = page.locator("[data-test=blk-gap]")
+    assert bar.is_hidden()
+    gap_y = page.evaluate("() => { const [a, b] = document.querySelectorAll('#editor .blk'); return (a.getBoundingClientRect().bottom + b.getBoundingClientRect().top) / 2; }")
+    x = page.evaluate("() => { const r = document.querySelector('#editor').getBoundingClientRect(); return r.left + r.width / 2; }")
+    page.mouse.move(x, gap_y - 30)
+    page.mouse.move(x, gap_y)
+    page.wait_for_selector("[data-test=blk-gap]:not([hidden])")
+    # the bar sits on the gap
+    top, bottom = page.evaluate("() => { const r = document.querySelector('#blk-gap').getBoundingClientRect(); return [r.top, r.bottom]; }")
+    assert top < gap_y < bottom
+    # + Paragraph puts a new block between the two, focused
+    bar.locator("[data-gap=p]").click()
+    page.wait_for_timeout(300)
+    assert bar.is_hidden()
+    assert page.locator("#editor .blk").count() == 3
+    assert page.evaluate("() => [...document.querySelectorAll('#editor .blk')].indexOf(document.activeElement.closest('.blk'))") == 1
+    page.keyboard.type("middle")
+    page.wait_for_timeout(700)
+    assert body_of(h).strip() == "first\n\nmiddle\n\nsecond", body_of(h)
+    # − Below from the gap under "first" removes "middle"; hovering the button marks it first
+    gap_y = page.evaluate("() => { const [a, b] = document.querySelectorAll('#editor .blk'); return (a.getBoundingClientRect().bottom + b.getBoundingClientRect().top) / 2; }")
+    page.mouse.move(x, gap_y + 40)
+    page.mouse.move(x, gap_y)
+    page.wait_for_selector("[data-test=blk-gap]:not([hidden])")
+    bar.locator("[data-gap=rm-below]").hover()
+    assert page.evaluate("() => document.querySelectorAll('#editor .blk')[1].classList.contains('del-hint')")
+    bar.locator("[data-gap=rm-below]").click()
+    page.wait_for_timeout(700)
+    assert body_of(h).strip() == "first\n\nsecond", body_of(h)
+    assert page.locator("#editor .blk").count() == 2
+    assert page.locator("#editor .del-hint").count() == 0
+    # below the last block: no "− Below"; + More ▾ lists every kind, each inserting here
+    last_bottom = page.evaluate("() => document.querySelector('#editor .blk:last-child').getBoundingClientRect().bottom")
+    page.mouse.move(x, last_bottom + 6)
+    page.wait_for_selector("[data-test=blk-gap]:not([hidden])")
+    assert bar.locator("[data-gap=rm-below]").count() == 0 and bar.locator("[data-gap=rm-above]").count() == 1
+    bar.locator("[data-gap=more]").click()
+    page.wait_for_selector(".popover .ins-grid")
+    assert page.locator(".popover .ins-grid [data-ins-where=before]").count() == 0
+    page.locator(".popover .ins-grid [data-ins-kind=hr]").click()
+    page.wait_for_timeout(700)
+    assert body_of(h).strip().endswith("second\n\n---"), body_of(h)
+    # the bar goes away when the pointer leaves the gap
+    page.mouse.move(x, 5)
+    page.wait_for_timeout(300)
+    assert bar.is_hidden()
     assert not errors

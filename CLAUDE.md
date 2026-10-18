@@ -117,7 +117,32 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   The typed number of a block's first TOP-LEVEL item restarts the count when it is `1.` or
   jumps forward (`3.` starts at 3, `1.` after a blank line starts over); a smaller typed number
   is stale (an item was added above) and the count continues; nested items always count under
-  their parent. The block ⋮ menu has "Start numbering at…".
+  their parent. The block ⋮ menu has "Start numbering at…". NESTED LISTS (Seth, 2026-10-18:
+  "increase and decrease the indent (and display it prettily)"): `editor.indent(body, b, dir)`
+  steps every line under the selection in or out by two spaces (≤ 4 levels) and keeps the
+  selection on the same text — Tab / Shift+Tab, Ctrl+] / Ctrl+[, the toolbar's ⇥ ⇤
+  (`indentActive`, the active list block) and the block menu's "List indent" row. Each level has
+  its own bullet (• ◦ ▪ ‣, CSS on `.md-indentN .md-bullet::before`) and nested numbers are shown
+  as letters one level in and roman two levels in (`markdown.numberLabel(n, level)`, the
+  `data-num` the editor draws; the typed digits stay in the file). The indent spaces are a
+  zero-width `md-ind` span of their own (inside the 22px bullet span they wrapped the item onto a
+  second line); the bullet and number spans are `white-space: pre` — `nowrap` COLLAPSES the
+  trailing space and Chromium then drops it from the text on the next keystroke ("- item" became
+  "-item"). SINGLE-SPACED LINES (Seth, 2026-10-18: "we don't really want double-line spacing in
+  our list items within a single block"): the `\n` between two lines is the LAST character of the
+  first line's `.md-line` span (`decorate` joins with ''): a newline text node BETWEEN two
+  `display: block` spans is laid out as an empty line of its own under `pre-wrap`. An empty line
+  that is not the last is just its `\n`; only the last line, when empty, gets the `<br>`.
+  `pointAt` steps from the end of a line's `\n` to the start of the next span.
+- THE BAR BETWEEN BLOCKS (Seth, 2026-10-18: "Between blocks an empty line is allowed (in fact, it
+  would be a convenient place for an 'add/remove block' bar similar to the bar at the end of our
+  table)"): blocks are 8px apart; `wireGapBar` keeps one floating `#blk-gap` beside the root (the
+  root is emptied by `renderAll`) and shows it while the pointer rests in a gap — between two
+  blocks, just above the first, under the last (`gapAt`): + Paragraph · + Example · + Table ·
+  + More ▾ (`insertSection` with only the side that means "here") insert at that gap through
+  `insertNewBlock`; − Above / − Below `deleteBlock` the neighbour, marked `.del-hint` while the
+  button is hovered. It hides on scroll, keys, a drag and when the pointer leaves (160 ms grace
+  so it can be reached).
 - New blocks (Seth, 2026-10-16): right-click a block that is not running text (an example, a
   chart, a divider…) or the space between blocks, a table cell, or open the ⋮ block menu →
   "Insert a new block": paragraph, heading, bulleted / numbered list, checklist, quote, table,
@@ -189,7 +214,14 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   editor.js selects the whole token when Backspace is just after it, Delete just before it, or
   either is pressed inside it, in a `.blk-body` or `.cell-edit`; the key's own deletion then
   removes it through the usual input handling (`brAround`).
-- MARKERS HIDDEN (`body.md-hide`, Settings / the ** Markup button): the caret NEVER rests inside a
+- MARKERS HIDDEN (`body.md-hide`, Settings / the ** Markup button): ONLY THE MARKUP AT THE CARET
+  SHOWS (Seth, 2026-10-18: "whatever character or style markup applies to the current cursor
+  position should be visible, but none of the rest of it … roughly how WhatsApp works"):
+  `revealMarkers` (editor.js, on selectionchange) pairs the marker spans of the caret's line left
+  to right (same delimiter text; `[`…`](…)`, `[[`…`]]`) and reveals every pair whose span holds or
+  touches the caret — nested ones too — plus the line's own `###` / `>` prefix; a bullet, number
+  or checkbox is drawn as its glyph and never revealed as text. Table markup is a widget anyway.
+  The caret NEVER rests inside a
   line's hidden prefix (Seth, 2026-10-18: "the cursor goes to the left of the ### and makes the ###
   appear … text should automatically start typing to the RIGHT of a heading or list markup tag").
   `snapPastPrefix` (on selectionchange and before any insert) moves a caret inside the prefix to
