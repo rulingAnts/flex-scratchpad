@@ -98,3 +98,42 @@ test('the TSV grid and the readable copy carry headers, words, markers, translat
   assert.equal(g2[0][g2[0].length - 1], 'Notes');
   assert.equal(g2[6][g2[6].length - 1], 'Locative after the verb in the chart.');
 });
+
+test('a text’s chart spans become column tags on an example when the cols line is on', () => {
+  const I = FS.interlinear;
+  const text = { guid: 't', segments: [{ n: 1, words: [{ txt: 'Kabir', ai: 0 }, { txt: 'ka-nuwa-mo', ai: 1 }, { txt: 'lo', ai: 2 }, { txt: '.', punct: true, ai: 3 }] }], tags: [],
+    chartSpans: [{ chart: 'c', chartName: 'Story chart', template: 'Default', row: '1a', column: { guid: 'g3', name: 'Subject', abbr: 'S', path: ['Nucleus'] }, from: { seg: 1, w: 0 }, to: { seg: 1, w: 0 } },
+      { chart: 'c', chartName: 'Story chart', template: 'Default', row: '1a', column: { guid: 'g4', name: 'Verb', abbr: 'V', path: ['Nucleus'] }, from: { seg: 1, w: 1 }, to: { seg: 1, w: 2 } }] };
+  const specOff = R.parse('{{flex:text 9b1c2d3e-4f50-4a6b-8c7d-0e1f2a3b0001 seg=1}}');
+  const specOn = R.parse('{{flex:text 9b1c2d3e-4f50-4a6b-8c7d-0e1f2a3b0001 seg=1 lines=txt,gls,cols}}');
+  assert.equal(R.showsCols(specOff), false);
+  assert.equal(R.showsCols(specOn), true);
+  assert.equal(I.withChartTags(text, specOff).tags.length, 0);
+  const on = I.withChartTags(text, specOn);
+  assert.equal(on.tags.length, 2);
+  assert.equal(on.tags[0].tag.name, 'Nucleus/Subject');
+  assert.equal(on.tags[0].tag.column, true);
+  assert.equal(on.tags[1].tag.abbr, 'V');
+  assert.deepEqual(on.tags[1].to, { seg: 1, w: 2 });
+  const lanes = I.segTags(text, specOn, text.segments[0]);
+  assert.equal(lanes.length, 2);
+  assert.deepEqual(lanes.map((o) => [o.firstAi, o.lastAi]), [[0, 0], [1, 2]]);
+  assert.equal(I.segTags(text, specOff, text.segments[0]).length, 0);
+});
+
+test('the pivot counts rows by marker and column', () => {
+  const c = chart();
+  const p = C.pivot(c, R.parse('{{flex:chart ' + G + '}}'));
+  assert.deepEqual(p.columns, ['Prenuclear › Outer', 'Prenuclear › Inner', 'Nucleus › Subject', 'Nucleus › Verb', 'Nucleus › Object', 'Postnuclear › Inner', 'Postnuclear › Outer']);
+  const by = Object.fromEntries(p.lines.map((l) => [l.key, l]));
+  assert.deepEqual(by['m:New'].counts, [0, 0, 1, 1, 0, 0, 0]);
+  assert.equal(by['m:New'].total, 1);
+  assert.deepEqual(by['m:Given'].counts, [0, 0, 1, 1, 0, 1, 0]);
+  assert.equal(by['clause:speech'].total, 1);
+  assert.equal(by['moved:preposed'].counts[0], 1);
+  assert.equal(by['clauseref'].total, 1);
+  assert.deepEqual(p.totals, [1, 1, 5, 5, 1, 1, 0]);   // 3b's words sit in Subject (merged into Verb)
+  assert.equal(p.rowCount, 7);
+  const narrow = C.pivot(c, R.parse('{{flex:chart ' + G + ' cols=Nucleus}}'));
+  assert.equal(narrow.columns.length, 3);
+});

@@ -1410,6 +1410,8 @@ class FlexiconBackend:
                 segs[_guid(seg)] = (n, pi, k, seg)
         d["textSegmentCount"] = n
         d["textIndex"] = [{"n": v[0], "label": f"{v[1]}.{v[2]}", "guid": g} for g, v in segs.items()]
+        # the text's markup tags too, so a chart can draw them inside its cells (Seth, 2026-10-18)
+        d["tags"] = _t(lambda: self._text_tags(text, {g: v[0] for g, v in segs.items()}), [])
         read: dict[int, dict] = {}
 
         def seg_dict(sg):

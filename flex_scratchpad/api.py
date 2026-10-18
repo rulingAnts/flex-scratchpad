@@ -251,7 +251,7 @@ class Api:
         """A new collection holding every line the rule matches, one example each, in text order."""
         rule = clean_rule(rule)
         if not rule:
-            raise RuntimeError("Choose at least one tag for the rule")
+            raise RuntimeError("Choose at least one tag for the rule, or a chart search")
         rows = self.rule_matches(rule)
         body = "\n\n".join(match_embed(r) for r in rows)
         n = self._nb.create_note(tab, folder or "", title or "", body + ("\n" if body else ""), "examples", rule=rule)
@@ -884,6 +884,20 @@ class Api:
         Path(target).write_text(text, encoding="utf-8", newline="\n")
         LOG.info("chart %s exported as %s → %s", guid[:8], fmt, target)
         return target
+
+    def chart_search(self, q: str) -> list[dict]:
+        """The chart rows a query matches (FlexService.chart_search): the picker's chart search."""
+        try:
+            return self._flex.chart_search(q or "")
+        except FlexError as e:
+            raise RuntimeError(e.message) from e
+
+    def chart_profile(self, term: str) -> dict:
+        """Where a lexical item sits in the charts: counts per template and column, with the rows."""
+        try:
+            return self._flex.chart_profile(term or "")
+        except FlexError as e:
+            raise RuntimeError(e.message) from e
 
     def flex_charts(self, text_guid: str = "") -> list[dict]:
         """The project's text charts, or one text's (the picker's Charts tab, a chart note)."""

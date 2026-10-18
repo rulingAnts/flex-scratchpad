@@ -123,14 +123,15 @@
     if (st.other) out.push('', st.other);
     if (st.columns.length) {
       out.push('', H_COLS, '', '| Column | Kind | Settings |', '|---|---|---|');
-      for (const c of st.columns) out.push('| ' + cellText(c.name) + ' | ' + c.kind + ' | ' + cellText(c.settings || '') + ' |');
+      const row = (cells) => '|' + cells.map((c) => (c ? ' ' + c + ' ' : ' ')).join('|') + '|';
+      for (const c of st.columns) out.push(row([cellText(c.name), c.kind, cellText(c.settings || '')]));
       const stored = st.columns.filter((c) => c.kind !== 'rule');
       const keys = [...st.values.keys()].filter((k) => { const v = st.values.get(k) || {}; return stored.some((c) => v[c.name]); });
       if (stored.length && keys.length) {
         out.push('', H_VALS, '', '| Row | ' + stored.map((c) => cellText(c.name)).join(' | ') + ' |', '|' + '---|'.repeat(stored.length + 1));
         for (const k of keys) {
           const v = st.values.get(k) || {};
-          out.push('| ' + cellText(st.labels.get(k) || '') + ' #' + k + ' | ' + stored.map((c) => cellText(v[c.name] || '')).join(' | ') + ' |');
+          out.push(row([cellText(st.labels.get(k) || '') + ' #' + k].concat(stored.map((c) => cellText(v[c.name] || '')))));
         }
       }
     }
@@ -140,7 +141,7 @@
   /* ------------------------------------------------------------------ rules */
   function tokenize(src) {
     const out = [];
-    const re = /\s*(\(|\)|→|->|;|\[|\]|"[^"]*"|[^\s()\[\];"]+)/g;
+    const re = /\s*(\(|\)|→|->|;|\[|\]|[^\s()\[\];"]+(?:"[^"]*")?|"[^"]*")/g;
     let m;
     while ((m = re.exec(src))) out.push(m[1] === '->' ? '→' : m[1]);
     return out;
@@ -300,7 +301,8 @@
         el('span', { class: 'spacer' }),
         el('button', { class: 'btn small', title: 'Reload the chart from FieldWorks', onclick: () => { FS.interlinear.invalidate('chart', this.guid()); this.drawChart(true); } }, '↻ Refresh'),
         el('button', { class: 'btn small', 'data-test': 'cn-add-col', title: 'A column of your own: a choice list, free notes, or a rule computed from the markers and columns of each row', onclick: () => this.columnDialog(null) }, '+ Custom column…'),
-        el('button', { class: 'btn small', title: 'The choice lists of this notebook (shared by every chart note)', onclick: () => this.listsDialog() }, 'Lists…'));
+        el('button', { class: 'btn small', title: 'The choice lists of this notebook (shared by every chart note)', onclick: () => this.listsDialog() }, 'Lists…'),
+        obj && FS.chart.pivotDialog ? el('button', { class: 'btn small', 'data-test': 'cn-pivot', title: 'Counts of rows by marker and by column', onclick: () => FS.chart.pivotDialog(obj, this.st.spec) }, 'Pivot…') : null);
     }
     drawChart(refresh) {
       const host = this.host;

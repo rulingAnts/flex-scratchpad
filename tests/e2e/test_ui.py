@@ -4332,3 +4332,198 @@ def test_a_chart_gets_a_readable_copy_and_exports(app):
     out = h.api.export_chart(CHART, "xml", [1, 2], path=str(h.tmp / "c.xml"))
     assert '<row type="normal" id="1a"' in Path(out).read_text(encoding="utf-8")
     assert not errors
+
+
+def test_a_chart_note_with_custom_columns(app):
+    """Seth, 2026-10-18: a chart note — one text chart with the user's own columns (a choice list
+    shared by the notebook, notes, a rule from the markers and columns) and styles, all saved in the
+    note's file as tables and found by search."""
+    h, page, errors = app
+    page.locator("#btn-new-menu").click()
+    page.locator("[data-test=new-chart-note]").click()
+    page.wait_for_selector("[data-test=pick-chart-note]")
+    page.locator("[data-test=pick-chart-note]").first.click()
+    page.wait_for_selector("#chartnote .tchart tr.crow")
+    assert page.locator("#chartnote tr.crow").count() == 7
+    assert page.input_value("#note-title") == "Story chart — The dog and the river"
+    saved = lambda: page.wait_for_function("() => document.getElementById('save-state').textContent === 'Saved'", timeout=5000)  # noqa: E731
+    # a notes column, typed into
+    page.locator("[data-test=cn-add-col]").click()
+    page.fill("[data-test=cn-col-name]", "Comment")
+    page.select_option("[data-test=cn-col-kind]", "notes")
+    page.locator("[data-test=cn-col-save]").click()
+    page.wait_for_selector("#chartnote th.th-x")
+    page.locator("#chartnote tr.crow[data-label='1b'] td.xcell .xval").click()
+    page.wait_for_selector("[data-test=xedit]")
+    page.keyboard.type("Subject fronted")
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#chartnote tr.crow[data-label='1b'] td.xcell .xval")
+    saved()
+    # a choice-list column with a new project-wide list
+    page.locator("[data-test=cn-add-col]").click()
+    page.fill("[data-test=cn-col-name]", "Status")
+    page.select_option("[data-test=cn-col-kind]", "list")
+    page.wait_for_selector("[data-test=cn-list-name]")
+    page.fill("[data-test=cn-list-name]", "Information status")
+    page.fill("[data-test=cn-list-opts]", "new\ngiven\ncontrast")
+    page.locator("[data-test=cn-col-save]").click()
+    page.wait_for_function("() => document.querySelectorAll('#chartnote th.th-x').length === 2")
+    page.locator("#chartnote tr.crow[data-label='1a'] td.xcell-list .xval").click()
+    page.wait_for_selector("#chartnote select.xsel")
+    page.select_option("#chartnote select.xsel", "given")
+    page.wait_for_function("() => document.querySelector(\"#chartnote tr.crow[data-label='1a'] td.xcell-list .xval\").textContent === 'given'")
+    saved()
+    assert h.api.chart_lists() == {"Information status": {"options": ["new", "given", "contrast"], "open": True}}
+    # a rule column: text per row, a row style from a marker, a list column's value as a term
+    page.locator("[data-test=cn-add-col]").click()
+    page.fill("[data-test=cn-col-name]", "Role")
+    page.select_option("[data-test=cn-col-kind]", "rule")
+    page.wait_for_selector("[data-test=cn-rule]")
+    page.fill("[data-test=cn-rule]", "marker:new → N [row hl#fde68a]; Status:given → G; col:Subject → S")
+    page.wait_for_function("() => (document.querySelector('.cn-preview') || {}).textContent.includes('row')")
+    page.locator("[data-test=cn-col-save]").click()
+    page.wait_for_function("() => document.querySelectorAll('#chartnote th.th-x').length === 3")
+    roles = page.locator("#chartnote tr.crow td.xcell-rule").all_inner_texts()
+    assert roles == ["N", "S", "", "", "S", "S", "S"], roles          # 1a: the marker case comes first; 2a / 2b have no Subject
+    saved()
+    body = page.evaluate("() => window.__fsChartNote.markdown()")
+    assert "## Custom columns" in body and "| Status | list | Information status |" in body and "| Role | rule | marker:new" in body
+    assert "| 1b #" in body and "| Subject fronted |" in body and "| 1a #" in body and "| given |" in body, body
+    # found by search, and still there after a reload
+    nid = page.evaluate("() => window.__fsChartNote && document.querySelector('.note-card.active').dataset.id")
+    assert any(hit["id"] == nid for hit in h.api.search("fronted"))
+    page.reload()
+    page.wait_for_selector(".note-card")
+    page.locator(".note-card", has_text="Story chart").click()
+    page.wait_for_selector("#chartnote th.th-x")
+    assert page.locator("#chartnote tr.crow[data-label='1b'] td.xcell .xval").first.inner_text() == "Subject fronted"
+    assert not errors
+
+
+def test_chart_markers_style_their_whole_row(app):
+    """Seth, 2026-10-18: visual filters on chart markers, with row-level markers that style the
+    whole row they are in — through the same scoped rules as the text tags."""
+    h, page, errors = app
+    new_note(page, "Marker rows")
+    page.keyboard.type("{{flex:chart %s}}" % CHART)
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#editor .chart-obj tr.crow")
+    assert page.locator("#editor .chart-obj .ctag").count() == 2
+    page.locator("#editor .chart-obj [data-test=marker-btn]").click()
+    page.wait_for_selector("[data-test=tag-popover] .tagrow")
+    row = page.locator("[data-test=tag-popover] .tagrow[data-tag='New']")
+    row.locator("[data-test=tag-style]").click()
+    page.locator("[data-test=tag-popover] [data-test=tag-bg]").first.click()
+    page.locator("[data-test=tag-popover] [data-test=tag-row]").click()
+    page.keyboard.press("Escape")
+    page.wait_for_selector("#editor .chart-obj tr.crow.marker-row")
+    tr = page.locator("#editor .chart-obj tr.crow.marker-row")
+    assert tr.count() == 1 and tr.get_attribute("data-label") == "1a" and tr.get_attribute("data-marker-row") == "New"
+    page.wait_for_function("() => document.getElementById('save-state').textContent === 'Saved'", timeout=5000)
+    body = body_of(h)
+    assert "tags=marker%3ANew:bg#ffd6a5+row" in body, body
+    # hidden for the whole notebook from the popover's scope select: the chip goes, the row stays plain
+    page.locator("#editor .chart-obj [data-test=marker-btn]").click()
+    page.wait_for_selector("[data-test=tag-popover] .tagrow")
+    page.select_option("[data-test=tag-scope-pick]", label="the whole notebook")
+    page.wait_for_timeout(200)
+    page.locator("[data-test=tag-popover] .tagrow[data-tag='Given'] [data-test=tag-toggle]").click()
+    page.wait_for_function("() => document.querySelectorAll('#editor .chart-obj .ctag:not(.hidden)').length === 1")
+    page.keyboard.press("Escape")
+    rules = h.api._nb.config["tagStyles"]["project"]
+    assert any(r.get("tag") == "marker:Given" and r.get("hide") for rs in rules.values() for r in rs), rules
+    assert not errors
+
+
+def test_chart_search_rows_profile_and_a_collection_of_rows(app):
+    """Seth, 2026-10-18: search the charts — rows by words, column, marker, lexical item — insert
+    the hits, see which columns an item sits in, and collect the rows into a collection that can
+    take in new rows later."""
+    h, page, errors = app
+    new_note(page, "Chart search")
+    page.click(".blk-body")
+    page.keyboard.press("Control+Shift+L")
+    page.locator(".picker-tabs button", has_text="Text charts").click()
+    page.fill(".picker-left input[type=text]", "col:Subject lex:kabir")
+    page.wait_for_selector("[data-test=pick-chart-row]")
+    rows = page.locator("[data-test=pick-chart-row]")
+    assert rows.count() == 3 and "1a" in rows.first.inner_text() and "Subject: Kabir" in rows.first.inner_text()
+    # a hit opens the chart at that row; Insert rows writes an anchored one-row embed
+    rows.nth(1).click()
+    page.wait_for_selector(".picker-preview tr.crow.in-range")
+    assert page.locator(".picker-preview tr.crow.in-range").get_attribute("data-label") == "2c"
+    page.locator("[data-test=insert-chart-rows]").click()
+    page.wait_for_selector("#editor .chart-obj tr.crow")
+    page.wait_for_function("() => document.getElementById('save-state').textContent === 'Saved'", timeout=5000)
+    assert "{{flex:chart %s rows=5 at=" % CHART in body_of(h)
+    assert page.locator("#editor .chart-obj tr.crow th.rlab").all_inner_texts() == ["2c"]
+    assert page.locator("#editor .chart-obj thead th.th-col").count() == 7            # the headings always come along
+    # the column profile
+    page.keyboard.press("Control+Shift+L")
+    page.locator(".picker-tabs button", has_text="Text charts").click()
+    page.fill(".picker-left input[type=text]", "lex:kabir")
+    page.wait_for_selector("[data-test=chart-profile]")
+    page.locator("[data-test=chart-profile]").click()
+    page.wait_for_selector(".profile-table")
+    assert "Subject" in page.locator(".profile-table").inner_text() and page.locator("[data-test=profile-count]").inner_text() == "3"
+    page.keyboard.press("Escape")
+    # a collection of the rows a search matches, with a rule that finds new rows
+    page.keyboard.press("Control+Shift+L")
+    page.locator(".picker-tabs button", has_text="Text charts").click()
+    page.fill(".picker-left input[type=text]", "marker:*")
+    page.wait_for_selector("[data-test=collect-chart-rows]")
+    page.locator("[data-test=collect-chart-rows]").click()
+    page.wait_for_selector("[data-test=chart-rule-create]")
+    page.wait_for_function("() => (document.querySelector('[data-test=chart-rule-count]') || {}).textContent.startsWith('2 rows')")
+    page.fill("[data-test=chart-rule-title]", "Marked rows")
+    page.locator("[data-test=chart-rule-create]").click()
+    page.wait_for_selector("#collection .coll-item .chart-obj tr.crow")
+    assert page.locator("#collection .coll-item").count() == 2
+    bar = page.locator("[data-test=coll-rule]")
+    assert "marker:*" in bar.inner_text() and "Find new rows" in bar.inner_text()
+    page.locator("[data-test=coll-rule-update]").click()
+    page.wait_for_selector(".toast", state="visible")
+    assert "Nothing new" in page.locator(".toast").last.inner_text()
+    notes = [n for n in h.api._nb.list_notes() if n["title"] == "Marked rows"]
+    assert notes and h.api.get_note(notes[0]["id"])["rule"] == {"charts": "marker:*"}
+    assert not errors
+
+
+def test_chart_columns_on_an_example_text_tags_in_a_chart_pivot_and_entry_profile(app):
+    """Seth, 2026-10-18 (phase 3): the text's chart columns drawn on an interlinear example like
+    tags; the text's markup tags inside a chart's cells; a markers × columns pivot; where a lexical
+    item sits in the charts, from its entry card."""
+    h, page, errors = app
+    new_note(page, "Columns as tags")
+    page.keyboard.type("{{flex:text %s seg=1-2 lines=txt,gls,cols}}" % T_STORY)
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#editor .text-obj .tagbar")
+    bars = page.locator("#editor .text-obj .segment[data-n='1'] .tagbar.first")
+    assert sorted(bars.all_inner_texts()) == ["S", "V"], bars.all_inner_texts()
+    assert page.locator("#editor .text-obj .il-tag[data-tag='Nucleus/Subject']").count() >= 1
+    page.locator("#editor .text-obj [data-test=tag-btn]").click()
+    page.wait_for_selector("[data-test=tag-popover] .tagrow[data-tag='Nucleus/Subject']")
+    page.keyboard.press("Escape")
+    # the text's FLEx tags inside a chart's cells, on request (typed in the paragraph after the example)
+    page.locator("#editor .blk-body").last.click()
+    page.keyboard.type("{{flex:chart %s rows=1-2 lines=txt,gls,tag}}" % CHART)
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#editor .chart-obj .ctexttag")
+    chips = page.locator("#editor .chart-obj tr.crow[data-label='1a'] .ctexttag").all_inner_texts()
+    assert chips == ["S", "V"], chips
+    # the pivot
+    page.locator("#editor .chart-obj [data-test=chart-menu]").click()
+    page.locator("[data-test=chart-pivot]").click()
+    page.wait_for_selector(".pivot-table")
+    txt = page.locator(".pivot-table").inner_text()
+    assert "⚐ New" in txt and "moved text, preposed" in txt and "rows with words" in txt
+    page.keyboard.press("Escape")
+    # the entry card: where kabir sits in the charts
+    page.locator("#editor .blk-body").last.click()
+    page.keyboard.type("{{flex:entry 6a5f3a2e-1b1e-4c2a-9f10-0d2c1a7e0001}}")
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#editor .entry-card [data-test=entry-chart-profile]")
+    page.locator("#editor .entry-card [data-test=entry-chart-profile]").click()
+    page.wait_for_selector(".profile-table")
+    assert "Subject" in page.locator(".profile-table").inner_text()
+    assert not errors

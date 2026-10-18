@@ -1003,3 +1003,21 @@ table.md-table td.drop-target, table.md-table th.drop-target { outline: 2px soli
 .cn-preview { margin-top: 4px; }
 .cn-list { border-top: 1px solid var(--border-soft); padding: 8px 0; }
 .note-card .kind-badge.chart { background: color-mix(in srgb, var(--pos) 15%, var(--bg)); color: var(--pos); }
+.tchart .ctag.hidden { display: none; }
+.profile-table { border-collapse: collapse; width: 100%; margin: 8px 0 14px; font-size: 13.5px; }
+.profile-table th { text-align: left; color: var(--muted); font-size: 12px; padding: 4px 6px; border-bottom: 1px solid var(--border-soft); }
+.profile-table td { padding: 3px 6px; vertical-align: middle; }
+.profile-table td.n { white-space: nowrap; width: 45%; }
+.profile-table td.n .lnk { font-weight: 700; margin-right: 6px; }
+.profile-bar { display: inline-block; height: 8px; background: var(--accent-soft); border-radius: 4px; vertical-align: middle; max-width: 70%; }
+.profile-rows { padding: 2px 0 6px 12px; }
+
+.tchart .ctagrow { display: block; margin-top: 2px; }
+.tchart .ctexttag { display: inline-block; font-size: 10.5px; font-weight: 700; padding: 0 5px; border-radius: 999px; line-height: 1.5; margin: 0 2px 1px 0; }
+.pivot-table { border-collapse: collapse; font-size: 13px; margin: 6px 0 10px; }
+.pivot-table th, .pivot-table td { border: 1px solid var(--border-soft); padding: 3px 8px; text-align: left; }
+.pivot-table th { background: var(--panel-2); color: var(--muted); font-weight: 600; font-size: 12px; }
+.pivot-table td.n { text-align: right; font-variant-numeric: tabular-nums; }
+.pivot-table td.n.zero { color: var(--faint); }
+.pivot-table td.n.total { font-weight: 700; }
+.pivot-table tr.totals th, .pivot-table tr.totals td { border-top: 2px solid var(--border); }

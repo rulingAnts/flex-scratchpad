@@ -142,7 +142,58 @@
       get_note: async (id) => ({ ...notes[id], inlineTags: summary(notes[id]).inlineTags }),
       create_note: async (tab, folder, title, body, kind) => ({ ...mk(tab || 'Notes', folder || '', title || '', body || '', null, kind || '') }),
       // rule collections (the mock's version of Api.rule_matches & co.: tags by name / guid / group:<name> / *)
+      // the mock's chart search (Api.chart_search in short: words, col:, marker:, lex:, gloss:, clause:, moved)
+      chart_search: async (q) => {
+        const nz = (x) => FS.normalize(String(x || ''), true);
+        const terms = [];
+        for (const m of String(q || '').matchAll(/(-(?=[a-z]+:))?(?:([a-z]+):)?("([^"]*)"|\S+)/gi)) terms.push({ neg: !!m[1], key: (m[2] || '').toLowerCase(), val: nz(m[4] != null ? m[4] : m[3]) });
+        const out = [];
+        for (const c of Object.values(demo.charts || {})) {
+          const cols = new Map(c.template.columns.map((x) => [x.n, x]));
+          for (const r of c.rows) {
+            const cells = r.cells.filter((x) => x.kind === 'words').map((x) => { const col = cols.get(x.colN) || {}; const ws = (x.words || []).filter((w) => !w.punct); return { colN: x.colN, col: col.name || '', abbr: col.abbr || '', path: (col.path || []).concat([col.name]).join('/'), words: ws.map((w) => w.txt), glosses: ws.map((w) => w.gls || ''), forms: ws.flatMap((w) => (w.morphs || []).map((m) => m.form || '')), cfs: [], mgls: ws.flatMap((w) => (w.morphs || []).map((m) => m.gls || '')), pos: ws.map((w) => w.pos || '').filter(Boolean) }; });
+            const markers = r.cells.filter((x) => x.kind === 'tag' && x.tag).flatMap((x) => [x.tag.name, x.tag.abbr].concat(x.tag.path || []));
+            const moved = r.cells.filter((x) => x.kind === 'moved').map((x) => (x.preposed ? 'preposed' : 'postposed'));
+            const row = { chart: c.guid, chartName: c.name, text: c.text, title: c.title, template: c.template.name, row: r.n, label: r.label, guid: r.guid, at: r.guid.replace(/-/g, '').slice(-12), clause: r.clause, endSent: r.endSent, endPara: r.endPara, markers, moved, clauseref: r.cells.some((x) => x.kind === 'clause'), notes: r.notes || '', cells };
+            const cellHas = (cell, t) => { const v = t.val; const has = (xs) => xs.some((x) => v && nz(x).includes(v)); if (t.key === 'col') return nz(cell.col) === v || nz(cell.abbr) === v || nz(cell.path) === v || nz(cell.path).endsWith('/' + v) || cell.path.split('/').slice(0, -1).some((p) => nz(p) === v) || ('c' + cell.colN) === v; if (t.key === 'lex') return has(cell.words) || has(cell.forms); if (t.key === 'gloss') return has(cell.glosses) || has(cell.mgls); if (t.key === 'pos') return cell.pos.some((x) => nz(x) === v); return has(cell.words) || has(cell.glosses) || has(cell.forms) || has(cell.mgls); };
+            let ok = true, hits = [];
+            const colT = terms.filter((t) => t.key === 'col' && !t.neg), content = terms.filter((t) => !t.key || ['lex', 'gloss', 'word', 'pos'].includes(t.key));
+            for (const t of terms) {
+              let v = null;
+              if (t.key === 'marker') v = t.val === '*' ? markers.length > 0 : markers.some((m) => nz(m) === t.val);
+              else if (t.key === 'clause') v = row.clause === t.val;
+              else if (t.key === 'moved' || (!t.key && t.val === 'moved')) v = moved.length > 0;
+              else if (t.key === 'chart') v = nz(c.name).includes(t.val); else if (t.key === 'text') v = nz(c.title).includes(t.val); else if (t.key === 'row') v = nz(r.label) === t.val;
+              if (v != null && v === t.neg) { ok = false; break; }
+            }
+            if (!ok) continue;
+            let cs = cells;
+            if (colT.length) { cs = cs.filter((cell) => colT.some((t) => cellHas(cell, t))); if (!cs.length) continue; }
+            const pos = content.filter((t) => !t.neg && !(t.key === '' && t.val === 'moved'));
+            if (pos.length) { cs = cs.filter((cell) => pos.every((t) => cellHas(cell, t))); if (!cs.length) { if (!pos.every((t) => !t.key && nz(row.notes).includes(t.val))) continue; } }
+            hits = (colT.length || pos.length) ? cs.map((x) => x.colN) : [];
+            out.push(Object.assign(row, { hits }));
+          }
+        }
+        return out;
+      },
+      chart_profile: async function (term) {
+        const nz = (x) => FS.normalize(String(x || ''), true), t = nz(term);
+        const out = { term, total: 0, templates: [] };
+        if (!t) return out;
+        const byT = {};
+        for (const r of await this.chart_search('')) for (const c of r.cells) {
+          if (![...c.words, ...c.forms, ...c.glosses, ...c.mgls].some((x) => nz(x).includes(t))) continue;
+          const tp = byT[r.template] = byT[r.template] || { name: r.template, total: 0, columns: {} };
+          const col = tp.columns[c.path] = tp.columns[c.path] || { name: c.col, path: c.path, colN: c.colN, count: 0, rows: [] };
+          col.count++; tp.total++; out.total++;
+          col.rows.push({ chart: r.chart, chartName: r.chartName, title: r.title, row: r.row, label: r.label, at: r.at, words: c.words.join(' '), glosses: c.glosses.join(' ') });
+        }
+        out.templates = Object.values(byT).map((tp) => ({ name: tp.name, total: tp.total, columns: Object.values(tp.columns).sort((a, b) => a.colN - b.colN) }));
+        return out;
+      },
       rule_matches: async function (rule) {
+        if (rule && rule.charts) return (await this.chart_search(rule.charts)).map((r) => Object.assign(r, { embed: '{{flex:chart ' + r.chart + ' rows=' + r.row + ' at=' + r.at + '}}' }));
         const all = await this.flex_text_tags();
         const norm = (x) => String(x || '').trim().toLowerCase().replace(/_/g, ' ');
         const want = new Map();
@@ -162,8 +213,8 @@
       },
       create_rule_collection: async function (tab, folder, title, rule) {
         const rows = await this.rule_matches(rule);
-        const n = mk(tab || 'Notes', folder || '', title || '', rows.map(ruleEmbed).join('\n\n') + (rows.length ? '\n' : ''), null, 'examples');
-        n.rule = { tags: [...(rule.tags || [])], ...(rule.texts && rule.texts.length ? { texts: [...rule.texts] } : {}) };
+        const n = mk(tab || 'Notes', folder || '', title || '', rows.map((r) => r.embed || ruleEmbed(r)).join('\n\n') + (rows.length ? '\n' : ''), null, 'examples');
+        n.rule = rule.charts ? { charts: rule.charts } : { tags: [...(rule.tags || [])], ...(rule.texts && rule.texts.length ? { texts: [...rule.texts] } : {}) };
         return { ...n, matched: rows.length };
       },
       update_rule_collection: async function (id) {
@@ -171,8 +222,8 @@
         if (!n || n.kind !== 'examples' || !n.rule) throw new Error('This collection has no rule');
         const rows = await this.rule_matches(n.rule);
         const have = new Set();
-        for (const m of n.body.matchAll(/\{\{flex:text\s+([0-9a-f-]{36})\b([^}]*)\}\}/gi)) {
-          const seg = /\bseg=(\d+)(?:-(\d+))?/.exec(m[2]), at = /\bat=([0-9a-f]+)(?:-([0-9a-f]+))?/i.exec(m[2]);
+        for (const m of n.body.matchAll(/\{\{flex:(?:text|chart)\s+([0-9a-f-]{36})\b([^}]*)\}\}/gi)) {
+          const seg = /\b(?:seg|rows)=(\d+)(?:-(\d+))?/.exec(m[2]), at = /\bat=([0-9a-f]+)(?:-([0-9a-f]+))?/i.exec(m[2]);
           if (at) have.add(m[1].toLowerCase() + '@' + at[1] + '-' + (at[2] || at[1]));
           if (seg) have.add(m[1].toLowerCase() + '#' + seg[1] + '-' + (seg[2] || seg[1]));
         }
@@ -237,6 +288,9 @@
       flex_texts: async (q) => Object.values(demo.texts).filter((t) => !q || t.title.toLowerCase().includes(q.toLowerCase())).map((t) => ({ guid: t.guid, title: t.title, abbrev: t.abbrev, segmentCount: t.segments.length, hasMedia: false })),
       flex_find_in_text: async (guid, phrase) => { const t = demo.texts[guid]; const p = FS.normalize(phrase, true); return t ? t.segments.filter((s) => FS.normalize(s.baseline + ' ' + s.free, true).includes(p)).map((s) => s.n) : []; },
       flex_resolve_link: async (text) => { const m = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i.exec(text || ''); if (!m) return null; const g = m[1].toLowerCase(); const e = demo.entries.find((x) => x.guid === g); if (e) return { kind: 'entry', guid: g, title: e.headword }; if (demo.texts[g]) return { kind: 'text', guid: g, title: demo.texts[g].title }; return null; },
+      create_chart_note: async function (tab, folder, title, guid, view) { const c = (demo.charts || {})[guid]; if (!c) throw new Error('No such chart'); const n = mk(tab || config.tabs[0].dir, folder || '', title || (c.name + ' — ' + c.title), (view && view.startsWith('{{flex:chart ' + guid) ? view.trim() : '{{flex:chart ' + guid + '}}') + '\n', [], 'chart'); n.chart = guid; return this.get_note(n.id); },
+      chart_lists: async () => (config.chartLists = config.chartLists || {}),
+      set_chart_list: async (name, options, open) => { const lists = (config.chartLists = config.chartLists || {}); if (options == null && open == null) delete lists[name]; else { const cur = lists[name] || { options: [], open: true }; if (options) cur.options = options; if (open != null) cur.open = !!open; lists[name] = cur; } return lists; },
       flex_charts: async (text) => Object.values(demo.charts || {}).filter((c) => !text || c.text === text).map((c) => ({ guid: c.guid, name: c.name, text: c.text, title: c.title, rows: c.rowCount, template: c.template.name, columns: c.template.columns.length })),
       flex_chart_markers: async () => (demo.chartMarkers || []).map((m) => ({ ...m, count: Object.values(demo.charts || {}).reduce((n, c) => n + c.rows.reduce((k, r) => k + r.cells.filter((x) => x.kind === 'tag' && x.tag && x.tag.guid === m.guid).length, 0), 0) })),
       flex_text_tags: async () => (demo.tagList || []).map((t) => ({ ...t, count: Object.values(demo.texts).reduce((n, x) => n + (x.tags || []).filter((g) => g.tag.guid === t.guid).length, 0) })),

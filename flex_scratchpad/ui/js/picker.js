@@ -62,15 +62,38 @@
             results.appendChild(it);
           }
         } else if (state.mode === 'charts') {
-          const q = search.value.trim().toLowerCase();
+          const q = search.value.trim();
+          const ql = q.toLowerCase();
           const all = await FS.api.flex_charts('');
-          const hits = all.filter((c) => !q || ((c.title || '') + ' ' + (c.name || '') + ' ' + (c.template || '')).toLowerCase().includes(q));
+          const hits = all.filter((c) => !ql || ((c.title || '') + ' ' + (c.name || '') + ' ' + (c.template || '')).toLowerCase().includes(ql));
           results.innerHTML = '';
-          if (!hits.length) results.appendChild(el('div', { class: 'pick-item muted' }, all.length ? 'No chart matches.' : 'This project has no text charts yet (Texts & Words › Text Chart in FieldWorks).'));
+          if (!hits.length && !q) results.appendChild(el('div', { class: 'pick-item muted' }, all.length ? 'No chart matches.' : 'This project has no text charts yet (Texts & Words › Text Chart in FieldWorks).'));
           for (const c of hits) {
             const it = el('div', { class: 'pick-item', 'data-test': 'pick-chart' }, el('span', { class: 'hw' }, c.title || '(untitled text)'), el('span', { class: 'pos' }, c.name || 'chart'), el('span', { class: 'n' }, (c.rows || 0) + ' row' + (c.rows === 1 ? '' : 's') + (c.template ? ' · ' + c.template : '') + (c.cached ? ' · cached' : '')));
             it.addEventListener('click', () => { results.querySelectorAll('.on').forEach((x) => x.classList.remove('on')); it.classList.add('on'); pickChart(c); });
             results.appendChild(it);
+          }
+          // CHART SEARCH (Seth, 2026-10-18): the rows matching the words / col: / marker: / lex: query
+          if (q && FS.api.chart_search) {
+            let rows = [];
+            try { rows = await FS.api.chart_search(q); } catch (e) { results.appendChild(el('div', { class: 'pick-item', style: { color: 'var(--danger)' } }, e.message)); rows = null; }
+            if (rows) {
+              state.rowHits = rows;
+              const lex = /(?:^|\s)(?:lex|word|words):("[^"]+"|\S+)/i.exec(q);
+              results.appendChild(el('div', { class: 'pick-group', style: { display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' } }, el('b', {}, 'Chart rows'), el('span', { class: 'muted' }, rows.length + ' match' + (rows.length === 1 ? '' : 'es')),
+                el('span', { class: 'spacer' }),
+                lex && FS.chartProfile ? el('button', { class: 'btn', 'data-test': 'chart-profile', title: 'Which columns this item sits in, across every chart', onclick: () => { m.close(); FS.chartProfile(lex[1].replace(/^"|"$/g, '')); } }, 'Column profile\u2026') : null));
+              if (rows.length) results.appendChild(el('div', { class: 'pick-item', style: { justifyContent: 'flex-end', gap: '6px' } },
+                FS.chartCollection ? el('button', { class: 'btn', 'data-test': 'collect-chart-rows', title: 'A new collection of these rows, which can take in new matches later', onclick: () => { m.close(); FS.chartCollection(q); } }, 'Collect into a new collection\u2026') : null,
+                el('button', { class: 'btn', 'data-test': 'insert-all-chart-rows', title: 'One chart row per match, in chart order, with the headings', onclick: () => { onInsert(rows.map((r) => embedFor('chart', r.chart, { seg: [r.row, r.row], at: [r.at, r.at] })).join('\n\n'), true); m.close(); } }, 'Insert all ' + rows.length + ' as rows')));
+              if (!rows.length) results.appendChild(el('div', { class: 'pick-item muted' }, 'No chart row matches. Try words, col:Name, marker:Name, lex:form, gloss:…'));
+              for (const r of rows) {
+                const cells = r.cells.filter((c) => !r.hits.length || r.hits.includes(c.colN));
+                const it = el('div', { class: 'pick-item', 'data-test': 'pick-chart-row' }, el('span', { class: 'hw' }, (r.chartName || 'Chart') + ' \u00b7 ' + (r.title || '')), el('span', { class: 'pos' }, r.label), el('span', { class: 'gl' }, cells.map((c) => c.col + ': ' + c.words.join(' ')).join(' | ') + (r.markers.length ? '  \u2690' + [...new Set(r.markers)].slice(0, 2).join(',') : '')));
+                it.addEventListener('click', async () => { results.querySelectorAll('.on').forEach((x) => x.classList.remove('on')); it.classList.add('on'); await pickChart({ guid: r.chart, name: r.chartName, title: r.title }); state.range = [r.row, r.row]; state.anchor = null; if (state.redraw) state.redraw(); const tr = preview.querySelector('tr.crow[data-row="' + r.row + '"]'); if (tr) tr.scrollIntoView({ block: 'center' }); });
+                results.appendChild(it);
+              }
+            }
           }
         } else if (state.mode === 'tags' && !state.tag) {
           const q = search.value.trim().toLowerCase();
@@ -222,6 +245,7 @@
       const rangeInfo = el('span', { class: 'muted' });
       optsRow.innerHTML = '';
       optsRow.append(rangeInfo, el('span', { class: 'muted small' }, 'of ' + (obj.rowCount || 0) + ' rows'));
+      state.redraw = draw;
       draw();
       const anchors = () => { const at = (n) => { const e = (obj.index || []).find((i) => i.n === n); return e ? e.guid.replace(/-/g, '').slice(-12) : ''; }; return state.range && at(state.range[0]) ? [at(state.range[0]), at(state.range[1]) || at(state.range[0])] : null; };
       btnRow.innerHTML = '';

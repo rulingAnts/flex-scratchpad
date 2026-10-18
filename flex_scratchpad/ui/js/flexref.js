@@ -36,7 +36,8 @@
 
   // `tag` = FLEx's text markup tags, drawn under the words (Seth, 2026-10-17); on by default,
   // off when an explicit `lines=` leaves it out, like any other line
-  const LINES = ['txt', 'morph', 'mgls', 'gls', 'pos', 'ft', 'lit', 'note', 'cf', 'tag'];
+  // `cols` (Seth, 2026-10-18): the text's CHART COLUMNS drawn on the example as tags, off by default
+  const LINES = ['txt', 'morph', 'mgls', 'gls', 'pos', 'ft', 'lit', 'note', 'cf', 'tag', 'cols'];
   const STYLES = ['hl', 'b', 'u', 'i', 's', 'color'];
   const DEFAULT_LINES = ['txt', 'morph', 'mgls', 'gls', 'pos', 'ft', 'tag'];
   // Entry embeds choose their FIELDS instead of lines (`fields=cf,mt,gl,def,ex,tr,sub`):
@@ -430,7 +431,8 @@
   // bar / nobar (the lane under the words, otherwise shown only when no text style is on);
   // the border's line (Seth, 2026-10-18: "edit line style and thickness"): bs(solid|dashed|dotted|
   // double), bw1…bw6 (px); the tile's own colour ("edit the background color"): tc#rrggbb
-  const TAG_TOKEN = /^(off|on|b|i|u|nolabel|label|hl|tile|box|bar|nobar|br(sq|rd|cu|an|db|ce|fl|bar)|bs(solid|dashed|dotted|double)|bw[1-6]|bg#[0-9a-f]{6}|fg#[0-9a-f]{6}|c#[0-9a-f]{6}|tc#[0-9a-f]{6})$/;
+  // `row` (Seth, 2026-10-18): a chart MARKER's rule styles the whole row the marker is in (`marker%3ATopic:row+bg#fde68a`)
+  const TAG_TOKEN = /^(off|on|b|i|u|row|nolabel|label|hl|tile|box|bar|nobar|br(sq|rd|cu|an|db|ce|fl|bar)|bs(solid|dashed|dotted|double)|bw[1-6]|bg#[0-9a-f]{6}|fg#[0-9a-f]{6}|c#[0-9a-f]{6}|tc#[0-9a-f]{6})$/;
   const encodeTagKey = (t) => String(t).replace(/%/g, '%25').replace(/_/g, '%5F').replace(/,/g, '%2C').replace(/:/g, '%3A').replace(/\+/g, '%2B').replace(/ /g, '_');
   const decodeTagKey = (k) => String(k).replace(/_/g, ' ').replace(/%([0-9A-Fa-f]{2})/g, (m, h) => String.fromCharCode(parseInt(h, 16)));
   function parseTagRules(val) {
@@ -461,7 +463,7 @@
       if (r.hide === true) toks.push('off'); else if (r.hide === false) toks.push('on');
       if (r.bg) toks.push('bg' + String(r.bg).toLowerCase()); if (r.fg) toks.push('fg' + String(r.fg).toLowerCase());
       if (r.c) toks.push('c' + String(r.c).toLowerCase());
-      for (const k of ['b', 'i', 'u', 'hl', 'tile', 'box']) if (r[k]) toks.push(k);
+      for (const k of ['b', 'i', 'u', 'row', 'hl', 'tile', 'box']) if (r[k]) toks.push(k);
       if (r.br && /^(sq|rd|cu|an|db|ce|fl|bar)$/.test(r.br)) toks.push('br' + r.br);
       if (r.bs && /^(solid|dashed|dotted|double)$/.test(r.bs)) toks.push('bs' + r.bs);
       if (r.bw >= 1 && r.bw <= 6) toks.push('bw' + Math.round(r.bw));
@@ -474,6 +476,7 @@
   const tagRules = (spec) => parseTagRules(spec && spec.extra && spec.extra.tags);
   function setTagRules(spec, rules) { spec.extra = spec.extra || {}; const v = serializeTagRules(rules); if (v) spec.extra.tags = v; else delete spec.extra.tags; }
   const showsTags = (spec) => ((spec && spec.lines && spec.lines.length) ? spec.lines : DEFAULT_LINES).includes('tag');
+  const showsCols = (spec) => !!(spec && spec.lines && spec.lines.includes('cols'));
 
   /* Find every embed in a markdown string: [{start, end, src, spec}]. */
   function findEmbeds(md) {
@@ -507,7 +510,7 @@
     CHART_LINES, DEFAULT_CHART_LINES, FREE_MODES, parseChartTarget, serializeChartTarget, resolveChartStyles, chartStylesFor, chartLines, freeMode,
     hasStyle, toggleStyle, clearStyles, resolveStyles, stylesFor, findAll,
     lineTextOfWord, lineTextOfSegment, findEmbeds,
-    parseTagRules, serializeTagRules, tagRules, setTagRules, showsTags,
+    parseTagRules, serializeTagRules, tagRules, setTagRules, showsTags, showsCols,
     isEmbedLine: (line) => EMBED_LINE_RE.test(line || ''),
   };
 })();

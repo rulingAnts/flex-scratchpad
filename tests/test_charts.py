@@ -120,3 +120,112 @@ def test_a_chart_exports_as_flex_discourse_xml_and_as_json(tmp_path):
     assert doc.find("languages/language").get("vernacular") == "true" and doc.find("languages/language").get("font") == "Charis SIL"
     js = json.loads((tmp_path / "c.json").read_text(encoding="utf-8")) if api.export_chart(CHART, "json", None, path=str(tmp_path / "c.json")) else None
     assert js["format"] == "flex-scratchpad-chart/1" and js["rowCount"] == 7 and js["rows"][1]["cells"][4]["kind"] == "moved"
+
+
+def test_a_chart_note_is_a_kind_of_note_with_its_chart_in_the_front_matter(tmp_path):
+    api = _api(tmp_path)
+    n = api.create_chart_note(None, "", "", CHART)
+    assert n["kind"] == "chart" and n["chart"] == CHART and n["title"] == "Story chart — The dog and the river"
+    assert n["body"] == "{{flex:chart " + CHART + "}}\n"
+    text = Path(n["path"]).read_text(encoding="utf-8")
+    assert "kind: chart" in text and "chart: " + CHART in text
+    # the view carried over from an embed keeps its settings; a wrong GUID is refused
+    v = api.create_chart_note(None, "", "Mine", CHART, "{{flex:chart " + CHART + " rows=1-2 free=col}}")
+    assert v["body"].startswith("{{flex:chart " + CHART + " rows=1-2 free=col}}")
+    import pytest
+    with pytest.raises(RuntimeError):
+        api.create_chart_note(None, "", "", "00000000-0000-4000-8000-000000000000")
+    with pytest.raises(ValueError):
+        api.create_note(None, "", "x", "", "chart", chart="nope")
+    # the kind survives a rescan, a duplicate keeps the chart, an ordinary note has no chart key
+    api.rescan()
+    again = api.get_note(n["id"])
+    assert again["kind"] == "chart" and again["chart"] == CHART
+    d = api.duplicate_note(n["id"])
+    assert d["kind"] == "chart" and d["chart"] == CHART
+    plain = api.create_note(None, "", "Plain", "hello")
+    assert "chart:" not in Path(plain["path"]).read_text(encoding="utf-8")
+    # the project-wide choice lists
+    assert api.chart_lists() == {}
+    lists = api.set_chart_list("Information status", ["new", "given", "", "given"], True)
+    assert lists == {"Information status": {"options": ["new", "given"], "open": True}}
+    api.set_chart_list("Information status", None, False)
+    assert api.chart_lists()["Information status"]["open"] is False
+    api.set_chart_list("Information status", rename="Info")
+    assert list(api.chart_lists()) == ["Info"]
+    api.set_chart_list("Info")
+    assert api.chart_lists() == {}
+    assert json.loads((tmp_path / "nb" / "notebook.json").read_text(encoding="utf-8")).get("chartLists") == {}
+
+
+def test_chart_search_by_words_columns_markers_and_more(tmp_path):
+    api = _api(tmp_path)
+    labels = lambda rows: [r["label"] for r in rows]  # noqa: E731
+    assert labels(api.chart_search("kabir")) == ["1a", "2c", "3b"]
+    assert labels(api.chart_search("col:Subject lex:kabir")) == ["1a", "2c", "3b"]
+    assert labels(api.chart_search("col:Verb kabir")) == []
+    hit = api.chart_search("col:Verb -mo")[0]
+    assert hit["label"] == "1a" and hit["hits"] == [4]
+    assert labels(api.chart_search("marker:new")) == ["1a"] and labels(api.chart_search("marker:Reference")) == ["1a", "2c"]
+    assert labels(api.chart_search("marker:*")) == ["1a", "2c"] and labels(api.chart_search("-marker:*")) == ["1b", "2a", "2b", "3a", "3b"]
+    assert labels(api.chart_search("clause:speech")) == ["2a"] and labels(api.chart_search("moved")) == ["1b"] and labels(api.chart_search("moved:postposed")) == []
+    assert labels(api.chart_search("clauseref")) == ["2b"] and labels(api.chart_search("endpara")) == ["1b", "2c", "3b"]
+    assert labels(api.chart_search("gloss:river")) == ["1b", "2c"] and labels(api.chart_search("col:Postnuclear/Inner gloss:river")) == ["2c"]
+    assert labels(api.chart_search("col:c1")) == ["1b"] and labels(api.chart_search("col:Pre-O")) == ["1b"]
+    assert labels(api.chart_search("pos:adv")) == ["1b"] and labels(api.chart_search("lex:sila")) == ["1b", "2b"]
+    assert labels(api.chart_search("note:locative")) == ["2c"] and labels(api.chart_search("locative")) == ["2c"]
+    assert labels(api.chart_search('"ka-sila"')) == ["1b", "2b"] and labels(api.chart_search("row:2b")) == ["2b"]
+    assert labels(api.chart_search("chart:story text:dog template:default")) and labels(api.chart_search("chart:nothing")) == []
+    assert [r["label"] for r in api.chart_search("")] == ["1a", "1b", "2a", "2b", "2c", "3a", "3b"]   # everything
+    # the profile: where kabir sits
+    p = api.chart_profile("kabir")
+    assert p["total"] == 3 and p["templates"][0]["name"] == "Default"
+    cols = {c["name"]: c["count"] for c in p["templates"][0]["columns"]}
+    assert cols == {"Subject": 3}
+    assert [r["label"] for r in p["templates"][0]["columns"][0]["rows"]] == ["1a", "2c", "3b"]
+    p2 = api.chart_profile("sleep")        # a gloss: ka-nuwa-mo, ka-nuwa, ka-nuwa-mo
+    assert p2["total"] == 3 and p2["templates"][0]["columns"][0]["name"] == "Verb"
+    assert api.chart_profile("")["total"] == 0
+
+
+def test_a_chart_collection_from_a_rule_takes_in_new_rows(tmp_path):
+    from flex_scratchpad.notebook import example_keys, match_embed, match_keys, clean_rule
+    api = _api(tmp_path)
+    assert clean_rule({"charts": " col:Subject "}) == {"charts": "col:Subject"}
+    assert clean_rule({"charts": ""}) is None
+    n = api.create_rule_collection(None, "", "Subjects", {"charts": "col:Subject"})
+    assert n["kind"] == "examples" and n["rule"] == {"charts": "col:Subject"} and n["matched"] == 5
+    body = n["body"]
+    assert body.count("{{flex:chart " + CHART + " rows=") == 5 and " rows=1 at=" in body
+    assert [x for x in api.list_notes() if x["id"] == n["id"]][0]["exampleCount"] == 5
+    assert "rule-charts: col:Subject" in Path(n["path"]).read_text(encoding="utf-8")
+    api.rescan()
+    assert api.get_note(n["id"])["rule"] == {"charts": "col:Subject"}
+    # the same keys from the file and from a match; nothing new the second time
+    row = api.chart_search("col:Subject")[0]
+    assert match_embed(row).startswith("{{flex:chart " + CHART + " rows=1 at=") and set(match_keys(row)) <= example_keys(body)
+    r = api.update_rule_collection(n["id"])
+    assert r["added"] == [] and r["matched"] == 5
+    # a wider rule finds the rest
+    api.set_note_rule(n["id"], {"charts": ""})
+    assert api.get_note(n["id"])["rule"] is None
+    api.set_note_rule(n["id"], {"charts": "-marker:nothing"})
+    r = api.update_rule_collection(n["id"])
+    assert len(r["added"]) == 2 and r["total"] == 7
+
+
+def test_a_text_knows_its_chart_spans_and_a_chart_its_text_tags(tmp_path):
+    api = _api(tmp_path)
+    t = api.flex_get("text", T_STORY, 1, 2)
+    spans = t["chartSpans"]
+    assert spans and spans[0]["chart"] == CHART and spans[0]["chartName"] == "Story chart"
+    first = [s for s in spans if s["row"] == "1a"]
+    assert [s["column"]["name"] for s in first] == ["Subject", "Verb"] and first[1]["from"] == {"seg": 1, "w": 1} and first[1]["to"] == {"seg": 1, "w": 2}
+    assert first[0]["column"]["path"] == ["Nucleus"]
+    # offline: from the snapshots
+    api._flex.close()
+    api._flex.backend = None
+    off = api.flex_get("text", T_STORY, 1, 2)
+    assert off["cached"] and len(off["chartSpans"]) == len(spans)
+    c = api.flex_get("chart", CHART)
+    assert [tg["tag"]["name"] for tg in c["tags"]][:3] == ["Subject", "Verb", "Focus"]

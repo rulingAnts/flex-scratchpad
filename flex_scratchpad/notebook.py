@@ -48,7 +48,7 @@ from .log import LOG
 
 CONFIG_NAME = "notebook.json"
 NOTE_KINDS = ("", "examples", "chart")
-EXAMPLE_LINE_RE = re.compile(r"^\s*\{\{flex:text\b[^\n]*\}\}\s*$", re.M)
+EXAMPLE_LINE_RE = re.compile(r"^\s*\{\{flex:(?:text|chart)\b[^\n]*\}\}\s*$", re.M)   # an example, or a chart row (Seth, 2026-10-18)
 PRIVATE_DIR = ".scratchpad"
 # Files attached to notes (Seth, 2026-10-17): copied here under their own names, visible beside
 # the tabs so the notebook stays readable without the app; a `{{file attachments/…}}` embed in a
@@ -254,6 +254,10 @@ def clean_rule(rule) -> dict | None:
     selectors and the texts it is limited to; None when it names no tag."""
     if not isinstance(rule, dict):
         return None
+    # a CHART rule (Seth, 2026-10-18): a chart search query; its matches are chart rows
+    charts = str(rule.get("charts") or "").strip()[:300]
+    if charts:
+        return {"charts": charts}
     tags = [str(t).strip()[:120] for t in (rule.get("tags") or []) if str(t).strip()]
     if not tags:
         return None
@@ -265,6 +269,8 @@ def clean_rule(rule) -> dict | None:
 
 
 def rule_from_meta(meta: dict) -> dict | None:
+    if str(meta.get("rule-charts") or "").strip():
+        return clean_rule({"charts": str(meta.get("rule-charts"))})
     tags = meta.get("rule-tags")
     if isinstance(tags, str):
         tags = [tags] if tags else []
@@ -274,7 +280,7 @@ def rule_from_meta(meta: dict) -> dict | None:
     return clean_rule({"tags": tags or [], "texts": texts or []})
 
 
-_EX_PARTS = re.compile(r"\{\{flex:text\s+([0-9a-f-]{36})\b([^}]*)\}\}", re.I)
+_EX_PARTS = re.compile(r"\{\{flex:(?:text|chart)\s+([0-9a-f-]{36})\b([^}]*)\}\}", re.I)
 
 
 def example_keys(body: str) -> set[str]:
@@ -284,7 +290,7 @@ def example_keys(body: str) -> set[str]:
     keys: set[str] = set()
     for m in _EX_PARTS.finditer(body or ""):
         guid, rest = m.group(1).lower(), m.group(2)
-        seg = re.search(r"\bseg=(\d+)(?:-(\d+))?", rest)
+        seg = re.search(r"\b(?:seg|rows)=(\d+)(?:-(\d+))?", rest)
         at = re.search(r"\bat=([0-9a-f]+)(?:-([0-9a-f]+))?", rest, re.I)
         if at:
             keys.add(f"{guid}@{at.group(1).lower()}-{(at.group(2) or at.group(1)).lower()}")
@@ -295,6 +301,12 @@ def example_keys(body: str) -> set[str]:
 
 def match_keys(row: dict) -> list[str]:
     """The keys of one match of a rule (a tag occurrence row), in the same shapes."""
+    if row.get("chart"):                               # a chart row: `rows=n at=<anchor>`
+        g = str(row["chart"]).lower()
+        out = [f"{g}#{row.get('row')}-{row.get('row')}"]
+        if row.get("at"):
+            out.insert(0, f"{g}@{row['at']}-{row['at']}")
+        return out
     guid = str(row.get("text") or "").lower()
     out = [f"{guid}#{row.get('seg')}-{row.get('segTo', row.get('seg'))}"]
     at = row.get("at") or []
@@ -306,6 +318,8 @@ def match_keys(row: dict) -> list[str]:
 def match_embed(row: dict) -> str:
     """The example source for one match: `{{flex:text <guid> seg=a-b at=x-y}}`, as flexref
     serialises it, so the page and the file agree."""
+    if row.get("chart"):
+        return f"{{{{flex:chart {str(row['chart']).lower()} rows={row.get('row')}" + (f" at={row['at']}" if row.get("at") else "") + "}}"
     seg = f"seg={row['seg']}" + (f"-{row['segTo']}" if row.get("segTo") not in (None, row["seg"]) else "")
     at = row.get("at") or []
     s = f"{{{{flex:text {str(row['text']).lower()} {seg}"
@@ -665,6 +679,8 @@ class Notebook:
             meta["rule-tags"] = list(note.rule["tags"])
             if note.rule.get("texts"):
                 meta["rule-texts"] = list(note.rule["texts"])
+        elif note.rule and note.rule.get("charts"):
+            meta["rule-charts"] = note.rule["charts"]
         target = self._note_path(note)
         target.parent.mkdir(parents=True, exist_ok=True)
         _atomic_write(target, dump_front_matter(meta) + note.body)

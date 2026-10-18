@@ -175,6 +175,7 @@ def _chart(story: dict) -> dict:
         model.make_row(g(0x70), 7, "3b", "normal", end_sent=True, end_para=True, cells=[W(g(0x71), COL[3], 6, 0, 1, merge_after=True)]),
     ]
     ch["rows"] = rows
+    ch["tags"] = list(story.get("tags") or [])        # the text's markup tags, drawn inside the cells on request
     return model.finish_chart(ch, by_n)
 
 

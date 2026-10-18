@@ -58,7 +58,23 @@
       listPromise = FS.api.flex_text_tags().then((l) => { list = l || []; return list; }, () => list);
       return listPromise;
     },
+    // the project's Chart Markers list (chart.js; Seth, 2026-10-18: "visual filters using
+    // textchartmarkers instead of textmarkuptags"): a marker is a tag item with `marker: true`,
+    // its rules keyed `marker:<name>` / `marker:group:<g>` / `marker:*`
+    markers: () => markers,
+    setMarkers(l) { markers = (l || []).map((m) => Object.assign({}, m, { marker: true })); },
+    loadMarkers(force) {
+      if (markersPromise && !force) return markersPromise;
+      markersPromise = (FS.api.flex_chart_markers ? FS.api.flex_chart_markers() : Promise.resolve([])).then((l) => { T.setMarkers(l); return markers; }, () => markers);
+      return markersPromise;
+    },
   };
+  let markers = [];
+  let markersPromise = null;
+  // the chart COLUMNS seen on the examples drawn (their templates' columns), for the picker
+  const columnsSeen = new Map();
+  T.noteColumn = (col) => { if (col && col.name) columnsSeen.set((col.path || []).concat([col.name]).join('/'), Object.assign({}, col, { column: true, guid: 'column:' + (col.guid || col.name) })); };
+  T.columns = () => [...columnsSeen.values()];
 
   /* The scopes that apply at `ctx`, most specific first. `override` stands in for one scope's
    * stored rules (an editor showing the effect of unsaved changes). */
@@ -93,20 +109,22 @@
     return f.enabled !== false;
   }
   const matches = (rule, tag) => {
-    const k = norm(rule.tag);
+    let k = norm(rule.tag);
+    if (k.startsWith('marker:')) { if (!tag.marker) return false; k = k.slice(7); } else if (tag.marker) return false;
+    if (k.startsWith('column:')) { if (!tag.column) return false; k = k.slice(7); } else if (tag.column) return false;
     if (k === '*') return true;
     if (k.startsWith('group:')) { const g = k.slice(6); return (tag.path || (tag.group ? [tag.group] : [])).some((x) => norm(x) === g); }
     if (k.startsWith('filter:')) return false;
     return k === norm(tag.name) || (!!tag.abbr && k === norm(tag.abbr)) || (!!tag.guid && k === norm(tag.guid));
   };
-  const rank = (r) => { const k = norm(r.tag); return k === '*' ? 2 : k.startsWith('group:') ? 1 : 0; };
+  const rank = (r) => { const k = norm(r.tag).replace(/^(marker|column):/, ''); return k === '*' ? 2 : k.startsWith('group:') ? 1 : 0; };
   /* One scope's rules for a tag, in the order they are consulted: the tag's own, its group's, then `*`. */
   function rulesIn(rules, tag) {
     return (rules || []).filter((r) => r && r.enabled !== false && matches(r, tag)).sort((a, b) => rank(a) - rank(b));
   }
   const TEXT_KEYS = ['br', 'hl', 'tile', 'box', 'c'];
   const BORDER_STYLES = ['solid', 'dashed', 'dotted', 'double'];
-  const hasStyle = (r) => !!(r && (r.bg || r.fg || r.b || r.i || r.u || r.label === false || r.bar != null || r.bs || r.bw || r.tc || TEXT_KEYS.some((k) => r[k])));
+  const hasStyle = (r) => !!(r && (r.bg || r.fg || r.b || r.i || r.u || r.row || r.label === false || r.bar != null || r.bs || r.bw || r.tc || TEXT_KEYS.some((k) => r[k])));
   const textStyled = (res) => !!(res && (res.br || res.hl || res.tile || res.box || res.c));
   /* '#rrggbb' at an opacity (the overlays blend where tags overlap). */
   const rgba = (hex, a) => { const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex || ''); return m ? 'rgba(' + parseInt(m[1], 16) + ',' + parseInt(m[2], 16) + ',' + parseInt(m[3], 16) + ',' + a + ')' : hex; };
@@ -123,12 +141,12 @@
     const c = Object.assign({}, ctx || T.context());
     if (spec && spec.guid && !c.text) c.text = spec.guid;       // the example's source text is a scope of its own
     const scopes = scopesFor(c, spec ? R.tagRules(spec) : null, override);
-    const out = { hide: false, bg: '', fg: '', b: false, i: false, u: false, label: true, br: '', hl: false, tile: false, box: false, c: '', bar: null, bs: '', bw: 0, tc: '', hideVia: null, styleVia: null };
+    const out = { hide: false, bg: '', fg: '', b: false, i: false, u: false, label: true, br: '', hl: false, tile: false, box: false, c: '', bar: null, bs: '', bw: 0, tc: '', row: false, hideVia: null, styleVia: null };
     for (const sc of scopes) {
       for (const r of rulesIn(sc.rules, tag)) {
         if (!out.hideVia && r.hide != null) { out.hide = !!r.hide; out.hideVia = sc; }
         // the border's line style / thickness and the tile's own colour ride with the style (Seth, 2026-10-18)
-        if (!out.styleVia && hasStyle(r)) Object.assign(out, { bg: r.bg || '', fg: r.fg || '', b: !!r.b, i: !!r.i, u: !!r.u, label: r.label !== false, br: BRACKETS[r.br] ? r.br : '', hl: !!r.hl, tile: !!r.tile, box: !!r.box, c: r.c || '', bar: r.bar == null ? null : !!r.bar, bs: BORDER_STYLES.includes(r.bs) ? r.bs : '', bw: r.bw >= 1 && r.bw <= 6 ? Math.round(r.bw) : 0, tc: r.tc || '', styleVia: sc });
+        if (!out.styleVia && hasStyle(r)) Object.assign(out, { bg: r.bg || '', fg: r.fg || '', b: !!r.b, i: !!r.i, u: !!r.u, label: r.label !== false, br: BRACKETS[r.br] ? r.br : '', hl: !!r.hl, tile: !!r.tile, box: !!r.box, c: r.c || '', bar: r.bar == null ? null : !!r.bar, bs: BORDER_STYLES.includes(r.bs) ? r.bs : '', bw: r.bw >= 1 && r.bw <= 6 ? Math.round(r.bw) : 0, tc: r.tc || '', row: !!r.row, styleVia: sc });
       }
       if (out.hideVia && out.styleVia) break;
     }
@@ -208,6 +226,18 @@
     return [...seen.values()];
   }
 
+  /* The chart markers a chart (or a slice of it) carries: [{tag (marker: true), count}]. */
+  function markersIn(obj) {
+    const seen = new Map();
+    for (const r of obj.rows || []) for (const c of r.cells || []) {
+      if (c.kind !== 'tag' || !c.tag) continue;
+      const e = seen.get(c.tag.guid) || { tag: Object.assign({}, c.tag, { marker: true }), count: 0 };
+      e.count++;
+      seen.set(c.tag.guid, e);
+    }
+    return [...seen.values()];
+  }
+
   async function save(kind, key, rules) {
     if (kind === 'filter') {
       const list = (config.filters || []).map((f) => (f.id === key ? Object.assign({}, f, { rules }) : f));
@@ -254,6 +284,15 @@
     box.appendChild(el('span', { class: 'tag-ctl', title: 'Text colour' }, 'A', fg, r.fg ? el('button', { class: 'tog', title: 'Back to the automatic text colour', onclick: () => set({ fg: undefined }) }, 'auto') : null));
     for (const [k, l, ttl, st] of [['b', 'B', 'Bold words', { fontWeight: '700' }], ['i', 'I', 'Italic words', { fontStyle: 'italic' }], ['u', 'U', 'Underline the words in the tag’s colour', { textDecoration: 'underline' }]]) {
       box.appendChild(el('button', { class: 'tog' + (r[k] ? ' on' : ''), 'data-test': 'tag-' + k, title: ttl, style: st, onclick: () => set({ [k]: r[k] ? undefined : true }) }, l));
+    }
+    if (o.marker) {
+      // a chart marker (Seth, 2026-10-18: "row-level markers, so that when they are found anywhere in
+      // a row, that whole row is styled"): the chip, or the whole row
+      box.appendChild(el('button', { class: 'tog' + (r.row ? ' on' : ''), 'data-test': 'tag-row', title: 'Style the WHOLE ROW the marker is in, not just the marker', onclick: () => set({ row: r.row ? undefined : true }) }, 'whole row'));
+      const c = el('input', { type: 'color', value: r.c || '#1a1d21', title: 'Colour of the row’s words' });
+      c.addEventListener('change', () => set({ c: c.value }));
+      box.appendChild(el('span', { class: 'tag-ctl', title: 'Colour of the words' }, 'text', c, r.c ? el('button', { class: 'tog', title: 'Back to the usual word colour', onclick: () => set({ c: undefined }) }, 'auto') : null));
+      return box;
     }
     box.appendChild(el('button', { class: 'tog' + (r.label === false ? '' : ' on'), title: 'Show the tag’s abbreviation (off: a thin bar only)', onclick: () => set({ label: r.label === false ? undefined : false }) }, 'label'));
     // the TEXT itself (Seth, 2026-10-18): brackets round the span, a marker, a tile, a border, a colour
@@ -311,7 +350,9 @@
   /* The ⚑ popover on an example: its tags, each with where its look comes from, a show / hide
    * toggle and its own style — all written into the embed's `tags=`. */
   function examplePopover(anchor, spec, obj, opts) {
-    const ctx = Object.assign({}, T.context(), { text: spec.guid });
+    const markerMode = !!(opts && opts.markers);
+    const ctx = Object.assign({}, T.context(), { text: markerMode ? (obj.text || spec.guid) : spec.guid });
+    const keyOf = (tag) => (tag.marker ? 'marker:' : tag.column ? 'column:' : '') + tag.name;
     // where a change made here goes (Seth, 2026-10-18: "a rule should let the user choose its
     // scope (whole notebook, tab, folder, notes doc, selected range in a note, specific texts
     // anywhere they appear)"): this example by default; a selection of examples is the note
@@ -338,8 +379,9 @@
       const host = el('div', { class: 'tag-rules', 'data-test': 'tag-popover' });
       const draw = () => {
         host.innerHTML = '';
-        const here = tagsIn(obj);
+        const here = markerMode ? markersIn(obj) : tagsIn(obj);
         const countOf = new Map(here.map((x) => [x.tag.guid, x.count]));
+        if (markerMode) host.appendChild(el('div', { class: 'muted small', style: { padding: '2px 0 6px' } }, 'Chart markers in this chart. “Style ▾” → “whole row” colours every row the marker is in.'));
         renderTagTree(host, here.map((x) => x.tag), { leaf: (tag) => {
           const count = countOf.get(tag.guid) || 1;
           const res = resolve(tag, spec, ctx);
@@ -348,24 +390,24 @@
           cb.addEventListener('change', async () => {
             // hidden by a broader scope → "on" at the target; hidden by the target itself → just drop that; shown → "off"
             const decidedHere = res.hideVia && res.hideVia.kind === target.kind && res.hideVia.key === target.key;
-            patchRule(rules, tag.name, { hide: cb.checked ? (decidedHere ? undefined : false) : true });
+            patchRule(rules, keyOf(tag), { hide: cb.checked ? (decidedHere ? undefined : false) : true });
             await write(); draw();
           });
           const sw = el('span', { class: 'tag-sw', style: swatchStyle(res) });
           const via = el('span', { class: 'via', 'data-test': 'tag-via' }, res.hide ? 'hidden by ' + res.hideVia.label : (res.hideVia && res.hideVia.kind === 'example' ? 'shown here · ' : '') + 'styled by ' + res.styleVia.label);
           const name = el('span', { class: 'tag-name' }, el('span', {}, tag.name + (tag.abbr && tag.abbr !== tag.name ? ' (' + tag.abbr + ')' : '') + (count > 1 ? '  ×' + count : '')), el('br'), via);
           const styleBtn = el('button', { class: 'lnk', 'data-test': 'tag-style', title: 'The look of this tag, for ' + target.label, onclick: () => { if (openTags.has(tag.name)) openTags.delete(tag.name); else openTags.add(tag.name); draw(); } }, 'Style ▾');
-          const find = FS.openPicker ? el('button', { class: 'lnk', title: 'Find the other places this tag is used, and insert them', onclick: () => { close(); FS.openPicker({ mode: 'tags', tag: tag.guid }); } }, '\u{1F50D}') : null;
+          const find = FS.openPicker && !tag.marker ? el('button', { class: 'lnk', title: 'Find the other places this tag is used, and insert them', onclick: () => { close(); FS.openPicker({ mode: 'tags', tag: tag.guid }); } }, '\u{1F50D}') : null;
           row.append(cb, sw, name, styleBtn, find);
           if (!openTags.has(tag.name)) return row;
-          return el('div', {}, row, el('div', { class: 'tag-style-box' }, controls(() => rules.find((x) => norm(x.tag) === norm(tag.name)), async (patch) => { patchRule(rules, tag.name, patch); await write(); draw(); }, { noShow: true })));
+          return el('div', {}, row, el('div', { class: 'tag-style-box' }, controls(() => rules.find((x) => norm(x.tag) === norm(keyOf(tag))), async (patch) => { patchRule(rules, keyOf(tag), patch); await write(); draw(); }, { noShow: true, marker: !!tag.marker })));
         } });
       };
       draw();
       pop.appendChild(host);
       if ((config.filters || []).length && target.kind !== 'filter') pop.appendChild(filterSwitches(rules, async (key, patch) => { patchRule(rules, key, patch); await write(); draw(); }, { inheritLabel: 'as inherited' }));
       pop.appendChild(el('hr'));
-      if (R.tagRules(spec).length) pop.appendChild(el('button', { class: 'menu-item', 'data-test': 'tag-clear', onclick: () => { R.setTagRules(spec, []); opts.onSpecChange && opts.onSpecChange(spec); close(); } }, 'Clear this example’s own tag styles'));
+      if (R.tagRules(spec).length) pop.appendChild(el('button', { class: 'menu-item', 'data-test': 'tag-clear', onclick: () => { R.setTagRules(spec, []); opts.onSpecChange && opts.onSpecChange(spec); close(); } }, markerMode ? 'Clear this chart’s own marker styles' : 'Clear this example’s own tag styles'));
       const links = el('div', { class: 'row', style: { gap: '10px', flexWrap: 'wrap' } }, el('span', { class: 'lbl' }, 'All rules for'));
       for (const sc of scopesFor(ctx)) { if (sc.kind !== 'filter') links.appendChild(el('button', { class: 'lnk', 'data-test': 'tag-scope-' + sc.kind, onclick: () => { close(); dialog(sc); } }, (sc.kind === 'folder' ? sc.label.replace(/^the /, '') : sc.kind === 'text' ? 'this text' : sc.label.replace(/^the /, 'this ')) + '…')); }
       links.appendChild(el('button', { class: 'lnk', 'data-test': 'tag-scope-filters', onclick: () => { close(); filtersDialog(); } }, 'visual filters…'));
@@ -414,6 +456,20 @@
     // what a rule's key stands for: a tag of the list, a group, every tag, or a name the list no longer has
     const itemFor = (key) => {
       const k = norm(key);
+      if (k.startsWith('column:')) {
+        const ck = k.slice(7);
+        if (ck === '*') return { guid: 'column:*', name: key, abbr: '', group: '', column: true, isBroad: true, label: 'All chart columns', note: 'one rule for every chart column drawn on an example' };
+        if (ck.startsWith('group:')) { const g = key.slice(13); return { guid: 'column:group:' + g, name: key, abbr: '', group: g, column: true, isBroad: true, label: 'All chart columns of “' + g + '”', note: 'one rule for the group’s columns; a column’s own rule wins' }; }
+        const c = T.columns().find((x) => norm(x.name) === ck || (x.abbr && norm(x.abbr) === ck) || norm((x.path || []).concat([x.name]).join('/')) === ck);
+        return c ? Object.assign({}, c, { isMarker: true, label: (c.path || []).concat([c.name]).join(' › ') + ' (chart column)' }) : { guid: key, name: key.slice(7), abbr: '', group: '', column: true, isMarker: true, label: key.slice(7) + ' (chart column)', note: 'a chart column' };
+      }
+      if (k.startsWith('marker:')) {
+        const mk = k.slice(7);
+        if (mk === '*') return { guid: 'marker:*', name: key, abbr: '', group: '', marker: true, isBroad: true, label: 'All chart markers', note: 'one rule for every chart marker; a marker’s or group’s own rule wins' };
+        if (mk.startsWith('group:')) { const g = key.slice(13); return { guid: 'marker:group:' + g, name: key, abbr: '', group: g, marker: true, isBroad: true, label: 'All chart markers of “' + g + '”', note: 'one rule for the group’s markers; a marker’s own rule wins' }; }
+        const m = markers.find((x) => norm(x.name) === mk || (x.abbr && norm(x.abbr) === mk) || norm(x.guid) === mk);
+        return m ? Object.assign({}, m, { marker: true, isMarker: true, label: m.name + (m.abbr && m.abbr !== m.name ? ' (' + m.abbr + ')' : '') + ' (chart marker)' }) : { guid: key, name: key.slice(7), abbr: '', group: '', marker: true, isMarker: true, label: key.slice(7) + ' (chart marker)', note: 'not in the project’s Chart Markers list' };
+      }
       if (k === '*') return { guid: '*', name: '*', abbr: '', group: '', label: 'All tags', note: 'one rule for every tag; a tag’s or group’s own rule wins' };
       if (k.startsWith('group:')) { const g = key.slice(6); return { guid: 'group:' + g, name: key, abbr: '', group: g, isGroup: true, label: 'All of “' + g + '”', note: 'one rule for the group’s tags; a tag’s own rule wins' }; }
       if (k.startsWith('filter:')) return null;
@@ -437,23 +493,26 @@
           on.addEventListener('change', () => { if (r) { r.enabled = on.checked; commit(); } });
           row.appendChild(on);
         }
-        const res = tag.guid === '*' || tag.isGroup || !tag.guid ? null : resolve(tag, example ? { extra: { tags: R.serializeTagRules(rules) } } : null, ctx, example ? null : override);
+        const res = tag.guid === '*' || tag.isGroup || tag.isBroad || !tag.guid ? null : resolve(tag, example ? { extra: { tags: R.serializeTagRules(rules) } } : null, ctx, example ? null : override);
         row.appendChild(el('span', { class: 'tag-sw', style: res ? swatchStyle(res) : { background: 'var(--panel-2)' } }));
         row.appendChild(el('span', { class: 'tag-name' },
           el('span', {}, tag.label), el('br'),
           el('span', { class: 'via', 'data-test': 'tag-via' }, res ? (res.hide ? 'hidden by ' + res.hideVia.label : 'styled by ' + res.styleVia.label) : tag.note || '')));
-        row.appendChild(controls(() => r, (patch) => { patchRule(rules, key, patch); commit(); }, { inheritLabel: example ? 'as the folder / tab / project says' : 'as inherited' }));
+        row.appendChild(controls(() => r, (patch) => { patchRule(rules, key, patch); commit(); }, { inheritLabel: example ? 'as the folder / tab / project says' : 'as inherited', marker: !!tag.marker }));
         row.appendChild(el('button', { class: 'icon-btn danger', 'data-test': 'tag-rule-remove', title: 'Remove this tag from here', onclick: () => { if (r) rules.splice(rules.indexOf(r), 1); const i = pending.findIndex((k) => norm(k) === norm(key)); if (i >= 0) pending.splice(i, 1); commit(); } }, '✕'));
         return row;
       };
       // `*` and the group rules first, then the tags in FLEx's own hierarchy
       const broad = keys.filter((k) => norm(k) === '*' || norm(k).startsWith('group:'));
       for (const key of broad) { const row = rowFor(key); if (row) host.appendChild(row); }
-      const tagKeys = keys.filter((k) => !broad.includes(k));
+      // chart marker rules: their own rows, after the tags
+      const markerKeys = keys.filter((k) => norm(k).startsWith('marker:') || norm(k).startsWith('column:'));
+      const tagKeys = keys.filter((k) => !broad.includes(k) && !markerKeys.includes(k));
       const tagItems = tagKeys.map((k) => Object.assign({}, itemFor(k) || {}, { _key: k })).filter((t) => t.name);
       const tree = el('div');
       renderTagTree(tree, tagItems, { leaf: (t) => rowFor(t._key) });
       host.appendChild(tree);
+      if (markerKeys.length) { host.appendChild(el('div', { class: 'tag-tree-head', style: { marginTop: '6px' } }, 'Chart markers and columns')); for (const key of markerKeys) { const row = rowFor(key); if (row) host.appendChild(row); } }
       const add = el('button', { class: 'btn', 'data-test': 'tag-add', onclick: (e) => addTagPicker(e.currentTarget, keys, (key) => { pending.push(key); draw(); }) }, '+ Add a tag…');
       host.appendChild(el('div', { class: 'btn-row', style: { justifyContent: 'flex-start', marginTop: '8px' } }, add));
       if (!list.length) host.appendChild(el('div', { class: 'muted small' }, 'No text markup tags have been read from the project yet. Open the project (or show an example that carries tags) and come back.'));
@@ -482,6 +541,31 @@
           head: (n) => (has('group:' + n.name) ? null : el('button', { class: 'lnk small', 'data-test': 'tag-pick-group', dataset: { tag: 'group:' + n.name }, title: 'One rule for every tag under “' + n.name + '”', onclick: (e) => { e.stopPropagation(); close(); pick('group:' + n.name); } }, '+ all of these')),
         });
         lst.appendChild(tree);
+        if (markers.length) {
+          const mitems = markers.filter((t) => !(has('marker:' + t.name) || has('marker:' + t.guid) || (t.abbr && has('marker:' + t.abbr))) && (!needle || norm(t.name).includes(needle) || norm(t.abbr).includes(needle) || (t.path || []).some((g) => norm(g).includes(needle))));
+          if (mitems.length || (!needle && !has('marker:*'))) lst.appendChild(el('div', { class: 'tag-tree-head', style: { marginTop: '6px' } }, 'Chart markers'));
+          if (!needle && !has('marker:*')) lst.appendChild(row('marker:*', 'All chart markers', 'every marker of the project', 'tag-pick-all'));
+          const mtree = el('div');
+          renderTagTree(mtree, mitems, {
+            open: !!needle,
+            leaf: (t) => row('marker:' + t.name, t.name, t.abbr && t.abbr !== t.name ? t.abbr : '', 'tag-pick-tag'),
+            head: (n) => (has('marker:group:' + n.name) ? null : el('button', { class: 'lnk small', dataset: { tag: 'marker:group:' + n.name }, title: 'One rule for every chart marker under “' + n.name + '”', onclick: (e) => { e.stopPropagation(); close(); pick('marker:group:' + n.name); } }, '+ all of these')),
+          });
+          lst.appendChild(mtree);
+        }
+        const cols = T.columns();
+        if (cols.length) {
+          const citems = cols.filter((t) => !(has('column:' + t.name) || has('column:' + (t.path || []).concat([t.name]).join('/'))) && (!needle || norm(t.name).includes(needle) || (t.path || []).some((g) => norm(g).includes(needle))));
+          if (citems.length || (!needle && !has('column:*'))) lst.appendChild(el('div', { class: 'tag-tree-head', style: { marginTop: '6px' } }, 'Chart columns'));
+          if (!needle && !has('column:*')) lst.appendChild(row('column:*', 'All chart columns', 'every column, on examples that show them', 'tag-pick-all'));
+          const ctree = el('div');
+          renderTagTree(ctree, citems, {
+            open: !!needle,
+            leaf: (t) => row('column:' + (t.path || []).concat([t.name]).join('/'), t.name, (t.path || []).join(' › '), 'tag-pick-tag'),
+            head: (n) => (has('column:group:' + n.name) ? null : el('button', { class: 'lnk small', dataset: { tag: 'column:group:' + n.name }, title: 'One rule for every chart column under “' + n.name + '”', onclick: (e) => { e.stopPropagation(); close(); pick('column:group:' + n.name); } }, '+ all of these')),
+          });
+          lst.appendChild(ctree);
+        }
         if (!items.length && !lst.querySelector('.tag-pick-all')) lst.appendChild(el('div', { class: 'muted small', style: { padding: '6px' } }, list.length ? 'Nothing else to add.' : 'No tags have been read from the project yet.'));
       };
       q.addEventListener('input', draw);
@@ -580,5 +664,5 @@
     return m;
   }
 
-  FS.tagstyles = Object.assign(T, { resolve, tagsIn, scopesFor, matches, hasStyle, textStyled, rgba, ink, patchRule, save, saveFilters, examplePopover, dialog, filtersPopover, filtersDialog, filterOn, tagTree, renderTagTree });
+  FS.tagstyles = Object.assign(T, { resolve, tagsIn, markersIn, scopesFor, matches, hasStyle, textStyled, rgba, ink, patchRule, save, saveFilters, examplePopover, dialog, filtersPopover, filtersDialog, filterOn, tagTree, renderTagTree });
 })();

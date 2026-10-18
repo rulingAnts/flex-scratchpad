@@ -118,9 +118,9 @@
     return parts.map((s) => '‘' + s.free.trim() + '’' + (withLabels && parts.length > 1 ? ' (' + (s.label || s.n) + ')' : ''));
   }
   const rowsLabel = (rows, a, b) => (a === b ? rows[a].label : rows[a].label + '–' + rows[b].label);
-  function markerLook(chart, tag) {
+  function markerLook(chart, tag, spec) {
     if (FS.tagstyles && FS.tagstyles.resolve) {
-      try { return FS.tagstyles.resolve(tag, null, {}); } catch (e) { /* the palette below */ }
+      try { return FS.tagstyles.resolve(Object.assign({}, tag, { marker: true }), spec || null, Object.assign({}, FS.tagstyles.context(), { text: chart.text || '' })); } catch (e) { /* the palette below */ }
     }
     if (tag && tag.back) return { bg: tag.back, fg: tag.fore || (FS.readableTextColor ? FS.readableTextColor(tag.back) : '#111') };
     const i = Math.max(0, (chart.markers || []).findIndex((m) => m.guid === (tag && tag.guid)));
@@ -129,6 +129,7 @@
 
   /* ------------------------------------------------------------------ styled text */
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const rgba = (hex, a) => { const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex || ''); return m ? 'rgba(' + parseInt(m[1], 16) + ',' + parseInt(m[2], 16) + ',' + parseInt(m[3], 16) + ',' + a + ')' : hex; };
   function styledHtml(text, styles) {
     if (!styles || !styles.length) return esc(text);
     let cls = '', st = '';
@@ -153,6 +154,7 @@
     const index = R.resolveChartStyles(spec, obj);
     const vern = (obj.ws && obj.ws.vern) || {}, anal = (obj.ws && obj.ws.anal) || {};
     const rows = obj.rows || [];
+    const showTextTags = !!(spec.lines && spec.lines.includes('tag')) && (obj.tags || []).length > 0;   // the text's markup tags inside the cells (Seth, 2026-10-18)
     const box = el('div', { class: 'flex-obj chart-obj' + (obj.cached ? ' cached' : ''), dataset: { chart: obj.guid } });
     const range = obj.range || [rows[0] && rows[0].n, rows.length && rows[rows.length - 1].n];
     const rangeText = rows.length ? (range[0] === range[1] ? 'row ' + rows[0].label : 'rows ' + rows[0].label + '–' + rows[rows.length - 1].label) + ' of ' + (obj.rowCount || rows.length) : 'no rows';
@@ -168,6 +170,8 @@
       spec.label ? el('span', { class: 'badge' }, spec.label) : null,
       el('span', { class: 'spacer' }));
     head.appendChild(el('button', { class: 'lnk', title: 'Reload from FLEx', onclick: () => opts.refresh && opts.refresh() }, '↻'));
+    const markersHere = FS.tagstyles && FS.tagstyles.markersIn ? FS.tagstyles.markersIn(obj) : [];
+    if (opts.editable && markersHere.length) head.appendChild(el('button', { class: 'lnk tag-btn', 'data-test': 'marker-btn', title: 'Chart markers in this chart: show, hide, style (a marker can style its whole row)', onclick: (e) => FS.tagstyles.examplePopover(e.currentTarget, spec, obj, Object.assign({}, opts, { markers: true })) }, '⚑ ' + markersHere.length));
     if (opts.editable && !opts.overlay) head.appendChild(el('button', { class: 'lnk', 'data-test': 'collapse-obj', title: 'Collapse to a chip', onclick: () => FS.interlinear.setCollapsed(spec, opts, true) }, '⤡'));
     if (opts.editable && opts.inCell && opts.editCell && !opts.overlay) head.appendChild(el('button', { class: 'lnk', title: 'Edit the cell’s text', onclick: () => opts.editCell() }, '✎'));
     if (opts.editable && !opts.overlay && opts.duplicate) head.appendChild(el('button', { class: 'lnk', title: 'Duplicate this object', onclick: () => opts.duplicate() }, '⧉'));
@@ -214,6 +218,19 @@
     rows.forEach((row, ri) => {
       const tr = el('tr', { class: 'crow cl-' + (row.clause || 'normal') + (row.endSent ? ' end-sent' : '') + (row.endPara ? ' end-para' : '') + (row.depStart ? ' dep-start' : '') + (row.depEnd ? ' dep-end' : ''), dataset: { row: row.n, label: row.label } });
       if (opts.rowDecor) { const d = opts.rowDecor(row) || {}; if (d.style) Object.assign(tr.style, d.style); for (const c of d.classes || []) tr.classList.add(c); }
+      // a chart marker whose rule says "whole row" (Seth, 2026-10-18) colours the row it is in
+      for (const c of row.cells || []) {
+        if (c.kind !== 'tag' || !c.tag) continue;
+        const look = markerLook(obj, c.tag, spec);
+        if (look.hide || !look.row) continue;
+        tr.classList.add('marker-row');
+        tr.dataset.markerRow = c.tag.name;
+        if (look.bg) tr.style.background = rgba(look.bg, 0.45);
+        if (look.b) tr.style.fontWeight = '700';
+        if (look.i) tr.style.fontStyle = 'italic';
+        if (look.u) tr.style.textDecoration = 'underline';
+        if (look.c) tr.style.color = look.c;
+      }
       const lab = el('th', { class: 'rlab', title: 'Row ' + row.label + (row.clause && row.clause !== 'normal' ? ' — ' + row.clause + ' clause' : '') + (row.endSent ? '; ends the sentence' : '') + (row.endPara ? '; ends the paragraph' : '') + (opts.editable ? '. Click to style the row.' : '') }, row.label);
       if (opts.editable) lab.addEventListener('click', (e) => stylePopover(e.currentTarget, spec, { row: row.n }, opts, 'row ' + row.label));
       tr.appendChild(lab);
@@ -221,7 +238,7 @@
         const cellStyles = R.chartStylesFor(index, row.n, slot.col.n, 0, '');
         const td = el('td', { class: 'ccell' + (slot.parts.length ? '' : ' empty'), colspan: slot.span > 1 ? slot.span : null, dataset: { row: row.n, col: slot.col.n } });
         applyCellStyles(td, cellStyles);
-        for (const part of slot.parts) td.appendChild(renderPart(part, row, slot.col, obj, spec, opts, { lines, index, vern, anal, wordGroups, movedTargets, tbody }));
+        for (const part of slot.parts) td.appendChild(renderPart(part, row, slot.col, obj, spec, opts, { lines, index, vern, anal, wordGroups, movedTargets, tbody, showTextTags }));
         if (opts.editable) td.addEventListener('click', (e) => { if (e.target.closest('.cw, .cclause, .ctag, .cmoved, button, a')) return; stylePopover(td, spec, { row: row.n, col: slot.col.n }, opts, 'row ' + row.label + ', ' + slot.col.name); });
         if (free === 'tip') td.addEventListener('click', (e) => { if (e.target.closest('button, a')) return; showTip(box, obj, rowSegs(row), row); });
         tr.appendChild(td);
@@ -281,6 +298,20 @@
         if (opts.editable) cw.addEventListener('click', (e) => { e.stopPropagation(); stylePopover(cw, spec, { row: row.n, col: col.n, word: n, line: 'txt' }, opts, '“' + (w.txt || '') + '” in row ' + row.label + ', ' + col.name, w); });
         wrap.appendChild(cw);
       }
+      if (ctx.showTextTags) {
+        // the text's markup tags on these words: a chip per tag, in the look its scopes give it
+        const a = part.from ? part.from.w : 0, z = part.to ? part.to.w : Infinity, s = part.seg;
+        const chips = [];
+        for (const t of obj.tags || []) {
+          if (!t.from || !t.to || s < t.from.seg || s > t.to.seg) continue;
+          const ta = s === t.from.seg ? t.from.w : 0, tz = s === t.to.seg ? t.to.w : Infinity;
+          if (tz < a || ta > z) continue;
+          const look = FS.tagstyles ? FS.tagstyles.resolve(t.tag, null, Object.assign({}, FS.tagstyles.context(), { text: obj.text || '' })) : { bg: '#ffd6a5', fg: '#1a1d21' };
+          if (look.hide) continue;
+          chips.push(el('span', { class: 'ctexttag', style: { background: look.bg, color: look.fg }, title: t.tag.name + ' (FLEx text markup tag' + (look.styleVia ? '; styled by ' + look.styleVia.label : '') + ')', dataset: { tag: t.tag.name } }, t.tag.abbr || t.tag.name));
+        }
+        if (chips.length) wrap.appendChild(el('span', { class: 'ctagrow' }, chips));
+      }
       return wrap;
     }
     if (part.kind === 'moved') {
@@ -301,8 +332,13 @@
     if (part.kind === 'tag') {
       const t = part.tag;
       if (!t) return el('span', { class: 'ctag missing', title: 'A chart marker whose list item is missing' }, '?');
-      const look = markerLook(obj, t);
-      return el('span', { class: 'ctag', style: { background: look.bg, color: look.fg }, title: t.name + ((t.path || []).length ? ' — ' + t.path.join(' › ') : '') + ' (chart marker)', dataset: { marker: t.name } }, t.abbr || t.name);
+      const look = markerLook(obj, t, spec);
+      if (look.hide) return el('span', { class: 'ctag hidden', dataset: { marker: t.name }, title: t.name + ' (hidden by ' + (look.hideVia ? look.hideVia.label : 'a rule') + ')' });
+      const st = { background: look.bg, color: look.fg };
+      if (look.b) st.fontWeight = '800';
+      if (look.i) st.fontStyle = 'italic';
+      if (look.u) st.textDecoration = 'underline';
+      return el('span', { class: 'ctag', style: st, title: t.name + ((t.path || []).length ? ' — ' + t.path.join(' › ') : '') + ' (chart marker' + (look.styleVia ? '; styled by ' + look.styleVia.label : '') + ')', dataset: { marker: t.name } }, t.abbr || t.name);
     }
     return el('span', { class: 'muted small', title: part.error || '' }, '(' + (part.className || part.kind) + ')');
   }
@@ -395,7 +431,10 @@
       // lines
       const lr = el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Lines'));
       const cur = R.chartLines(spec);
-      for (const l of R.CHART_LINES) lr.appendChild(el('button', { class: 'tog' + (cur.includes(l) ? ' on' : ''), onclick: () => { const on = cur.includes(l) ? cur.filter((k) => k !== l) : R.CHART_LINES.filter((k) => cur.includes(k) || k === l); spec.lines = on.length ? on : ['txt']; change(); close(); } }, LINE_NAMES[l]));
+      const tagOn = !!(spec.lines && spec.lines.includes('tag'));
+      const setLines = (on) => { spec.lines = (on.length ? on : ['txt']).concat(tagOn ? ['tag'] : []); };
+      for (const l of R.CHART_LINES) lr.appendChild(el('button', { class: 'tog' + (cur.includes(l) ? ' on' : ''), onclick: () => { setLines(cur.includes(l) ? cur.filter((k) => k !== l) : R.CHART_LINES.filter((k) => cur.includes(k) || k === l)); change(); close(); } }, LINE_NAMES[l]));
+      if ((obj.tags || []).length) lr.appendChild(el('button', { class: 'tog' + (tagOn ? ' on' : ''), 'data-test': 'chart-texttags', title: 'The text’s FLEx markup tags on the words of each cell', onclick: () => { spec.lines = cur.concat(tagOn ? [] : ['tag']); change(); close(); } }, 'FLEx tags'));
       pop.appendChild(lr);
       // free translations
       const fsel = el('select', { onchange: (e) => { if (e.target.value === 'row') delete x.free; else x.free = e.target.value; change(); close(); } });
@@ -434,12 +473,14 @@
         pop.appendChild(el('label', { class: 'row', style: { gap: '8px' } }, cb, 'Number as example (1), (2)…'));
       }
       if (obj.url) pop.appendChild(el('button', { class: 'menu-item', onclick: () => { FS.copyText(obj.url); FS.toast('FLEx link copied'); close(); } }, 'Copy FLEx link'));
+      pop.appendChild(el('button', { class: 'menu-item', 'data-test': 'chart-pivot', title: 'Counts of rows by marker (and clause type) and by column', onclick: () => { close(); pivotDialog(obj, spec); } }, 'Pivot: markers \u00d7 columns\u2026'));
       pop.appendChild(el('button', { class: 'menu-item', onclick: () => { FS.copyText(chartTsv(spec, obj)); FS.toast('Copied as TSV'); close(); } }, 'Copy as TSV'));
       pop.appendChild(el('button', { class: 'menu-item', onclick: () => { FS.copyText(R.serialize(spec)); FS.toast('Embed code copied'); close(); } }, 'Copy embed code'));
       if (FS.api && FS.api.export_chart) {
         pop.appendChild(el('button', { class: 'menu-item', title: 'The shape FieldWorks itself exports (Texts & Words › Discourse Chart › Export), with GUIDs added', onclick: async () => { close(); try { const p = await FS.api.export_chart(obj.guid, 'xml', spec.seg || null); if (p) FS.toast('Saved ' + p); } catch (e) { FS.toast(e.message, 'error'); } } }, 'Export as FLEx chart XML…'));
         pop.appendChild(el('button', { class: 'menu-item', title: 'Every row, cell and word with its GUID', onclick: async () => { close(); try { const p = await FS.api.export_chart(obj.guid, 'json', spec.seg || null); if (p) FS.toast('Saved ' + p); } catch (e) { FS.toast(e.message, 'error'); } } }, 'Export as JSON…'));
       }
+      if (FS.newChartNote && !opts.collection) pop.appendChild(el('button', { class: 'menu-item', title: 'A note that is this chart, with its own columns (choice lists, notes, rules) and these styles', onclick: () => { close(); FS.newChartNote(obj.guid, R.serialize(spec)); } }, 'Open as a chart note\u2026'));
       if (opts.editSource) pop.appendChild(el('button', { class: 'menu-item', onclick: () => { close(); opts.editSource(); } }, 'Edit source'));
       if (opts.duplicate || opts.remove) pop.appendChild(el('hr'));
       if (opts.duplicate) pop.appendChild(el('button', { class: 'menu-item', onclick: () => { close(); opts.duplicate(); } }, 'Duplicate this object'));
@@ -487,5 +528,40 @@
   }
   const chartTsv = (spec, obj) => chartGrid(spec, obj).map((r) => r.map((c) => String(c == null ? '' : c).replace(/[\t\r\n]+/g, ' ')).join('\t')).join('\n') + '\n';
 
-  FS.chart = { renderChart, visibleColumns, headerRows, layoutRow, rowSegs, freeRuns, freeText, chartGrid, chartTsv, markerLook, LINE_NAMES, FREE_NAMES };
+  /* ------------------------------------------------------------------ the pivot
+   * Rows: every chart marker (and the clause types, moved text, clause references); columns: the
+   * visible template columns; a cell counts the rows that carry the marker AND have words in the
+   * column; the last column counts the rows with the marker at all (Seth, 2026-10-18: "compile"). */
+  function pivot(obj, spec) {
+    const cols = visibleColumns(spec, obj);
+    const rows = obj.rows || [];
+    const keys = new Map();     // key → {label, rows: Set(row n)}
+    const addKey = (k, label, n) => { if (!keys.has(k)) keys.set(k, { label, rows: new Set() }); keys.get(k).rows.add(n); };
+    for (const r of rows) {
+      for (const c of r.cells || []) {
+        if (c.kind === 'tag' && c.tag) addKey('m:' + c.tag.name, '\u2690 ' + c.tag.name, r.n);
+        else if (c.kind === 'moved') addKey('moved:' + (c.preposed ? 'preposed' : 'postposed'), 'moved text, ' + (c.preposed ? 'preposed' : 'postposed'), r.n);
+        else if (c.kind === 'clause') addKey('clauseref', 'clause marker', r.n);
+      }
+      if (r.clause && r.clause !== 'normal') addKey('clause:' + r.clause, r.clause + ' clause', r.n);
+    }
+    const hasWords = (r, colN) => (r.cells || []).some((c) => c.kind === 'words' && c.colN === colN && (c.words || []).some((w) => !w.punct));
+    const out = { columns: cols.map((c) => (c.path || []).concat([c.name]).join(' \u203a ')), lines: [], totals: cols.map((c) => rows.filter((r) => hasWords(r, c.n)).length), rowCount: rows.length };
+    for (const [k, v] of keys) out.lines.push({ key: k, label: v.label, counts: cols.map((c) => rows.filter((r) => v.rows.has(r.n) && hasWords(r, c.n)).length), total: v.rows.size });
+    return out;
+  }
+  function pivotDialog(obj, spec) {
+    const p = pivot(obj, spec);
+    const m = FS.modal({ title: 'Pivot \u2014 ' + (obj.name || 'Chart') + ' \u00b7 ' + (obj.title || '') });
+    if (!p.lines.length) { m.body.appendChild(el('p', { class: 'muted' }, 'No markers, clause types or moved text in these rows to count.')); return; }
+    const tbl = el('table', { class: 'pivot-table' });
+    tbl.appendChild(el('tr', {}, el('th', {}), ...p.columns.map((c) => el('th', {}, c)), el('th', {}, 'rows')));
+    for (const l of p.lines) tbl.appendChild(el('tr', {}, el('th', {}, l.label), ...l.counts.map((n) => el('td', { class: n ? 'n' : 'n zero' }, n ? String(n) : '\u00b7')), el('td', { class: 'n total' }, String(l.total))));
+    tbl.appendChild(el('tr', { class: 'totals' }, el('th', {}, 'rows with words'), ...p.totals.map((n) => el('td', { class: 'n' }, String(n))), el('td', { class: 'n total' }, String(p.rowCount))));
+    const tsv = [['', ...p.columns, 'rows'].join('\t')].concat(p.lines.map((l) => [l.label, ...l.counts, l.total].join('\t'))).concat([['rows with words', ...p.totals, p.rowCount].join('\t')]).join('\n') + '\n';
+    m.body.append(el('p', { class: 'muted small' }, 'Each cell counts the rows of this chart (the range shown) that carry the marker and have words in the column; the last column counts the rows with the marker.'), tbl,
+      el('div', { class: 'btn-row' }, el('button', { class: 'btn', 'data-test': 'pivot-copy', onclick: () => { FS.copyText(tsv); FS.toast('Copied as TSV'); } }, 'Copy as TSV'), el('button', { class: 'btn primary', onclick: () => m.close() }, 'Done')));
+  }
+
+  FS.chart = { renderChart, visibleColumns, headerRows, layoutRow, rowSegs, freeRuns, freeText, chartGrid, chartTsv, markerLook, pivot, pivotDialog, LINE_NAMES, FREE_NAMES };
 })();

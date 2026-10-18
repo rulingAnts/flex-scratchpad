@@ -64,11 +64,11 @@
   }
   // FLEx tag styles (tagstyles.js) resolve against the open note's place; a change anywhere redraws
   FS.tagstyles.context = () => ({ project: (S.flex && S.flex.project) || '', tab: S.note ? S.note.tab : (S.tab || ''), folder: S.note ? (S.note.folder || '') : (S.folder || ''), note: S.note ? S.note.id : '' });
-  FS.on('tagstyles', () => { if (isCollection()) { if (S.coll) S.coll.render(); } else if (S.editor) S.editor.renderAll(); renderRail(); });
+  FS.on('tagstyles', () => { if (isCollection()) { if (S.coll) S.coll.render(); } else if (isChartNote()) { if (S.chartNote) S.chartNote.drawChart(); } else if (S.editor) S.editor.renderAll(); renderRail(); });
   function applyInit(init) {
     S.init = init; S.config = init.config; S.notes = init.notes; S.folders = init.folders; S.tags = init.tags; S.flex = init.flex;
     FS.tagstyles.setConfig(S.config.tagStyles);
-    if (S.flex && S.flex.open) FS.tagstyles.loadList(true).then(renderRail);
+    if (S.flex && S.flex.open) { FS.tagstyles.loadList(true).then(renderRail); FS.tagstyles.loadMarkers(true); }
     loadFtags();
     applyMarkers();
     applySticky();
@@ -167,7 +167,7 @@
     const go = (dir) => {
       const hitEls = objs.filter((o) => o.classList.contains('tag-hit'));
       if (!hitEls.length) return;
-      const sc = document.getElementById(isCollection() ? 'collection' : 'editor');
+      const sc = document.getElementById(isCollection() ? 'collection' : isChartNote() ? 'chartnote' : 'editor');
       const top = sc.getBoundingClientRect().top + 40;
       let i = dir > 0 ? hitEls.findIndex((o) => o.getBoundingClientRect().top > top + 1) : hitEls.map((o) => o.getBoundingClientRect().top < top - 1).lastIndexOf(true);
       if (i < 0) i = dir > 0 ? 0 : hitEls.length - 1;
@@ -400,7 +400,7 @@
     if (!list.length) { host.appendChild(el('div', { class: 'empty' }, el('b', {}, S.results ? 'Nothing found' : 'No notes here'), S.results ? 'Try other words, or clear the tag filter.' : 'Press Ctrl+N to write one.')); return; }
     for (const n of list) {
       const card = el('div', { class: 'note-card' + (S.note && S.note.id === n.id ? ' active' : ''), draggable: 'true', dataset: { id: n.id } });
-      card.appendChild(el('div', { class: 't' }, n.pinned ? el('span', { class: 'pin' }, '📌') : null, n.kind === 'examples' ? el('span', { class: 'kind-badge', title: 'Example collection: exports as a FLEx text' }, 'IGT') : null, n.title || 'Untitled'));
+      card.appendChild(el('div', { class: 't' }, n.pinned ? el('span', { class: 'pin' }, '📌') : null, n.kind === 'examples' ? el('span', { class: 'kind-badge', title: 'Example collection: exports as a FLEx text' }, 'IGT') : n.kind === 'chart' ? el('span', { class: 'kind-badge chart', title: 'Chart note: one FieldWorks text chart with your columns and styles' }, 'Chart') : null, n.title || 'Untitled'));
       const x = el('div', { class: 'x' });
       if (n.snippet != null) x.innerHTML = markSnippet(n.snippet, n.snippetMarks); else x.textContent = n.kind === 'examples' ? (n.exampleCount || 0) + ' example' + (n.exampleCount === 1 ? '' : 's') : (n.excerpt || '');
       card.appendChild(x);
@@ -447,7 +447,7 @@
   function ensureEditor() {
     if (S.editor) return S.editor;
     S.editor = new FS.Editor($('editor'), {
-      onChange: (md) => { if (!S.note || isCollection()) return; S.note.body = md; S.dirty = true; $('save-state').textContent = 'Editing…'; scheduleSave(); },
+      onChange: (md) => { if (!S.note || isSpecial()) return; S.note.body = md; S.dirty = true; $('save-state').textContent = 'Editing…'; scheduleSave(); },
       openLink: openLink,
       onPasteLink: (text, insert) => FS.picker.pasteChooser(text, insert),
       onPasteLocate: (text, insert, fallback) => (S.flex && S.flex.open) ? FS.picker.locateChooser(text, insert, fallback) : fallback(),
@@ -479,21 +479,71 @@
     localStorage.setItem('fs:lastNote', id);
     $('editor-pane').classList.remove('no-note');
     $('note-title').value = n.title || '';
-    const coll = n.kind === 'examples';
-    $('editor-pane').classList.toggle('is-collection', coll);
-    $('editor').hidden = coll; $('collection').hidden = !coll;
-    $('note-title').placeholder = coll ? 'Untitled collection' : 'Untitled note';
+    const coll = n.kind === 'examples', cn = n.kind === 'chart';
+    $('editor-pane').classList.toggle('is-collection', coll || cn);
+    $('editor').hidden = coll || cn; $('collection').hidden = !coll; $('chartnote').hidden = !cn;
+    $('note-title').placeholder = coll ? 'Untitled collection' : cn ? 'Untitled chart note' : 'Untitled note';
     closeFind();
     if (coll) { ensureEditor().load(''); ensureCollection().load(n.body || ''); }
+    else if (cn) { ensureEditor().load(''); ensureChartNote().load(n.body || ''); }
     else ensureEditor().load(n.body || '');
     renderNoteMeta();
     renderList();
     $('save-state').textContent = '';
-    if (!n.title) $('note-title').focus(); else if (!coll) S.editor.focusBlock(0, 0);
+    if (!n.title) $('note-title').focus(); else if (!coll && !cn) S.editor.focusBlock(0, 0);
   }
   /* Example collections (Seth, 2026-10-16): a note that is JUST interlinear examples, the one
    * kind of note that exports as a FLEx text. collection.js draws it; this wires it in. */
   function isCollection() { return !!(S.note && S.note.kind === 'examples'); }
+  /* CHART NOTES (Seth, 2026-10-18): a note that is one FieldWorks text chart with the user's own
+   * columns and styles; chartnote.js draws it. `isSpecial` = the block editor is not the view. */
+  function isChartNote() { return !!(S.note && S.note.kind === 'chart'); }
+  function isSpecial() { return isCollection() || isChartNote(); }
+  function ensureChartNote() {
+    if (S.chartNote) return S.chartNote;
+    S.chartNote = new FS.ChartNote($('chartnote'), {
+      onChange: (md) => { if (!isChartNote()) return; S.note.body = md; S.dirty = true; $('save-state').textContent = 'Editing…'; scheduleSave(); },
+      chartGuid: () => (S.note && S.note.chart) || '',
+    });
+    window.__fsChartNote = S.chartNote;
+    return S.chartNote;
+  }
+  /* A new chart note on a chart (from the New menu's dialog, or a chart embed's ⋯ menu with its
+   * view carried over). */
+  async function newChartNote(guid, view) {
+    await flushSave();
+    try {
+      const n = await FS.api.create_chart_note(S.tab, S.folder || '', '', guid, view || '');
+      clearSearch();
+      await refreshLists();
+      await openNote(n.id);
+      return n;
+    } catch (e) { FS.toast(e.message, 'error'); return null; }
+  }
+  FS.newChartNote = newChartNote;
+  function newChartNoteDialog() {
+    const m = FS.modal({ title: 'New chart note' });
+    const search = el('input', { type: 'text', placeholder: 'Search charts by text or name…', style: { width: '100%' } });
+    const list = el('div', { class: 'pick-list', style: { maxHeight: '50vh', overflow: 'auto', marginTop: '8px' } });
+    m.body.append(el('p', { class: 'muted small' }, 'A chart note shows one FieldWorks text chart (Texts & Words › Text Chart) with your own columns — choice lists, notes, rules — and your styling of its words, cells, rows and columns.'), search, list);
+    const draw = async () => {
+      list.innerHTML = '<div class="pick-item muted">Loading…</div>';
+      let all = [];
+      try { all = await FS.api.flex_charts(''); } catch (e) { list.innerHTML = ''; list.appendChild(el('div', { class: 'pick-item', style: { color: 'var(--danger)' } }, e.message)); return; }
+      const q = search.value.trim().toLowerCase();
+      const hits = all.filter((c) => !q || ((c.title || '') + ' ' + (c.name || '') + ' ' + (c.template || '')).toLowerCase().includes(q));
+      list.innerHTML = '';
+      if (!hits.length) list.appendChild(el('div', { class: 'pick-item muted' }, all.length ? 'No chart matches.' : 'This project has no text charts yet.'));
+      for (const c of hits) {
+        const it = el('div', { class: 'pick-item', 'data-test': 'pick-chart-note' }, el('span', { class: 'hw' }, c.title || '(untitled text)'), el('span', { class: 'pos' }, c.name || 'chart'), el('span', { class: 'n' }, (c.rows || 0) + ' row' + (c.rows === 1 ? '' : 's') + (c.template ? ' · ' + c.template : '')));
+        it.addEventListener('click', () => { m.close(); newChartNote(c.guid, ''); });
+        list.appendChild(it);
+      }
+    };
+    search.addEventListener('input', FS.debounce(draw, 180));
+    draw();
+    search.focus();
+  }
   function ensureCollection() {
     if (S.coll) return S.coll;
     S.coll = new FS.Collection($('collection'), {
@@ -531,8 +581,80 @@
    * box per tag (a group's box = every tag under it, `group:<name>`), a visual filter as a
    * shortcut that ticks the tags its rules name, the live count and a preview of the lines;
    * Create → Api.create_rule_collection. With `note`, it edits that collection's rule instead. */
+  /* CHART COLLECTIONS (Seth, 2026-10-18: "returning cells or rows with a certain text chart markers
+   * or which column a certain lexical item is found in"): a collection of every chart ROW a chart
+   * search matches (Api.chart_search's query language), kept as the collection's rule
+   * (`rule-charts:`), so "⟳ Find new rows" takes in what is new. `note` edits that rule instead. */
+  async function chartCollectionDialog(opts) {
+    opts = opts || {};
+    const editing = opts.note && opts.note.kind === 'examples' && opts.note.rule && opts.note.rule.charts ? opts.note : null;
+    const m = FS.modal({ title: editing ? 'The chart search of this collection' : 'New collection of chart rows', class: 'rule-dlg' });
+    const q = el('input', { type: 'text', value: editing ? editing.rule.charts : (opts.query || ''), placeholder: 'e.g. col:Subject lex:kabir   or   marker:Topic', 'data-test': 'chart-rule-q', style: { width: '100%' } });
+    const title = el('input', { type: 'text', placeholder: 'Title of the collection', 'data-test': 'chart-rule-title', style: { width: '100%' } });
+    const count = el('div', { class: 'muted small', 'data-test': 'chart-rule-count' });
+    const preview = el('div', { class: 'rule-preview', style: { maxHeight: '30vh', overflow: 'auto' } });
+    const err = el('div', { style: { color: 'var(--danger)' } });
+    const run = FS.debounce(async () => {
+      err.textContent = '';
+      if (!q.value.trim()) { count.textContent = 'Type a search: words, col:Name, marker:Name, lex:form, gloss:…, clause:…, moved, -marker:… to exclude.'; preview.innerHTML = ''; return; }
+      try {
+        const rows = await FS.api.chart_search(q.value.trim());
+        count.textContent = rows.length + ' row' + (rows.length === 1 ? '' : 's') + ' match now';
+        preview.innerHTML = '';
+        for (const r of rows.slice(0, 40)) preview.appendChild(el('div', { class: 'pick-item' }, el('span', { class: 'hw' }, (r.chartName || 'Chart') + ' \u00b7 ' + (r.title || '')), el('span', { class: 'pos' }, r.label), el('span', { class: 'gl' }, r.cells.filter((c) => !r.hits.length || r.hits.includes(c.colN)).map((c) => c.words.join(' ')).join(' | '))));
+        if (rows.length > 40) preview.appendChild(el('div', { class: 'muted small' }, '\u2026 and ' + (rows.length - 40) + ' more'));
+      } catch (e) { err.textContent = e.message; }
+    }, 250);
+    q.addEventListener('input', run);
+    m.body.append(el('p', { class: 'muted small' }, 'Every chart row the search matches becomes a card, in chart order; later, \u27f3 Find new rows adds the rows that are new. Words match the row\u2019s words, glosses, morphemes and notes; col:Subject keeps a column; marker:Topic a chart marker (marker:* any); lex:kabir a lexical item; gloss:dog; pos:n; clause:dependent; moved; clauseref; endsent; endpara; chart:, text:, template:, row:; a leading - on a key excludes.'),
+      el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Search'), q), count, preview, err);
+    if (!editing) m.body.appendChild(el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Title'), title));
+    m.body.appendChild(el('div', { class: 'btn-row' }, el('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'),
+      el('button', { class: 'btn primary', 'data-test': 'chart-rule-create', onclick: async () => {
+        const query = q.value.trim();
+        if (!query) { err.textContent = 'Type a search first.'; return; }
+        try {
+          if (editing) { const n = await FS.api.set_note_rule(editing.id, { charts: query }); if (S.note && S.note.id === n.id) S.note.rule = n.rule; m.close(); if (S.coll) S.coll.render(); return; }
+          await flushSave();
+          const n = await FS.api.create_rule_collection(S.tab, S.folder || '', title.value.trim() || ('Chart rows: ' + query), { charts: query });
+          m.close();
+          clearSearch();
+          await refreshLists();
+          await openNote(n.id);
+          FS.toast(n.matched + ' row' + (n.matched === 1 ? '' : 's') + ' collected', 'ok');
+        } catch (e) { err.textContent = e.message; }
+      } }, editing ? 'Save' : 'Create')));
+    run();
+    (editing ? q : (opts.query ? title : q)).focus();
+  }
+  FS.chartCollection = (query) => chartCollectionDialog({ query });
+  /* Where a lexical item sits in the charts (Seth, 2026-10-18: "which column a certain lexical
+   * item is found in"): a count per column of every template, each a click from its rows. */
+  async function chartProfileDialog(term) {
+    let p;
+    try { p = await FS.api.chart_profile(term); } catch (e) { FS.toast(e.message, 'error'); return; }
+    const m = FS.modal({ title: 'Where \u201c' + term + '\u201d sits in the charts' });
+    if (!p.total) { m.body.appendChild(el('p', { class: 'muted' }, 'No chart cell holds \u201c' + term + '\u201d (words, morpheme forms, lexeme forms and glosses were looked at).')); return; }
+    m.body.appendChild(el('p', { class: 'muted small' }, p.total + ' cell' + (p.total === 1 ? '' : 's') + ' in all. Click a count for the rows; \u201cCollect\u201d makes a collection of them.'));
+    for (const t of p.templates) {
+      const tbl = el('table', { class: 'profile-table' });
+      tbl.appendChild(el('tr', {}, el('th', {}, 'Template \u201c' + (t.name || '?') + '\u201d'), el('th', {}, 'rows'), el('th', {})));
+      for (const c of t.columns) {
+        const rowsBox = el('div', { class: 'profile-rows', hidden: true });
+        for (const r of c.rows) rowsBox.appendChild(el('div', { class: 'pick-item' }, el('span', { class: 'hw' }, (r.chartName || 'Chart') + ' \u00b7 ' + (r.title || '')), el('span', { class: 'pos' }, r.label), el('span', { class: 'gl' }, r.words + (r.glosses ? '  \u2018' + r.glosses + '\u2019' : ''))));
+        const bar = el('span', { class: 'profile-bar', style: { width: Math.round(100 * c.count / t.total) + '%' } });
+        const tr = el('tr', {}, el('td', {}, c.path.replace(/\//g, ' \u203a ')), el('td', { class: 'n' }, el('button', { class: 'lnk', 'data-test': 'profile-count', onclick: () => { rowsBox.hidden = !rowsBox.hidden; } }, String(c.count)), bar),
+          el('td', {}, el('button', { class: 'lnk', title: 'A collection of these rows', onclick: () => { m.close(); chartCollectionDialog({ query: 'col:' + c.path + ' lex:' + term }); } }, 'Collect\u2026')));
+        tbl.appendChild(tr);
+        tbl.appendChild(el('tr', {}, el('td', { colspan: 3 }, rowsBox)));
+      }
+      m.body.appendChild(tbl);
+    }
+  }
+  FS.chartProfile = chartProfileDialog;
   async function ruleCollectionDialog(opts) {
     opts = opts || {};
+    if (opts.note && opts.note.rule && opts.note.rule.charts) return chartCollectionDialog(opts);
     let tags;
     try { tags = await FS.api.flex_text_tags(); } catch (e) { FS.toast(e.message, 'error'); return; }
     if (FS.tagstyles && !FS.tagstyles.list().length) FS.tagstyles.setList(tags);
@@ -646,7 +768,7 @@
    * table cells, or a selection inside a rendered example (that example). */
   function highlightedSource() {
     const ed = S.editor;
-    if (!ed || !S.note || isCollection()) return null;
+    if (!ed || !S.note || isSpecial()) return null;
     if (ed.msel) { const md = ed.selectionMarkdown(); if (md.trim()) return md; }
     for (const b of ed.blocks) {
       const w = b.el && b.el._table;
@@ -785,7 +907,7 @@
       item('Move to…', () => moveDialog(n));
       item('Duplicate', async () => { await flushSave(); const c = await FS.api.duplicate_note(n.id); await refreshLists(); openNote(c.id); FS.toast('Duplicated — this is the copy'); });
       item('Copy to…', () => moveDialog(n, true));
-      if (n.kind !== 'examples') {
+      if (n.kind !== 'examples' && n.kind !== 'chart') {
         // the highlighted part of the open note when it holds examples, else the whole note
         const hl = S.note && S.note.id === n.id ? (S.menuHighlight !== undefined ? S.menuHighlight : highlightedSource()) : null;
         const k = hl ? examplesIn(hl).length : 0;
@@ -803,7 +925,7 @@
       item('Copy link to this note', () => { FS.copyText('flexscratchpad://note/' + n.id); FS.toast('Link copied — it opens this note in FLEx Scratchpad'); });
       pop.appendChild(el('hr'));
       pop.appendChild(el('div', { class: 'row', style: { padding: '0 8px' } }, el('b', {}, 'Export')));
-      const doExport = async (fmt) => { if (!S.note || S.note.id !== n.id) await openNote(n.id); await flushSave(); try { await FS.exporter.exportNote(S.note, isCollection() ? ensureCollection().asEditor() : ensureEditor(), fmt); } catch (e) { FS.toast('Export failed: ' + e.message, 'error'); } };
+      const doExport = async (fmt) => { if (!S.note || S.note.id !== n.id) await openNote(n.id); await flushSave(); try { await FS.exporter.exportNote(S.note, isCollection() ? ensureCollection().asEditor() : isChartNote() ? ensureChartNote().asEditor() : ensureEditor(), fmt); } catch (e) { FS.toast('Export failed: ' + e.message, 'error'); } };
       // only an example collection exports as a FLEx text (Seth, 2026-10-16)
       if (n.kind === 'examples') item('FLEx text (.flextext)…', () => doExport('flextext'));
       item('Markdown (.md)', () => doExport('md'));
@@ -900,7 +1022,7 @@
   /* ------------------------------------------------------------------ insert / slash */
   function insertFlex() { FS.openPicker(); }
   /* The picker, into whatever is open: a note's editor, or a collection (its own add). */
-  FS.openPicker = (o) => { if (isCollection()) { if (S.coll) S.coll.pick(undefined, o); return; } FS.picker.open((md, asBlock) => ensureEditor().insertMarkdown(md, asBlock), o); };
+  FS.openPicker = (o) => { if (isChartNote()) { FS.toast('A chart note holds one chart; objects go into ordinary notes.'); return; } if (isCollection()) { if (S.coll) S.coll.pick(undefined, o); return; } FS.picker.open((md, asBlock) => ensureEditor().insertMarkdown(md, asBlock), o); };
   /* Tag styles for SEVERAL examples at once (Seth, 2026-10-17: "applyable to a group of examples by
    * highlight"): the dialog in example scope, its rules written into each embed's `tags=`. */
   function tagStylesForEmbeds(srcs, applyFn) {
@@ -913,7 +1035,7 @@
   /* Attach files (Seth, 2026-10-17): COPIED into the notebook's attachments/ unless `link`,
    * then a file alone on its line becomes a card, after text a chip. */
   async function attachFiles(link) {
-    if (!S.note || isCollection()) return;
+    if (!S.note || isSpecial()) return;
     const ed = ensureEditor();
     const srcs = await FS.files.pick(link);
     if (srcs.length) ed.insertMarkdown(srcs.join('\n\n'), true);
@@ -938,6 +1060,7 @@
       const r = await FS.api.flex_refresh_all();
       FS.interlinear.invalidate();
       if (S.note && isCollection()) ensureCollection().load(S.note.body || '');   // keeps its scroll
+      else if (S.note && isChartNote()) ensureChartNote().load(S.note.body || '');
       else if (S.note) {
         const edEl = $('editor'); const top = edEl.scrollTop;
         ensureEditor().load(S.note.body || '');
@@ -1000,7 +1123,7 @@
     return 'https://' + u;
   }
   async function linkDialog() {
-    if (!S.note || isCollection()) return;
+    if (!S.note || isSpecial()) return;
     const ed = ensureEditor();
     const ae = document.activeElement;
     const cell = ae && ae.classList && ae.classList.contains('cell-edit') ? ae : null;
@@ -1084,7 +1207,7 @@
     let raf = 0;
     const update = () => {
       raf = 0;
-      if (!S.note || isCollection() || !S.editor) return hide();
+      if (!S.note || isSpecial() || !S.editor) return hide();
       const sel = window.getSelection();
       if (!sel || !sel.rangeCount || !sel.isCollapsed) return hide();
       const ctx = S.editor.linkContext();
@@ -1444,6 +1567,7 @@
       pop.appendChild(el('button', { class: 'menu-item', onclick: () => { close(); newNote(); } }, 'New note', el('span', { class: 'muted small' }, '  Ctrl+N')));
       pop.appendChild(el('button', { class: 'menu-item', 'data-test': 'new-collection', title: 'A note that is just interlinear examples, numbered in order — the kind that exports as a FLEx text', onclick: () => { close(); newCollection('', ''); } }, 'New example collection'));
       pop.appendChild(el('button', { class: 'menu-item', 'data-test': 'new-rule-collection', title: 'A collection of every line in the project that carries the FLEx text markup tags you choose; later it can take in the new matches', onclick: () => { close(); ruleCollectionDialog({}); } }, 'New collection from tagged lines\u2026'));
+      pop.appendChild(el('button', { class: 'menu-item', 'data-test': 'new-chart-note', title: 'A note that is one FieldWorks text chart, with your own columns (choice lists, notes, rules) and styles', onclick: () => { close(); newChartNoteDialog(); } }, 'New chart note\u2026'));
     }));
     $('btn-add-tab').addEventListener('click', addTab);
     $('btn-add-folder').addEventListener('click', () => newFolder(S.tab, S.folder || ''));
@@ -1457,7 +1581,7 @@
     $('flex-banner-hide').addEventListener('click', () => { sessionStorage.setItem('fs:flexBannerHidden', '1'); $('flex-banner').hidden = true; });
     $('btn-sort').addEventListener('click', (e) => FS.popover(e.currentTarget, (pop, close) => { for (const [v, l] of [['updated', 'Last edited'], ['created', 'Date created'], ['title', 'Title']]) pop.appendChild(el('button', { class: 'menu-item' + (S.sort === v ? ' on' : ''), onclick: () => { S.sort = v; close(); renderList(); } }, (S.sort === v ? '✓ ' : '') + l)); }));
     $('note-title').addEventListener('input', () => { if (S.note) { S.note.title = $('note-title').value; S.dirty = true; scheduleSave(); } });
-    $('note-title').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); if (!isCollection()) ensureEditor().focusBlock(0, 0); else e.target.blur(); } });
+    $('note-title').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); if (!isSpecial()) ensureEditor().focusBlock(0, 0); else e.target.blur(); } });
     $('btn-pin').addEventListener('click', () => { if (!S.note) return; S.note.pinned = !S.note.pinned; saveMeta({ pinned: S.note.pinned }); refreshLists(); });
     $('btn-note-menu').addEventListener('click', (e) => { if (S.note) noteMenu(e.currentTarget, S.note); });
     $('btn-insert-flex').addEventListener('click', insertFlex);
@@ -1490,7 +1614,7 @@
         const ae = document.activeElement;
         const native = ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.classList.contains('cell-edit'));
         const own = ae && (ae.closest('.blk-body') || ae.classList.contains('widget'));
-        if (!native && !own && S.note && S.editor && !isCollection()) {
+        if (!native && !own && S.note && S.editor && !isSpecial()) {
           e.preventDefault();
           if (e.key.toLowerCase() === 'y' || e.shiftKey) S.editor.redoStep(); else S.editor.undoStep();
           return;
@@ -1498,18 +1622,18 @@
       }
       if (mod && e.key.toLowerCase() === 'n' && !e.shiftKey) { e.preventDefault(); newNote(); }
       else if (mod && e.shiftKey && e.key.toLowerCase() === 'n') { e.preventDefault(); newCollection('', ''); }
-      else if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k') { if (S.note && !isCollection()) { e.preventDefault(); linkDialog(); } }
+      else if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k') { if (S.note && !isSpecial()) { e.preventDefault(); linkDialog(); } }
       else if (mod && !e.altKey && e.code === 'Slash') { e.preventDefault(); shortcutsDialog(); }
       else if (e.key === 'F2' && !mod) { if (S.note) { e.preventDefault(); $('note-title').focus(); $('note-title').select(); } }
-      else if (mod && e.shiftKey && !e.altKey && (e.code === 'Digit7' || e.code === 'Digit8' || e.code === 'Digit9')) { if (S.note && !isCollection()) { e.preventDefault(); ensureEditor().linePrefix(e.code === 'Digit7' ? 'num' : e.code === 'Digit8' ? 'list' : 'task'); } }
-      else if (mod && e.altKey && e.code === 'Digit0') { if (S.note && !isCollection()) { e.preventDefault(); ensureEditor().plainText(); } }
-      else if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'd') { const ed = S.editor; if (ed && ed.active && S.note && !isCollection() && !(document.activeElement && document.activeElement.matches('input, textarea, .cell-edit'))) { e.preventDefault(); ed.duplicateBlocks(ed.active); } }
+      else if (mod && e.shiftKey && !e.altKey && (e.code === 'Digit7' || e.code === 'Digit8' || e.code === 'Digit9')) { if (S.note && !isSpecial()) { e.preventDefault(); ensureEditor().linePrefix(e.code === 'Digit7' ? 'num' : e.code === 'Digit8' ? 'list' : 'task'); } }
+      else if (mod && e.altKey && e.code === 'Digit0') { if (S.note && !isSpecial()) { e.preventDefault(); ensureEditor().plainText(); } }
+      else if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'd') { const ed = S.editor; if (ed && ed.active && S.note && !isSpecial() && !(document.activeElement && document.activeElement.matches('input, textarea, .cell-edit'))) { e.preventDefault(); ed.duplicateBlocks(ed.active); } }
       else if (mod && e.shiftKey && e.key.toLowerCase() === 'f') { e.preventDefault(); $('search').focus(); $('search').select(); }
-      else if (mod && !e.shiftKey && e.key.toLowerCase() === 'f') { if (S.note && !isCollection()) { e.preventDefault(); openFind(); } }
-      else if (mod && e.shiftKey && e.key.toLowerCase() === 'l') { if (S.note) { e.preventDefault(); if (isCollection()) ensureCollection().pick(); else insertFlex(); } }
+      else if (mod && !e.shiftKey && e.key.toLowerCase() === 'f') { if (S.note && !isSpecial()) { e.preventDefault(); openFind(); } }
+      else if (mod && e.shiftKey && e.key.toLowerCase() === 'l') { if (S.note) { e.preventDefault(); if (isCollection()) ensureCollection().pick(); else if (!isChartNote()) insertFlex(); } }
       else if (mod && e.key.toLowerCase() === 's') { e.preventDefault(); flushSave().then(() => FS.toast('Saved')); }
-      else if (mod && e.altKey && /^[1-6]$/.test(e.key)) { if (!isCollection()) { e.preventDefault(); ensureEditor().linePrefix('h', +e.key); } }
-      else if (mod && e.altKey && (e.key === '[' || e.key === ']')) { if (!isCollection()) { e.preventDefault(); shiftHeadings(ensureEditor(), e.key === '[' ? -1 : 1); } }
+      else if (mod && e.altKey && /^[1-6]$/.test(e.key)) { if (!isSpecial()) { e.preventDefault(); ensureEditor().linePrefix('h', +e.key); } }
+      else if (mod && e.altKey && (e.key === '[' || e.key === ']')) { if (!isSpecial()) { e.preventDefault(); shiftHeadings(ensureEditor(), e.key === '[' ? -1 : 1); } }
       else if (mod && e.key === ',') { e.preventDefault(); openSettings(); }
       else if (mod && (e.key === '\\' || e.code === 'Backslash')) { e.preventDefault(); toggleNav(); }
     });

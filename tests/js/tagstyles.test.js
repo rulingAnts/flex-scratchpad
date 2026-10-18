@@ -162,3 +162,48 @@ test('the tag list’s hierarchy: a group rule covers every tag under it, and ta
   const shape = (n) => n.entries.map((e) => (e.tag ? e.tag.name : [e.node.name, e.node.count, shape(e.node)]));
   assert.deepStrictEqual(plain(shape(root)), [['Syntax', 3, [['Arguments', 2, ['Subject', 'Object']], 'Verb']], ['Discourse', 1, ['Topic shift']]]);
 });
+
+test('chart markers: their own rule namespace, and a whole-row style (Seth, 2026-10-18)', () => {
+  T.setConfig({ project: { '': [{ tag: 'marker:Topic', bg: '#fde68a', row: true }, { tag: 'marker:*', hide: true }, { tag: 'Topic', bg: '#ff0000' }] }, tab: {}, folder: {}, note: {}, text: {}, filters: [] });
+  const marker = { guid: 'm1', name: 'Topic', abbr: 'Top', group: 'Discourse', path: ['Discourse'], marker: true };
+  const res = T.resolve(marker, null, { project: '', tab: 'T', folder: '' });
+  assert.strictEqual(res.bg, '#fde68a');
+  assert.strictEqual(res.row, true);
+  assert.strictEqual(res.hide, true);              // marker:* hides every marker; Topic's own rule gives the look
+  // a text TAG called Topic is untouched by marker rules, and a marker by tag rules
+  const tag = { guid: 't4', name: 'Topic', abbr: 'Top', group: 'Discourse', path: ['Discourse'] };
+  const tres = T.resolve(tag, null, { project: '', tab: 'T', folder: '' });
+  assert.strictEqual(tres.bg, '#ff0000');
+  assert.strictEqual(tres.hide, false);
+  assert.strictEqual(tres.row, false);
+  // a group rule for markers; the marker's own rule wins over it
+  T.setConfig({ project: { '': [{ tag: 'marker:group:Discourse', bg: '#caffbf' }] }, tab: {}, folder: {}, note: {}, text: {}, filters: [] });
+  assert.strictEqual(T.resolve(marker, null, { project: '', tab: 'T', folder: '' }).bg, '#caffbf');
+  assert.strictEqual(T.resolve(Object.assign({}, marker, { name: 'Focus' }), null, { project: '', tab: 'T', folder: '' }).bg, '#caffbf');
+  // markersIn reads a chart's tag cells; `row` rides in tags=
+  const chart = { rows: [{ cells: [{ kind: 'tag', tag: { guid: 'm1', name: 'Topic', abbr: 'Top' } }, { kind: 'words' }] }, { cells: [{ kind: 'tag', tag: { guid: 'm1', name: 'Topic', abbr: 'Top' } }] }] };
+  const here = T.markersIn(chart);
+  assert.strictEqual(here.length, 1);
+  assert.strictEqual(here[0].count, 2);
+  assert.strictEqual(here[0].tag.marker, true);
+  const spec = R.parse('{{flex:chart ' + G + '}}');
+  R.setTagRules(spec, [{ tag: 'marker:Topic', row: true, bg: '#fde68a' }]);
+  assert.strictEqual(R.serialize(spec), '{{flex:chart ' + G + ' tags=marker%3ATopic:bg#fde68a+row}}');
+  assert.deepStrictEqual(plain(R.tagRules(R.parse(R.serialize(spec)))), [{ tag: 'marker:Topic', bg: '#fde68a', row: true }]);
+  assert.strictEqual(T.resolve(marker, spec, { project: '', tab: 'T', folder: '' }).row, true);
+});
+
+test('chart columns: the `column:` namespace, apart from tags and markers', () => {
+  T.setConfig({ project: { '': [{ tag: 'column:Nucleus/Subject', bg: '#a0c4ff', br: 'sq' }, { tag: 'column:group:Nucleus', bg: '#caffbf' }, { tag: 'Subject', bg: '#ff0000' }] }, tab: {}, folder: {}, note: {}, text: {}, filters: [] });
+  const subj = { guid: 'column:c3', name: 'Nucleus/Subject', abbr: 'S', group: 'Nucleus', path: ['Nucleus'], column: true };
+  const verb = { guid: 'column:c4', name: 'Nucleus/Verb', abbr: 'V', group: 'Nucleus', path: ['Nucleus'], column: true };
+  const ctx = { project: '', tab: 'T', folder: '' };
+  assert.strictEqual(T.resolve(subj, null, ctx).bg, '#a0c4ff');
+  assert.strictEqual(T.resolve(subj, null, ctx).br, 'sq');
+  assert.strictEqual(T.resolve(verb, null, ctx).bg, '#caffbf');          // the group's rule
+  assert.strictEqual(T.resolve({ guid: 't1', name: 'Subject', abbr: 'S' }, null, ctx).bg, '#ff0000');   // the tag is its own
+  assert.notStrictEqual(T.resolve({ guid: 'm', name: 'Subject', marker: true }, null, ctx).bg, '#ff0000');
+  T.noteColumn({ guid: 'c3', name: 'Subject', abbr: 'S', path: ['Nucleus'] });
+  assert.strictEqual(T.columns().length, 1);
+  assert.strictEqual(T.columns()[0].guid, 'column:c3');
+});

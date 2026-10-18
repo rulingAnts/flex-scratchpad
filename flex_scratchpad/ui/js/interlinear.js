@@ -348,9 +348,10 @@
     const mediaByGuid = new Map((obj.media || []).map((m) => [m.guid, m]));
     const box = el('div', { class: 'flex-obj text-obj' + (obj.cached ? ' cached' : '') });
     // FLEx's text markup tags (Seth, 2026-10-17): drawn under the words when the `tag` line is on
-    const tagsHere = (obj.tags || []).length && FS.tagstyles ? FS.tagstyles.tagsIn(obj) : [];
+    const objT = withChartTags(obj, spec);
+    const tagsHere = (objT.tags || []).length && FS.tagstyles ? FS.tagstyles.tagsIn(objT) : [];
     if (FS.tagstyles && FS.tagstyles.noteTextTitle) FS.tagstyles.noteTextTitle(obj.guid, obj.title);
-    box._showTags = tagsHere.length > 0 && R.showsTags(spec);
+    box._showTags = tagsHere.length > 0 && (R.showsTags(spec) || R.showsCols(spec));
     if (tagsHere.length) box.dataset.tags = tagNames(obj);   // app.js: filtering the note's examples by tag
     const range = obj.range || [segs[0] && segs[0].n, segs.length && segs[segs.length - 1].n];
     // FLEx's own numbers (paragraph.segment, as its Gloss / Print views show them) are what a
@@ -374,7 +375,7 @@
       head.appendChild(el('button', { class: 'lnk play-range', title: 'Play this range', onclick: () => playRange(box, obj, segs.filter((x) => !blankSeg(x)), mediaByGuid, opts) }, '▶ Play ' + flexRange));
     }
     head.appendChild(el('button', { class: 'lnk', title: 'Reload from FLEx', onclick: () => opts.refresh && opts.refresh() }, '↻'));
-    if (opts.editable && tagsHere.length) head.appendChild(el('button', { class: 'lnk tag-btn', 'data-test': 'tag-btn', title: 'FLEx text markup tags in this example: show, hide, style', onclick: (e) => FS.tagstyles.examplePopover(e.currentTarget, spec, obj, opts) }, '\u2691 ' + tagsHere.length));
+    if (opts.editable && tagsHere.length) head.appendChild(el('button', { class: 'lnk tag-btn', 'data-test': 'tag-btn', title: 'FLEx text markup tags' + (R.showsCols(spec) ? ' and chart columns' : '') + ' in this example: show, hide, style', onclick: (e) => FS.tagstyles.examplePopover(e.currentTarget, spec, objT, opts) }, '\u2691 ' + tagsHere.length));
     if (opts.editable && !opts.overlay) head.appendChild(el('button', { class: 'lnk', 'data-test': 'collapse-obj', title: 'Collapse to a chip', onclick: () => setCollapsed(spec, opts, true) }, '⤡'));
     if (opts.editable && opts.inCell && opts.editCell && !opts.overlay) head.appendChild(el('button', { class: 'lnk', title: 'Edit the cell\u2019s text (type before or after this example, add another)', onclick: () => opts.editCell() }, '✎'));
     if (opts.editable && !opts.overlay && opts.duplicate) head.appendChild(el('button', { class: 'lnk', title: 'Duplicate this object', onclick: () => opts.duplicate() }, '⧉'));
@@ -402,9 +403,29 @@
   /* The tags shown on one segment: [{t, res, a, z, lane, firstAi, lastAi}] — `a`..`z` the analysis
    * indices the tag covers IN THIS SEGMENT (a tag over several segments covers all of the middle
    * ones), `lane` so overlapping tags stack, first/lastAi its first and last word cell here. */
+  /* The text's CHART COLUMNS as tags (Seth, 2026-10-18: "style spans of non-chart interlinear text
+   * objects that are mapped to text chart columns"): every word group of the text's charts
+   * (obj.chartSpans, from FlexService._chart_spans) as a tag item with `column: true`, keyed
+   * `column:<Group/Name>` in the rules, drawn by the tag machinery when the `cols` line is on. */
+  function chartTags(obj) {
+    const out = [];
+    (obj.chartSpans || []).forEach((s, i) => {
+      const col = s.column || {};
+      const path = col.path || [];
+      if (FS.tagstyles && FS.tagstyles.noteColumn) FS.tagstyles.noteColumn(col);
+      out.push({ guid: 'col-' + (s.chart || '') + '-' + i, synthetic: true,
+        tag: { guid: 'column:' + (col.guid || col.name), name: path.concat([col.name]).join('/'), abbr: col.abbr || col.name, group: path[path.length - 1] || '', path, column: true, fore: '', back: '', chart: s.chartName, rowLabel: s.row },
+        from: s.from, to: s.to });
+    });
+    return out;
+  }
+  const withChartTags = (obj, spec) => (R.showsCols(spec) && (obj.chartSpans || []).length ? Object.assign({}, obj, { tags: (obj.tags || []).concat(chartTags(obj)) }) : obj);
   function segTags(obj, spec, seg) {
     const out = [];
+    obj = withChartTags(obj, spec);
+    const textOn = R.showsTags(spec), colsOn = R.showsCols(spec);
     for (const t of obj.tags || []) {
+      if (t.synthetic ? !colsOn : !textOn) continue;          // each kind only when its line is on
       if (!t.from || !t.to || seg.n < t.from.seg || seg.n > t.to.seg) continue;
       const res = FS.tagstyles ? FS.tagstyles.resolve(t.tag, spec) : { bg: '#ffd6a5', fg: '#1a1d21', label: true };
       if (res.hide) continue;
@@ -882,7 +903,7 @@
         pop.appendChild(el('hr'));
       } else {
         pop.appendChild(el('div', { class: 'row' }, el('b', {}, 'Lines to show')));
-        const names = { txt: 'Word', morph: 'Morphemes', mgls: 'Morph glosses', cf: 'Lex. entries', gls: 'Word gloss', pos: 'Category', ft: 'Free translation', lit: 'Literal translation', note: 'Notes', tag: 'FLEx text markup tags' };
+        const names = { txt: 'Word', morph: 'Morphemes', mgls: 'Morph glosses', cf: 'Lex. entries', gls: 'Word gloss', pos: 'Category', ft: 'Free translation', lit: 'Literal translation', note: 'Notes', tag: 'FLEx text markup tags', cols: 'Chart columns (from the text’s charts, drawn like tags)' };
         const current = spec.lines && spec.lines.length ? spec.lines : R.DEFAULT_LINES;
         for (const l of R.LINES) {
           const cb = el('input', { type: 'checkbox', checked: current.includes(l) });
@@ -1013,6 +1034,7 @@
     if (F.has('cf') && obj.citationForm && obj.citationForm !== obj.headword && obj.citationForm !== obj.lexemeForm) head.appendChild(el('span', Object.assign({ class: 'ecf', title: 'citation form' }, wsAttrs(vern)), obj.citationForm));
     if (F.has('lf') && obj.lexemeForm && obj.lexemeForm !== obj.headword) head.appendChild(el('span', Object.assign({ class: 'ecf', title: 'lexeme form' }, wsAttrs(vern)), obj.lexemeForm));
     if (F.has('mt') && obj.morphType) head.appendChild(el('span', { class: 'mtype' }, obj.morphType));
+    if (FS.chartProfile && !opts.inCell && !opts.overlay) head.appendChild(el('button', { class: 'lnk', 'data-test': 'entry-chart-profile', title: 'Which chart columns this item sits in, across the project’s text charts', onclick: () => FS.chartProfile(obj.lexemeForm || obj.headword || '') }, '\u25a6 In charts'));
     if (spec.label) head.appendChild(el('span', { class: 'badge' }, spec.label));
     if (obj.cached) head.appendChild(el('span', { class: 'badge warn', title: obj.liveError || '' }, 'cached' + (obj.cachedAt ? ' ' + obj.cachedAt.slice(0, 10) : '')));
     head.appendChild(el('span', { class: 'spacer' }));
@@ -1403,5 +1425,5 @@
     });
   }
 
-  FS.interlinear = { blankSeg, peek, segTags, nowPlaying, render, renderText, renderEntry, renderWordform, renderChip, hydrateInline, openContext, wholeText, openOverlay, closeOverlay, isCollapsed, setCollapsed, styled, styledParts, invalidate, flexGet, openInFlex, labelOf, numberFor, flexTsv, HL_COLORS };
+  FS.interlinear = { blankSeg, peek, segTags, chartTags, withChartTags, nowPlaying, render, renderText, renderEntry, renderWordform, renderChip, hydrateInline, openContext, wholeText, openOverlay, closeOverlay, isCollapsed, setCollapsed, styled, styledParts, invalidate, flexGet, openInFlex, labelOf, numberFor, flexTsv, HL_COLORS };
 })();

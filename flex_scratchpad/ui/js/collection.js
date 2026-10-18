@@ -70,7 +70,7 @@
       }
       if (R.isEmbedLine(line)) {
         const spec = R.parse(line.trim());
-        if (spec && spec.kind === 'text') { cur = { t: 'ex', src: line.trim(), spec, note: '' }; items.push(cur); other = null; continue; }
+        if (spec && (spec.kind === 'text' || spec.kind === 'chart')) { cur = { t: 'ex', src: line.trim(), spec, note: '' }; items.push(cur); other = null; continue; }   // an example, or a chart row (Seth, 2026-10-18)
       }
       const q = /^>\s?(.*)$/.exec(line);
       if (q && cur) { cur.note += (cur.note ? '\n' : '') + q[1]; continue; }
@@ -118,7 +118,7 @@
     changed() { if (this.opts.onChange) this.opts.onChange(this.markdown()); }
     /* The examples the FLEx text export takes, in order, each with its note. */
     flextextItems() {
-      return this.examples().map((i) => ({ kind: 'text', guid: i.spec.guid, seg: i.spec.seg, at: i.spec.at, label: i.spec.label || '', note: (i.note || '').trim() }));
+      return this.examples().filter((i) => i.spec.kind === 'text').map((i) => ({ kind: 'text', guid: i.spec.guid, seg: i.spec.seg, at: i.spec.at, label: i.spec.label || '', note: (i.note || '').trim() }));   // chart rows are not FLEx text
     }
     /* What the other exports read: blocks as the editor would hold them — groups as headings,
      * examples numbered, notes as paragraphs under them. */
@@ -179,7 +179,7 @@
         const src = cleanEmbed(s);
         const spec = src && R.parse(src);
         if (!spec) { FS.toast('Only rendered examples go into a collection, not links.', 'warn'); continue; }
-        if (spec.kind !== 'text') { FS.toast('A collection holds interlinear examples only — that is a lexicon entry.', 'warn'); continue; }
+        if (spec.kind !== 'text' && spec.kind !== 'chart') { FS.toast('A collection holds interlinear examples and chart rows only — that is a lexicon entry.', 'warn'); continue; }
         fresh.push({ t: 'ex', src, spec, note: '' });
       }
       if (!fresh.length) return 0;
@@ -432,8 +432,15 @@
      * appends the ones not here yet) and "Edit rule…". */
     ruleBar() {
       const rule = this.opts.rule ? this.opts.rule() : null;
-      if (!rule || !(rule.tags || []).length) return null;
+      if (!rule || (!(rule.tags || []).length && !rule.charts)) return null;
       const label = (sel) => (/^group:/i.test(sel) ? 'all of ' + sel.slice(6) : sel === '*' ? 'every tag' : sel);
+      if (rule.charts) {
+        // a CHART rule: the rows a chart search matches (Seth, 2026-10-18)
+        return el('span', { class: 'coll-rule', 'data-test': 'coll-rule', title: 'This collection was made from every chart row matching this search' },
+          el('span', { class: 'coll-rule-tags' }, '\u25a6 ' + rule.charts),
+          el('button', { class: 'btn', 'data-test': 'coll-rule-update', title: 'Look through the charts again and add the matching rows that are not here yet', onclick: (e) => { e.currentTarget.disabled = true; this.opts.onRuleUpdate && this.opts.onRuleUpdate(); } }, '\u27f3 Find new rows'),
+          el('button', { class: 'btn', 'data-test': 'coll-rule-edit', title: 'Change the chart search', onclick: () => this.opts.onRuleEdit && this.opts.onRuleEdit() }, 'Edit rule\u2026'));
+      }
       return el('span', { class: 'coll-rule', 'data-test': 'coll-rule', title: 'This collection was made from every line carrying one of these FLEx tags' + (rule.texts && rule.texts.length ? ' in ' + rule.texts.length + ' chosen text' + (rule.texts.length === 1 ? '' : 's') : '') },
         el('span', { class: 'coll-rule-tags' }, '\u2691 ' + rule.tags.map(label).join(', ')),
         el('button', { class: 'btn', 'data-test': 'coll-rule-update', title: 'Look through the project again and add the matching lines that are not here yet', onclick: (e) => { e.currentTarget.disabled = true; this.opts.onRuleUpdate && this.opts.onRuleUpdate(); } }, '\u27f3 Find new lines'),
