@@ -561,9 +561,9 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   word/gloss. Exports: `export.js chartBlock` → `{type: 'chart'}` → an HTML `table.tchart`, a Word
   table (`docx_writer.chart`: header spans, a cell's own `bg` shades it). Search: `marker:Topic`
   = the ⚐name token `model.chart_searchable_text` adds; `texts_used` counts a chart under its
-  text (`charts`). A chart link (`flex:chart/<guid>`) opens the TEXT in FLEx. Not yet: the chart
-  NOTE type with custom columns, marker visual filters with row-level rules, the chart search /
-  column profile / chart collections, text tags inside cells (plans/BACKLOG.md).
+  text (`charts`). A chart link (`flex:chart/<guid>`) opens the TEXT in FLEx. The chart NOTE
+  kind, the marker filters, the chart search / profile / collections and the columns-as-tags are
+  the three bullets below; what is still open is in plans/BACKLOG.md › Text Charts.
 - CHART NOTES (Seth, 2026-10-18: "a text chart note type (similar to the example collection, except
   that it would focus on one text chart …)" with "custom columns … (a) a user-custom-defined list of
   choices … project-wide … (b) some kind of formula or rule … (c) just an extra notes column …
