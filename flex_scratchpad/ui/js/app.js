@@ -889,7 +889,7 @@
     }
     if (href.startsWith('tag:')) { S.tag = href.slice(4); renderRail(); if (S.query) runSearch(); else renderList(); return; }
     if (href.startsWith('flex:')) {
-      const m = /^flex:(entry|sense|text|wordform)\/([0-9a-f-]{36})/i.exec(href);
+      const m = /^flex:(entry|sense|text|wordform|chart)\/([0-9a-f-]{36})/i.exec(href);
       if (m) { try { await FS.api.flex_open_object(m[1], m[2]); FS.toast('Sent to FieldWorks'); } catch (e) { FS.toast(e.message, 'error'); } }
       return;
     }

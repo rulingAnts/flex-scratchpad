@@ -18,7 +18,18 @@
  *   {{file attachments/preview.html preview h=480}}     a web page shown in the note, 480 px high
  * The reference is percent-encoded only where it must be (% space " { } | and controls), so
  * Unicode names stay readable; a relative reference is inside the notebook, an absolute one is
- * a link. spec = {kind: 'file', ref, label, extra}; `guid` is ''. */
+ * a link. spec = {kind: 'file', ref, label, extra}; `guid` is ''.
+ *
+ * A TEXT CHART (Seth, 2026-10-18 — a FieldWorks constituent chart, whole, a range of rows, or
+ * a block of cells), the same grammar with chart targets:
+ *   {{flex:chart <guid> rows=2-5 at=<a>-<b> cols=Nucleus,Postnuclear/Inner lines=txt,gls free=row hl=r2 b=r3c4 u=r2c3.1 color[red]=c4 "label"}}
+ * `rows=` counts rows 1.. through the chart (FLEx's own labels "1a", "2b" are what is shown);
+ * `at=` anchors the first and last ROW by GUID (spec.seg / spec.at hold both, as for a text);
+ * `cols=` lists the columns shown (a name, Group/Name, an abbreviation, a group's name for all
+ * of its columns, c3 or c3-c5 by position); `headers=off` drops the header rows; `free=col|row|
+ * tip|off` places the free translations; `notes=off` hides the row notes. A chart target is
+ * rN (a row), cN (a column), rNcM (a cell), rNcM.W (a word), with ranges rN-rM / rNcM-rNcK /
+ * rNcM.W-K; `line:` as for texts (txt by default). */
 (function () {
   'use strict';
   const FS = (window.FS = window.FS || {});
@@ -43,6 +54,39 @@
 
   const TARGET_RE = new RegExp('^(?:(' + LINES.join('|') + '):)?(\\d+)(?:\\.(\\d+))?(?::(\\d+)(?:-(\\d+))?)?(?:-(\\d+)(?:\\.(\\d+))?)?$');
   const QUOTED_RE = new RegExp('^(?:(' + LINES.join('|') + '):)?(\\*)?"(.*)"$');
+  // chart targets: rN[cM[.W]][-rN[cM[.W]] | -cM | -W] and cN[-cM]
+  const CHART_TARGET_RE = new RegExp('^(?:(' + LINES.join('|') + '):)?(?:r(\\d+)(?:c(\\d+))?(?:\\.(\\d+))?(?:-(?:r(\\d+))?(?:c(\\d+))?(?:\\.?(\\d+))?)?|c(\\d+)(?:-c?(\\d+))?)$');
+  const CHART_LINES = ['txt', 'gls', 'morph', 'mgls', 'pos', 'cf'];
+  const DEFAULT_CHART_LINES = ['txt', 'gls'];
+  const FREE_MODES = ['row', 'col', 'tip', 'off'];
+
+  function parseChartTarget(item) {
+    item = item.trim();
+    const m = CHART_TARGET_RE.exec(item);
+    if (!m) return null;
+    const t = { line: m[1] || '' };
+    if (m[8] != null) { t.col = +m[8]; if (m[9]) t.colEnd = +m[9]; return t; }
+    t.row = +m[2];
+    if (m[3]) t.col = +m[3];
+    if (m[4]) t.word = +m[4];
+    if (m[5] || m[6] || m[7]) {
+      if (m[5]) t.rowEnd = +m[5];
+      if (m[6]) t.colEnd = +m[6];
+      if (m[7]) t.wordEnd = +m[7];
+      if (t.rowEnd == null && t.colEnd == null && t.wordEnd != null && t.word == null) { t.colEnd = t.wordEnd; delete t.wordEnd; }   // r2c3-5 → columns 3–5
+    }
+    if (t.word != null && !t.line) t.line = 'txt';          // a word target styles its Words line unless told otherwise
+    return t;
+  }
+  function serializeChartTarget(t) {
+    let s = t.line && !(t.line === 'txt' && t.word != null) ? t.line + ':' : '';
+    if (t.row == null) return s + 'c' + t.col + (t.colEnd != null && t.colEnd !== t.col ? '-c' + t.colEnd : '');
+    s += 'r' + t.row + (t.col != null ? 'c' + t.col : '') + (t.word != null ? '.' + t.word : '');
+    if (t.rowEnd != null || t.colEnd != null || t.wordEnd != null) {
+      s += '-' + (t.rowEnd != null ? 'r' + t.rowEnd : '') + (t.colEnd != null ? 'c' + t.colEnd : '') + (t.wordEnd != null ? (t.rowEnd != null || t.colEnd != null ? '.' : '') + t.wordEnd : '');
+    }
+    return s;
+  }
 
   function parseTarget(item) {
     item = item.trim();
@@ -130,13 +174,14 @@
   function parse(src) {
     const s = String(src || '').trim().replace(/^\{\{\s*/, '').replace(/\s*\}\}$/, '');
     if (/^file\s/.test(s)) return parseFile(s);
-    const m = /^flex:(entry|sense|text|wordform)\s+([0-9a-fA-F-]{36})\s*([\s\S]*)$/i.exec(s);
+    const m = /^flex:(entry|sense|text|wordform|chart)\s+([0-9a-fA-F-]{36})\s*([\s\S]*)$/i.exec(s);
     if (!m || !GUID.test(m[2])) return null;
     const spec = { kind: m[1].toLowerCase(), guid: m[2].toLowerCase(), seg: null, at: null, lines: null, fields: null, senses: null, ws: null, styles: [], label: '', extra: {} };
+    const chart = spec.kind === 'chart';
     for (const tok of tokenize(m[3])) {
       if (tok.label != null) { spec.label = tok.label; continue; }
       if (tok.flag) { spec.extra[tok.flag] = true; continue; }
-      if (tok.key === 'seg') {
+      if (tok.key === 'seg' || (chart && tok.key === 'rows')) {
         const r = /^(\d+)(?:-(\d+))?$/.exec(tok.val);
         if (r) spec.seg = [+r[1], r[2] ? +r[2] : +r[1]];
       } else if (tok.key === 'at') {
@@ -157,7 +202,7 @@
         spec.senses = splitItems(tok.val).map((x) => x.trim()).filter((x) => /^\d+(\.\d+)*$/.test(x));
         if (!spec.senses.length) spec.senses = null;
       } else if (STYLES.includes(tok.key)) {
-        const targets = splitItems(tok.val).map(parseTarget).filter(Boolean);
+        const targets = splitItems(tok.val).map(chart ? parseChartTarget : parseTarget).filter(Boolean);
         if (targets.length) spec.styles.push({ style: tok.key, color: tok.color || '', targets });
       } else {
         spec.extra[tok.key] = tok.val;
@@ -174,7 +219,8 @@
       return '{{' + parts.join(' ') + '}}';
     }
     const parts = ['flex:' + spec.kind + ' ' + spec.guid];
-    if (spec.seg) parts.push('seg=' + spec.seg[0] + (spec.seg[1] !== spec.seg[0] ? '-' + spec.seg[1] : ''));
+    const chart = spec.kind === 'chart';
+    if (spec.seg) parts.push((chart ? 'rows=' : 'seg=') + spec.seg[0] + (spec.seg[1] !== spec.seg[0] ? '-' + spec.seg[1] : ''));
     if (spec.at && spec.at[0]) parts.push('at=' + spec.at[0] + (spec.at[1] && spec.at[1] !== spec.at[0] ? '-' + spec.at[1] : ''));
     if (spec.lines && spec.lines.length) parts.push('lines=' + spec.lines.join(','));
     if (spec.fields) parts.push('fields=' + (spec.fields.length ? spec.fields.join(',') : 'none'));
@@ -182,7 +228,7 @@
     if (spec.ws && Object.keys(spec.ws).length) parts.push('ws=' + Object.keys(spec.ws).filter((k) => spec.ws[k]).map((k) => k + ':' + spec.ws[k]).join(','));
     for (const g of spec.styles) {
       if (!g.targets.length) continue;
-      parts.push(g.style + (g.color ? '[' + g.color + ']' : '') + '=' + g.targets.map(serializeTarget).join(','));
+      parts.push(g.style + (g.color ? '[' + g.color + ']' : '') + '=' + g.targets.map(chart ? serializeChartTarget : serializeTarget).join(','));
     }
     for (const [k, v] of Object.entries(spec.extra || {})) parts.push(v === true ? k : k + '=' + v);
     if (spec.label) parts.push('"' + spec.label.replace(/"/g, '”') + '"');
@@ -192,7 +238,8 @@
   function sameTarget(a, b) {
     return a.line === b.line && a.seg === b.seg && (a.word || null) === (b.word || null)
       && (a.segEnd || null) === (b.segEnd || null) && (a.wordEnd || null) === (b.wordEnd || null)
-      && String(a.chars || '') === String(b.chars || '') && (a.text || null) === (b.text || null) && !!a.all === !!b.all;
+      && String(a.chars || '') === String(b.chars || '') && (a.text || null) === (b.text || null) && !!a.all === !!b.all
+      && (a.row || null) === (b.row || null) && (a.col || null) === (b.col || null) && (a.rowEnd || null) === (b.rowEnd || null) && (a.colEnd || null) === (b.colEnd || null);
   }
 
   function hasStyle(spec, target, style, color) {
@@ -331,6 +378,46 @@
     return index.get(key(n, line, w)) || [];
   }
 
+  /* A chart's styles: { "row|col|word|line" → [{style, color}] } — 0 stands for "every" (a row
+   * target keys row|0|0, a column 0|col|0, a cell row|col|0, a word row|col|w); `line` is ''
+   * for the whole cell. `chartStylesFor` gathers the four levels for one word of one cell. */
+  const ckey = (r, c, w, line) => r + '|' + c + '|' + w + '|' + (line || '');
+  function resolveChartStyles(spec, chart) {
+    const index = new Map();
+    const add = (r, c, w, line, g) => { const k = ckey(r, c, w, line); if (!index.has(k)) index.set(k, []); index.get(k).push({ style: g.style, color: g.color || '' }); };
+    const nrows = (chart && chart.rowCount) || 0;
+    const ncols = (chart && chart.template && chart.template.columns && chart.template.columns.length) || 0;
+    for (const g of spec.styles || []) {
+      for (const t of g.targets) {
+        if (t.row == null) { for (let c = t.col; c <= (t.colEnd != null ? t.colEnd : t.col); c++) add(0, c, 0, t.line, g); continue; }
+        const r2 = t.rowEnd != null ? t.rowEnd : t.row;
+        for (let r = t.row; r <= Math.min(r2, nrows || r2); r++) {
+          if (t.col == null) { add(r, 0, 0, t.line, g); continue; }
+          const c2 = t.colEnd != null ? t.colEnd : t.col;
+          for (let c = t.col; c <= Math.min(c2, ncols || c2); c++) {
+            if (t.word == null) { add(r, c, 0, t.line, g); continue; }
+            const w2 = t.wordEnd != null ? t.wordEnd : t.word;
+            for (let w = t.word; w <= w2; w++) add(r, c, w, t.line || 'txt', g);
+          }
+        }
+      }
+    }
+    return index;
+  }
+  function chartStylesFor(index, r, c, w, line) {
+    const out = [];
+    const levels = [[r, 0, 0], [0, c, 0], [r, c, 0]];
+    if (w) levels.push([r, c, w]);
+    for (const [rr, cc, ww] of levels) {
+      const e0 = index.get(ckey(rr, cc, ww, ''));
+      if (e0) out.push(...e0);
+      if (line) { const e = index.get(ckey(rr, cc, ww, line)); if (e) out.push(...e); }
+    }
+    return out;
+  }
+  const chartLines = (spec) => { const l = spec.lines && spec.lines.length ? spec.lines.filter((x) => CHART_LINES.includes(x)) : DEFAULT_CHART_LINES; return l.length ? l : ['txt']; };
+  const freeMode = (spec) => { const v = (spec.extra && spec.extra.free) || 'row'; return FREE_MODES.includes(v) ? v : 'row'; };
+
   /* An example's OWN look for FLEx text markup tags (Seth, 2026-10-17: project-, tab-, folder- and
    * example-scoped styles, the most specific winning; tagstyles.js resolves them): the `tags=`
    * key, `tags=Subject:off,Topic:bg#d1fae5+b,*:nolabel` — per tag (its name with spaces as `_`,
@@ -417,6 +504,7 @@
     ENTRY_FIELDS, DEFAULT_FIELDS, entryFields, visibleSenses,
     LINES, STYLES, DEFAULT_LINES, GUID, EMBED_RE, encodeRef, decodeRef,
     parse, serialize, parseTarget, serializeTarget, sameTarget,
+    CHART_LINES, DEFAULT_CHART_LINES, FREE_MODES, parseChartTarget, serializeChartTarget, resolveChartStyles, chartStylesFor, chartLines, freeMode,
     hasStyle, toggleStyle, clearStyles, resolveStyles, stylesFor, findAll,
     lineTextOfWord, lineTextOfSegment, findEmbeds,
     parseTagRules, serializeTagRules, tagRules, setTagRules, showsTags,

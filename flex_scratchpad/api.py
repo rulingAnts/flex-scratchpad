@@ -21,6 +21,7 @@ from . import APP_NAME, __version__, build_id
 from .config import AppConfig
 from .flex import FlexService
 from .flex.lcm import FlexError
+from .log import LOG, logged as _logged
 from .notebook import ATTACH_DIR, Notebook, clean_rule, example_keys, inline_tags, match_embed, match_keys
 
 
@@ -99,6 +100,8 @@ class Api:
             svc.open()
 
     def _progress(self, message: str) -> None:
+        if message:
+            LOG.info("progress: %s", message)
         self._emit("progress", {"message": message})
 
     def _emit(self, event: str, data: dict) -> None:
@@ -126,6 +129,14 @@ class Api:
                 "flex": self._flex.status(),
                 "canBrowse": self._window is not None,
             }
+
+    def client_log(self, level: str, message: str, where: str = "") -> bool:
+        """What the page reports (window.onerror, unhandled promise rejections, console.error /
+        console.warn — api.js `clientLog`): into the same log as everything else, so a JS failure
+        shows in the terminal transcript without the developer tools."""
+        lvl = {"error": 30 + 10, "warn": 30, "warning": 30, "info": 20, "debug": 10}.get(str(level or "").lower(), 20)
+        LOG.log(lvl, "page %s: %s%s", level, str(message or "")[:2000], (" @ " + str(where)[:300]) if where else "")
+        return True
 
     def choose_notebook_folder(self) -> dict | None:
         """Native folder dialog; switches the notebook if the user picks one."""
@@ -168,9 +179,55 @@ class Api:
         d["inlineTags"] = inline_tags(n.body)
         return d
 
-    def create_note(self, tab: str | None = None, folder: str = "", title: str = "", body: str = "", kind: str = "") -> dict:
-        n = self._nb.create_note(tab, folder, title, body, kind or "")
+    def create_note(self, tab: str | None = None, folder: str = "", title: str = "", body: str = "", kind: str = "", chart: str = "") -> dict:
+        n = self._nb.create_note(tab, folder, title, body, kind or "", chart=chart or "")
         return self.get_note(n.id)
+
+    # -- chart notes (Seth, 2026-10-18: "a text chart note type … custom columns … project-wide") --
+
+    def create_chart_note(self, tab: str | None, folder: str, title: str, chart_guid: str, view: str = "") -> dict:
+        """A note that IS one text chart (`kind: chart`, `chart: <guid>`): its body starts with the
+        view embed (`{{flex:chart <guid> …}}`, every view setting and the user's styles) that
+        ui/js/chartnote.js owns, the custom columns and their values after it."""
+        g = (chart_guid or "").lower()
+        try:
+            ch = self._flex.get_object("chart", g, prefer_cache=False)
+        except FlexError as e:
+            raise RuntimeError(e.message) from e
+        body = (view.strip() if view and view.strip().startswith("{{flex:chart " + g) else "{{flex:chart " + g + "}}") + "\n"
+        n = self._nb.create_note(tab, folder, title or ((ch.get("name") or "Chart") + " \u2014 " + (ch.get("title") or "")), body, "chart", chart=g)
+        return self.get_note(n.id)
+
+    def chart_lists(self) -> dict:
+        """The notebook's choice lists for chart-note list columns: {name: {options: [...], open: bool}}."""
+        return self._nb.config.setdefault("chartLists", {})
+
+    def set_chart_list(self, name: str, options: list | None = None, open_: bool | None = None, rename: str | None = None) -> dict:
+        """Create or change one list (project-wide: every chart note using the name sees it);
+        `rename` moves it under a new name; options is None → delete it."""
+        name = str(name or "").strip()[:80]
+        if not name:
+            raise ValueError("A list needs a name")
+        lists = self._nb.config.setdefault("chartLists", {})
+        if options is None and rename is None and open_ is None:
+            lists.pop(name, None)
+        else:
+            cur = dict(lists.get(name) or {"options": [], "open": True})
+            if options is not None:
+                seen: list[str] = []
+                for o in options:
+                    o = str(o or "").strip()[:120]
+                    if o and o not in seen:
+                        seen.append(o)
+                cur["options"] = seen
+            if open_ is not None:
+                cur["open"] = bool(open_)
+            if rename and rename.strip() and rename.strip() != name:
+                lists.pop(name, None)
+                name = rename.strip()[:80]
+            lists[name] = cur
+        self._nb.save_config()
+        return lists
 
     def list_collections(self) -> list[dict]:
         """The example collections, for "Add to collection…" (newest first, with counts)."""
@@ -804,6 +861,37 @@ class Api:
         """The project's text markup tags (the picker's Tags search, the tag style editors)."""
         return self._flex.text_tags()
 
+    def export_chart(self, guid: str, fmt: str = "xml", rows: list | None = None, path: str | None = None) -> str | None:
+        """A text chart (or rows a..b of it) as FieldWorks' discourse-chart XML or as JSON with
+        every GUID (flex/chart_export.py); `path` skips the save dialog (tests)."""
+        from .flex import chart_export
+        fmt = (fmt or "xml").lower()
+        if fmt not in ("xml", "json"):
+            raise ValueError("fmt is xml or json")
+        try:
+            chart = self._flex.get_object("chart", guid, prefer_cache=False)
+        except FlexError as e:
+            raise RuntimeError(e.message) from e
+        rr = None
+        if rows and len(rows) >= 1 and rows[0]:
+            rr = (int(rows[0]), int(rows[1] if len(rows) > 1 and rows[1] else rows[0]))
+        name = safe_filename((chart.get("name") or "chart") + " - " + (chart.get("title") or "") + (f" rows {rr[0]}-{rr[1]}" if rr else "")) + "." + fmt
+        target = path or self._save_dialog(name)
+        if not target:
+            return None
+        app = f"{APP_NAME} {__version__} (build {build_id()})"
+        text = chart_export.discourse_xml(chart, rr, app) if fmt == "xml" else chart_export.chart_json(chart, rr, app)
+        Path(target).write_text(text, encoding="utf-8", newline="\n")
+        LOG.info("chart %s exported as %s → %s", guid[:8], fmt, target)
+        return target
+
+    def flex_charts(self, text_guid: str = "") -> list[dict]:
+        """The project's text charts, or one text's (the picker's Charts tab, a chart note)."""
+        return self._flex.charts(text_guid or None)
+
+    def flex_chart_markers(self) -> list[dict]:
+        return self._flex.chart_markers()
+
     def flex_tag_occurrences(self, tag_guid: str, q: str = "") -> list[dict]:
         try:
             return self._flex.tag_occurrences(tag_guid, q)
@@ -925,6 +1013,14 @@ class Api:
     def flex_open_object(self, kind: str, guid: str) -> bool:
         """Jump to an object in FieldWorks by kind + GUID (a link chip was clicked)."""
         from .flex import model
+        if kind == "chart":
+            # FieldWorks has no link to a chart itself: open its text (the Text Chart tab is there)
+            try:
+                chart = self._flex.get_object("chart", guid, prefer_cache=True)
+            except FlexError:
+                chart = {}
+            url = chart.get("url") or model.goto_url(self._flex.project_name, "text", chart.get("text") or guid)
+            return self._open_url(url)
         url = model.goto_url(self._flex.project_name, kind, guid)
         return self._open_url(url)
 
@@ -1070,3 +1166,11 @@ class Api:
             return True
         except OSError:
             return False
+
+
+# Every public method of Api is the js_api surface; each call is logged (flex_scratchpad/log.py:
+# the arguments, the result in short, the time; secrets redacted) so a run from a terminal says
+# exactly what the page asked for and what came back.
+for _name, _fn in list(vars(Api).items()):
+    if not _name.startswith("_") and callable(_fn) and not isinstance(_fn, (staticmethod, classmethod, property)):
+        setattr(Api, _name, _logged(_fn))

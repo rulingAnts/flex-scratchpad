@@ -38,12 +38,12 @@
     right.append(preview, optsRow, btnRow);
     m.body.appendChild(el('div', { class: 'picker' }, left, right));
     // FLEx text markup TAGS as a way in (Seth, 2026-10-17): a tag, then every place it is used
-    const modes = [['lexicon', 'Lexicon'], ['texts', 'Texts'], ['tags', 'FLEx tags']];
+    const modes = [['lexicon', 'Lexicon'], ['texts', 'Texts'], ['charts', 'Text charts'], ['tags', 'FLEx tags']];
     const setMode = (mode) => {
       state.mode = mode; state.sel = null; state.text = null; state.range = null; state.tag = null;
       tabs.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.mode === mode));
-      search.placeholder = mode === 'lexicon' ? 'Search headword or gloss…' : mode === 'tags' ? 'Search tags by name…' : 'Search text titles…';
-      preview.innerHTML = '<div class="muted small">' + (mode === 'lexicon' ? 'Pick an entry on the left.' : mode === 'tags' ? 'Pick a tag, then one of the places it is used.' : 'Pick a text, then click the first and last segment of the range.') + '</div>';
+      search.placeholder = mode === 'lexicon' ? 'Search headword or gloss…' : mode === 'tags' ? 'Search tags by name…' : mode === 'charts' ? 'Search charts by text or name…' : 'Search text titles…';
+      preview.innerHTML = '<div class="muted small">' + (mode === 'lexicon' ? 'Pick an entry on the left.' : mode === 'tags' ? 'Pick a tag, then one of the places it is used.' : mode === 'charts' ? 'Pick a chart, then click the first and last row of the range (or insert it whole).' : 'Pick a text, then click the first and last segment of the range.') + '</div>';
       optsRow.innerHTML = ''; btnRow.innerHTML = '';
       doSearch();
       search.focus();
@@ -59,6 +59,17 @@
           for (const h of hits) {
             const it = el('div', { class: 'pick-item' }, el('span', { class: 'hw' }, h.headword || h.lexeme || '?'), h.pos ? el('span', { class: 'pos' }, h.pos) : null, el('span', { class: 'gl' }, h.gloss || ''), h.senses > 1 ? el('span', { class: 'n' }, h.senses + ' senses') : null);
             it.addEventListener('click', () => { results.querySelectorAll('.on').forEach((x) => x.classList.remove('on')); it.classList.add('on'); pickEntry(h); });
+            results.appendChild(it);
+          }
+        } else if (state.mode === 'charts') {
+          const q = search.value.trim().toLowerCase();
+          const all = await FS.api.flex_charts('');
+          const hits = all.filter((c) => !q || ((c.title || '') + ' ' + (c.name || '') + ' ' + (c.template || '')).toLowerCase().includes(q));
+          results.innerHTML = '';
+          if (!hits.length) results.appendChild(el('div', { class: 'pick-item muted' }, all.length ? 'No chart matches.' : 'This project has no text charts yet (Texts & Words › Text Chart in FieldWorks).'));
+          for (const c of hits) {
+            const it = el('div', { class: 'pick-item', 'data-test': 'pick-chart' }, el('span', { class: 'hw' }, c.title || '(untitled text)'), el('span', { class: 'pos' }, c.name || 'chart'), el('span', { class: 'n' }, (c.rows || 0) + ' row' + (c.rows === 1 ? '' : 's') + (c.template ? ' · ' + c.template : '') + (c.cached ? ' · cached' : '')));
+            it.addEventListener('click', () => { results.querySelectorAll('.on').forEach((x) => x.classList.remove('on')); it.classList.add('on'); pickChart(c); });
             results.appendChild(it);
           }
         } else if (state.mode === 'tags' && !state.tag) {
@@ -180,6 +191,44 @@
         el('button', { class: 'btn', onclick: () => { onInsert(linkFor('text', h.guid, h.title), false); m.close(); } }, 'Insert link'),
         el('button', { class: 'btn', onclick: () => { onInsert(embedFor('text', h.guid), true); m.close(); } }, 'Whole text'),
         el('button', { class: 'btn primary', onclick: () => { const r = state.range || [read(from.value, 1), read(to.value, 1)]; onInsert(embedFor('text', h.guid, { seg: [Math.min(r[0], r[1]), Math.max(r[0], r[1])], index: state.obj && state.obj.index }), true); m.close(); } }, 'Insert segments'));
+    }
+
+    /* A text chart: the whole chart in the preview; click the first and last row of a range. */
+    async function pickChart(c) {
+      state.chart = c; state.range = null; state.anchor = null;
+      preview.innerHTML = '<div class="flex-loading">Loading…</div>';
+      let obj;
+      try { obj = await FS.api.flex_get('chart', c.guid); } catch (e) { preview.innerHTML = ''; preview.appendChild(el('div', { class: 'flex-err' }, e.message)); return; }
+      state.obj = obj;
+      const draw = () => {
+        preview.innerHTML = '';
+        preview.appendChild(el('div', { class: 'muted small', style: { marginBottom: '6px' } }, 'Click the first and then the last row of the range you want; the column headings always come along.'));
+        const node = FS.chart.renderChart(obj, { kind: 'chart', guid: obj.guid, seg: null, at: null, lines: null, styles: [], label: '', extra: {} }, { editable: false, context: true });
+        node.querySelectorAll('tr.crow').forEach((tr) => {
+          const n = +tr.dataset.row;
+          tr.classList.add('pick');
+          if (state.range && n >= state.range[0] && n <= state.range[1]) tr.classList.add('in-range');
+          tr.addEventListener('click', (e) => {
+            if (e.target.closest('a, button')) return;
+            if (state.anchor == null || (state.range && state.range[0] !== state.range[1])) { state.anchor = n; state.range = [n, n]; }
+            else { state.range = [Math.min(state.anchor, n), Math.max(state.anchor, n)]; state.anchor = null; }
+            draw();
+          });
+        });
+        preview.appendChild(node);
+        const lab = (n) => { const e = (obj.index || []).find((i) => i.n === n); return e ? e.label : String(n); };
+        rangeInfo.textContent = state.range ? (state.range[0] === state.range[1] ? 'Row ' + lab(state.range[0]) : 'Rows ' + lab(state.range[0]) + ' – ' + lab(state.range[1])) : 'No rows picked yet';
+      };
+      const rangeInfo = el('span', { class: 'muted' });
+      optsRow.innerHTML = '';
+      optsRow.append(rangeInfo, el('span', { class: 'muted small' }, 'of ' + (obj.rowCount || 0) + ' rows'));
+      draw();
+      const anchors = () => { const at = (n) => { const e = (obj.index || []).find((i) => i.n === n); return e ? e.guid.replace(/-/g, '').slice(-12) : ''; }; return state.range && at(state.range[0]) ? [at(state.range[0]), at(state.range[1]) || at(state.range[0])] : null; };
+      btnRow.innerHTML = '';
+      btnRow.append(
+        el('button', { class: 'btn', onclick: () => { onInsert(linkFor('chart', c.guid, (c.name || 'Chart') + ' — ' + (c.title || '')), false); m.close(); } }, 'Insert link'),
+        el('button', { class: 'btn', 'data-test': 'insert-whole-chart', onclick: () => { onInsert(embedFor('chart', c.guid), true); m.close(); } }, 'Whole chart'),
+        el('button', { class: 'btn primary', 'data-test': 'insert-chart-rows', onclick: () => { if (!state.range) { FS.toast('Click the first and last row first'); return; } onInsert(embedFor('chart', c.guid, { seg: state.range, at: anchors() }), true); m.close(); } }, 'Insert rows'));
     }
 
     function renderPreview() {

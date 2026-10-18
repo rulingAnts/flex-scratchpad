@@ -4227,3 +4227,108 @@ def test_links_dialog_and_the_common_keyboard_shortcuts(app):
     raw = h.api.get_note(n["id"])["body"]
     assert raw.count('"flex-copy")') == 1 and "[ref](https://x.y)" in raw, raw
     assert not errors
+
+
+# ---------------------------------------------------------------------------------- text charts
+CHART = "d15c0000-0000-4000-8000-00000000c001"
+
+
+def test_text_chart_rows_from_the_picker_with_headings_markers_and_translations(app):
+    """Seth, 2026-10-18: a text chart, a range of its rows (the column headings always included),
+    FLEx's markers drawn, the free translations spliced in."""
+    h, page, errors = app
+    new_note(page, "Charted")
+    page.click(".blk-body")
+    page.keyboard.press("Control+Shift+L")
+    page.locator(".picker-tabs button", has_text="Text charts").click()
+    page.wait_for_selector("[data-test=pick-chart]")
+    page.locator("[data-test=pick-chart]").first.click()
+    page.wait_for_selector(".picker-preview tr.crow")
+    rows = page.locator(".picker-preview tr.crow")
+    rows.nth(1).click()
+    rows.nth(3).click()
+    page.locator("[data-test=insert-chart-rows]").click()
+    page.wait_for_selector("#editor .chart-obj tr.crow")
+    saved = lambda: page.wait_for_function("() => document.getElementById('save-state').textContent === 'Saved'", timeout=5000)  # noqa: E731
+    saved()
+    body = body_of(h)
+    assert "{{flex:chart %s rows=2-4 at=" % CHART in body, body
+    obj = page.locator("#editor .chart-obj")
+    assert obj.locator("thead th.th-group").evaluate_all("els => els.map((e) => e.textContent)") == ["Prenuclear", "Nucleus", "Postnuclear"]
+    assert "Subject" in obj.locator("thead th.th-col").all_inner_texts()
+    assert obj.locator("tbody tr.crow th.rlab").all_inner_texts() == ["1b", "2a", "2b"]
+    assert "rows 1b–2b of 7" in obj.locator("[data-test=chart-range]").inner_text()
+    assert obj.locator(".cmoved").inner_text() == "‹‹" and obj.locator(".cclause").inner_text() == "[2a]"
+    # the free translations: one row after each segment's rows, naming them (2a and 2b share a segment)
+    frees = obj.locator("tr.cfree-row")
+    assert frees.count() == 2
+    assert "Yesterday the child saw the river." in frees.nth(0).inner_text() and frees.nth(0).locator(".cfree-rows").inner_text() == "1b"
+    assert frees.nth(1).locator(".cfree-rows").inner_text() == "2a–2b"
+    assert obj.locator("tr.cl-speech th.rlab").inner_text().strip() == "2a"
+    # a word styled from its popover; a column from its heading
+    obj.locator("tr.crow[data-label='1b'] td[data-col='3'] .cw").first.click()
+    page.locator(".popover button.tog", has_text="Bold").click()
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(300)
+    saved()
+    assert "b=r2c3.1" in body_of(h), body_of(h)
+    page.locator("#editor .chart-obj thead th.th-col", has_text="Verb").click()
+    page.locator(".popover .sw").nth(1).click()
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(300)
+    saved()
+    assert "hl[#ffd6a5]=c4" in body_of(h), body_of(h)
+    assert page.locator("#editor .chart-obj td[data-col='4'].st-hl").count() == 3
+    # the ⋯ menu: the free translations as a column spanning the rows of one segment
+    page.locator("#editor .chart-obj [data-test=chart-menu]").click()
+    page.locator(".popover select").first.select_option("col")
+    page.wait_for_selector("#editor .chart-obj td.cfree")
+    assert page.locator("#editor .chart-obj td.cfree").nth(1).get_attribute("rowspan") == "2"
+    saved()
+    assert "free=col" in body_of(h)
+    # collapsed: a chip naming the chart and its rows
+    page.locator("#editor .chart-obj [data-test=collapse-obj]").click()
+    page.wait_for_selector("#editor .flex-collapsed.kind-chart")
+    chip = page.locator("#editor .flex-collapsed.kind-chart")
+    page.wait_for_function("() => document.querySelector('#editor .flex-collapsed.kind-chart .cttl').textContent.includes('Story chart')")
+    assert chip.locator(".crange").inner_text() == "rows 1b–2b"
+    assert not errors
+
+
+def test_a_chart_gets_a_readable_copy_and_exports(app):
+    h, page, errors = app
+    new_note(page, "Chart export")
+    page.keyboard.type("Intro")
+    page.keyboard.press("Enter")
+    page.keyboard.type("{{flex:chart %s rows=1-2}}" % CHART)
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#editor .chart-obj tr.crow")
+    page.wait_for_function("() => document.getElementById('save-state').textContent === 'Saved'", timeout=5000)
+    page.locator("#editor .blk-body").first.click()
+    page.keyboard.press("End")
+    page.keyboard.type(" more")
+    page.wait_for_function("() => document.getElementById('save-state').textContent === 'Saved'", timeout=5000)
+    page.wait_for_timeout(600)
+    notes = [n for n in h.api._nb.list_notes() if n["title"] == "Chart export"]
+    raw = h.api.get_note(notes[0]["id"])["body"]
+    assert '[Story chart — The dog and the river, rows 1a–1b](silfw://' in raw and '"flex-copy")' in raw, raw
+    fence = raw.split("```flex-copy\n")[1].split("\n```")[0]
+    assert fence.splitlines()[0].strip().startswith("Prenuclear") and "1b  Haŋa/yesterday" in fence and "‹‹1b" in fence, fence
+    html_path, docx_path = str(h.tmp / "chart.html"), str(h.tmp / "chart.docx")
+    html = page.evaluate("""async ([hp, dp]) => {
+      const api = window.pywebview.api;
+      const notes = await api.list_notes(); const note = (await Promise.all(notes.map((n) => api.get_note(n.id)))).find((n) => n.title === 'Chart export');
+      const editor = new FS.Editor(document.createElement('div'), {}); editor.load(FS.flexcopy.strip(note.body));
+      const doc = await FS.exporter.buildDoc(note, editor);
+      await api.export_note_html(note.id, FS.exporter.toHtml(doc), hp);
+      await api.export_note_docx(note.id, doc, dp);
+      return FS.exporter.toHtml(doc);
+    }""", [html_path, docx_path])
+    assert 'class="tchart"' in html and "Prenuclear" in html and "Haŋa" in html and "The dog slept." in html and "‹‹1b" in html, html[:400]
+    import zipfile
+    xml = zipfile.ZipFile(docx_path).read("word/document.xml").decode("utf-8")
+    assert "Prenuclear" in xml and "Haŋa" in xml and "The dog slept." in xml and '<w:gridSpan w:val="3"/>' in xml
+    # FLEx's own chart XML, from the object's menu
+    out = h.api.export_chart(CHART, "xml", [1, 2], path=str(h.tmp / "c.xml"))
+    assert '<row type="normal" id="1a"' in Path(out).read_text(encoding="utf-8")
+    assert not errors

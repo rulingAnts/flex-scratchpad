@@ -21,7 +21,9 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="flex-scratchpad", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--notebook", help="notebook folder (markdown files)")
     ap.add_argument("--demo", action="store_true", help="use the built-in demo project")
-    ap.add_argument("--debug", action="store_true", help="open WebView2 devtools")
+    ap.add_argument("--devtools", "--debug", dest="debug", action="store_true", help="turn the browser developer tools on for the page (WebView2 opens them in their own window: press F12 in the app, or right-click → Inspect); off without this flag")
+    ap.add_argument("-v", "--verbose", action="store_true", help="log everything to the terminal (the default when run from a pip install in a terminal; the windowed exe only writes the log file)")
+    ap.add_argument("-q", "--quiet", action="store_true", help="only warnings and errors on the terminal")
     ap.add_argument("--list-projects", action="store_true")
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--selftest", metavar="OUT", help="check the installed program and write a JSON report to OUT, then exit (0 = all good)")
@@ -30,11 +32,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--dump", metavar="TEXT", help="print the first segments of a text (title, part of a title, or GUID) as JSON and exit — for diagnosing what flexicon returns")
     ap.add_argument("--locate", metavar="SOURCE", help="explain where pasted FLEx rows land: SOURCE is 'clip' (the clipboard, Windows) or a text file; writes a JSON report (--out) and exits")
     ap.add_argument("--dump-tags", nargs="?", const="", metavar="TEXT", help="write what the project's text markup tags look like raw (the list, and the tags of the first texts that have any, or of TEXT) to a JSON report (--out) and exit")
-    ap.add_argument("--out", default=None, help="report file for --locate (flex-scratchpad-locate.json) or --dump-tags (flex-scratchpad-tags.json)")
+    ap.add_argument("--dump-charts", nargs="?", const="", metavar="TEXT", help="write what the project's text charts look like raw (every chart, the Chart Markers list, and the rows of the first chart — or of TEXT's — as read) to a JSON report (--out) and exit")
+    ap.add_argument("--out", default=None, help="report file for --locate (flex-scratchpad-locate.json), --dump-tags (flex-scratchpad-tags.json) or --dump-charts (flex-scratchpad-charts.json)")
     ap.add_argument("--backup", action="store_true", help="back the notebook up to the place set in Settings (what closing the app starts), then exit (0 = backed up)")
     ap.add_argument("--register-links", action="store_true", help="register flexscratchpad:// links for this user (Windows) and exit")
     ap.add_argument("url", nargs="?", help="a flexscratchpad://note/<id> link to open (what Windows passes when such a link is clicked)")
     args = ap.parse_args(argv)
+    from .log import setup as log_setup
+    log_setup(verbose=True if args.verbose else None, quiet=args.quiet)
 
     if args.register_links:
         from .links import register_scheme
@@ -58,6 +63,8 @@ def main(argv: list[str] | None = None) -> int:
         return locate_report(args.project, args.locate, args.out or "flex-scratchpad-locate.json", demo=args.demo)
     if args.dump_tags is not None:
         return tags_report(args.project, args.dump_tags, args.out or "flex-scratchpad-tags.json")
+    if args.dump_charts is not None:
+        return charts_report(args.project, args.dump_charts, args.out or "flex-scratchpad-charts.json", demo=args.demo)
     if args.list_projects:
         from .flex.lcm import FlexError, FlexiconBackend
         be = FlexiconBackend()
@@ -132,6 +139,47 @@ def tags_report(project: str | None, which: str, out: str) -> int:
         report.update(be.explain_tags(which))
         Path(out).write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
         print(f"{len(report['list'])} tag(s) in the list, {sum(t['tagCount'] for t in report['texts'])} use(s) in {len(report['texts'])} text(s) → {out}")
+        return 0
+    except FlexError as e:
+        print(e.message, file=sys.stderr)
+        if e.detail:
+            print(e.detail, file=sys.stderr)
+        return 2
+    finally:
+        be.close()
+
+
+def charts_report(project: str | None, which: str, out: str, demo: bool = False) -> int:
+    """Write the project's text charts as read raw (FlexiconBackend.explain_charts) to a UTF-8
+    JSON file — the first thing to ask for when a chart comes out wrong (--demo: the fixture)."""
+    import json
+    from pathlib import Path
+    from . import __version__, build_id
+    from .flex.lcm import FlexError, FlexiconBackend
+    if demo:
+        from .flex.demo import DemoBackend
+        be = DemoBackend()
+        report = {"app": f"FLEx Scratchpad {__version__} (build {build_id()})", "project": be.project_name, "charts": be.list_charts(),
+                  "markers": be.list_chart_markers(), "chart": be.get_chart(be.list_charts()[0]["guid"]) if be.list_charts() else None}
+        Path(out).write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
+        print(f"{len(report['charts'])} chart(s) → {out}")
+        return 0
+    be = FlexiconBackend(progress=lambda m: print(m, file=sys.stderr))
+    try:
+        if not project:
+            names = be.list_projects()
+            if len(names) != 1:
+                print("Several projects; pass --project NAME. Found: " + ", ".join(names), file=sys.stderr)
+                return 2
+            project = names[0]
+        be.open(project)
+        report = {"app": f"FLEx Scratchpad {__version__} (build {build_id()})", "project": project}
+        report.update(be.explain_charts(which))
+        Path(out).write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
+        ch = report.get("chart") or {}
+        print(f"{len(report['charts'])} chart(s), {len(report['markers'])} marker(s) in the list"
+              + (f"; {ch.get('name') or '?'}: {ch.get('rowCount', 0)} row(s), {len((ch.get('template') or {}).get('columns') or [])} column(s)" if ch else "")
+              + f" → {out}")
         return 0
     except FlexError as e:
         print(e.message, file=sys.stderr)

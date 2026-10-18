@@ -485,4 +485,163 @@ def searchable_text(obj: dict) -> str:
             parts += [name, "\u2691" + name.replace(" ", "_")]
     elif obj.get("kind") == "wordform":
         parts += [obj.get("form", "")] + list(obj.get("glosses", []))
+    elif obj.get("kind") == "chart":
+        parts.append(chart_searchable_text(obj))
+    return " ".join(p for p in parts if p)
+
+
+# --------------------------------------------------------------------------- text charts
+# A FieldWorks constituent chart (Texts & Words › Text Chart; Seth, 2026-10-18), as plain dicts:
+#
+#   chart = {kind: 'chart', guid, name, text (guid), title, abbrev, url, ws: {vern, anal},
+#            template: {guid, name, columns: [column…]},   column = tag_item + {n: 1-based index}
+#            markers: [tag_item…]  (the project's Chart Markers list, with its hierarchy),
+#            rows: [row…], rowCount, index: [{n, label, guid}], segments: [segment…] (the
+#            text's segments the rows touch, whole, for the free translations), range, anchors}
+#   row   = {guid, n, label, clause: normal|dependent|speech|song, endSent, endPara, depStart,
+#            depEnd, notes, cells: [cell…]}
+#   cell  = {kind: words, col (column guid), colN, mergeAfter, mergeBefore, guid,
+#            seg, segTo (running numbers), from: {seg, w}, to: {seg, w}, words: [word…]}
+#         | {kind: moved, col, colN, guid, target (word-group guid), preposed}
+#         | {kind: clause, col, colN, guid, rows: [row guid…], labels: [label…]}
+#         | {kind: tag, col, colN, guid, tag: tag_item | None}
+#
+# Word groups address words exactly as text markup tags do (segment + analysis index), so
+# `cell_words` slices a segment's words by their `ai`. Rows are anchored by their GUIDs (the
+# `at=` of a chart embed; `index` is the rows' index, so resolve_range works unchanged).
+
+CLAUSE_TYPES = {0: "normal", 1: "dependent", 2: "song", 3: "speech"}
+
+
+def make_column(guid: str, name: str, abbr: str = "", path: list | None = None, n: int = 0) -> dict:
+    c = tag_item(guid, name, abbr, "", "", "", path=path)
+    c["n"] = int(n)
+    return c
+
+
+def make_chart(guid: str, name: str, text_guid: str, title: str = "", ws_vern: dict | None = None,
+               ws_anal: dict | None = None, template: dict | None = None, markers: list | None = None) -> dict:
+    return {"kind": "chart", "guid": (guid or "").lower(), "name": name or "", "text": (text_guid or "").lower(),
+            "title": title or "", "abbrev": "", "url": "",
+            "ws": {"vern": ws_vern or make_ws(), "anal": ws_anal or make_ws()},
+            "template": template or {"guid": "", "name": "", "columns": []}, "markers": list(markers or []),
+            "rows": [], "rowCount": 0, "index": [], "segments": [], "range": [0, 0], "anchors": ["", ""]}
+
+
+def make_row(guid: str, n: int, label: str, clause: str | int = "normal", end_sent: bool = False,
+             end_para: bool = False, notes: str = "", cells: list | None = None,
+             dep_start: bool = False, dep_end: bool = False) -> dict:
+    if isinstance(clause, int):
+        clause = CLAUSE_TYPES.get(clause, "normal")
+    return {"guid": (guid or "").lower(), "n": int(n), "label": label or str(n), "clause": clause or "normal",
+            "endSent": bool(end_sent), "endPara": bool(end_para), "depStart": bool(dep_start), "depEnd": bool(dep_end),
+            "notes": notes or "", "cells": list(cells or [])}
+
+
+def cell_words(seg: dict, ai_from: int, ai_to: int) -> list[dict]:
+    """The words of a segment whose analysis index lies in ai_from..ai_to (what a word group
+    covers); a word without `ai` counts by its position among the tokens."""
+    out = []
+    for i, w in enumerate(seg.get("words") or []):
+        ai = w.get("ai") if w.get("ai") is not None else i
+        if ai_from <= ai <= ai_to:
+            out.append(dict(w, ai=ai))
+    return out
+
+
+def make_word_cell(guid: str, col: dict | None, seg_a: dict, ai_a: int, seg_b: dict, ai_b: int,
+                   merge_after: bool = False, merge_before: bool = False) -> dict:
+    """A word-group cell: its words taken from the segment(s) it spans. Spanning two segments,
+    the group runs from ai_a to the end of the first and from 0 to ai_b of the last (anything
+    between belongs whole — rare, and left to the caller to add)."""
+    words = cell_words(seg_a, ai_a, ai_b if seg_a is seg_b or seg_a.get("n") == seg_b.get("n") else 10 ** 6)
+    if seg_a.get("n") != seg_b.get("n"):
+        words += cell_words(seg_b, 0, ai_b)
+    return {"kind": "words", "col": (col or {}).get("guid", ""), "colN": (col or {}).get("n", 0), "guid": (guid or "").lower(),
+            "mergeAfter": bool(merge_after), "mergeBefore": bool(merge_before),
+            "seg": int(seg_a.get("n") or 0), "segTo": int(seg_b.get("n") or 0),
+            "from": {"seg": int(seg_a.get("n") or 0), "w": int(ai_a)}, "to": {"seg": int(seg_b.get("n") or 0), "w": int(ai_b)},
+            "words": words}
+
+
+def make_marker_cell(kind: str, guid: str, col: dict | None, **extra) -> dict:
+    d = {"kind": kind, "col": (col or {}).get("guid", ""), "colN": (col or {}).get("n", 0), "guid": (guid or "").lower(),
+         "mergeAfter": bool(extra.pop("merge_after", False)), "mergeBefore": bool(extra.pop("merge_before", False))}
+    d.update(extra)
+    return d
+
+
+def finish_chart(chart: dict, segments_by_n: dict | None = None) -> dict:
+    """Fill the derived fields: row numbers, the rows' index, the segments the rows touch
+    (sorted), each moved-text marker's target row / column, each clause marker's labels."""
+    rows = chart.get("rows") or []
+    for i, r in enumerate(rows, 1):
+        r["n"] = i
+    chart["rowCount"] = len(rows)
+    chart["index"] = [{"n": r["n"], "label": r.get("label") or str(r["n"]), "guid": r.get("guid", "")} for r in rows]
+    by_row = {r["guid"]: r for r in rows}
+    groups = {}
+    for r in rows:
+        for c in r.get("cells") or []:
+            if c.get("kind") == "words":
+                groups[c["guid"]] = (r, c)
+    for r in rows:
+        for c in r.get("cells") or []:
+            if c.get("kind") == "moved":
+                t = groups.get(c.get("target", ""))
+                c["targetRow"] = t[0]["label"] if t else ""
+                c["targetCol"] = t[1]["col"] if t else ""
+                c["targetColN"] = t[1]["colN"] if t else 0
+            elif c.get("kind") == "clause":
+                c["labels"] = [by_row[g]["label"] for g in c.get("rows") or [] if g in by_row]
+    if segments_by_n is not None:
+        used = set()
+        for r in rows:
+            for c in r.get("cells") or []:
+                if c.get("kind") == "words":
+                    used.update(range(c["seg"], c["segTo"] + 1))
+        chart["segments"] = [segments_by_n[n] for n in sorted(used) if n in segments_by_n]
+    chart["range"] = [1, len(rows)] if rows else [0, 0]
+    chart["anchors"] = [anchor_of(rows[0]["guid"]), anchor_of(rows[-1]["guid"])] if rows else ["", ""]
+    return chart
+
+
+def slice_chart(chart: dict, row_from: int | None, row_to: int | None, at: list | None = None) -> dict:
+    """The rows an embed asks for (1-based, inclusive; `at` = row anchors win over numbers, as
+    for text segments). The whole chart's index, template, markers and segments stay, so the
+    page can draw headers and translations for any slice."""
+    import copy
+    rows = chart.get("rows") or []
+    index = chart.get("index") or [{"n": r["n"], "label": r["label"], "guid": r["guid"]} for r in rows]
+    r = resolve_range(index, row_from, row_to, at)
+    a = max(1, r["from"])
+    b = min(len(rows), r["to"] if (row_to or at) else len(rows))
+    out = copy.deepcopy(dict(chart))
+    out["rows"] = [x for x in out["rows"] if a <= x["n"] <= b]
+    out["range"] = [a, b] if rows else [0, 0]
+    out["anchors"] = [anchor_of(out["rows"][0]["guid"]), anchor_of(out["rows"][-1]["guid"])] if out["rows"] else ["", ""]
+    out["rangeMoved"] = bool(r["moved"])
+    out["anchorsLost"] = bool(r["lost"])
+    return out
+
+
+def chart_searchable_text(obj: dict) -> str:
+    """What the index sees for a chart embed: its name, the text's title, every row's label,
+    words, glosses and notes, the column names, and the markers as ⚐name tokens (so
+    `marker:name` in the search box finds the note)."""
+    parts = [obj.get("name", ""), obj.get("title", "")]
+    for c in (obj.get("template") or {}).get("columns") or []:
+        parts += [c.get("name", ""), c.get("abbr", "")]
+    for r in obj.get("rows") or []:
+        parts += [r.get("label", ""), r.get("notes", "")]
+        for c in r.get("cells") or []:
+            if c.get("kind") == "words":
+                for w in c.get("words") or []:
+                    parts += [w.get("txt", ""), w.get("gls", "")]
+                    for m in w.get("morphs") or []:
+                        parts += [m.get("form", ""), m.get("gls", "")]
+            elif c.get("kind") == "tag" and c.get("tag"):
+                nm = c["tag"].get("name") or c["tag"].get("abbr") or ""
+                if nm:
+                    parts += [nm, "⚐" + nm.replace(" ", "_")]
     return " ".join(p for p in parts if p)

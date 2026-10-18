@@ -4,6 +4,8 @@ FLEx Scratchpad is a notebook for FieldWorks: notes in tabs and folders that sho
 
 ### New in this pre-release
 
+- **Text charts.** FieldWorks' constituent charts (Texts & Words › Text Chart) in your notes: a whole chart, a range of rows or a block of columns, always with its column headings; FLEx's moved-text, clause and chart markers; the free translations spliced in as you like (a row after each segment's rows, a Free column, a tip for the clicked cell, or hidden); words, cells, rows and columns styled with a click; the chart's plain-text grid saved in the note file so it reads without the program; HTML and Word exports, and an export of the chart itself as FieldWorks' chart XML or as JSON. Notes are found with `marker:Topic`.
+- **Troubleshooting**: `flex-scratchpad -v` in a terminal logs every call, every FLEx read and every file written; the installed program writes the same to a log file; `--devtools` turns the browser developer tools on; `--dump-charts` writes a chart as the project returns it.
 - **Attach files to a note.** A chip opens the file in its own program; a web page (such as a FlexText Editor listening page) previews inside the note. Pictures and videos show in the note. Files are copied into the notebook, or linked if you prefer.
 - **Back up your notebook** to a OneDrive, Google Drive or Dropbox folder, or to S3-compatible storage (encryption optional, keys kept in Windows Credential Manager). It keeps old versions, shows a progress bar, backs up when you close the program, shows how much space notes and backups use, and can clean up. Settings › Backup & storage.
 - **Examples stay on their lines** when you split, merge or delete lines in FLEx, and are found again by their text when a paragraph is rebuilt.

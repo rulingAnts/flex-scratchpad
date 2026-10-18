@@ -360,7 +360,39 @@ Design points that follow, to check when this is built:
   Markdown export and the TSV / LaTeX copies must not see the copy twice. The note's Markdown export
   could keep the copies as they are (they are what a reader without the app sees).
 
-## Text Charts in notes (Seth, 2026-10-17 — "that's for later. Much later")
+## Text Charts in notes (Seth, 2026-10-17 — "that's for later. Much later"; moved up 2026-10-18)
+
+**Phase 1 shipped 2026-10-18** (CLAUDE.md › TEXT CHARTS): the reader, `{{flex:chart …}}` with rows /
+columns / lines / free translations / styles, the renderer with headings, the readable copy, the
+HTML / Word exports, FLEx's chart XML + JSON, `--dump-charts`, `marker:` search. Still to build, in
+order (Seth, 2026-10-18, "go ahead and start building all this"):
+
+1. **A chart note type** (like an example collection, but one chart): `kind: chart` in the front
+   matter, the chart's GUID, the view settings (lines, columns, free translations, filters) and the
+   user's styling kept in the note; several chart notes may share one FLEx chart, each with its own
+   filters and custom columns.
+2. **Custom columns** in a chart note, searchable: (a) a choice list — project-wide (in
+   `notebook.json`), reusable in other chart notes, either open (type a new option) or locked to its
+   list; (b) a rule / formula column showing text, counts or a style from which markers or columns a
+   row has or lacks (combinations too); (c) a free notes column with its own heading. Values keyed by
+   row GUID so they survive renumbering.
+3. **Visual filters on chart markers** (`marker:<name>`, groups, and the pseudo-markers clause:dependent /
+   speech / song, moved:preposed / postposed) through the existing scoped rules; a rule's `row`
+   flag styles the WHOLE row when any cell carries the marker.
+4. **Search, sort, filter, collect**: an index row per cell (text, row, column, words, glosses,
+   lexeme / sense GUIDs, markers, clause type, moved text); `col:Subject`, `marker:Topic`,
+   `lex:headword` queries; a COLUMN PROFILE for a lexeme / sense / category (count per column across
+   the charts of a template, each count a click from its rows; on the entry card too); CHART
+   COLLECTIONS (rows as embeds, with "Find new rows" like rule collections); filter-in-place in a
+   chart note (rows by marker / column content / clause type, hide empty columns, fold column
+   groups — chart order always kept; "group by marker" as a compiled view, never a sort); pivots
+   (marker × column, category × column) to a table block or CSV.
+5. **Text markup tags inside chart cells** (the same segment + analysis coordinates) and the
+   reverse: style an interlinear example by the chart column its words sit in (a text's chart of a
+   chosen template → word → column map, cached in the snapshot).
+6. The chart XML re-import belongs in flexicon (`plans/flexicon-requests.md` §4).
+
+Original note:
 
 > *"Later on, I'll want to add the ability to pull in a Text Chart, part of a text chart (including
 > the headers), a range of rows from a text chart, and styling for text chart markers (and also our

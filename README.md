@@ -139,6 +139,7 @@ elsewhere (marked *cached*).
 | New note / tab / folder | **Ctrl+N**; the `+` next to *Tabs* / *Folders*; right-click a tab or folder for rename, colour, delete |
 | Insert a FLEx object | **Ctrl+Shift+L** → search the lexicon or the texts → click the first and last segment → *Insert segments*; or paste a FLEx hyperlink (*Edit → Copy Location as Hyperlink* in FLEx) |
 | Find a segment by its text | In the picker's text view, *find segment by text…* |
+| Insert a text chart | **Ctrl+Shift+L** → *Text charts* → pick the chart → click the first and last row → *Insert rows* (the column headings always come along), or *Whole chart*. Its `⋯` chooses the lines, the columns, how the free translations are spliced in (a row after each segment's rows, a Free column, a tip for the clicked cell, or hidden), and exports the chart as FLEx's chart XML or JSON. Click a word, a cell, a row label or a column heading to style it |
 | Style words in an example | Click a word → Highlight / Bold / Underline / Italic / Strike / Colour; Shift+click another word for a range; *Characters* for part of a word; *match text* (then a colour or style) for every occurrence |
 | Style part of a free translation | Drag across the words in the free (or literal) translation, release, and pick a colour or style; a plain click styles the whole line |
 | Choose the lines shown | The `⋯` on an embed: Word, Morphemes, Morph glosses, Lex. entries, Word gloss, Category, Free, Literal, Notes; segment range |
@@ -153,6 +154,8 @@ elsewhere (marked *cached*).
 | Insert a block | Right-click an example, a table cell, or the space between blocks (or the ⋮ beside any block) → *Insert a new block*: paragraph, heading, list, checklist, quote, table, FLEx example or divider, above or below |
 | A paste lands wrong | `flex-scratchpad --project NAME --locate clip` with the rows still copied writes `flex-scratchpad-locate.json`, which shows what the app read and what the project holds there |
 | Tags look wrong | `flex-scratchpad --project NAME --dump-tags` writes `flex-scratchpad-tags.json`: the tag list and the first tagged texts exactly as the project returns them. Send that file |
+| A chart looks wrong | `flex-scratchpad --project NAME --dump-charts [TEXT]` writes `flex-scratchpad-charts.json`: every chart, the Chart Markers list, and the rows of one chart exactly as the project returns them. Send that file |
+| Something else goes wrong | Run `flex-scratchpad -v` from a terminal (a pip install logs everything there by default): every call the page makes, every FLEx read, every file written, with times — copy the transcript. The same goes to `%LOCALAPPDATA%\FLEx Scratchpad\log\flex-scratchpad.log`, also for the installed program. `--devtools` turns the browser developer tools on (F12 in the app opens them in their own window) |
 | The left pane | Each part (Tabs, Folders, Tags, FLEx tags) folds with a click on its heading and the dividers between them drag; headings always stay in view, so nothing is ever out of reach |
 | Folders | A folder shows the notes directly in it; tick *Show notes in subfolders* under the list title to see everything below it |
 | Move a note | Drag it onto a tab or folder, or `⋯ → Move to…` |

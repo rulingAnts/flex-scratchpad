@@ -44,8 +44,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Iterable
 
+from .log import LOG
+
 CONFIG_NAME = "notebook.json"
-NOTE_KINDS = ("", "examples")
+NOTE_KINDS = ("", "examples", "chart")
 EXAMPLE_LINE_RE = re.compile(r"^\s*\{\{flex:text\b[^\n]*\}\}\s*$", re.M)
 PRIVATE_DIR = ".scratchpad"
 # Files attached to notes (Seth, 2026-10-17): copied here under their own names, visible beside
@@ -175,7 +177,8 @@ class Note:
     created: str = ""
     updated: str = ""
     pinned: bool = False
-    kind: str = ""           # '' = an ordinary note; 'examples' = an example collection
+    kind: str = ""           # '' = an ordinary note; 'examples' = an example collection; 'chart' = a chart note
+    chart: str = ""          # a chart note's FLEx chart GUID (`chart:` in the front matter)
     body: str = ""
     path: Path | None = None
     # A RULE COLLECTION (Seth, 2026-10-18: "create a collection with ALL lines that match a
@@ -377,6 +380,8 @@ def parse_query(q: str) -> dict:
             filters[k.lower()].append(v)
         elif _ and k.lower() == "tagged" and v:
             terms.append("\u2691" + v.replace(" ", "_"))      # a FLEx text markup tag on an example in the note (model.searchable_text)
+        elif _ and k.lower() == "marker" and v:
+            terms.append("\u2690" + v.replace(" ", "_"))      # a chart marker on a text chart in the note (model.chart_searchable_text)
         elif word.startswith("#") and len(word) > 1:
             filters["tag"].append(word[1:])
         else:
@@ -414,6 +419,7 @@ class Notebook:
         self._index_marks: dict[str, str] = {}
         self.ensure()
         self.load()
+        LOG.info("notebook %s: %d notes, %d tabs", self.root, len(self.notes), len(self.config.get("tabs") or []))
 
     # -- folders ---------------------------------------------------------------
 
@@ -530,6 +536,7 @@ class Notebook:
             updated=str(meta.get("updated") or datetime.fromtimestamp(stat.st_mtime).replace(microsecond=0).isoformat()),
             pinned=bool(meta.get("pinned", False)),
             kind=str(meta.get("kind") or ""),
+            chart=str(meta.get("chart") or "").lower() if str(meta.get("kind") or "") == "chart" else "",
             rule=rule_from_meta(meta),
             body=body.replace("\r\n", "\n"),
             path=path,
@@ -652,6 +659,8 @@ class Notebook:
         }
         if note.kind:                       # only collections carry it: ordinary files are unchanged
             meta["kind"] = note.kind
+        if note.kind == "chart" and note.chart:
+            meta["chart"] = note.chart
         if note.rule and note.rule.get("tags"):
             meta["rule-tags"] = list(note.rule["tags"])
             if note.rule.get("texts"):
@@ -659,6 +668,7 @@ class Notebook:
         target = self._note_path(note)
         target.parent.mkdir(parents=True, exist_ok=True)
         _atomic_write(target, dump_front_matter(meta) + note.body)
+        LOG.debug("wrote %s (%d chars%s)", target.relative_to(self.root) if target.is_relative_to(self.root) else target, len(note.body), ", kind " + note.kind if note.kind else "")
         if note.path and note.path != target and note.path.exists():
             try:
                 note.path.unlink()
@@ -668,19 +678,22 @@ class Notebook:
         self._reindex(note)
 
     def create_note(self, tab: str | None = None, folder: str = "", title: str = "", body: str = "", kind: str = "",
-                    rule: dict | None = None) -> Note:
+                    rule: dict | None = None, chart: str = "") -> Note:
         if kind not in NOTE_KINDS:
             raise ValueError(f"Unknown kind of note: {kind}")
         rule = clean_rule(rule)
         if rule and kind != "examples":
             raise ValueError("Only an example collection can have a rule")
+        chart = (chart or "").lower()
+        if kind == "chart" and not re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", chart):
+            raise ValueError("A chart note needs the GUID of a FLEx text chart")
         with self.lock:
             tab = tab or (self.tab_dirs()[0] if self.tab_dirs() else DEFAULT_TAB)
             if tab not in self.tab_dirs():
                 self.add_tab(tab)
             ts = now_iso()
             note = Note(id=new_id(), title=title or "", tab=tab, folder=folder or "",
-                        created=ts, updated=ts, body=body, kind=kind, rule=rule)
+                        created=ts, updated=ts, body=body, kind=kind, rule=rule, chart=chart if kind == "chart" else "")
             self.notes[note.id] = note
             self._write_note(note)
             return note
@@ -693,7 +706,7 @@ class Notebook:
             src = self.get_note(note_id)
             same_place = (tab is None or tab == src.tab) and (folder is None or (folder or "") == (src.folder or ""))
             new_title = title if title is not None else ((src.title + " (copy)") if same_place and src.title else src.title)
-            copy = self.create_note(tab or src.tab, src.folder if folder is None else (folder or ""), new_title, src.body, src.kind)
+            copy = self.create_note(tab or src.tab, src.folder if folder is None else (folder or ""), new_title, src.body, src.kind, chart=src.chart)
             if src.tags:
                 copy = self.save_note(copy.id, tags=list(src.tags))
             return copy
@@ -774,6 +787,7 @@ class Notebook:
             if note.path and note.path.exists():
                 dest = self.trash_dir / f"{now_iso().replace(':', '-')}--{note.path.name}"
                 shutil.move(str(note.path), str(dest))
+                LOG.info("note %s trashed → %s", note_id, dest.name)
             self.notes.pop(note_id, None)
             self._index.pop(note_id, None)
             self._index_marks.pop(note_id, None)

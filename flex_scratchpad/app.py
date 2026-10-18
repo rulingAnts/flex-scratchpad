@@ -12,6 +12,7 @@ from pathlib import Path
 from . import APP_NAME
 from .api import Api
 from .config import AppConfig, local_data_dir
+from .log import LOG, banner
 
 UI_DIR = Path(__file__).parent / "ui"
 
@@ -73,7 +74,9 @@ def run(notebook_dir: str | None = None, demo: bool = False, debug: bool = False
               f"start again to run the installed build {build}.")
         return 0
 
+    banner()
     config = AppConfig()
+    LOG.info("config: %s", config.path)
     api = Api(config, notebook_dir=notebook_dir, demo=demo)
     size = config.data.get("window", {})
     width, height = _fit_to_screen(int(size.get("width", 1280)), int(size.get("height", 820)))
@@ -88,6 +91,7 @@ def run(notebook_dir: str | None = None, demo: bool = False, debug: bool = False
         text_select=True,
     )
     api._window = window
+    LOG.info("window created: %s (%dx%d, maximized)%s", ui_url(), width, height, "; developer tools ON (F12 or right-click → Inspect opens them in their own window)" if debug else "")
 
     state = {"maximized": True}
 
@@ -98,6 +102,7 @@ def run(notebook_dir: str | None = None, demo: bool = False, debug: bool = False
         state["maximized"] = False
 
     def on_closing():
+        LOG.info("window closing (backup running: %s)", api._backup.running if getattr(api, '_backup', None) else False)
         # The backup on close (Seth, 2026-10-17: a progress bar "when they exit" too): the window
         # stays open while it runs, the page showing its progress with "Close now, finish in the
         # background" and "Close without backing up"; then it closes itself. Skipped when nothing
@@ -195,6 +200,7 @@ def shut_down(api, watcher=None, wait: float = 5.0) -> None:
     already shutting pythonnet down, and the process dies on it. So: nothing is pushed to the
     page any more, the poller stops, FLEx is closed, an Api call still writing (the last autosave)
     may finish, and `exit_now` ends the process without that shutdown."""
+    LOG.info("shutting down")
     api._window = None                  # Api._emit is a no-op from here on
     if watcher is not None and getattr(watcher, "stop", None) is not None:
         watcher.stop.set()

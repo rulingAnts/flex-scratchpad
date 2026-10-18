@@ -140,6 +140,29 @@
     return textRef(spec, obj) + (said ? ': ' + said : '');
   };
 
+  /* A text chart (Seth, 2026-10-18): "Story chart — The dog and the river, rows 1a–2b", and the grid
+   * FS.chart.chartGrid builds (the header rows, a row per chart row: label, each column's words
+   * — word/gloss —, markers as ‹‹1b, [2a], ⟨Top⟩, the free translation, the notes), each column
+   * padded to its widest cell. */
+  function chartRef(spec, obj) {
+    const rows = obj.rows || [];
+    const range = rows.length ? (rows.length === 1 ? 'row ' + rows[0].label : 'rows ' + rows[0].label + '–' + rows[rows.length - 1].label) : '';
+    return [(spec.label ? spec.label + ' — ' : '') + (obj.name || 'Chart') + ' — ' + (obj.title || '(untitled text)'), range].filter(Boolean).join(', ');
+  }
+  function chartBody(spec, obj) {
+    const grid = FS.chart.chartGrid(spec, obj).map((r) => r.map(flat));
+    const n = Math.max(0, ...grid.map((r) => r.length));
+    const widths = [];
+    for (let i = 0; i < n; i++) widths.push(Math.max(0, ...grid.map((r) => width(r[i] || ''))));
+    return grid.map((r) => r.map((c, i) => (i === r.length - 1 ? c : pad(c || '', widths[i]))).join('  ').replace(/\s+$/, '')).join('\n');
+  }
+  const chartInline = (spec, obj) => {
+    const words = [];
+    for (const r of obj.rows || []) for (const c of r.cells || []) if (c.kind === 'words') for (const w of c.words || []) if (!w.punct && w.txt) words.push(w.txt);
+    const said = words.join(' ');
+    return chartRef(spec, obj) + (said ? ': ' + (said.length > 80 ? said.slice(0, 77) + '…' : said) : '');
+  };
+
   function entrySenses(spec, obj) {
     const shown = R.visibleSenses(spec, obj.senses || []);
     return spec.kind === 'sense' ? shown.filter((s) => s.guid === spec.guid) : shown;
@@ -175,6 +198,7 @@
     const url = obj.url || '';
     if (obj.kind === 'text') return { ref: textRef(spec, obj), inline: textInline(spec, obj), url, body: noFence(textBody(spec, obj)) };
     if (obj.kind === 'entry') return { ref: entryRef(spec, obj), inline: entryInline(spec, obj), url, body: noFence(entryBody(spec, obj)) };
+    if (obj.kind === 'chart' && FS.chart) return { ref: chartRef(spec, obj), inline: chartInline(spec, obj), url, body: noFence(chartBody(spec, obj)) };
     if (obj.kind === 'wordform') {
       const g = (obj.glosses || []).map(flat).filter(Boolean).join('; ');
       const ref = (spec.label ? spec.label + ' — ' : '') + (obj.form || '?') + ((obj.pos || []).length ? ' (' + obj.pos.join(', ') + ')' : '');

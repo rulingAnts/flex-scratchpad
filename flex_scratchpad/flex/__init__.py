@@ -11,14 +11,15 @@ import threading
 from pathlib import Path
 
 from . import model
+from ..log import LOG
 from .audio import cut_clip, store_clip_bytes
 from .cache import SnapshotCache
 from .lcm import FlexError
 
-EMBED_RE = re.compile(r"\{\{\s*flex:(entry|sense|text|wordform)\s+([0-9a-fA-F-]{36})", re.I)
+EMBED_RE = re.compile(r"\{\{\s*flex:(entry|sense|text|wordform|chart)\s+([0-9a-fA-F-]{36})", re.I)
 # the whole embed, for refresh-all: kind, guid and the rest of the spec (seg= / at= are read out of it)
-EMBED_FULL_RE = re.compile(r"\{\{\s*flex:(entry|sense|text|wordform)\s+([0-9a-fA-F-]{36})([^}]*)\}\}", re.I)
-LINK_RE = re.compile(r"\(flex:(entry|sense|text|wordform)/([0-9a-fA-F-]{36})", re.I)
+EMBED_FULL_RE = re.compile(r"\{\{\s*flex:(entry|sense|text|wordform|chart)\s+([0-9a-fA-F-]{36})([^}]*)\}\}", re.I)
+LINK_RE = re.compile(r"\(flex:(entry|sense|text|wordform|chart)/([0-9a-fA-F-]{36})", re.I)
 
 
 import unicodedata as _ud
@@ -196,11 +197,15 @@ class FlexService:
                 self.last_error = e.message
                 self.last_error_code = e.code
                 self.backend = None
+                LOG.warning("FLEx source not opened (%s): %s%s", e.code, e.message, (" — " + e.detail[:300]) if e.detail else "")
             except Exception as e:  # noqa: BLE001
                 self.last_error = f"Could not open the FLEx source: {e}"
                 self.last_error_code = "lcm"
                 self.backend = None
-            return self.status()
+                LOG.exception("FLEx source not opened")
+            st = self.status()
+            LOG.info("FLEx source: %s project=%r open=%s", st.get("source"), st.get("project"), st.get("open"))
+            return st
 
     def close(self) -> None:
         with self.lock:
@@ -253,6 +258,11 @@ class FlexService:
                     elif kind == "wordform":
                         obj = be.get_wordform(guid)
                         self.cache.put(self.project_name, "wordform", guid, obj)
+                    elif kind == "chart":
+                        # the whole chart is read and snapshotted (charts are small); the embed's rows are sliced here
+                        whole = be.get_chart(guid)
+                        self.cache.put(self.project_name, "chart", guid, whole)
+                        obj = model.slice_chart(whole, seg_from, seg_to, at)
                     else:
                         raise FlexError(f"Unknown object kind: {kind}", "", "kind")
                     obj = dict(obj)
@@ -261,6 +271,7 @@ class FlexService:
                 except FlexError as e:
                     live_err = e
                 except Exception as e:  # noqa: BLE001
+                    LOG.exception("%s %s: the live fetch failed", kind, guid[:8])
                     live_err = FlexError(str(e), "", "lcm")
             snap = self.cache.get(self.project_name, kind, variant) or self.cache.find(kind, variant) \
                 or (self.cache.get(self.project_name, kind, guid) or self.cache.find(kind, guid) if ws else None)
@@ -279,8 +290,11 @@ class FlexService:
                     out["rangeMoved"] = bool(r["moved"])
                     out["anchorsLost"] = bool(r["lost"])
                     snap = out
+                elif kind == "chart":
+                    snap = model.slice_chart(snap, seg_from, seg_to, at)
                 snap["cached"] = True
                 snap["liveError"] = live_err.message if live_err else ""
+                LOG.info("%s %s: showing the snapshot (%s)", kind, guid[:8], live_err.message if live_err else "cache preferred")
                 return snap
             if live_err:
                 raise live_err
@@ -813,10 +827,17 @@ class FlexService:
         for note_id, note_title, body in sources:
             for rx, key in ((EMBED_RE, "examples"), (LINK_RE, "links")):
                 for m in rx.finditer(body or ""):
-                    if m.group(1).lower() != "text":
-                        continue
+                    kind = m.group(1).lower()
                     g = m.group(2).lower()
-                    r = rows.setdefault(g, {"guid": g, "examples": 0, "links": 0, "notes": []})
+                    if kind == "chart":                      # a chart counts for the text it charts
+                        snap = self.cache.get(self.project_name, "chart", g) or self.cache.find("chart", g)
+                        g = (snap or {}).get("text") or ""
+                        if not g:
+                            continue
+                        key = "charts"
+                    elif kind != "text":
+                        continue
+                    r = rows.setdefault(g, {"guid": g, "examples": 0, "links": 0, "charts": 0, "notes": []})
                     r[key] += 1
                     if not any(n["id"] == note_id for n in r["notes"]):
                         r["notes"].append({"id": note_id, "title": note_title})
@@ -850,6 +871,37 @@ class FlexService:
             except Exception:  # noqa: BLE001 — closed, or a backend without tags
                 snap = self.cache.get(self.project_name, "list", "texttags") if self.project_name else None
                 return list((snap or {}).get("tags") or [])
+
+    # -- text charts (Seth, 2026-10-18) -------------------------------------------------
+
+    def charts(self, text_guid: str | None = None) -> list[dict]:
+        """The project's constituent charts (optionally those of one text): live, else what the
+        snapshot folder holds, so a note's chart is still listed without FLEx."""
+        g = (text_guid or "").lower()
+        with self.lock:
+            try:
+                return self._live().list_charts(g or None)
+            except Exception:  # noqa: BLE001 — closed, or a backend without charts
+                out = []
+                d = self.cache.project_dir(self.project_name) if self.project_name else None
+                for f in sorted(d.glob("chart-*.json")) if d and d.is_dir() else []:
+                    snap = self.cache.get(self.project_name, "chart", f.stem[6:])
+                    if snap and (not g or snap.get("text") == g):
+                        out.append({"guid": snap["guid"], "name": snap.get("name", ""), "text": snap.get("text", ""), "title": snap.get("title", ""),
+                                    "rows": snap.get("rowCount", 0), "template": (snap.get("template") or {}).get("name", ""),
+                                    "columns": len((snap.get("template") or {}).get("columns") or []), "cached": True})
+                return out
+
+    def chart_markers(self) -> list[dict]:
+        """The project's Chart Markers list (kept in the snapshot folder like the text tags)."""
+        with self.lock:
+            try:
+                items = self._live().list_chart_markers()
+                self.cache.put(self.project_name, "list", "chartmarkers", {"markers": items})
+                return items
+            except Exception:  # noqa: BLE001
+                snap = self.cache.get(self.project_name, "list", "chartmarkers") if self.project_name else None
+                return list((snap or {}).get("markers") or [])
 
     def tag_occurrences(self, tag_guid: str, q: str = "") -> list[dict]:
         with self.lock:

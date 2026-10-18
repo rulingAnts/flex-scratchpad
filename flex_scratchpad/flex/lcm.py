@@ -15,10 +15,12 @@ import os
 import queue
 import re
 import threading
+import time
 from concurrent.futures import Future
 from pathlib import Path
 
 from . import model
+from ..log import LOG
 
 OPEN_TIMEOUT = 600      # a big project can take minutes to open
 CALL_TIMEOUT = 180
@@ -37,6 +39,7 @@ def _friendly(exc: BaseException, project: str = "") -> FlexError:
     text = str(exc)
     if isinstance(exc, FlexError):
         return exc
+    LOG.warning("flexicon raised %s: %s", name, text[:600].replace("\n", " | "))
     if isinstance(exc, ImportError) or name == "ModuleNotFoundError":
         return FlexError(
             "flexicon is not installed, so the FLEx project cannot be read directly. "
@@ -82,9 +85,17 @@ class LcmWorker(threading.Thread):
                     fut.set_exception(e)
 
     def call(self, fn, timeout: float = CALL_TIMEOUT):
+        label = getattr(fn, "__qualname__", "?").replace(".<locals>.go", "").replace(".<locals>", "")
+        t0 = time.perf_counter()
         fut: Future = Future()
         self.q.put((fn, fut))
-        return fut.result(timeout=timeout)
+        try:
+            out = fut.result(timeout=timeout)
+        except BaseException as e:
+            LOG.debug("lcm %s failed after %.0f ms: %s: %s", label, (time.perf_counter() - t0) * 1000, type(e).__name__, str(e)[:300])
+            raise
+        LOG.debug("lcm %s (%.0f ms)", label, (time.perf_counter() - t0) * 1000)
+        return out
 
     def stop(self) -> None:
         self.q.put(None)
@@ -1278,6 +1289,256 @@ class FlexiconBackend:
         # flexicon's BuildGotoURL returned a percent-encoded query (`database%3d…%26tool%3d…`)
         # on Seth's first run (2026-10-12).
         return model.goto_url(self.project_name, kind, _guid(obj))
+
+    # -- text charts (Seth, 2026-10-18) ---------------------------------------------------
+    # A constituent chart is an IDsConstChart in LangProject.DiscourseDataOA.ChartsOC: BasedOnRA
+    # (the text's IStText), TemplateRA (a CmPossibility whose sub-items are the column GROUPS and
+    # their COLUMNS), RowsOS of IConstChartRow (Label, Notes, ClauseType, EndSentence, EndParagraph,
+    # Start/EndDependentClauseGroup, CellsOS). A cell part (IConstituentChartCellPart: ColumnRA,
+    # MergesAfter, MergesBefore) is one of IConstChartWordGroup (BeginSegmentRA, EndSegmentRA,
+    # BeginAnalysisIndex, EndAnalysisIndex — the shape of a text markup tag), IConstChartMovedTextMarker
+    # (WordGroupRA, Preposed), IConstChartClauseMarker (DependentClausesRS) or IConstChartTag (TagRA,
+    # an item of DiscourseDataOA.ChartMarkersOA). flexicon 4.12 has ConstCharts / ConstChartRows /
+    # Discourse.GetCells, but not the analysis indexes, the row flags or the template tree, so the
+    # fields are read directly here (read-only, behind _t(), like the tags). Not yet run against a
+    # real project: `flex-scratchpad --project NAME --dump-charts` writes what it sees.
+    def _discourse(self):
+        return self._c(_t(lambda: self.project.lp.DiscourseDataOA, None))
+
+    def _chart_objects(self) -> list:
+        dd = self._discourse()
+        out = []
+        for ch in _t(lambda: list(dd.ChartsOC), []) if dd is not None else []:
+            ch = self._c(ch)
+            if _t(lambda: ch.ClassName, "") == "DsConstChart":
+                out.append(ch)
+        return out
+
+    def _chart_text(self, ch):
+        """The IText a chart is based on (BasedOnRA is its StText)."""
+        st = self._c(_t(lambda: ch.BasedOnRA, None))
+        return self._owning_text(st) if st is not None else None
+
+    def _template_columns(self, tmpl) -> list[dict]:
+        """The template's leaves in order, each with the names of its groups above it."""
+        cols: list[dict] = []
+
+        def walk(items, path):
+            for it in items:
+                it = self._c(it)
+                subs = _t(lambda: list(it.SubPossibilitiesOS), [])
+                name = _s(_t(lambda: self._best(it.Name), ""))
+                if subs:
+                    walk(subs, path + [name])
+                else:
+                    cols.append(model.make_column(_guid(it), name, _s(_t(lambda: self._best(it.Abbreviation), "")), path, len(cols) + 1))
+        if tmpl is not None:
+            walk(_t(lambda: list(tmpl.SubPossibilitiesOS), []), [])
+        return cols
+
+    def _chart_summary(self, ch) -> dict:
+        text = self._chart_text(ch)
+        tmpl = self._c(_t(lambda: ch.TemplateRA, None))
+        return {"guid": _guid(ch), "name": _s(_t(lambda: self._best(ch.Name), "")),
+                "text": _guid(text) if text is not None else "", "title": self._text_title(text) if text is not None else "",
+                "rows": int(_t(lambda: ch.RowsOS.Count, 0) or 0),
+                "template": _s(_t(lambda: self._best(tmpl.Name), "")) if tmpl is not None else "",
+                "columns": len(self._template_columns(tmpl))}
+
+    def list_charts(self, text_guid: str | None = None) -> list[dict]:
+        g = (text_guid or "").lower()
+
+        def go():
+            self._need()
+            out = [self._chart_summary(ch) for ch in self._chart_objects()]
+            return [c for c in out if not g or c["text"] == g]
+        try:
+            return self.worker.call(go, timeout=OPEN_TIMEOUT)
+        except BaseException as e:
+            raise _friendly(e, self.project_name)
+
+    def list_chart_markers(self) -> list[dict]:
+        """The project's Chart Markers list (the items a ConstChartTag names), with hierarchy."""
+        def go():
+            self._need()
+            return self.list_chart_markers_on_worker()
+        try:
+            return self.worker.call(go)
+        except BaseException as e:
+            raise _friendly(e, self.project_name)
+
+    def get_chart(self, guid: str) -> dict:
+        """The whole chart (charts are small; the service slices rows)."""
+        def go():
+            self._need()
+            ch = self._c(self.project.Object(guid))
+            if _t(lambda: ch.ClassName, "") != "DsConstChart":
+                raise FlexError("That GUID is not a text chart.", "", "no-object")
+            return self._chart_dict(ch)
+        try:
+            return self.worker.call(go, timeout=OPEN_TIMEOUT)
+        except BaseException as e:
+            raise _friendly(e, self.project_name)
+
+    def _chart_dict(self, ch) -> dict:
+        p = self.project
+        text = self._chart_text(ch)
+        if text is None:
+            raise FlexError("This chart's text could not be found.", "", "no-object")
+        ws = self._writing_systems()
+        vern_handle, vern_tag = self._baseline_ws(text)
+        self._sel = self._selection(None, vern_handle)
+        self._cur_vern_handle = vern_handle
+        self._diag = False
+        self._alts = False
+        tmpl = self._c(_t(lambda: ch.TemplateRA, None))
+        cols = self._template_columns(tmpl)
+        by_col = {c["guid"]: c for c in cols}
+        d = model.make_chart(_guid(ch), _s(_t(lambda: self._best(ch.Name), "")), _guid(text), self._text_title(text, "", vern_tag),
+                             self._ws_info(vern_tag, "") if vern_tag else ws["vern"], ws["anal"],
+                             {"guid": _guid(tmpl), "name": _s(_t(lambda: self._best(tmpl.Name), "")) if tmpl is not None else "", "columns": cols},
+                             _t(lambda: self.list_chart_markers_on_worker(), []))
+        d["abbrev"] = _s(_t(lambda: p.Texts.GetAbbreviation(text), ""))
+        d["url"] = self._goto(text, "text")
+        media_by_guid = {m["guid"]: m for m in self._media(text)}
+        # every segment of the text by guid → (n, paragraph, k, object); read only the ones the rows touch
+        segs: dict[str, tuple] = {}
+        n = 0
+        for pi, para in enumerate(_t(lambda: list(p.Paragraphs.GetAll(text)), []), 1):
+            for k, seg in enumerate(_t(lambda: list(p.Segments.GetAll(para)), []), 1):
+                n += 1
+                segs[_guid(seg)] = (n, pi, k, seg)
+        d["textSegmentCount"] = n
+        d["textIndex"] = [{"n": v[0], "label": f"{v[1]}.{v[2]}", "guid": g} for g, v in segs.items()]
+        read: dict[int, dict] = {}
+
+        def seg_dict(sg):
+            v = segs.get(sg)
+            if not v:
+                return None
+            if v[0] not in read:
+                try:
+                    read[v[0]] = self._segment_dict(v[3], v[0], v[1], media_by_guid, v[2])
+                except Exception as exc:  # noqa: BLE001
+                    read[v[0]] = model.make_segment(sg, v[0], v[1], "", [], notes=[f"⚠ could not read this segment: {exc}"], k=v[2])
+            return read[v[0]]
+
+        def col_of(part):
+            return by_col.get(_guid(_t(lambda: part.ColumnRA, None)))
+
+        rows = []
+        for i, row in enumerate(_t(lambda: list(ch.RowsOS), []), 1):
+            row = self._c(row)
+            cells = []
+            for part in _t(lambda: list(row.CellsOS), []):
+                part = self._c(part)
+                cls = _t(lambda: part.ClassName, "")
+                col = col_of(part)
+                ma, mb = bool(_t(lambda: part.MergesAfter, False)), bool(_t(lambda: part.MergesBefore, False))
+                try:
+                    if cls == "ConstChartWordGroup":
+                        a = seg_dict(_guid(_t(lambda: part.BeginSegmentRA, None)))
+                        b = seg_dict(_guid(_t(lambda: part.EndSegmentRA, None))) or a
+                        if a is None:
+                            cells.append(model.make_marker_cell("words", _guid(part), col, merge_after=ma, merge_before=mb, seg=0, segTo=0, words=[], lost=True))
+                            continue
+                        cells.append(model.make_word_cell(_guid(part), col, a, int(_t(lambda: part.BeginAnalysisIndex, 0) or 0), b,
+                                                          int(_t(lambda: part.EndAnalysisIndex, 0) or 0), ma, mb))
+                    elif cls == "ConstChartMovedTextMarker":
+                        cells.append(model.make_marker_cell("moved", _guid(part), col, merge_after=ma, merge_before=mb,
+                                                            target=_guid(_t(lambda: part.WordGroupRA, None)), preposed=bool(_t(lambda: part.Preposed, False))))
+                    elif cls == "ConstChartClauseMarker":
+                        cells.append(model.make_marker_cell("clause", _guid(part), col, merge_after=ma, merge_before=mb,
+                                                            rows=[_guid(r) for r in _t(lambda: list(part.DependentClausesRS), [])]))
+                    elif cls == "ConstChartTag":
+                        tag = _t(lambda: part.TagRA, None)
+                        cells.append(model.make_marker_cell("tag", _guid(part), col, merge_after=ma, merge_before=mb,
+                                                            tag=self._poss_dict(tag) if tag is not None else None))
+                    else:
+                        cells.append(model.make_marker_cell("other", _guid(part), col, merge_after=ma, merge_before=mb, className=cls))
+                except Exception as exc:  # noqa: BLE001 — one odd cell degrades, never the chart
+                    cells.append(model.make_marker_cell("other", _guid(part), col, className=cls, error=str(exc)))
+            rows.append(model.make_row(_guid(row), i, _s(_t(lambda: row.Label, "")) or str(i), int(_t(lambda: row.ClauseType, 0) or 0),
+                                       bool(_t(lambda: row.EndSentence, False)), bool(_t(lambda: row.EndParagraph, False)),
+                                       _s(_t(lambda: row.Notes, "")), cells,
+                                       bool(_t(lambda: row.StartDependentClauseGroup, False)), bool(_t(lambda: row.EndDependentClauseGroup, False))))
+        d["rows"] = rows
+        return model.finish_chart(d, read)
+
+    def list_chart_markers_on_worker(self) -> list[dict]:
+        """list_chart_markers' body for a caller already ON the worker."""
+        dd = self._discourse()
+        lst = self._c(_t(lambda: dd.ChartMarkersOA, None)) if dd is not None else None
+        out: list[dict] = []
+
+        def walk(items, path):
+            for it in items:
+                it = self._c(it)
+                subs = _t(lambda: list(it.SubPossibilitiesOS), [])
+                if subs:
+                    walk(subs, path + [_s(_t(lambda: self._best(it.Name), ""))])
+                else:
+                    out.append(self._poss_dict(it, path))
+        if lst is not None:
+            walk(_t(lambda: list(lst.PossibilitiesOS), []), [])
+        return out
+
+    def explain_charts(self, which: str = "", max_rows: int = 40) -> dict:
+        """What the project's charts look like RAW, for `--dump-charts`: every chart's summary,
+        the markers list, and for the first chart whose text matches `which` (or the first chart)
+        the rows with each cell part's class and fields as read, plus the chart as this app
+        builds it. The first thing to ask for when a chart comes out wrong."""
+        def go():
+            self._need()
+            charts = self._chart_objects()
+            rep: dict = {"charts": [], "markers": self.list_chart_markers_on_worker(), "chart": None, "raw": []}
+            for ch in charts:
+                try:
+                    rep["charts"].append(self._chart_summary(ch))
+                except Exception as exc:  # noqa: BLE001
+                    rep["charts"].append({"guid": _guid(ch), "error": str(exc)})
+            w = (which or "").casefold()
+            pick = None
+            for ch, summ in zip(charts, rep["charts"]):
+                if not w or w in (summ.get("title", "") + " " + summ.get("name", "") + " " + summ.get("guid", "")).casefold():
+                    pick = ch
+                    break
+            if pick is None:
+                return rep
+            for i, row in enumerate(_t(lambda: list(pick.RowsOS), []), 1):
+                if i > max_rows:
+                    break
+                row = self._c(row)
+                raw = {"n": i, "label": _s(_t(lambda: row.Label, "")), "notes": _s(_t(lambda: row.Notes, "")),
+                       "clauseType": _t(lambda: int(row.ClauseType), None), "endSentence": _t(lambda: row.EndSentence, None),
+                       "endParagraph": _t(lambda: row.EndParagraph, None), "cells": []}
+                for part in _t(lambda: list(row.CellsOS), []):
+                    part = self._c(part)
+                    c = {"class": _t(lambda: part.ClassName, ""), "guid": _guid(part),
+                         "column": _s(_t(lambda: self._best(self._c(part.ColumnRA).Name), "")), "columnGuid": _guid(_t(lambda: part.ColumnRA, None)),
+                         "mergesAfter": _t(lambda: part.MergesAfter, None), "mergesBefore": _t(lambda: part.MergesBefore, None)}
+                    for attr in ("BeginAnalysisIndex", "EndAnalysisIndex", "Preposed"):
+                        v = _t(lambda a=attr: getattr(part, a), None)
+                        if v is not None:
+                            c[attr] = v if isinstance(v, (int, bool)) else _s(v)
+                    for attr in ("BeginSegmentRA", "EndSegmentRA", "WordGroupRA", "TagRA"):
+                        v = _t(lambda a=attr: getattr(part, a), None)
+                        if v is not None:
+                            c[attr] = _guid(v)
+                    deps = _t(lambda: list(part.DependentClausesRS), None)
+                    if deps is not None:
+                        c["DependentClausesRS"] = [_guid(x) for x in deps]
+                    raw["cells"].append(c)
+                rep["raw"].append(raw)
+            try:
+                rep["chart"] = self._chart_dict(pick)
+            except Exception as exc:  # noqa: BLE001
+                rep["chartError"] = f"{type(exc).__name__}: {exc}"
+            return rep
+        try:
+            return self.worker.call(go, timeout=OPEN_TIMEOUT)
+        except BaseException as e:
+            raise _friendly(e, self.project_name)
 
     def resolve_guid(self, guid: str) -> dict | None:
         """What is this GUID? → {kind, guid, title, seg?, sense?} for the kinds the UI can embed."""

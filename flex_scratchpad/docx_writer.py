@@ -145,6 +145,14 @@ class Docx:
                 xml = self._indent(xml, 360 * int(block["indent"]))
             self.body.append(xml)
             self.body.append("<w:p/>")
+        elif t == "chart":
+            parts = self.chart(block)
+            if block.get("exNum"):
+                parts.insert(0, self.para([{"text": str(block["exNum"]), "color": "#68717d"}]))
+            if block.get("indent"):
+                parts = [self._indent(x, 360 * int(block["indent"])) for x in parts]
+            self.body.extend(parts)
+            self.body.append("<w:p/>")
         elif t in ("interlinear", "entry"):
             parts = self.interlinear(block) if t == "interlinear" else self.entry(block)
             if block.get("exNum"):      # (1), (2)… on its own line above the example
@@ -236,7 +244,7 @@ class Docx:
             for ci, c in enumerate(row):
                 col = cols.get(str(ci + 1), {}) or {}
                 rs = rowst.get(str(ri + 1), {}) or {}
-                shade = _hex(rs.get("bg") or col.get("bg")) or ("F3F4F6" if ri == 0 and block.get("header", True) else ("F7F8FA" if "striped" in flags and ri % 2 == 0 and ri else ""))
+                shade = _hex(c.get("bg")) or _hex(rs.get("bg") or col.get("bg")) or ("F3F4F6" if ri == 0 and block.get("header", True) else ("F7F8FA" if "striped" in flags and ri % 2 == 0 and ri else ""))
                 c = dict(c)
                 if ri == 0 and block.get("header", True) or rs.get("bold") or col.get("bold"):
                     c["runs"] = [dict(r, b=True) for r in (c.get("runs") or [])]
@@ -271,6 +279,99 @@ class Docx:
             out.append(f"<w:tr>{''.join(cells)}</w:tr>")
         out.append("</w:tbl>")
         return "".join(out)
+
+    def chart(self, block: dict) -> list[str]:
+        """A text chart (export.js chartBlock): its title line, then ONE Word table — the header
+        rows (a group spanning its columns), a row per chart row with the label first, each cell's
+        words (their lines separated by line breaks) and markers, the Free column spanning the
+        rows of a segment, the notes; a translation row after a segment's rows when the embed
+        shows them that way."""
+        out = []
+        head = [{"text": (block.get("name") or "Chart") + " · ", "b": True}, {"text": block.get("title") or "", "b": True, "color": "#00379c", "font": (block.get("ws") or {}).get("font")}]
+        if block.get("label"):
+            head.append({"text": "   " + block["label"], "color": "#68717d"})
+        out.append(self.para(head))
+        rows: list[list[dict]] = []
+        spans: dict = {}
+        headers = block.get("headers") or []
+        ncols = int(block.get("cols") or 0)
+        extra = (1 if block.get("freeCol") else 0) + (1 if block.get("notesCol") else 0)
+        width = 1 + ncols + extra
+        for hi, hr in enumerate(headers):
+            row = [{"runs": [{"text": "#" if hi == 0 else "", "b": True, "color": "#68717d"}]}]
+            ci = 1
+            for h in hr:
+                row.append({"runs": [{"text": h.get("text") or "", "b": True, "color": "#68717d"}], "align": "center"})
+                if int(h.get("span") or 1) > 1:
+                    spans[f"{len(rows) + 1}.{ci + 1}"] = {"rows": 1, "cols": int(h["span"])}
+                    for _ in range(int(h["span"]) - 1):
+                        row.append({"runs": []})
+                ci += int(h.get("span") or 1)
+            if hi == 0:
+                if block.get("freeCol"):
+                    row.append({"runs": [{"text": "Free", "b": True, "color": "#68717d"}]})
+                    if len(headers) > 1:
+                        spans[f"1.{len(row)}"] = {"rows": len(headers), "cols": 1}
+                if block.get("notesCol"):
+                    row.append({"runs": [{"text": "Notes", "b": True, "color": "#68717d"}]})
+                    if len(headers) > 1:
+                        spans[f"1.{len(row)}"] = {"rows": len(headers), "cols": 1}
+            else:
+                for _ in range(extra):
+                    row.append({"runs": []})
+            if len(headers) > 1 and hi == 0:
+                spans["1.1"] = {"rows": len(headers), "cols": 1}
+            rows.append(row)
+        for r in block.get("rows") or []:
+            row = [{"runs": [{"text": r.get("label") or "", "b": True, "color": "#68717d"}], "align": "right"}]
+            for c in r.get("cells") or []:
+                runs: list[dict] = []
+                for wi, w in enumerate(c.get("words") or []):
+                    if wi:
+                        runs.append({"text": " "})
+                    runs.extend(dict(x) for x in w)
+                if c.get("marks"):
+                    if runs:
+                        runs.append({"text": " "})
+                    runs.extend(dict(x) for x in c["marks"])
+                for x in runs:
+                    if c.get("b"):
+                        x["b"] = True
+                    if c.get("i"):
+                        x["i"] = True
+                    if c.get("u"):
+                        x["u"] = True
+                    if c.get("color") and not x.get("color"):
+                        x["color"] = c["color"]
+                cell = {"runs": runs}
+                if c.get("hl"):
+                    cell["bg"] = c["hl"]
+                row.append(cell)
+                if int(c.get("span") or 1) > 1:
+                    spans[f"{len(rows) + 1}.{len(row)}"] = {"rows": 1, "cols": int(c["span"])}
+                    for _ in range(int(c["span"]) - 1):
+                        row.append({"runs": []})
+            if block.get("freeCol"):
+                fr = r.get("free")
+                row.append({"runs": [{"text": fr["text"], "i": True}] if fr else []})
+                if fr and int(fr.get("span") or 1) > 1:
+                    spans[f"{len(rows) + 1}.{len(row)}"] = {"rows": int(fr["span"]), "cols": 1}
+            if block.get("notesCol"):
+                row.append({"runs": [{"text": r.get("notes") or "", "color": "#68717d"}]})
+            rows.append(row)
+            if r.get("freeRow") and (r["freeRow"].get("text") or "").strip():
+                frow = [{"runs": []}, {"runs": [{"text": r["freeRow"]["text"], "i": True}, {"text": "   " + (r["freeRow"].get("rows") or ""), "color": "#68717d"}]}]
+                spans[f"{len(rows) + 1}.2"] = {"rows": 1, "cols": max(1, width - 1)}
+                for _ in range(width - 2):
+                    frow.append({"runs": []})
+                rows.append(frow)
+        rowst = {}
+        for i, r in enumerate(rows):
+            if i < len(headers):
+                rowst[str(i + 1)] = {"bg": "#f3f4f6"}
+        tbl = {"rows": rows, "header": False, "style": {"spans": spans, "rows": rowst, "flags": ["borders-light"]}}
+        out.append(self.table(tbl))
+        return out
 
     def interlinear(self, block: dict) -> list[str]:
         out = []

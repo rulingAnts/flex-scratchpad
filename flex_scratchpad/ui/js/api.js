@@ -60,6 +60,33 @@
   /* Events pushed from Python: window.evaluate_js('FS.onEvent({event, ...})'). */
   FS.onEvent = function (data) { FS.emit('py:' + (data && data.event), data); };
 
+  /* The page's own errors go to Python's log (Seth, 2026-10-18: the browser console is not easy to
+   * route to the terminal): window.onerror, unhandled promise rejections and console.error /
+   * console.warn each become one `client_log` call (at most 40 per minute; never for a failure of
+   * client_log itself). The developer tools (--devtools) remain the place to look at them live. */
+  const clientLog = (() => {
+    let stamps = [];
+    return (level, message, where) => {
+      try {
+        const api = window.pywebview && window.pywebview.api;
+        if (!api || !api.client_log) return;
+        const now = Date.now();
+        stamps = stamps.filter((t) => now - t < 60000);
+        if (stamps.length >= 40) return;
+        stamps.push(now);
+        const p = api.client_log(String(level), String(message).slice(0, 2000), where ? String(where).slice(0, 300) : '');
+        if (p && p.catch) p.catch(() => {});
+      } catch (e) { /* never recurse into the log */ }
+    };
+  })();
+  FS.clientLog = clientLog;
+  window.addEventListener('error', (e) => clientLog('error', (e.message || 'error') + (e.error && e.error.stack ? '\n' + e.error.stack : ''), (e.filename || '') + ':' + (e.lineno || 0)));
+  window.addEventListener('unhandledrejection', (e) => { const r = e.reason; clientLog('error', 'unhandled rejection: ' + (r && r.stack ? r.stack : (r && r.message) || String(r))); });
+  for (const lvl of ['error', 'warn']) {
+    const orig = console[lvl] ? console[lvl].bind(console) : null;
+    console[lvl] = (...args) => { if (orig) orig(...args); clientLog(lvl, args.map((a) => (a && a.stack) || (typeof a === 'object' ? (() => { try { return JSON.stringify(a); } catch (x) { return String(a); } })() : String(a))).join(' ')); };
+  }
+
   /* ------------------------------------------------------------------ mock (browser only) */
   FS.mockApi = function () {
     FS._mockActive = true;
@@ -95,6 +122,19 @@
     };
     const status = () => ({ source: 'demo', project: 'Kalu Demo', open: true, backend: 'demo', error: '', texts: Object.keys(demo.texts).length, entries: demo.entries.length });
     const init = () => ({ app: 'FLEx Scratchpad', version: 'browser-demo', platform: 'browser', notebook: '(in-memory demo notebook)', config, notes: list(), folders, tags: tags(), flex: status(), canBrowse: false });
+    /* the mock's model.slice_chart: the rows asked for, anchors first */
+    const sliceChart = (chart, a, b, at) => {
+      const out = JSON.parse(JSON.stringify(chart));
+      const rows = out.rows || [];
+      const find = (want, near) => { if (!want) return null; const hits = rows.filter((r) => r.guid.replace(/-/g, '').endsWith(String(want).toLowerCase())).map((r) => r.n); return hits.length ? hits.sort((x, y) => Math.abs(x - near) - Math.abs(y - near))[0] : null; };
+      let from = Math.max(1, a || 1), to = b || rows.length;
+      if (at && at.length) { const fa = find(at[0], from), fb = find(at[1], to); const len = to - from; if (fa != null && fb != null) { from = Math.min(fa, fb); to = Math.max(fa, fb); } else if (fa != null) { from = fa; to = fa + len; } else if (fb != null) { to = fb; from = Math.max(1, fb - len); } out.rangeMoved = (from !== Math.max(1, a || 1)) || (to !== (b || rows.length)); out.anchorsLost = (fa == null && !!at[0]) || (fb == null && !!at[1]); }
+      out.rows = rows.filter((r) => r.n >= from && r.n <= to);
+      out.range = out.rows.length ? [from, Math.min(to, rows.length)] : [0, 0];
+      out.anchors = out.rows.length ? [out.rows[0].guid.replace(/-/g, '').slice(-12), out.rows[out.rows.length - 1].guid.replace(/-/g, '').slice(-12)] : ['', ''];
+      out.cached = false;
+      return out;
+    };
     const sliceText = (t, a, b) => { const segs = t.segments.filter((s) => (!a || s.n >= a) && (!b || s.n <= b)).slice(0, 60); return { ...t, segments: segs, segmentCount: t.segments.length, range: segs.length ? [segs[0].n, segs[segs.length - 1].n] : [0, 0], cached: false }; };
     return {
       init: async () => init(),
@@ -192,11 +232,13 @@
       reveal_file: async () => false,
       flex_status: async () => status(), flex_projects: async () => ['Kalu Demo'],
       flex_configure: async () => status(), flex_open: async () => status(), flex_refresh: async () => status(), flex_reload: async () => status(),
-      flex_get: async (kind, guid, a, b, _pc, _ws) => { if (kind === 'entry' || kind === 'sense') { const e = demo.entries.find((x) => x.guid === guid || x.senses.some((s) => s.guid === guid)); if (!e) throw new Error('No such entry'); return { ...e, cached: false }; } const t = demo.texts[guid]; if (!t) throw new Error('No such text'); return sliceText(t, a, b); },
+      flex_get: async (kind, guid, a, b, _pc, _ws, at) => { if (kind === 'chart') { const c = (demo.charts || {})[guid]; if (!c) throw new Error('No such chart'); return sliceChart(c, a, b, at); } if (kind === 'entry' || kind === 'sense') { const e = demo.entries.find((x) => x.guid === guid || x.senses.some((s) => s.guid === guid)); if (!e) throw new Error('No such entry'); return { ...e, cached: false }; } const t = demo.texts[guid]; if (!t) throw new Error('No such text'); return sliceText(t, a, b); },
       flex_search_entries: async (q) => demo.entries.filter((e) => !q || (e.headword + ' ' + e.senses.map((s) => s.gloss).join(' ')).toLowerCase().includes(q.toLowerCase())).map((e) => ({ guid: e.guid, headword: e.headword, pos: e.pos, gloss: e.senses.map((s) => s.gloss).join('; '), senses: e.senses.length, morphType: e.morphType })),
       flex_texts: async (q) => Object.values(demo.texts).filter((t) => !q || t.title.toLowerCase().includes(q.toLowerCase())).map((t) => ({ guid: t.guid, title: t.title, abbrev: t.abbrev, segmentCount: t.segments.length, hasMedia: false })),
       flex_find_in_text: async (guid, phrase) => { const t = demo.texts[guid]; const p = FS.normalize(phrase, true); return t ? t.segments.filter((s) => FS.normalize(s.baseline + ' ' + s.free, true).includes(p)).map((s) => s.n) : []; },
       flex_resolve_link: async (text) => { const m = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i.exec(text || ''); if (!m) return null; const g = m[1].toLowerCase(); const e = demo.entries.find((x) => x.guid === g); if (e) return { kind: 'entry', guid: g, title: e.headword }; if (demo.texts[g]) return { kind: 'text', guid: g, title: demo.texts[g].title }; return null; },
+      flex_charts: async (text) => Object.values(demo.charts || {}).filter((c) => !text || c.text === text).map((c) => ({ guid: c.guid, name: c.name, text: c.text, title: c.title, rows: c.rowCount, template: c.template.name, columns: c.template.columns.length })),
+      flex_chart_markers: async () => (demo.chartMarkers || []).map((m) => ({ ...m, count: Object.values(demo.charts || {}).reduce((n, c) => n + c.rows.reduce((k, r) => k + r.cells.filter((x) => x.kind === 'tag' && x.tag && x.tag.guid === m.guid).length, 0), 0) })),
       flex_text_tags: async () => (demo.tagList || []).map((t) => ({ ...t, count: Object.values(demo.texts).reduce((n, x) => n + (x.tags || []).filter((g) => g.tag.guid === t.guid).length, 0) })),
       flex_tag_occurrences: async (guid, q) => {
         const rows = [];

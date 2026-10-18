@@ -924,3 +924,82 @@ table.md-table td.drop-target, table.md-table th.drop-target { outline: 2px soli
 .text-obj.tag-miss, .flex-collapsed.tag-miss, .md-embed.tag-miss { opacity: 0.4; }
 .text-obj.tag-hit, .flex-collapsed.tag-hit, .md-embed.tag-hit { box-shadow: 0 0 0 2px var(--accent); }
 .pick-group { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); padding: 8px 8px 2px; }
+
+/* ---- text charts (chart.js; Seth, 2026-10-18) ------------------------------------------- */
+.chart-obj .chart-scroll { overflow-x: auto; max-width: 100%; }
+.tchart { border-collapse: collapse; font-size: 13.5px; min-width: 100%; }
+.tchart th, .tchart td { border: 1px solid var(--border-soft); padding: 3px 7px; vertical-align: top; text-align: left; }
+.tchart thead th { background: var(--panel-2); color: var(--muted); font-weight: 600; font-size: 12px; text-align: center; }
+.tchart thead th.th-group { border-bottom-width: 0; letter-spacing: 0.02em; text-transform: uppercase; font-size: 10.5px; }
+.tchart thead th.th-col { cursor: pointer; }
+.tchart thead th.th-col:hover { color: var(--accent); }
+.tchart th.rlab { width: 2.4em; text-align: right; color: var(--muted); font-weight: 600; font-variant-numeric: tabular-nums; background: var(--panel-2); cursor: pointer; white-space: nowrap; }
+.tchart th.rlab:hover { color: var(--accent); }
+.tchart td.ccell { min-width: 3em; cursor: default; }
+.tchart td.ccell.empty { background: transparent; }
+.tchart td.ccell.st-hl { background: var(--hl); }
+.tchart tr.end-sent > th, .tchart tr.end-sent > td { border-bottom: 2px solid var(--border); }
+.tchart tr.end-para > th, .tchart tr.end-para > td { border-bottom: 3px double var(--text); }
+.tchart tr.cl-dependent th.rlab { font-style: italic; }
+.tchart tr.cl-dependent th.rlab::before { content: "↳ "; color: var(--faint); }
+.tchart tr.cl-speech th.rlab::before { content: "“ "; color: var(--faint); }
+.tchart tr.cl-song th.rlab::before { content: "♪ "; color: var(--faint); }
+.tchart tr.crow.flash > td, .tchart tr.crow.flash > th { background: var(--accent-soft); transition: background 0.25s; }
+.tchart tr.crow.pick { cursor: pointer; }
+.tchart tr.crow.pick:hover > td { background: var(--accent-soft); }
+.tchart tr.crow.in-range > td, .tchart tr.crow.in-range > th { background: color-mix(in srgb, var(--accent) 14%, var(--bg)); }
+.tchart .cwords { display: inline-flex; flex-wrap: wrap; gap: 0 10px; align-items: flex-start; }
+.tchart .cwords.flash { outline: 2px solid var(--accent); border-radius: 4px; }
+.tchart .cwords.moved-src .il-txt { text-decoration: underline dotted var(--muted); text-underline-offset: 3px; }
+.tchart .cw { display: inline-flex; flex-direction: column; gap: 0; border-radius: 4px; padding: 0 2px; }
+.tchart .cw:hover { background: var(--accent-soft); cursor: pointer; }
+.tchart .cw.punct { color: var(--vern); }
+.tchart .cw .il-txt { font-size: 15.5px; }
+.tchart .cw .il-gls { font-size: 12.5px; }
+.tchart .cw .il-morph { font-size: 13px; display: block; }
+.tchart .cw .il-mgls { font-size: 12px; display: block; }
+.tchart .cw .il-pos { font-size: 11px; }
+.tchart .cw .il-line { white-space: nowrap; line-height: 1.3; }
+.tchart .cmoved { color: var(--pos); font-weight: 700; cursor: help; padding: 0 3px; }
+.tchart .cclause { color: var(--accent); cursor: pointer; font-weight: 600; }
+.tchart .cclause:hover { text-decoration: underline; }
+.tchart .ctag { display: inline-block; font-size: 11px; font-weight: 700; padding: 0 6px; border-radius: 999px; line-height: 1.6; margin: 1px 2px; }
+.tchart .ctag.missing { background: var(--panel-2); color: var(--muted); }
+.tchart td.cfree, .tchart .cfree-row td { color: var(--text); font-style: italic; }
+.tchart td.cfree { min-width: 12em; vertical-align: middle; background: color-mix(in srgb, var(--gloss) 6%, var(--bg)); }
+.tchart .cfree-row td { background: color-mix(in srgb, var(--gloss) 6%, var(--bg)); border-top: 0; }
+.tchart .cfree-row .cfree-rows { float: right; font-style: normal; font-size: 11px; color: var(--muted); background: var(--bg); border: 1px solid var(--border-soft); border-radius: 999px; padding: 0 6px; margin-left: 10px; }
+.tchart td.cnotes { color: var(--muted); font-size: 12.5px; min-width: 8em; }
+.tchart th.th-notes, .tchart th.th-free { min-width: 6em; }
+.tchart.rtl td.ccell { direction: rtl; text-align: right; }
+.chart-tip { margin-top: 6px; padding: 5px 8px; border-top: 1px dotted var(--border-soft); font-style: italic; }
+.chart-cols { display: flex; flex-direction: column; gap: 2px; max-height: 260px; overflow: auto; }
+.chart-cols .chart-col-group { font-weight: 600; margin-top: 4px; }
+.chart-cols .chart-col { margin-left: 18px; }
+.chart-context .chart-obj { border: 0; padding: 0; }
+.flex-collapsed.kind-chart .cicon { color: var(--pos); }
+
+/* ---- chart notes (chartnote.js) ------------------------------------------------------------ */
+#chartnote { padding-bottom: 40px; }
+.cn-head .kind-badge { font-size: 11px; padding: 1px 7px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.cn-head .btn.small { padding: 3px 9px; font-size: 12.5px; }
+.cn-body .chart-obj { border: 0; padding: 0; background: transparent; }
+.tchart th.th-x { background: color-mix(in srgb, var(--accent) 10%, var(--panel-2)); text-align: left; min-width: 7em; }
+.tchart th.th-x .xhead { display: inline-flex; align-items: center; gap: 2px; }
+.tchart th.th-x .xkind { font-weight: 400; font-size: 10.5px; }
+.tchart th.th-x .xmenu { opacity: 0.35; padding: 0 3px; }
+.tchart th.th-x:hover .xmenu { opacity: 1; }
+.tchart th.th-x .xerr, .tchart .xerr { color: var(--danger); }
+.tchart td.xcell { background: color-mix(in srgb, var(--accent) 4%, var(--bg)); }
+.tchart td.xcell .xval { min-height: 1.3em; min-width: 4em; cursor: text; border-radius: 4px; padding: 0 3px; white-space: pre-wrap; }
+.tchart td.xcell .xval.list { cursor: pointer; }
+.tchart td.xcell .xval.empty { color: var(--faint); }
+.tchart td.xcell .xval:hover, .tchart td.xcell .xval:focus { background: var(--accent-soft); outline: none; }
+.tchart td.xcell textarea.xedit { width: 100%; min-width: 9em; border: 1px solid var(--accent); border-radius: 4px; padding: 1px 3px; font: inherit; background: var(--bg); color: var(--text); resize: none; }
+.tchart td.xcell select.xsel { font: inherit; max-width: 14em; }
+.tchart td.xcell .xrule { font-weight: 600; }
+.cn-col-dlg .modal-body .row { margin: 6px 0; }
+.cn-settings textarea { font-size: 13px; }
+.cn-preview { margin-top: 4px; }
+.cn-list { border-top: 1px solid var(--border-soft); padding: 8px 0; }
+.note-card .kind-badge.chart { background: color-mix(in srgb, var(--pos) 15%, var(--bg)); color: var(--pos); }

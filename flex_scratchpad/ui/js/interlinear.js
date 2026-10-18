@@ -25,9 +25,9 @@
   const peek = (spec) => {
     if (!spec || spec.kind === 'file') return null;
     const kind = spec.kind === 'sense' ? 'entry' : spec.kind;
-    const t = spec.kind === 'text';
+    const t = spec.kind === 'text' || spec.kind === 'chart';
     const a = t && spec.seg ? spec.seg[0] : null, b = t && spec.seg ? spec.seg[1] : null, at = t ? spec.at : null;
-    for (const ws of t && spec.ws ? [spec.ws, null] : [null]) {
+    for (const ws of spec.kind === 'text' && spec.ws ? [spec.ws, null] : [null]) {
       const v = mem.get(keyOf(kind, spec.guid, a, b, ws, at));
       if (v && typeof v.then !== 'function') return v;
     }
@@ -47,6 +47,25 @@
   /* After a fetch: a text embed records its anchors the first time, and follows them when
    * FLEx has renumbered its segments — rewriting `seg=` in the note (silently, via onSpecChange). */
   function syncAnchors(spec, obj, opts) {
+    if (spec.kind === 'chart') {
+      // a chart's rows are anchored by their GUIDs the same way (rows=, at=); the row styles
+      // (hl=r2 …) move with the numbers, which is the best that can be done without a ledger
+      if (!obj || obj.kind !== 'chart' || !opts.onSpecChange || !spec.seg) return false;
+      const anchors = obj.anchors && obj.anchors[0] ? obj.anchors : null;
+      let changed = false;
+      if (obj.rangeMoved && obj.range && obj.range[0] && (obj.range[0] !== spec.seg[0] || obj.range[1] !== spec.seg[1])) {
+        const d = obj.range[0] - spec.seg[0];
+        if (d && obj.range[1] - spec.seg[1] === d) for (const g of spec.styles || []) for (const t of g.targets) { if (t.row != null) t.row += d; if (t.rowEnd != null) t.rowEnd += d; }
+        spec.seg = [obj.range[0], obj.range[1]];
+        changed = true;
+      }
+      if (anchors && (!spec.at || (obj.rangeMoved && (spec.at[0] !== anchors[0] || spec.at[1] !== anchors[1])))) { spec.at = anchors; changed = true; }
+      if (changed) {
+        opts.onSpecChange(spec);
+        if (obj.rangeMoved) { const lab = (n) => { const e = (obj.index || []).find((i) => i.n === n); return e ? e.label : String(n); }; FS.toast('Rows renumbered in FLEx — the chart now shows ' + lab(spec.seg[0]) + (spec.seg[1] !== spec.seg[0] ? '–' + lab(spec.seg[1]) : '')); }
+      }
+      return changed;
+    }
     if (spec.kind !== 'text' || !obj || obj.kind !== 'text' || !opts.onSpecChange || !spec.seg || obj.lost) return false;
     const anchors = obj.anchors && obj.anchors[0] ? obj.anchors : null;
     let changed = false;
@@ -1100,9 +1119,12 @@
     else { if (collapsed) spec.extra.collapsed = true; else delete spec.extra.collapsed; }
     opts.onSpecChange && opts.onSpecChange(spec);
   }
+  // a text and a chart are the two kinds with a range (`seg=` / `rows=`) and anchors (`at=`)
+  const ranged = (spec) => spec.kind === 'text' || spec.kind === 'chart';
   function chipTitle(spec, obj) {
     if (spec.label) return spec.label;
     if (!obj) return spec.kind + ' ' + spec.guid.slice(0, 8) + '…';
+    if (obj.kind === 'chart') return (obj.name || 'Chart') + ' · ' + (obj.title || '');
     if (obj.kind === 'entry') {
       if (spec.kind === 'sense') { const sn = (obj.senses || []).find((x) => x.guid === spec.guid); if (sn) return (obj.headword || '') + ' ' + (sn.number ? sn.number + '. ' : '') + (sn.gloss || ''); }
       return (obj.headword || obj.lexemeForm || '?') + (obj.senses && obj.senses[0] && obj.senses[0].gloss ? ' ‘' + obj.senses[0].gloss + '’' : '');
@@ -1111,6 +1133,12 @@
     return obj.title || '(untitled text)';
   }
   function chipRange(spec, obj) {
+    if (spec.kind === 'chart') {
+      const r = spec.seg || (obj && obj.range) || null;
+      if (!r) return 'all rows';
+      const lab = (n) => { const e = obj && obj.index && obj.index.find((i) => i.n === n); return e ? e.label : String(n); };
+      return 'rows ' + (r[0] === r[1] ? lab(r[0]) : lab(r[0]) + '–' + lab(r[1]));
+    }
     if (spec.kind !== 'text') return '';
     const r = spec.seg || (obj && obj.range) || null;
     if (!r) return 'all';
@@ -1125,19 +1153,19 @@
   }
   function renderChip(container, spec, opts) {
     container.innerHTML = '';
-    const icon = spec.kind === 'text' ? '¶' : spec.kind === 'wordform' ? 'ω' : '📖';
+    const icon = spec.kind === 'text' ? '¶' : spec.kind === 'chart' ? '▦' : spec.kind === 'wordform' ? 'ω' : '📖';
     const chip = el('span', { class: 'flex-collapsed kind-' + spec.kind, tabindex: 0, title: 'Click to preview; ⤢ to expand' + (opts.collection ? '' : '; drag to move'), draggable: opts.editable && !opts.collection ? 'true' : null });   // a collection drags a card by its own grip
     const ttl = el('span', { class: 'cttl' }, chipTitle(spec, null));
     chip.appendChild(el('span', { class: 'cicon' }, icon));
     chip.appendChild(ttl);
     const range = chipRange(spec, null);
     const rangeEl = el('span', { class: 'crange' }, range);
-    if (spec.kind === 'text') chip.appendChild(rangeEl);
+    if (ranged(spec)) chip.appendChild(rangeEl);
     if (opts.editable) chip.appendChild(el('button', { class: 'cexp', title: opts.inCell ? 'Show the full example in this cell' : 'Expand in place', onclick: (e) => { e.stopPropagation(); closeOverlay(); setCollapsed(spec, opts, false); } }, '⤢'));
     container.appendChild(chip);
     // fill the title from the (cached) object without blocking the chip
     const kind = spec.kind === 'sense' ? 'entry' : spec.kind;
-    flexGet(kind, spec.guid, spec.kind === 'text' && spec.seg ? spec.seg[0] : null, spec.kind === 'text' && spec.seg ? spec.seg[1] : null, false, null, spec.kind === 'text' ? spec.at : null)
+    flexGet(kind, spec.guid, ranged(spec) && spec.seg ? spec.seg[0] : null, ranged(spec) && spec.seg ? spec.seg[1] : null, false, null, ranged(spec) ? spec.at : null)
       .then((obj) => { if (syncAnchors(spec, obj, opts)) return; ttl.textContent = chipTitle(spec, obj); rangeEl.textContent = chipRange(spec, obj); const ws = obj.ws && obj.ws.vern; if (ws && obj.kind !== 'wordform') { if (ws.rtl) ttl.dir = 'rtl'; if (ws.tag) ttl.lang = ws.tag; } if (obj.cached) chip.classList.add('cached'); const tn = tagNames(obj); if (tn) chip.dataset.tags = tn; })
       .catch((e) => { chip.classList.add('err'); chip.title = e.message || String(e); });
     // click → pinned overlay; hover → temporary overlay
@@ -1303,10 +1331,10 @@
     const doRender = async (refresh) => {
       try {
         const kind = spec.kind === 'sense' ? 'entry' : spec.kind;
-        const obj = await flexGet(kind, spec.guid, spec.kind === 'text' && spec.seg ? spec.seg[0] : null, spec.kind === 'text' && spec.seg ? spec.seg[1] : null, refresh, spec.kind === 'text' ? spec.ws : null, spec.kind === 'text' ? spec.at : null);
+        const obj = await flexGet(kind, spec.guid, ranged(spec) && spec.seg ? spec.seg[0] : null, ranged(spec) && spec.seg ? spec.seg[1] : null, refresh, spec.kind === 'text' ? spec.ws : null, ranged(spec) ? spec.at : null);
         if (syncAnchors(spec, obj, opts)) return;          // the spec changed: the owner re-renders
         const o = Object.assign({}, opts, { refresh: () => reload() });
-        const node = kind === 'text' ? renderText(obj, spec, o) : kind === 'wordform' ? renderWordform(obj, spec, o) : renderEntry(obj, spec, o);
+        const node = kind === 'text' ? renderText(obj, spec, o) : kind === 'chart' ? FS.chart.renderChart(obj, spec, o) : kind === 'wordform' ? renderWordform(obj, spec, o) : renderEntry(obj, spec, o);
         const restore = keep && container.isConnected ? holdScroll(container) : null;   // only when a drawing is REPLACED
         container.innerHTML = '';
         container.appendChild(node);
@@ -1356,8 +1384,8 @@
         return;
       }
       const kind = spec.kind === 'sense' ? 'entry' : spec.kind;
-      flexGet(kind, spec.guid, spec.kind === 'text' && spec.seg ? spec.seg[0] : null, spec.kind === 'text' && spec.seg ? spec.seg[1] : null, false, null, spec.kind === 'text' ? spec.at : null)
-        .then((obj) => { if (!span.isConnected) return; span.dataset.title = chipTitle(spec, obj); if (spec.kind === 'text') span.dataset.range = chipRange(spec, obj); if (obj.cached) span.classList.add('cached'); const tn = tagNames(obj); if (tn) span.dataset.tags = tn; })
+      flexGet(kind, spec.guid, ranged(spec) && spec.seg ? spec.seg[0] : null, ranged(spec) && spec.seg ? spec.seg[1] : null, false, null, ranged(spec) ? spec.at : null)
+        .then((obj) => { if (!span.isConnected) return; span.dataset.title = chipTitle(spec, obj); if (ranged(spec)) span.dataset.range = chipRange(spec, obj); if (obj.cached) span.classList.add('cached'); const tn = tagNames(obj); if (tn) span.dataset.tags = tn; })
         .catch((e) => { span.classList.add('err'); span.title = e.message || String(e); });
       if (!opts) return;
       const o = {

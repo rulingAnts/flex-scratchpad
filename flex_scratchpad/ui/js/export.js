@@ -78,6 +78,7 @@
           note: F.has('snote') ? s.note : '', domains: F.has('sem') ? (s.domains || []) : [] })) };
     }
     if (kind === 'wordform') return { type: 'wordform', form: obj.form, glosses: obj.glosses || [], font: obj.ws && obj.ws.vern && obj.ws.vern.font };
+    if (kind === 'chart') return chartBlock(obj, spec);
     const lines = spec.lines && spec.lines.length ? spec.lines : R.DEFAULT_LINES;
     const index = R.resolveStyles(spec, obj);
     const vern = obj.ws && obj.ws.vern || {};
@@ -123,6 +124,62 @@
     });
     return { type: 'interlinear', title: obj.title, label: spec.label, segments: segs, ws: vern, segmentCount: obj.segmentCount, range: obj.range };
   }
+
+  /* A text chart (Seth, 2026-10-18) for the exports: {type: 'chart', title, name, label, headers:
+   * [[{text, span}]], rows: [{label, clause, endSent, endPara, cells: [{span, runs}], free, notes}],
+   * ws} — the same layout the page draws (chart.js helpers), each cell's content as runs. */
+  function chartBlock(obj, spec) {
+    const C = FS.chart;
+    const cols = C.visibleColumns(spec, obj);
+    const lines = R.chartLines(spec);
+    const free = R.freeMode(spec);
+    const headers = !(spec.extra && spec.extra.headers === 'off');
+    const notesOn = !(spec.extra && spec.extra.notes === 'off') && (obj.rows || []).some((r) => (r.notes || '').trim());
+    const index = R.resolveChartStyles(spec, obj);
+    const vern = obj.ws && obj.ws.vern || {}, anal = obj.ws && obj.ws.anal || {};
+    const wg = new Map();
+    for (const r of obj.rows || []) for (const c of r.cells || []) if (c.kind === 'words') wg.set(c.guid, { row: r, cell: c });
+    const runsOfStyles = (text, st, base) => styledRuns(text, st.map((s) => ({ style: s.style, color: s.color, chars: null })), base);
+    const lineText = (w, line) => line === 'txt' ? (w.txt || '') : line === 'gls' ? (w.gls || '') : line === 'pos' ? (w.pos || '') : line === 'morph' ? (w.morphs || []).map((m) => m.form || '').join(' ') : line === 'mgls' ? (w.morphs || []).map((m) => m.gls || '').join(' ') : line === 'cf' ? (w.morphs || []).map((m) => m.cf || '').join(' ') : '';
+    const LB = { txt: { color: '#00379c', font: vern.font || undefined }, morph: { color: '#4a4f57', font: vern.font || undefined }, cf: { color: '#68717d' }, gls: { color: '#2a6e2a', size: 9 }, mgls: { color: '#2a6e2a', size: 9 }, pos: { color: '#7a3e9d', size: 8 } };
+    const partWords = (p, row, col) => {
+      // one run group per word: its lines joined by a line break
+      const words = [];
+      let wi = 0;
+      for (const w of p.words || []) {
+        if (w.punct) { words.push([{ text: w.txt || '', color: '#00379c', font: vern.font || undefined }]); continue; }
+        wi++;
+        const runs = [];
+        lines.forEach((line, li) => { const t = lineText(w, line); if (!t && line !== 'txt') return; if (li) runs.push({ text: '\n' }); runs.push(...runsOfStyles(t, R.chartStylesFor(index, row.n, col.n, wi, line), LB[line] || {})); });
+        words.push(runs);
+      }
+      return words;
+    };
+    const runs = freeRunsOf(obj.rows || []);
+    const rows = (obj.rows || []).map((row, ri) => {
+      const cells = C.layoutRow(row, cols).map((slot) => {
+        const cellSt = R.chartStylesFor(index, row.n, slot.col.n, 0, '');
+        const words = [];
+        const marks = [];
+        for (const p of slot.parts) {
+          if (p.kind === 'words') words.push(...partWords(p, row, slot.col));
+          else if (p.kind === 'moved') { const t = wg.get(p.target); marks.push({ text: (p.preposed ? '\u2039\u2039' : '\u203a\u203a') + (t ? t.row.label : ''), color: '#7a3e9d', b: true }); }
+          else if (p.kind === 'clause') marks.push({ text: '[' + ((p.labels || []).length > 1 ? p.labels[0] + '\u2013' + p.labels[p.labels.length - 1] : (p.labels || ['?'])[0]) + ']', color: '#1f4f8f', b: true });
+          else if (p.kind === 'tag') { const look = C.markerLook(obj, p.tag || {}); marks.push({ text: ' ' + ((p.tag && (p.tag.abbr || p.tag.name)) || '?') + ' ', hl: look.bg, size: 8, b: true }); }
+        }
+        const hl = cellSt.find((s) => s.style === 'hl');
+        return { span: slot.span, words, marks, hl: hl ? (hl.color || '#fff2a8') : '', b: cellSt.some((s) => s.style === 'b'), i: cellSt.some((s) => s.style === 'i'), u: cellSt.some((s) => s.style === 'u'), color: (cellSt.find((s) => s.style === 'color') || {}).color || '' };
+      });
+      const run = runs.find((x) => x.from === ri);
+      const runEnd = runs.find((x) => x.to === ri);
+      return { n: row.n, label: row.label, clause: row.clause, endSent: !!row.endSent, endPara: !!row.endPara, cells,
+        free: free === 'col' && run ? { text: C.freeText(obj, run.segs, true).join(' '), span: run.to - run.from + 1 } : null,
+        freeRow: free === 'row' && runEnd ? { text: C.freeText(obj, runEnd.segs, true).join(' '), rows: runEnd.from === runEnd.to ? obj.rows[runEnd.from].label : obj.rows[runEnd.from].label + '\u2013' + obj.rows[runEnd.to].label } : null,
+        notes: notesOn ? (row.notes || '') : null };
+    });
+    return { type: 'chart', title: obj.title, name: obj.name, label: spec.label, headers: headers ? C.headerRows(cols).map((hr) => hr.map((h) => ({ text: h.text, span: h.span }))) : [], freeCol: free === 'col', notesCol: notesOn, cols: cols.length, rows, ws: vern, anal, rowCount: obj.rowCount, range: obj.range };
+  }
+  const freeRunsOf = (rows) => FS.chart.freeRuns(rows);
 
   /* ------------------------------------------------------------------ note → model */
   async function buildDoc(note, editor) {
@@ -241,6 +298,11 @@
   .hw { font-size: 20px; font-weight: 700; color: #00379c; font-family: "Charis SIL", serif; } .sense { display: flex; gap: 8px; padding: 3px 0; } .sense .sn { color: #a8b0ba; min-width: 20px; text-align: right; } .sense .pos { font-style: italic; } .sense .gl { color: #2a6e2a; font-weight: 600; } .ex { color: #68717d; margin-left: 6px; border-left: 2px solid #e8ebef; padding-left: 8px; font-size: 13.5px; } .ex .v { color: #00379c; font-family: "Charis SIL", serif; font-size: 14.5px; }
   ul.task { list-style: none; padding-left: 8px; } hr { border: 0; border-top: 1px solid #d9dde3; margin: 16px 0; } img { max-width: 100%; }
   [dir=rtl] .il { flex-direction: row-reverse; justify-content: flex-end; }
+  table.tchart { border-collapse: collapse; font-size: 13px; margin-top: 6px; } table.tchart th, table.tchart td { border: 1px solid #e8ebef; padding: 3px 7px; vertical-align: top; text-align: left; }
+  table.tchart thead th { background: #f3f4f6; color: #68717d; font-size: 11px; text-align: center; } table.tchart tbody th { color: #68717d; text-align: right; background: #f7f8fa; font-variant-numeric: tabular-nums; }
+  table.tchart tr.end-sent > th, table.tchart tr.end-sent > td { border-bottom: 2px solid #c9ced6; } table.tchart tr.end-para > th, table.tchart tr.end-para > td { border-bottom: 3px double #1a1d21; }
+  table.tchart tr.dependent th { font-style: italic; } table.tchart .cw { display: inline-block; vertical-align: top; margin-right: 8px; line-height: 1.3; } table.tchart td.free, table.tchart tr.free-row td { font-style: italic; background: #f3f9f3; }
+  table.tchart tr.free-row .rows { float: right; font-style: normal; font-size: 11px; color: #68717d; } table.tchart td.notes { color: #68717d; font-size: 12px; }
   @media print { body { margin: 0; max-width: none; } .obj { break-inside: avoid; } }`;
 
   function runHtml(r) {
@@ -296,6 +358,25 @@
               + (seg.free ? '<div class="ft"><b>Free</b>' + runsHtml(seg.free) + '</div>' : '') + (seg.lit ? '<div class="lit"><b>Lit</b>' + runsHtml(seg.lit) + '</div>' : '')
               + (seg.notes || []).map((n) => '<div class="note"><b>Note</b>' + runsHtml(n) + '</div>').join('') + '</div></div>';
           }).join('') + '</div>';
+      }
+      case 'chart': {
+        const rtl = b.ws && b.ws.rtl;
+        const extra = (b.freeCol ? 1 : 0) + (b.notesCol ? 1 : 0);
+        let h = '<div class="obj chart"><div><span class="ttl">' + esc(b.name || 'Chart') + ' \u00b7 ' + esc(b.title || '') + '</span>' + (b.label ? '<span class="lbl">' + esc(b.label) + '</span>' : '') + '</div><table class="tchart"' + (rtl ? ' dir="rtl"' : '') + '>';
+        if (b.headers.length) {
+          h += '<thead>' + b.headers.map((hr, i) => '<tr>' + (i === 0 ? '<th rowspan="' + b.headers.length + '">#</th>' : '') + hr.map((x) => '<th' + (x.span > 1 ? ' colspan="' + x.span + '"' : '') + '>' + esc(x.text) + '</th>').join('') + (i === 0 && b.freeCol ? '<th rowspan="' + b.headers.length + '">Free</th>' : '') + (i === 0 && b.notesCol ? '<th rowspan="' + b.headers.length + '">Notes</th>' : '') + '</tr>').join('') + '</thead>';
+        }
+        h += '<tbody>' + b.rows.map((r) => {
+          let tr = '<tr class="' + esc(r.clause || 'normal') + (r.endSent ? ' end-sent' : '') + (r.endPara ? ' end-para' : '') + '"><th>' + esc(r.label) + '</th>';
+          tr += r.cells.map((c) => '<td' + (c.span > 1 ? ' colspan="' + c.span + '"' : '') + (c.hl || c.b || c.i || c.u || c.color ? ' style="' + (c.hl ? 'background:' + c.hl + ';' : '') + (c.b ? 'font-weight:700;' : '') + (c.i ? 'font-style:italic;' : '') + (c.u ? 'text-decoration:underline;' : '') + (c.color ? 'color:' + c.color + ';' : '') + '"' : '') + '>'
+            + c.words.map((w) => '<span class="cw">' + runsHtml(w).replace(/\n/g, '<br>') + '</span>').join(' ') + (c.marks.length ? ' ' + runsHtml(c.marks) : '') + '</td>').join('');
+          if (r.free) tr += '<td class="free"' + (r.free.span > 1 ? ' rowspan="' + r.free.span + '"' : '') + '>' + esc(r.free.text) + '</td>';
+          if (r.notes != null) tr += '<td class="notes">' + esc(r.notes) + '</td>';
+          tr += '</tr>';
+          if (r.freeRow && r.freeRow.text) tr += '<tr class="free-row"><th></th><td colspan="' + (b.cols + extra) + '"><i>' + esc(r.freeRow.text) + '</i> <span class="rows">' + esc(r.freeRow.rows) + '</span></td></tr>';
+          return tr;
+        }).join('') + '</tbody></table></div>';
+        return h;
       }
       case 'entry': return '<div class="obj"><div><span class="hw">' + esc(b.headword || '') + '</span>' + (b.citationForm ? ' <span class="pos">' + esc(b.citationForm) + '</span>' : '') + (b.lexemeForm ? ' <span class="pos">' + esc(b.lexemeForm) + '</span>' : '') + (b.morphType ? ' <span class="pos">' + esc(b.morphType) + '</span>' : '') + (b.label ? '<span class="lbl">' + esc(b.label) + '</span>' : '') + '</div>'
         + (b.note ? '<div class="note">' + esc(b.note) + '</div>' : '')
