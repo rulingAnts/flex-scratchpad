@@ -69,6 +69,12 @@ test('headers, visible columns, merged cells, free-translation runs', () => {
   const runs = C.freeRuns(c.rows);
   assert.deepEqual(runs.map((r) => [r.from, r.to, r.segs]), [[0, 0, [1]], [1, 1, [2]], [2, 3, [3]], [4, 4, [4]], [5, 5, [5]], [6, 6, [6]]]);
   assert.deepEqual(C.freeText(c, [3], true), ['‘“Mother!” he sees.’']);
+  // a row holding the end of one segment and the start of the next (Siakai row 1 = 1.1 + 2.1,
+  // 2a–2b = 2.1): each translation once, after the last row of its segment, runs never overlap
+  const seg = (n, w) => ({ kind: 'words', seg: n, segTo: n, words: [{ txt: 'w' + w }] });
+  const rows = [{ cells: [seg(1, 0), seg(2, 0)] }, { cells: [seg(2, 1)] }, { cells: [seg(2, 2)] }, { cells: [{ kind: 'tag', tag: {} }] }];
+  assert.deepEqual(C.freeRuns(rows).map((r) => [r.from, r.to, r.segs]), [[0, 0, [1]], [1, 3, [2]]]);
+  assert.deepEqual(C.freeRuns([]), []);
   assert.deepEqual(C.freeText(c, [1, 2], true), ['‘The dog slept.’ (1.1)', '‘Yesterday the child saw the river.’ (1.2)']);
 });
 

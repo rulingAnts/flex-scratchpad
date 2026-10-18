@@ -97,17 +97,25 @@
     for (const c of row.cells || []) if (c.kind === 'words' && c.seg) for (let n = c.seg; n <= (c.segTo || c.seg); n++) s.add(n);
     return [...s].sort((a, b) => a - b);
   }
-  /* Runs of consecutive rows that share the same segments: one Free cell (or one translation
-   * row) per run. [{from, to, segs}] by row index. */
+  /* Where the free translations go: a segment's translation is shown ONCE, after the LAST row
+   * that holds any of its words (Seth's Siakai chart, 2026-10-18: row 1 holds the end of 1.1 and
+   * the start of 2.1, rows 2a–2b the rest of 2.1 — grouping rows by their segment set printed
+   * 2.1 twice). Runs never overlap (a Free column spans each run's rows): a run ends at a row
+   * where some segment ends and starts after the previous run; rows left over at the end join
+   * the last run. [{from, to, segs}] by row index. */
   function freeRuns(rows) {
+    const lastRow = new Map();
+    rows.forEach((r, i) => { for (const n of rowSegs(r)) lastRow.set(n, i); });
+    const endsAt = new Map();
+    for (const [n, i] of lastRow) { if (!endsAt.has(i)) endsAt.set(i, []); endsAt.get(i).push(n); }
     const runs = [];
+    let from = 0;
     rows.forEach((r, i) => {
-      const segs = rowSegs(r);
-      const key = segs.join(',');
-      const last = runs[runs.length - 1];
-      if (last && key && last.key === key) last.to = i;
-      else runs.push({ from: i, to: i, segs, key });
+      if (!endsAt.has(i)) return;
+      runs.push({ from, to: i, segs: endsAt.get(i).sort((a, b) => a - b) });
+      from = i + 1;
     });
+    if (runs.length && from < rows.length) runs[runs.length - 1].to = rows.length - 1;
     return runs;
   }
   const segsByN = (chart) => new Map((chart.segments || []).map((s) => [s.n, s]));

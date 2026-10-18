@@ -557,8 +557,9 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   Word gloss by default), ‹‹ / ›› moved-text markers (hover lights the word group they point at,
   which is dotted-underlined), [2a] clause markers (click flashes the rows), chart tags as chips
   (FLEx's colours, else the palette). FREE TRANSLATIONS (Seth's four ways): `free=row` (default) a
-  translation row after the LAST row of each segment's run naming the rows it covers (`freeRuns`:
-  consecutive rows sharing the same segments are one run), `col` a Free column spanning the run's
+  translation row after the LAST row that holds any of a segment's words, naming the rows since the
+  previous one (`freeRuns`: each segment's translation ONCE, runs never overlap — Siakai's row 1 holds
+  the end of 1.1 and the start of 2.1, 2a–2b the rest of 2.1), `col` a Free column spanning the run's
   rows, `tip` a strip under the chart for the clicked cell, `off`. Row notes in a last column
   (`notes=off`). A click on a word / cell / row label / column heading opens `stylePopover`
   (scope: this word · the cell · the row · the column; the same hl/b/u/i/s/colour as examples) →
