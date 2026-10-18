@@ -70,12 +70,13 @@ ENTRY_BY_GUID = {e["guid"]: e for e in ENTRIES}
 # the story, as FLEx's Text Tagging view would place them. Two carry FLEx's own colours, the
 # rest take the app's palette; one spans two segments.
 def _tag(n, name, abbr, group, back=""):
-    return model.tag_item(f"7a9d0c00-0000-4000-8000-0000000000{n:02d}", name, abbr, group, "", back)
+    # `group` may be a path "Syntax/Roles" — the demo has one nested group to exercise the tree
+    return model.tag_item(f"7a9d0c00-0000-4000-8000-0000000000{n:02d}", name, abbr, "", "", back, path=group.split("/"))
 
 
 TAG_LIST = [
-    _tag(1, "Subject", "S", "Syntax", "#dbeafe"),
-    _tag(2, "Object", "O", "Syntax", "#fde68a"),
+    _tag(1, "Subject", "S", "Syntax/Arguments", "#dbeafe"),
+    _tag(2, "Object", "O", "Syntax/Arguments", "#fde68a"),
     _tag(3, "Verb", "V", "Syntax"),
     _tag(4, "Topic", "Top", "Discourse"),
     _tag(5, "Focus", "Foc", "Discourse"),

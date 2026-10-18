@@ -303,6 +303,7 @@
         if (pre.cls === 'md-num') lineCls += ' md-line-num';
         if (pre.cls === 'md-bullet') lineCls += ' md-line-bullet';
         if (pre.indent) lineCls += ' md-indent' + Math.min(4, Math.round(pre.indent / 2));
+        if (line.length === pre.len) lineCls += ' md-line-empty';   // nothing after the prefix yet: with markers hidden it stays visible, so the caret has somewhere to be
         start = pre.len;
       }
       if (blockType === 'h') { const lvl = (RE.heading.exec(line) || [null, '#'])[1].length; for (let i = start; i < line.length; i++) out.marks[i].add('md-h md-h' + lvl); }

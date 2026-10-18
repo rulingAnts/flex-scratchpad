@@ -3435,7 +3435,14 @@ def test_flex_text_markup_tags_render_and_are_styled_by_scope(app):
     first.locator("[data-test=tag-btn]").click()
     page.wait_for_selector("[data-test=tag-popover]")
     rows = page.locator("[data-test=tag-popover] .tagrow")
-    assert rows.locator("[data-test=tag-via]").all_inner_texts() == ["styled by FLEx’s own colours", "styled by the standard palette", "styled by the standard palette", "styled by FLEx’s own colours"]
+    # in FLEx's own hierarchy: Syntax › Arguments › Subject, Object; Syntax › Verb; Discourse › Focus
+    assert page.evaluate("() => [...document.querySelectorAll('[data-test=tag-popover] [data-test=tag-tree-group]')].map((h) => h.dataset.group + ':' + h.querySelector('.tag-tree-n').textContent)") == ["Syntax:3", "Arguments:2", "Discourse:1"]
+    assert [r.strip() for r in rows.locator(".tag-name > span:first-child").all_inner_texts()] == ["Subject (S) ×2", "Object (O)", "Verb (V) ×2", "Focus (Foc)"]
+    assert rows.locator("[data-test=tag-via]").all_inner_texts() == ["styled by FLEx’s own colours", "styled by FLEx’s own colours", "styled by the standard palette", "styled by the standard palette"]
+    page.locator("[data-test=tag-popover] [data-test=tag-tree-group][data-group=Arguments]").click()        # fold a group: its tags go, remembered
+    assert rows.count() == 2
+    page.locator("[data-test=tag-popover] [data-test=tag-tree-group][data-group=Arguments]").click()
+    assert rows.count() == 4
     rows.nth(0).locator("[data-test=tag-toggle]").click()
     page.wait_for_function("() => !document.querySelector('#editor .text-obj .segment .tagbar') || document.querySelector('#editor .text-obj .segment').querySelectorAll('.tagbar').length === 1")
     page.wait_for_timeout(900)
@@ -3646,4 +3653,46 @@ def test_rail_parts_fold_and_resize_and_are_never_lost(app):
     assert visible_top("#tags-section h4") and height("#tags-section") >= height("#tags-section h4")
     page.locator("[data-test=rail-divider]").nth(1).dblclick()
     assert "sizes" not in page.evaluate("JSON.parse(localStorage.getItem('fs:rail'))") or not page.evaluate("JSON.parse(localStorage.getItem('fs:rail')).sizes")
+    assert not errors
+
+
+def test_hidden_markers_type_to_the_right_of_a_prefix(app):
+    """Seth, 2026-10-18: with markup hidden, "add a heading or make a blank block into a heading
+    and then start typing, the cursor goes to the left of the ### and makes the ### appear. … text
+    should automatically start typing to the RIGHT of a heading or list markup tag"."""
+    h, page, errors = app
+    page.locator("#btn-markers").click()
+    page.wait_for_function("() => document.body.classList.contains('md-hide')")
+    new_note(page, "Hidden")
+    page.click(".blk-body")
+    # an empty block made a heading: its prefix shows faintly, the caret sits after it, typing follows it
+    page.locator("[data-test=tb-heading]").dispatch_event("mousedown")
+    page.locator("[data-test=heading-2]").dispatch_event("mousedown")
+    page.wait_for_selector("#editor .blk-h .md-line-empty")
+    assert page.locator("#editor .blk-h .md-line-empty .md-marker").first.is_visible()
+    page.keyboard.type("Title")
+    page.wait_for_timeout(900)
+    assert body_of(h).strip() == "## Title", body_of(h)
+    assert not page.locator("#editor .blk-h .md-marker").first.is_visible()        # hidden again once there is text
+    # Home then typing: still after the prefix; a click at the far left of the line too
+    page.keyboard.press("Home")
+    page.keyboard.type("A ")
+    page.wait_for_timeout(900)
+    assert body_of(h).strip() == "## A Title", body_of(h)
+    box = page.locator("#editor .blk-h .blk-body").bounding_box()
+    page.mouse.click(box["x"] + 1, box["y"] + box["height"] / 2)
+    page.keyboard.type("B")
+    page.wait_for_timeout(900)
+    assert body_of(h).strip() == "## BA Title", body_of(h)
+    # Enter makes a paragraph under it; a list item started there keeps typing after its bullet
+    page.keyboard.press("End")
+    page.keyboard.press("Enter")
+    page.keyboard.type("- first")
+    page.keyboard.press("Enter")
+    page.keyboard.press("Home")
+    page.keyboard.type("second")
+    page.wait_for_timeout(900)
+    assert body_of(h).strip() == "## BA Title\n\n- first\n- second", body_of(h)
+    page.locator("#btn-markers").click()
+    page.wait_for_function("() => !document.body.classList.contains('md-hide')")
     assert not errors

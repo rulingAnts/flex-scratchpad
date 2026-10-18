@@ -95,7 +95,7 @@
   const matches = (rule, tag) => {
     const k = norm(rule.tag);
     if (k === '*') return true;
-    if (k.startsWith('group:')) return !!tag.group && k.slice(6) === norm(tag.group);
+    if (k.startsWith('group:')) { const g = k.slice(6); return (tag.path || (tag.group ? [tag.group] : [])).some((x) => norm(x) === g); }
     if (k.startsWith('filter:')) return false;
     return k === norm(tag.name) || (!!tag.abbr && k === norm(tag.abbr)) || (!!tag.guid && k === norm(tag.guid));
   };
@@ -138,6 +138,56 @@
     if (!out.fg) out.fg = FS.readableTextColor ? FS.readableTextColor(out.bg) : '#1a1d21';
     out.ink = ink(out.bg);
     return out;
+  }
+
+  /* FLEx's tag list is a HIERARCHY (two levels at least; Seth, 2026-10-18: "show that collapsible
+   * hierarchy in the UI" wherever tags are chosen, searched, switched or added). `tagTree` folds a
+   * flat list into nodes by each tag's `path`, keeping FLEx's order; `renderTagTree` draws it with
+   * fold-able group headings, remembered on this computer (fs:tagTree, shared by every list). */
+  function tagTree(items) {
+    const root = { name: '', path: [], key: '', entries: [], count: 0 };
+    for (const t of items) {
+      let node = root;
+      const path = (t.path && t.path.length) ? t.path : (t.group ? [t.group] : []);
+      node.count++;
+      for (const name of path) {
+        let c = node.entries.find((e) => e.node && e.node.name === name);
+        if (!c) { c = { node: { name, path: node.path.concat([name]), key: node.path.concat([name]).join('/'), entries: [], count: 0 } }; node.entries.push(c); }
+        node = c.node;
+        node.count++;
+      }
+      node.entries.push({ tag: t });
+    }
+    return root;
+  }
+  const treeState = () => { try { return JSON.parse(localStorage.getItem('fs:tagTree') || '{}'); } catch (e) { return {}; } };
+  const saveTreeState = (st) => { try { localStorage.setItem('fs:tagTree', JSON.stringify(st)); } catch (e) { /* ignore */ } };
+  /* opts.leaf(tag, depth) → the row for a tag (null to leave it out); opts.head(node) → extra
+   * controls on a group heading; opts.open → every group open (a search is on); opts.flat → no
+   * headings at all. Returns the redraw function. */
+  function renderTagTree(host, items, opts) {
+    opts = opts || {};
+    const draw = () => {
+      host.innerHTML = '';
+      const st = treeState();
+      const walk = (node, depth) => {
+        for (const e of node.entries) {
+          if (e.tag) { const row = opts.leaf(e.tag, depth); if (row) { if (depth && !opts.flat) row.style.paddingInlineStart = (depth * 14) + 'px'; host.appendChild(row); } continue; }
+          const n = e.node;
+          if (opts.flat) { walk(n, depth); continue; }
+          const closed = !opts.open && !!st[n.key];
+          const head = el('div', { class: 'tag-tree-head' + (closed ? ' closed' : ''), 'data-test': 'tag-tree-group', dataset: { group: n.name }, style: { paddingInlineStart: (depth * 14) + 'px' }, title: closed ? 'Show this group' : 'Fold this group' },
+            el('span', { class: 'tag-tree-caret' }, closed ? '\u25b8' : '\u25be'), el('span', { class: 'tag-tree-name' }, n.name), el('span', { class: 'tag-tree-n' }, String(n.count)));
+          head.addEventListener('click', (e) => { if (e.target.closest('button, input, select')) return; const s2 = treeState(); if (closed) delete s2[n.key]; else s2[n.key] = true; saveTreeState(s2); draw(); });
+          if (opts.head) { const extra = opts.head(n); if (extra) head.appendChild(extra); }
+          host.appendChild(head);
+          if (!closed) walk(n, depth + 1);
+        }
+      };
+      walk(tagTree(items), 0);
+    };
+    draw();
+    return draw;
   }
 
   /* The distinct tags on the segments an example shows: [{tag, count}]. */
@@ -272,7 +322,10 @@
       const host = el('div', { class: 'tag-rules', 'data-test': 'tag-popover' });
       const draw = () => {
         host.innerHTML = '';
-        for (const { tag, count } of tagsIn(obj)) {
+        const here = tagsIn(obj);
+        const countOf = new Map(here.map((x) => [x.tag.guid, x.count]));
+        renderTagTree(host, here.map((x) => x.tag), { leaf: (tag) => {
+          const count = countOf.get(tag.guid) || 1;
           const res = resolve(tag, spec, ctx);
           const row = el('div', { class: 'tagrow', dataset: { tag: tag.name } });
           const cb = el('input', { type: 'checkbox', checked: !res.hide, 'data-test': 'tag-toggle', title: res.hide ? 'Show this tag (' + target.label + ')' : 'Hide this tag (' + target.label + ')' });
@@ -288,9 +341,9 @@
           const styleBtn = el('button', { class: 'lnk', 'data-test': 'tag-style', title: 'The look of this tag, for ' + target.label, onclick: () => { if (openTags.has(tag.name)) openTags.delete(tag.name); else openTags.add(tag.name); draw(); } }, 'Style ▾');
           const find = FS.openPicker ? el('button', { class: 'lnk', title: 'Find the other places this tag is used, and insert them', onclick: () => { close(); FS.openPicker({ mode: 'tags', tag: tag.guid }); } }, '\u{1F50D}') : null;
           row.append(cb, sw, name, styleBtn, find);
-          host.appendChild(row);
-          if (openTags.has(tag.name)) host.appendChild(el('div', { class: 'tag-style-box' }, controls(() => rules.find((x) => norm(x.tag) === norm(tag.name)), async (patch) => { patchRule(rules, tag.name, patch); await write(); draw(); }, { noShow: true })));
-        }
+          if (!openTags.has(tag.name)) return row;
+          return el('div', {}, row, el('div', { class: 'tag-style-box' }, controls(() => rules.find((x) => norm(x.tag) === norm(tag.name)), async (patch) => { patchRule(rules, tag.name, patch); await write(); draw(); }, { noShow: true })));
+        } });
       };
       draw();
       pop.appendChild(host);
@@ -358,9 +411,9 @@
       for (const r of rules) if (!norm(r.tag).startsWith('filter:') && !keys.some((k) => norm(k) === norm(r.tag))) keys.push(r.tag);
       for (const k of pending) if (!keys.some((x) => norm(x) === norm(k))) keys.push(k);
       if (!keys.length) host.appendChild(el('div', { class: 'muted small', 'data-test': 'tag-dialog-empty', style: { padding: '8px 0' } }, filter ? 'This filter styles no tag yet. Add the tags it should style.' : 'No tag is styled here yet. Add one to begin.'));
-      for (const key of keys) {
+      const rowFor = (key) => {
         const tag = itemFor(key);
-        if (!tag) continue;
+        if (!tag) return null;
         const r = rules.find((x) => norm(x.tag) === norm(key)) || null;
         const row = el('div', { class: 'tagrow', dataset: { tag: tag.name } });
         if (!example) {
@@ -375,8 +428,16 @@
           el('span', { class: 'via', 'data-test': 'tag-via' }, res ? (res.hide ? 'hidden by ' + res.hideVia.label : 'styled by ' + res.styleVia.label) : tag.note || '')));
         row.appendChild(controls(() => r, (patch) => { patchRule(rules, key, patch); commit(); }, { inheritLabel: example ? 'as the folder / tab / project says' : 'as inherited' }));
         row.appendChild(el('button', { class: 'icon-btn danger', 'data-test': 'tag-rule-remove', title: 'Remove this tag from here', onclick: () => { if (r) rules.splice(rules.indexOf(r), 1); const i = pending.findIndex((k) => norm(k) === norm(key)); if (i >= 0) pending.splice(i, 1); commit(); } }, '✕'));
-        host.appendChild(row);
-      }
+        return row;
+      };
+      // `*` and the group rules first, then the tags in FLEx's own hierarchy
+      const broad = keys.filter((k) => norm(k) === '*' || norm(k).startsWith('group:'));
+      for (const key of broad) { const row = rowFor(key); if (row) host.appendChild(row); }
+      const tagKeys = keys.filter((k) => !broad.includes(k));
+      const tagItems = tagKeys.map((k) => Object.assign({}, itemFor(k) || {}, { _key: k })).filter((t) => t.name);
+      const tree = el('div');
+      renderTagTree(tree, tagItems, { leaf: (t) => rowFor(t._key) });
+      host.appendChild(tree);
       const add = el('button', { class: 'btn', 'data-test': 'tag-add', onclick: (e) => addTagPicker(e.currentTarget, keys, (key) => { pending.push(key); draw(); }) }, '+ Add a tag…');
       host.appendChild(el('div', { class: 'btn-row', style: { justifyContent: 'flex-start', marginTop: '8px' } }, add));
       if (!list.length) host.appendChild(el('div', { class: 'muted small' }, 'No text markup tags have been read from the project yet. Open the project (or show an example that carries tags) and come back.'));
@@ -395,17 +456,17 @@
       const draw = () => {
         lst.innerHTML = '';
         const needle = norm(q.value);
-        const row = (key, label, sub, cls) => lst.appendChild(el('button', { class: 'menu-item ' + (cls || ''), 'data-test': 'tag-pick', dataset: { tag: key }, onclick: () => { close(); pick(key); } }, el('span', {}, label), sub ? el('span', { class: 'muted small', style: { marginLeft: '6px' } }, sub) : null));
-        if (!needle && !has('*')) row('*', 'All tags', 'every tag of the project', 'tag-pick-all');
-        let group;
-        for (const t of list) {
-          const gkey = t.group ? 'group:' + t.group : '';
-          if (t.group !== group) { group = t.group; if (gkey && !has(gkey) && (!needle || norm(group).includes(needle))) row(gkey, 'All of “' + group + '”', '', 'tag-pick-group'); }
-          if (has(t.name) || has(t.guid) || (t.abbr && has(t.abbr))) continue;
-          if (needle && !norm(t.name).includes(needle) && !norm(t.abbr).includes(needle) && !norm(t.group).includes(needle)) continue;
-          row(t.name, t.name, t.abbr && t.abbr !== t.name ? t.abbr : '', 'tag-pick-tag');
-        }
-        if (!lst.children.length) lst.appendChild(el('div', { class: 'muted small', style: { padding: '6px' } }, list.length ? 'Nothing else to add.' : 'No tags have been read from the project yet.'));
+        const row = (key, label, sub, cls) => el('button', { class: 'menu-item ' + (cls || ''), 'data-test': 'tag-pick', dataset: { tag: key }, onclick: () => { close(); pick(key); } }, el('span', {}, label), sub ? el('span', { class: 'muted small', style: { marginLeft: '6px' } }, sub) : null);
+        if (!needle && !has('*')) lst.appendChild(row('*', 'All tags', 'every tag of the project', 'tag-pick-all'));
+        const items = list.filter((t) => !(has(t.name) || has(t.guid) || (t.abbr && has(t.abbr))) && (!needle || norm(t.name).includes(needle) || norm(t.abbr).includes(needle) || (t.path || []).some((g) => norm(g).includes(needle))));
+        const tree = el('div');
+        renderTagTree(tree, items, {
+          open: !!needle,
+          leaf: (t) => row(t.name, t.name, t.abbr && t.abbr !== t.name ? t.abbr : '', 'tag-pick-tag'),
+          head: (n) => (has('group:' + n.name) ? null : el('button', { class: 'lnk small', 'data-test': 'tag-pick-group', dataset: { tag: 'group:' + n.name }, title: 'One rule for every tag under “' + n.name + '”', onclick: (e) => { e.stopPropagation(); close(); pick('group:' + n.name); } }, '+ all of these')),
+        });
+        lst.appendChild(tree);
+        if (!items.length && !lst.querySelector('.tag-pick-all')) lst.appendChild(el('div', { class: 'muted small', style: { padding: '6px' } }, list.length ? 'Nothing else to add.' : 'No tags have been read from the project yet.'));
       };
       q.addEventListener('input', draw);
       pop.appendChild(q);
@@ -502,5 +563,5 @@
     return m;
   }
 
-  FS.tagstyles = Object.assign(T, { resolve, tagsIn, scopesFor, matches, hasStyle, textStyled, rgba, ink, patchRule, save, saveFilters, examplePopover, dialog, filtersPopover, filtersDialog, filterOn });
+  FS.tagstyles = Object.assign(T, { resolve, tagsIn, scopesFor, matches, hasStyle, textStyled, rgba, ink, patchRule, save, saveFilters, examplePopover, dialog, filtersPopover, filtersDialog, filterOn, tagTree, renderTagTree });
 })();

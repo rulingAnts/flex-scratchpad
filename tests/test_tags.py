@@ -23,7 +23,8 @@ def test_a_text_carries_its_tags_and_a_tag_keeps_its_place_in_a_page(tmp_path):
     tags = t["tags"]
     assert len(tags) == 8                                   # all of the text's tags, whatever the page
     first = tags[0]
-    assert first["tag"]["name"] == "Subject" and first["tag"]["abbr"] == "S" and first["tag"]["group"] == "Syntax"
+    assert first["tag"]["name"] == "Subject" and first["tag"]["abbr"] == "S"
+    assert first["tag"]["path"] == ["Syntax", "Arguments"] and first["tag"]["group"] == "Arguments"   # FLEx's list nests: the whole path, top first
     assert first["from"] == {"seg": 1, "w": 0} and first["to"] == {"seg": 1, "w": 0}
     assert first["tag"]["back"] == "#dbeafe"                # FLEx's own colour, when the list item has one
     spanning = [x for x in tags if x["from"]["seg"] != x["to"]["seg"]]

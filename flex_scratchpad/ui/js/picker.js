@@ -63,18 +63,20 @@
           }
         } else if (state.mode === 'tags' && !state.tag) {
           const q = search.value.trim().toLowerCase();
-          const tags = (await FS.api.flex_text_tags()).filter((t) => !q || (t.name + ' ' + t.abbr + ' ' + t.group).toLowerCase().includes(q));
-          if (FS.tagstyles) FS.tagstyles.setList(tags.length || q ? FS.tagstyles.list() : tags);
+          const all = await FS.api.flex_text_tags();
+          const tags = all.filter((t) => !q || (t.name + ' ' + t.abbr + ' ' + (t.path || [t.group]).join(' ')).toLowerCase().includes(q));
+          if (FS.tagstyles && !FS.tagstyles.list().length) FS.tagstyles.setList(all);
           results.innerHTML = '';
           if (!tags.length) results.appendChild(el('div', { class: 'pick-item muted' }, q ? 'No tag matches.' : 'This project has no text markup tags.'));
-          let group;
-          for (const t of tags) {
-            if (t.group !== group) { group = t.group; results.appendChild(el('div', { class: 'pick-group' }, group || 'Tags')); }
+          // the list's own hierarchy, its groups fold-able (a search opens them all)
+          const leaf = (t) => {
             const look = FS.tagstyles ? FS.tagstyles.resolve(t, null) : { bg: '#ffd6a5' };
             const it = el('div', { class: 'pick-item', 'data-test': 'pick-tag' }, el('span', { class: 'tag-sw', style: { background: look.bg } }), el('span', { class: 'hw' }, t.name), t.abbr && t.abbr !== t.name ? el('span', { class: 'pos' }, t.abbr) : null, t.count != null ? el('span', { class: 'n' }, t.count + ' place' + (t.count === 1 ? '' : 's')) : null);
             it.addEventListener('click', () => { state.tag = t; search.value = ''; search.placeholder = 'Filter the places…'; doSearch(); });
-            results.appendChild(it);
-          }
+            return it;
+          };
+          if (FS.tagstyles && FS.tagstyles.renderTagTree) { const tree = el('div'); FS.tagstyles.renderTagTree(tree, tags, { leaf, open: !!q }); results.appendChild(tree); }
+          else for (const t of tags) results.appendChild(leaf(t));
         } else if (state.mode === 'tags') {
           const rows = await FS.api.flex_tag_occurrences(state.tag.guid, search.value.trim());
           state.occ = rows;

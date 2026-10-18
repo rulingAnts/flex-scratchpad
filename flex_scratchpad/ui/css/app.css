@@ -254,6 +254,9 @@ body.resizing * { pointer-events: none; }
  * prefixes keep their width so the bullet / checkbox / number still draw. */
 body.md-hide .md-marker { display: none; }
 body.md-hide .md-marker.reveal { display: inline; }
+/* a line that is only its prefix (a new heading, an empty quote line): the prefix shows, faint,
+ * so the caret can sit after it and typing lands to its RIGHT (Seth, 2026-10-18) */
+body.md-hide .md-line-empty .md-marker { display: inline; opacity: 0.35; }
 body.md-hide .md-marker.md-task, body.md-hide .md-marker.md-num, body.md-hide .md-marker.md-bullet { display: inline-block; }
 body.md-hide .md-marker.md-bullet { color: transparent; }
 body.md-hide .blk-code .md-marker { display: inline; }
@@ -860,6 +863,13 @@ table.md-table td.drop-target, table.md-table th.drop-target { outline: 2px soli
 .seg-btn.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 .lnk.small { font-size: 11.5px; }
 .popover.tag-pick { min-width: 260px; }
+/* the tag list's hierarchy (FLEx's groups), fold-able wherever tags are listed */
+.tag-tree-head { display: flex; align-items: center; gap: 5px; padding: 4px 6px; margin-top: 2px; font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); cursor: pointer; user-select: none; border-radius: 6px; }
+.tag-tree-head:hover { background: var(--panel-2); }
+.tag-tree-caret { width: 10px; font-size: 10px; color: var(--faint); }
+.tag-tree-n { color: var(--faint); font-weight: 400; margin-inline-start: 2px; }
+.tag-tree-head .lnk { margin-inline-start: auto; text-transform: none; letter-spacing: 0; font-weight: 500; }
+#ftags .tag-tree-head { padding: 3px 10px; }
 .tag-pick-list { max-height: 50vh; overflow: auto; margin-top: 6px; }
 .tag-pick-list .tag-pick-tag { padding-left: 22px; }
 .tag-pick-list .tag-pick-group, .tag-pick-list .tag-pick-all { font-weight: 600; }

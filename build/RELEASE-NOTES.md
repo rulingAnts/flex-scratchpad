@@ -14,7 +14,7 @@ FLEx Scratchpad is a notebook for FieldWorks: notes in tabs and folders that sho
 - The parts of the left pane (Tabs, Folders, Tags, FLEx tags) fold with a click on their heading and the dividers between them drag; headings always stay in view.
 - **Sticky headings**: the headings above the part of a long note you are reading stay at the top of the window; their ▾ collapses that section where you are and takes you to the heading. Switch it off in the H ▾ menu or in Settings.
 - Examples in a collection fold to chips; empty FLEx lines (left by Shift+Enter) are left out; **Texts used** lists the FLEx texts a note, a selection or a folder draws on.
-- Fixes: one Backspace removes a whole line break; styling inside a preview no longer jumps to the top; closing the program no longer ends in an error message.
+- Fixes: with Markdown markers hidden, typing after making a heading or a list item lands after the hidden marker, never before it; one Backspace removes a whole line break; styling inside a preview no longer jumps to the top; closing the program no longer ends in an error message.
 
 ### Download
 

@@ -87,15 +87,19 @@ def empty_text(guid: str, title: str = "", ws_vern: dict | None = None, ws_anal:
 # from the project's TextMarkupTags list). `w` counts the segment's analyses (our `words`, with
 # punctuation) from 0, as FLEx does. Tags ride on the text as `tags`, all of them whatever
 # range was fetched, so a note's snapshot always holds the full list.
-def tag_item(guid: str, name: str, abbr: str = "", group: str = "", fore: str = "", back: str = "") -> dict:
+def tag_item(guid: str, name: str, abbr: str = "", group: str = "", fore: str = "", back: str = "", path: list | None = None) -> dict:
     # A list item nobody coloured has 0 in all three colour fields (the model's default int; only
     # an XML import writes kclrTransparent), which reads as black on black — not a look anyone
     # chose (Seth's project, 2026-10-18: every tag a black bar). A black background with another
     # text colour is kept.
     if back == "#000000" and fore in ("", "#000000"):
         fore = back = ""
+    # `path` = the names of the item's ancestors in FLEx's list, top first (the list has at least
+    # two levels; Seth, 2026-10-18: show "that collapsible hierarchy in the UI"); `group` stays the
+    # nearest one for older callers
+    path = [str(x) for x in (path if path is not None else ([group] if group else [])) if x]
     return {"guid": (guid or "").lower(), "name": name or abbr or "?", "abbr": abbr or name or "?",
-            "group": group or "", "fore": fore or "", "back": back or ""}
+            "group": (path[-1] if path else group) or "", "path": path, "fore": fore or "", "back": back or ""}
 
 
 def make_tag(guid: str, tag: dict, seg_from: int, w_from: int, seg_to: int, w_to: int) -> dict:

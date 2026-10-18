@@ -872,19 +872,32 @@ class FlexiconBackend:
     # EndAnalysisIndex (0-based over the segment's analyses, punctuation included) and TagRA, an
     # item of LangProject.TextMarkupTagsOA (a two-level list: a group, its tags). Unverified
     # against a real project, like the rest of this file: every access is behind _t().
-    def _poss_dict(self, poss, group: str = "") -> dict:
-        p = self.project
+    def _poss_dict(self, poss, path=None) -> dict:
         poss = self._c(poss)
         name = _s(_t(lambda: self._best(poss.Name), ""))
         abbr = _s(_t(lambda: self._best(poss.Abbreviation), ""))
-        return model.tag_item(_guid(poss), name, abbr, group,
-                              model.fw_color(_t(lambda: poss.ForeColor, -1)), model.fw_color(_t(lambda: poss.BackColor, -1)))
+        if path is None:
+            path = self._tag_path(poss)
+        elif isinstance(path, str):
+            path = [path] if path else []
+        return model.tag_item(_guid(poss), name, abbr, "",
+                              model.fw_color(_t(lambda: poss.ForeColor, -1)), model.fw_color(_t(lambda: poss.BackColor, -1)), path=path)
+
+    def _tag_path(self, poss) -> list[str]:
+        """The names of an item's ancestors in its possibility list, top first (the list may nest
+        deeper than FLEx's usual two levels)."""
+        out: list[str] = []
+        cur = self._c(_t(lambda: poss.Owner, None))
+        for _ in range(12):
+            if cur is None or _t(lambda: cur.ClassName, "") != "CmPossibility":
+                break
+            out.append(_s(_t(lambda: self._best(cur.Name), "")))
+            cur = self._c(_t(lambda: cur.Owner, None))
+        return [x for x in reversed(out) if x]
 
     def _tag_group(self, poss) -> str:
-        owner = self._c(_t(lambda: poss.Owner, None))
-        if owner is not None and _t(lambda: owner.ClassName, "") == "CmPossibility":
-            return _s(_t(lambda: self._best(owner.Name), ""))
-        return ""
+        path = self._tag_path(poss)
+        return path[-1] if path else ""
 
     def _text_tags(self, text, seg_n: dict) -> list[dict]:
         out = []
@@ -898,7 +911,7 @@ class FlexiconBackend:
             b = seg_n.get(_guid(_t(lambda: tt.EndSegmentRA, None)))
             if poss is None or a is None or b is None:
                 continue
-            out.append(model.make_tag(_guid(tt), self._poss_dict(poss, self._tag_group(poss)), a,
+            out.append(model.make_tag(_guid(tt), self._poss_dict(poss), a,
                                       int(_t(lambda: tt.BeginAnalysisIndex, 0) or 0), b, int(_t(lambda: tt.EndAnalysisIndex, 0) or 0)))
         out.sort(key=lambda t: (t["from"]["seg"], t["from"]["w"], t["to"]["seg"], t["to"]["w"]))
         return out
@@ -910,14 +923,17 @@ class FlexiconBackend:
             self._need()
             lst = _t(lambda: self.project.lp.TextMarkupTagsOA, None)
             out = []
-            for top in _t(lambda: list(lst.PossibilitiesOS), []):
-                top = self._c(top)
-                subs = _t(lambda: list(top.SubPossibilitiesOS), [])
-                if subs:
-                    gname = _s(_t(lambda: self._best(top.Name), ""))
-                    out.extend(self._poss_dict(sub, gname) for sub in subs)
-                else:
-                    out.append(self._poss_dict(top, ""))
+
+            def walk(items, path):
+                # an item with sub-items is a GROUP (FLEx tags with the leaves); the leaves carry the path
+                for it in items:
+                    it = self._c(it)
+                    subs = _t(lambda: list(it.SubPossibilitiesOS), [])
+                    if subs:
+                        walk(subs, path + [_s(_t(lambda: self._best(it.Name), ""))])
+                    else:
+                        out.append(self._poss_dict(it, path))
+            walk(_t(lambda: list(lst.PossibilitiesOS), []), [])
             return out
         try:
             return self.worker.call(go)
@@ -985,7 +1001,7 @@ class FlexiconBackend:
                                  "flexiconBestStr": _s(_t(lambda: p.BestStr(c.Name), "⚠ raised"))},
                         "abbr": self._ws_alternatives(_t(lambda: c.Abbreviation, None)),
                         "foreColor": _t(lambda: int(c.ForeColor), None), "backColor": _t(lambda: int(c.BackColor), None),
-                        "underColor": _t(lambda: int(c.UnderColor), None), "asRead": self._poss_dict(c, self._tag_group(c))}
+                        "underColor": _t(lambda: int(c.UnderColor), None), "asRead": self._poss_dict(c)}
             for top in _t(lambda: list(lst.PossibilitiesOS), []):
                 rep["list"].append(raw_poss(top))
                 for sub in _t(lambda: list(self._c(top).SubPossibilitiesOS), []):

@@ -9,7 +9,7 @@ const FS = load(['util', 'flexref', 'tagstyles']);
 const R = FS.flexref, T = FS.tagstyles;
 const plain = (x) => JSON.parse(JSON.stringify(x));   // vm objects have their own prototypes
 const G = '9b1c2d3e-4f50-4a6b-8c7d-0e1f2a3b0001';
-const SUBJ = { guid: 't1', name: 'Subject', abbr: 'S', group: 'Syntax', fore: '', back: '#dbeafe' };
+const SUBJ = { guid: 't1', name: 'Subject', abbr: 'S', group: 'Arguments', path: ['Syntax', 'Arguments'], fore: '', back: '#dbeafe' };
 const TOPIC = { guid: 't4', name: 'Topic shift', abbr: 'Top', group: 'Discourse', fore: '', back: '' };
 
 test('an example’s own rules live in `tags=` and round-trip through the embed grammar', () => {
@@ -142,4 +142,14 @@ test('a TEXT is a scope of its own: its examples wherever they appear, between t
   T.noteTextTitle(G, 'The dog and the river');
   assert.deepStrictEqual(plain(T.scopesFor(Object.assign({ text: G }, ctx)).map((s) => s.kind)), ['tab', 'text', 'filter', 'project']);
   assert.strictEqual(T.scopesFor(Object.assign({ text: G }, ctx))[1].label, 'the text “The dog and the river”');
+});
+
+test('the tag list’s hierarchy: a group rule covers every tag under it, and tagTree keeps FLEx’s order', () => {
+  // group:Syntax reaches Subject through its path (Syntax › Arguments); group:Arguments too; group:Discourse not
+  assert.ok(T.matches({ tag: 'group:Syntax' }, SUBJ) && T.matches({ tag: 'group:arguments' }, SUBJ) && !T.matches({ tag: 'group:Discourse' }, SUBJ));
+  assert.ok(T.matches({ tag: 'group:Discourse' }, TOPIC));
+  const verb = { guid: 't3', name: 'Verb', abbr: 'V', group: 'Syntax', path: ['Syntax'] };
+  const root = T.tagTree([SUBJ, { guid: 't2', name: 'Object', abbr: 'O', path: ['Syntax', 'Arguments'] }, verb, TOPIC]);
+  const shape = (n) => n.entries.map((e) => (e.tag ? e.tag.name : [e.node.name, e.node.count, shape(e.node)]));
+  assert.deepStrictEqual(plain(shape(root)), [['Syntax', 3, [['Arguments', 2, ['Subject', 'Object']], 'Verb']], ['Discourse', 1, ['Topic shift']]]);
 });

@@ -189,6 +189,15 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   editor.js selects the whole token when Backspace is just after it, Delete just before it, or
   either is pressed inside it, in a `.blk-body` or `.cell-edit`; the key's own deletion then
   removes it through the usual input handling (`brAround`).
+- MARKERS HIDDEN (`body.md-hide`, Settings / the ** Markup button): the caret NEVER rests inside a
+  line's hidden prefix (Seth, 2026-10-18: "the cursor goes to the left of the ### and makes the ###
+  appear … text should automatically start typing to the RIGHT of a heading or list markup tag").
+  `snapPastPrefix` (on selectionchange and before any insert) moves a caret inside the prefix to
+  just after it; Home lands there, Left from there steps to the line before (or the block above);
+  Backspace there removes the whole prefix. A line that is ONLY its prefix (a new heading, an empty
+  quote line) gets `md-line-empty` from `decorate`, and its markers show faintly — a caret has no
+  visible place in a wholly hidden line, so Chromium would put it before the hidden text and the
+  typed letter would land in front of the `##`.
 - Undo is our own snapshot stack (innerHTML rebuilds break native undo).
 
 ## Working here
@@ -363,7 +372,18 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   filter rule has no effect on that tag one way or another"): it lists only the rules present
   (plus tags just added and not yet styled, `pending`, which are not saved) and "+ Add a tag…"
   (`addTagPicker`: All tags, each group as `group:<name>`, each tag, with a search box) — never
-  every tag of the project with an empty control. A RULE CHOOSES ITS SCOPE (Seth, 2026-10-18:
+  every tag of the project with an empty control. THE LIST IS A HIERARCHY (Seth, 2026-10-18:
+  "the text markup tags list has at least two levels … show that collapsible hierarchy in the UI"
+  wherever tags are chosen, searched, switched or added — not on the drawn tags, which only tier
+  when they overlap, nor in the list of filters): every tag carries `path` (its ancestors in
+  FLEx's list, top first; `lcm._tag_path` walks `Owner` while it is a CmPossibility, the demo nests
+  Subject / Object under Syntax › Arguments) and `group` = the nearest; `tagstyles.tagTree(items)`
+  folds a list into nodes in FLEx's order and `renderTagTree(host, items, {leaf, head, open,
+  flat})` draws fold-able group headings (`.tag-tree-head`, state in localStorage `fs:tagTree`,
+  shared by every list; a search opens all). Used by `addTagPicker` ("+ all of these" on a heading
+  = `group:<name>`), the scope dialog (`*` and group rules first, then the tags' tree), the ⚑
+  popover, the picker's FLEx tags tab and the rail's FLEx tags. A `group:<name>` rule matches any
+  ANCESTOR of that name. A RULE CHOOSES ITS SCOPE (Seth, 2026-10-18:
   "whole notebook, tab, folder, notes doc, selected range in a note, specific texts anywhere they
   appear"): the ⚑ popover's "Changes apply to" select (`tag-scope-pick`) aims every toggle and
   style at this example / this note / each folder / the tab / the TEXT / the whole notebook / a

@@ -122,13 +122,17 @@
     sec.hidden = !rows.length && !filters.length && !(S.flex && S.flex.open);
     if (was !== sec.hidden) applyRail();
     host.innerHTML = '';
-    for (const r of rows) {
-      const active = S.ftag && r.tokens.includes(S.ftag);
-      const item = el('div', { class: 'tag-item ftag-item' + (active ? ' active' : ''), 'data-test': 'ftag', dataset: { tag: r.name }, title: r.item && r.item.group ? r.item.group : '' },
+    const leaf = (t) => {
+      const r = t._row, active = S.ftag && r.tokens.includes(S.ftag);
+      const item = el('div', { class: 'tag-item ftag-item' + (active ? ' active' : ''), 'data-test': 'ftag', dataset: { tag: r.name }, title: (t.path || []).join(' › ') },
         el('span', { class: 'mark' }, '\u2691'), el('span', {}, r.name), el('span', { class: 'count' }, String(r.ids.size)));
       item.addEventListener('click', () => { setFtag(active ? null : r.tokens[0]); });
-      host.appendChild(item);
-    }
+      return item;
+    };
+    // in FLEx's own hierarchy, the groups fold-able (unknown tokens at the top level)
+    const items = rows.map((r) => Object.assign({}, r.item || { guid: r.key, name: r.name, path: [] }, { _row: r }));
+    if (FS.tagstyles.renderTagTree) { const tree = el('div'); FS.tagstyles.renderTagTree(tree, items, { leaf }); host.appendChild(tree); }
+    else for (const t of items) host.appendChild(leaf(t));
     if (!rows.length && !sec.hidden) host.appendChild(el('div', { class: 'muted small', style: { padding: '2px 10px' } }, 'No note in this tab shows a tagged example yet.'));
   }
   function setFtag(tok) {

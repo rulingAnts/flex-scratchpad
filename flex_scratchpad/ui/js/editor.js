@@ -155,6 +155,8 @@
       if (root.parentNode) root.parentNode.insertBefore(this.sticky, root);
       this.stickyOn = true;
       root.addEventListener('scroll', () => this.scheduleSticky(), { passive: true });
+      // markers hidden: the caret never rests inside a line's hidden prefix (see snapPastPrefix)
+      document.addEventListener('selectionchange', () => this.snapPastPrefix());
       if (typeof ResizeObserver === 'function') new ResizeObserver(() => this.scheduleSticky()).observe(root);
       // A click on the page's background (Seth, 2026-10-16: "if I click outside the table, it
       // scrolls to the same position, but deselects the cell/table"): only BELOW the last block
@@ -1088,8 +1090,29 @@
       });
     }
 
+    /* With markers hidden (Seth, 2026-10-18: "the cursor goes to the left of the ### and makes the
+     * ### appear … text should automatically start typing to the RIGHT of a heading or list markup
+     * tag"): a caret that lands inside a line's hidden prefix — a click, Home, a new heading — is
+     * moved to just after it, so what is typed goes after the markup, never before it. Returns
+     * the caret's place in the body, or -1 when there was nothing to do. */
+    snapPastPrefix(body, b) {
+      if (!document.body.classList.contains('md-hide')) return -1;
+      body = body || document.activeElement;
+      if (!body || !body.classList || !body.classList.contains('blk-body') || !this.root.contains(body)) return -1;
+      const sel = window.getSelection();
+      if (!sel || !sel.isCollapsed || !sel.rangeCount || !body.contains(sel.anchorNode)) return -1;
+      b = b || this.blocks.find((x) => x.el && x.el.contains(body));
+      if (!b) return -1;
+      const a = getCaret(body), s = body.textContent;
+      const ls = s.lastIndexOf('\n', a - 1) + 1, le = s.indexOf('\n', ls);
+      const pre = MD.linePrefix(s.slice(ls, le < 0 ? s.length : le), b.type);
+      if (!pre || a - ls >= pre.len) return -1;
+      setCaret(body, ls + pre.len);
+      return ls + pre.len;
+    }
     onBeforeInput(e, body, b) {
       const it = e.inputType;
+      if (it.startsWith('insert')) this.snapPastPrefix(body, b);
       if (it === 'historyUndo') { e.preventDefault(); this.undoStep(); return; }
       if (it === 'historyRedo') { e.preventDefault(); this.redoStep(); return; }
       if (it === 'insertParagraph') { e.preventDefault(); this.enter(body, b); return; }
@@ -1133,6 +1156,24 @@
       if (mod && e.key === 'Enter') { e.preventDefault(); this.insertBlockAfter(b, { type: 'p', src: '' }, true); return; }
       if (e.key === 'Tab' && (b.type === 'list' || b.type === 'code')) { e.preventDefault(); this.indent(body, b, e.shiftKey ? -1 : 1); return; }
       if (e.key === 'Escape') { body.blur(); return; }
+      if ((e.key === 'ArrowLeft' || e.key === 'Home') && !mod && !e.shiftKey && !e.altKey && document.body.classList.contains('md-hide')) {
+        // markers hidden: Home lands after the prefix; Left from there steps over it to the line before
+        const sel = window.getSelection();
+        if (sel && sel.isCollapsed) {
+          const a = getCaret(body), s = body.textContent;
+          const ls = s.lastIndexOf('\n', a - 1) + 1, le = s.indexOf('\n', ls);
+          const pre = MD.linePrefix(s.slice(ls, le < 0 ? s.length : le), b.type);
+          if (pre) {
+            if (e.key === 'Home') { e.preventDefault(); setCaret(body, ls + pre.len); return; }
+            if (a <= ls + pre.len) {
+              e.preventDefault();
+              if (ls > 0) setCaret(body, ls - 1);
+              else { const i = this.blocks.indexOf(b); if (i > 0) this.focusBlock(i - 1, 'end'); }
+              return;
+            }
+          }
+        }
+      }
       if (e.key === 'Backspace' && !mod && !e.altKey && document.body.classList.contains('md-hide')) {
         // markers hidden: Backspace right after a line prefix removes the whole prefix (the
         // bullet, the heading, the quote bar) instead of eating one invisible character
