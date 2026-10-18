@@ -574,3 +574,42 @@ def test_export_clips_gives_one_compressed_clip_per_example(tmp_path, monkeypatc
         assert out[0]["mime"] in ("audio/ogg", "audio/mpeg") and out[0]["bytes"] > 100, out[0]
         kept = list(svc.cache.audio_dir(svc.project_name).glob("*_1500-3200.export.*"))
         assert kept and svc.cache.find_audio_clip(svc.project_name, T_STORY, 1500, 3200).suffix in (".wav", ".flac"), kept   # the copy is never mistaken for the clip
+
+
+def test_snapshot_writes_from_many_threads_and_a_failing_write_keep_the_live_read(tmp_path):
+    """Seth, 2026-10-19: twelve examples of one text fetched at once wrote the same snapshot from
+    twelve threads; on Windows the second `os.replace` hit "Access is denied" and a good live read
+    was shown as "the snapshot". Writes are serialised, and a write that still fails is logged,
+    never raised through the fetch."""
+    import threading
+    from flex_scratchpad.flex import FlexService
+    from flex_scratchpad.flex.cache import SnapshotCache
+    from flex_scratchpad.notebook import Notebook
+    svc = FlexService(Notebook(tmp_path / "nb"))
+    svc.configure(source="demo", project="Kalu Demo")
+    svc.open()
+    from flex_scratchpad.flex.demo import T_STORY
+    errors = []
+
+    def one(i):
+        try:
+            o = svc.get_object("text", T_STORY, 1 + (i % 3), 2 + (i % 3))
+            assert o["cached"] is False
+        except Exception as e:  # noqa: BLE001
+            errors.append(e)
+    ts = [threading.Thread(target=one, args=(i,)) for i in range(12)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    assert not errors
+    assert not list((svc.cache.project_dir(svc.project_name)).glob("*.tmp"))
+    # the live read survives a snapshot that cannot be written
+    broken = SnapshotCache(tmp_path / "nb" / ".scratchpad" / "flex-cache-broken")
+
+    def boom(*a, **k):
+        raise PermissionError("Access is denied")
+    broken.put = boom
+    svc.cache = broken
+    o = svc.get_object("text", T_STORY, 1, 2)
+    assert o["cached"] is False and o["segments"]

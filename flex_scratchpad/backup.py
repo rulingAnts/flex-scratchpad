@@ -30,6 +30,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
+from .fsutil import replace_file
 
 REMOTE, CRYPT = "fsbackup", "fsbackupc"
 SECRETS = ("access_key_id", "secret_access_key", "crypt_password")
@@ -490,9 +491,12 @@ class Backup:
             self.running = False
             self.progress("")
             self._tick("done", force=True)
-        self.config.load()                  # another process (the backup on close) may have saved meanwhile
-        self.config.data.setdefault("backup", {}).update({"last": result})
-        self.config.save()
+        try:
+            self.config.load()              # another process (the backup on close) may have saved meanwhile
+            self.config.data.setdefault("backup", {}).update({"last": result})
+            self.config.save()
+        except OSError as e:                # the record is a convenience; the backup itself is done (Seth, 2026-10-19)
+            LOG.warning("backup: result not recorded in the config: %s", e)
         return result
 
     def _dest_join(self, root: str, sub: str) -> str:
@@ -744,7 +748,7 @@ def _mirror_folder(src: Path, dest: Path, stamp: str, tick=None, cancelled=None)
                     if cancelled():
                         raise BackupCancelled("The backup was stopped.")
             shutil.copystat(s_file, tmp)
-            os.replace(tmp, d_file)
+            replace_file(tmp, d_file)
         except BaseException:
             try:
                 tmp.unlink()

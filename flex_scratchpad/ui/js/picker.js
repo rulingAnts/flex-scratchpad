@@ -40,7 +40,7 @@
     // FLEx text markup TAGS as a way in (Seth, 2026-10-17): a tag, then every place it is used
     const modes = [['lexicon', 'Lexicon'], ['texts', 'Texts'], ['charts', 'Text charts'], ['tags', 'FLEx tags']];
     const setMode = (mode) => {
-      state.mode = mode; state.sel = null; state.text = null; state.range = null; state.tag = null;
+      state.mode = mode; state.sel = null; state.text = null; state.range = null; state.tag = null; state.obj = null; preview.onscroll = null;
       tabs.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.mode === mode));
       search.placeholder = mode === 'lexicon' ? 'Search headword or gloss…' : mode === 'tags' ? 'Search tags by name…' : mode === 'charts' ? 'Search charts by text or name…' : 'Search text titles…';
       preview.innerHTML = '<div class="muted small">' + (mode === 'lexicon' ? 'Pick an entry on the left.' : mode === 'tags' ? 'Pick a tag, then one of the places it is used.' : mode === 'charts' ? 'Pick a chart, then click the first and last row of the range (or insert it whole).' : 'Pick a text, then click the first and last segment of the range.') + '</div>';
@@ -178,6 +178,28 @@
       } catch (e) { preview.innerHTML = ''; preview.appendChild(el('div', { class: 'flex-err' }, e.message)); return; }
       state.obj = obj;
       renderPreview();
+      // THE REST OF THE TEXT ON SCROLL (Seth, 2026-10-19: the preview "only return[s] the first few
+      // rows … I can't scroll to other rows"): the backend pages 60 lines at a time, so the next
+      // page is fetched and appended as the preview nears its end, until the text is whole
+      let loadingMore = false;
+      const loadMore = async () => {
+        const cur = state.obj;
+        if (!cur || cur !== obj || loadingMore) return;
+        const last = cur.segments.length ? cur.segments[cur.segments.length - 1].n : 0;
+        if (!last || last >= (cur.segmentCount || 0)) return;
+        loadingMore = true;
+        try {
+          const more = await FS.api.flex_get('text', h.guid, last + 1, Math.min(cur.segmentCount, last + 60));
+          if (state.obj !== cur) return;
+          const seen = new Set(cur.segments.map((s) => s.n));
+          cur.segments = cur.segments.concat((more.segments || []).filter((s) => !seen.has(s.n)));
+          cur.range = [cur.range ? cur.range[0] : 1, (more.range || [0, last])[1]];
+          const st = preview.scrollTop;
+          renderPreview();
+          preview.scrollTop = st;
+        } catch (e) { FS.toast(e.message, 'error'); } finally { loadingMore = false; }
+      };
+      preview.onscroll = () => { if (preview.scrollTop + preview.clientHeight > preview.scrollHeight - 240) loadMore(); };
       optsRow.innerHTML = '';
       // The range fields take either numbering: FLEx's paragraph.segment ("4.1") or the running
       // count; they display FLEx's, and `seg=` in the embed always gets the running count.

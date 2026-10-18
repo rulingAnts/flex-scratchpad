@@ -249,23 +249,32 @@ class FlexService:
             variant += "~alts"          # every writing system: its own snapshot, never the lean one
         with self.lock:
             live_err = None
+
+            def keep(write):
+                # the snapshot is a convenience: a write that fails (a locked file, a full disk)
+                # must never turn a good live read into "showing the snapshot" (Seth, 2026-10-19)
+                try:
+                    write()
+                except Exception as e:  # noqa: BLE001
+                    LOG.warning("%s %s: snapshot not written: %s", kind, guid[:8], e)
+
             if not prefer_cache:
                 try:
                     be = self._live()
                     if kind == "entry":
                         obj = be.get_entry(guid)
-                        self.cache.put(self.project_name, "entry", guid, obj)
+                        keep(lambda: self.cache.put(self.project_name, "entry", guid, obj))
                     elif kind == "text":
                         obj = self._tracked_text(be, guid, seg_from, seg_to, ws, at, alts)
                         if not obj.get("lost"):
-                            self.cache.merge_text(self.project_name, variant, obj)
+                            keep(lambda: self.cache.merge_text(self.project_name, variant, obj))
                     elif kind == "wordform":
                         obj = be.get_wordform(guid)
-                        self.cache.put(self.project_name, "wordform", guid, obj)
+                        keep(lambda: self.cache.put(self.project_name, "wordform", guid, obj))
                     elif kind == "chart":
                         # the whole chart is read and snapshotted (charts are small); the embed's rows are sliced here
                         whole = be.get_chart(guid)
-                        self.cache.put(self.project_name, "chart", guid, whole)
+                        keep(lambda: self.cache.put(self.project_name, "chart", guid, whole))
                         obj = model.slice_chart(whole, seg_from, seg_to, at)
                     else:
                         raise FlexError(f"Unknown object kind: {kind}", "", "kind")

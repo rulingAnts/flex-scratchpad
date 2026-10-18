@@ -37,6 +37,7 @@ import unicodedata
 from pathlib import Path
 
 from . import model
+from ..fsutil import replace_file
 
 MAX_ORDERS = 6          # orders of the text kept (only when the order changed)
 MAX_TEXTS = 4           # texts kept per segment (newest first)
@@ -75,7 +76,7 @@ class Ledger:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_name(self.path.name + ".tmp")
         tmp.write_text(json.dumps(self.data, ensure_ascii=False), encoding="utf-8")
-        os.replace(tmp, self.path)
+        replace_file(tmp, self.path)
 
     def record(self, index: list[dict], segments: list[dict], texts: dict | None = None) -> None:
         """After a live fetch: the text's current order, and what the drawn segments say."""

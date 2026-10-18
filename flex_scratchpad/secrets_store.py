@@ -16,6 +16,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from .fsutil import replace_file
 
 PREFIX = "FLEx Scratchpad/"
 
@@ -73,7 +74,7 @@ class FileStore(SecretStore):
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(d, f)
-        os.replace(tmp, self.path)
+        replace_file(tmp, self.path)
         try:
             os.chmod(self.path, 0o600)
         except OSError:

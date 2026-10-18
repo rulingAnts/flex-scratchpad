@@ -238,6 +238,21 @@
     return [...seen.values()];
   }
 
+  /* A chart's template columns as items of the ⚑ popover (Seth, 2026-10-18: "apply specific
+   * styles to specific columns … and configure them myself"): the same `column:<Group/Name>`
+   * rules that style chart columns drawn on an example; `count` = the cells in the column. */
+  function columnsIn(obj) {
+    const cols = (obj.template && obj.template.columns) || [];
+    if (obj.flat) return [];
+    const used = new Map();
+    for (const r of obj.rows || []) for (const c of r.cells || []) used.set(c.colN, (used.get(c.colN) || 0) + 1);
+    return cols.map((col) => {
+      T.noteColumn(col);
+      const path = col.path || [];
+      return { tag: { guid: 'column:' + (col.guid || col.name), name: path.concat([col.name]).join('/'), abbr: col.abbr || col.name, group: path[path.length - 1] || '', path, column: true, fore: '', back: '', colN: col.n }, count: used.get(col.n) || 0 };
+    });
+  }
+
   async function save(kind, key, rules) {
     if (kind === 'filter') {
       const list = (config.filters || []).map((f) => (f.id === key ? Object.assign({}, f, { rules }) : f));
@@ -379,10 +394,12 @@
       const host = el('div', { class: 'tag-rules', 'data-test': 'tag-popover' });
       const draw = () => {
         host.innerHTML = '';
-        const here = markerMode ? markersIn(obj).concat((obj.tags || []).length ? tagsIn(obj) : []) : tagsIn(obj);
+        const marks = markerMode ? markersIn(obj).concat((obj.tags || []).length ? tagsIn(obj) : []) : [];
+        const columns = markerMode ? columnsIn(opts.fullChart || obj) : [];
+        const here = markerMode ? marks.concat(columns) : tagsIn(obj);
         const countOf = new Map(here.map((x) => [x.tag.guid, x.count]));
-        if (markerMode && !here.length) host.appendChild(el('div', { class: 'muted small', style: { padding: '2px 0 6px' } }, 'This chart has no chart markers, and its text no markup tags. The visual filters below still apply to it.'));
-        else if (markerMode) host.appendChild(el('div', { class: 'muted small', style: { padding: '2px 0 6px' } }, 'Chart markers in this chart' + ((obj.tags || []).length ? ', and the text\u2019s markup tags (drawn when the “FLEx tags” line is on)' : '') + '. “Style ▾” → “whole row” colours every row the marker is in.'));
+        if (markerMode && !marks.length) host.appendChild(el('div', { class: 'muted small', style: { padding: '2px 0 6px' } }, 'This chart has no chart markers, and its text no markup tags. Its columns are listed below; the visual filters apply to it too.'));
+        else if (markerMode) host.appendChild(el('div', { class: 'muted small', style: { padding: '2px 0 6px' } }, 'Chart markers in this chart' + ((obj.tags || []).length ? ', the text\u2019s markup tags (drawn when the “FLEx tags” line is on)' : '') + ', and its columns. “Style ▾” → “whole row” colours every row a marker is in; a column\u2019s style colours its cells (and its word groups in the one-column view), its box hides the column.'));
         renderTagTree(host, here.map((x) => x.tag), { leaf: (tag) => {
           const count = countOf.get(tag.guid) || 1;
           const res = resolve(tag, spec, ctx);
@@ -398,7 +415,7 @@
           const via = el('span', { class: 'via', 'data-test': 'tag-via' }, res.hide ? 'hidden by ' + res.hideVia.label : (res.hideVia && res.hideVia.kind === 'example' ? 'shown here · ' : '') + 'styled by ' + res.styleVia.label);
           const name = el('span', { class: 'tag-name' }, el('span', {}, tag.name + (tag.abbr && tag.abbr !== tag.name ? ' (' + tag.abbr + ')' : '') + (count > 1 ? '  ×' + count : '')), el('br'), via);
           const styleBtn = el('button', { class: 'lnk', 'data-test': 'tag-style', title: 'The look of this tag, for ' + target.label, onclick: () => { if (openTags.has(tag.name)) openTags.delete(tag.name); else openTags.add(tag.name); draw(); } }, 'Style ▾');
-          const find = FS.openPicker && !tag.marker ? el('button', { class: 'lnk', title: 'Find the other places this tag is used, and insert them', onclick: () => { close(); FS.openPicker({ mode: 'tags', tag: tag.guid }); } }, '\u{1F50D}') : null;
+          const find = FS.openPicker && !tag.marker && !tag.column ? el('button', { class: 'lnk', title: 'Find the other places this tag is used, and insert them', onclick: () => { close(); FS.openPicker({ mode: 'tags', tag: tag.guid }); } }, '\u{1F50D}') : null;
           row.append(cb, sw, name, styleBtn, find);
           if (!openTags.has(tag.name)) return row;
           return el('div', {}, row, el('div', { class: 'tag-style-box' }, controls(() => rules.find((x) => norm(x.tag) === norm(keyOf(tag))), async (patch) => { patchRule(rules, keyOf(tag), patch); await write(); draw(); }, { noShow: true, marker: !!tag.marker })));
@@ -665,5 +682,5 @@
     return m;
   }
 
-  FS.tagstyles = Object.assign(T, { resolve, tagsIn, markersIn, scopesFor, matches, hasStyle, textStyled, rgba, ink, patchRule, save, saveFilters, examplePopover, dialog, filtersPopover, filtersDialog, filterOn, tagTree, renderTagTree });
+  FS.tagstyles = Object.assign(T, { resolve, tagsIn, markersIn, columnsIn, scopesFor, matches, hasStyle, textStyled, rgba, ink, patchRule, save, saveFilters, examplePopover, dialog, filtersPopover, filtersDialog, filterOn, tagTree, renderTagTree });
 })();

@@ -1056,6 +1056,8 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 /* the one-column view (view=flat): every part of a row in one cell, word groups labelled with their columns */
 .chart-obj.flat .tchart td.ccell { white-space: normal; }
 .cflat-g { display: inline-block; vertical-align: top; margin: 1px 6px 3px 0; padding: 1px 3px; border-radius: 4px; }
+.cflat-g .cflat-body { display: inline-flex; align-items: flex-start; gap: 4px; vertical-align: top; }
+.cflat-g .cflat-body .cwords { display: inline-flex; }
 .cflat-g.hidden { display: none; }
 .cflat-g .cflat-lab { font-size: calc(9.5px * var(--cz, 1)); color: var(--muted); margin-left: 2px; letter-spacing: 0.02em; }
 .cflat-g .cflat-br { color: var(--muted); font-weight: 600; margin: 0 1px; }

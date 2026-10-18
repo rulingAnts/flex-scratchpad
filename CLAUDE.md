@@ -595,8 +595,15 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   columns' widths on its `<col>`s, shifted with the sideways scroll) over the top of the pane —
   under `#sticky-heads` and a collection's / chart note's `.coll-head` — while the header has passed
   the top and the rows are still in view; on the pane's scroll, the chart's sideways scroll, resize
-  and a ResizeObserver on the table; it goes with the chart. Not in a cell or the exports (the
-  page's print stylesheet repeats `thead` instead). FROZEN COLUMNS (Seth, 2026-10-18: "we always
+  and a ResizeObserver on the table; it goes with the chart — a 500 ms sweep removes the copy when
+  its chart has left the page without a scroll (Seth, 2026-10-19: a header "left behind that never
+  goes away" over another note). Not in a cell or the exports (the
+  page's print stylesheet repeats `thead` instead). RESIZEOBSERVERS DRAW ON THE NEXT FRAME: every
+  observer here (the ghost header, `placeFrozen`, the tag overlays in interlinear.js) queues its
+  work in a requestAnimationFrame and writes a style only when it changed — writing layout inside
+  the callback is what Chromium logs as "ResizeObserver loop completed with undelivered
+  notifications" (Seth's log, 2026-10-19), and a loop that re-lays the page out every frame is
+  the likeliest reason the whole-chart dialog and the picker would not scroll for him. FROZEN COLUMNS (Seth, 2026-10-18: "we always
   want the play buttons column to be sticky"; "freeze columns … for custom columns, on either or
   both sides of the chart"): the row-label column (the ▶s) is always `position: sticky` inside
   `.chart-scroll`, and a chart note's custom column when its Place says so; `renderChart` marks the
@@ -627,7 +634,22 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   column's rules give it — the SAME `column:<Group/Name>` rules that style chart columns on an
   example (brackets, tile, box, colour, b/i/u, hide), resolved through `tagstyles.resolve` — so a
   visual filter by column or marker does the work the columns did. Styles on `rNcM` targets keep
-  their meaning (the part's own column). SENTENCE / PARAGRAPH PLAY (Seth: "a play button for 4, not
+  their meaning (the part's own column). The parts of ONE chart cell share ONE box (Seth,
+  2026-10-18: a marker "should be inside the same border as the cell they apply to"): consecutive
+  parts with the same `srcCol` go into the same `.cflat-g` (`flatWrap` returns {wrap, add}).
+  COLUMN STYLES (Seth, 2026-10-18: "apply specific styles to specific columns … and configure them
+  myself"): the chart's ⚑ popover lists its template COLUMNS after the markers and the text's tags
+  (`tagstyles.columnsIn(obj)` — tag items with `column: true`, `opts.fullChart` so the one-column
+  view still lists the real columns), each with the full text controls, written as
+  `column:<Group/Name>` rules at the chosen scope (this chart's `tags=`, the note, folder, tab,
+  text, notebook, a filter) — the same namespace that styles chart columns on an example and the
+  one-column view's groups. In the columns view `columnLook(col, obj, spec)` resolves each visible
+  column and `applyColumnLook` tints its cells and heading (tile / marker → a tint, box → an inset
+  border, colour, b/i/u; `look.styled` = a rule somebody wrote, the palette's default is not a
+  style); the user's own cell styles are applied after it and win; a column whose rule says `hide`
+  leaves the table (never all of them). `export.js chartBlock` carries the same tint / b / i / u /
+  colour into the export model and drops hidden columns. A column heading's popover has "Style
+  this column everywhere… (⚑)", which opens that popover. SENTENCE / PARAGRAPH PLAY (Seth: "a play button for 4, not
   just for 4a, 4b, 4c"): `playGroups(rows, segments)` — a SENTENCE is the rows sharing a label
   number, a PARAGRAPH runs up to a row that ends one; the first row of a group spanning several
   rows with timed lines gets ▶§ / ▶¶ (`.chart-play-sent` / `.chart-play-para`) before its line ▶,
@@ -1034,6 +1056,24 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   kept so the next paste stays fast) before re-fetching; "Refresh all" (the toolbar, and a
   collection's header) also drops the indexes and re-fetches every example (Seth, 2026-10-16:
   ↻ in a collection only re-read the in-memory copy).
+- SNAPSHOT WRITES ARE SERIALISED (Seth's log, 2026-10-19: a note with twelve examples of one text
+  fetched them on twelve pywebview threads at once; on Windows the second `os.replace` of the same
+  snapshot hit "Access is denied" while the first still had the file open, and a good live read was
+  shown as "the snapshot"): `SnapshotCache.put` holds one lock, writes a per-thread `.tmp` and
+  retries the replace a few times; `merge_text` is one read-modify-write under that lock; and in
+  `FlexService.get_object` every snapshot write goes through `keep()`, which logs a failure and
+  never lets it fail the live fetch (`tests/test_flex.py::test_snapshot_writes_from_many_threads…`).
+  The same evening config.json failed the same way on the backup-before-closing screen (the page
+  was reading it while the finished backup recorded its result, so a GOOD backup was reported as
+  failed): EVERY atomic write in the app now goes through `fsutil.replace_file` (os.replace with a
+  few short retries on PermissionError, the temp file removed when they run out) — config.py (under
+  `_SAVE_LOCK`, a per-thread temp name), notebook.py, secrets_store.py, tracking.py, backup.py's
+  mirror and the snapshot cache; `Backup.run` records its result inside a try and logs a failure
+  instead of returning it (`tests/test_backup.py::test_atomic_writes_ride_out_a_busy_target…`).
+  THE PICKER'S TEXT PREVIEW PAGES (Seth, 2026-10-19: the preview "only return[s] the first few
+  rows … I can't scroll to other rows"): the backends hand out 60 lines at a time, so `pickText`
+  fetches and appends the next page as the preview nears its end (`loadMore`, `preview.onscroll`)
+  until the text is whole; the chart preview always had the whole chart.
 - `flex/lcm.py` has never met a real FieldWorks: it was written from flexicon 4.12's source and
   the LCM model. The first run on Windows will need adjustments — keep every access behind the
   `_t()` guard so one odd object degrades a rendering instead of failing it, and record what you

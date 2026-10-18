@@ -141,7 +141,10 @@
     const C = FS.chart;
     extras = extras || null;
     obj = C.flatten ? C.flatten(obj, spec) : obj;    // the one-column view exports as one column
-    const cols = C.visibleColumns(spec, obj);
+    let cols = C.visibleColumns(spec, obj);
+    // a column's own look (its `column:` rules): a hidden column is left out, a tinted / bold one tinted / bold
+    const colLooks = new Map();
+    if (!obj.flat && C.columnLook) { for (const c of cols) { const lk = C.columnLook(c, obj, spec); if (lk && lk.styled) colLooks.set(c.n, lk); else if (lk && lk.hide) colLooks.set(c.n, lk); } const shown = cols.filter((c) => !(colLooks.get(c.n) || {}).hide); if (shown.length) cols = shown; }
     const lines = R.chartLines(spec);
     const free = R.freeMode(spec);
     const headers = !(spec.extra && spec.extra.headers === 'off');
@@ -184,7 +187,9 @@
         const plain = { txt: plainWords.map((w) => w.txt || '').join(' '), gls: plainWords.filter((w) => !w.punct).map((w) => w.gls || '').join(' '),
           marks: slot.parts.filter((p) => p.kind === 'tag' && p.tag).map((p) => p.tag.name), moved: slot.parts.filter((p) => p.kind === 'moved').map((p) => (p.preposed ? 'preposed ' : 'postposed ') + ((wg.get(p.target) || { row: {} }).row.label || '')), clauses: slot.parts.filter((p) => p.kind === 'clause').flatMap((p) => p.labels || []) };
         const cellSegs = [...new Set(slot.parts.filter((p) => p.kind === 'words' && p.seg).flatMap((p) => { const a = []; for (let n = p.seg; n <= (p.segTo || p.seg); n++) a.push(n); return a; }))];
-        return { span: slot.span, col: slot.col.n, segs: cellSegs, words, marks, plain, hl: hl ? (hl.color || '#fff2a8') : '', b: cellSt.some((s) => s.style === 'b'), i: cellSt.some((s) => s.style === 'i'), u: cellSt.some((s) => s.style === 'u'), color: (cellSt.find((s) => s.style === 'color') || {}).color || '' };
+        const cl = colLooks.get(slot.col.n) || {};
+        const clBg = cl.styled ? (cl.tile ? (cl.tc || cl.bg) : cl.hl ? cl.bg : '') : '';
+        return { span: slot.span, col: slot.col.n, segs: cellSegs, words, marks, plain, hl: hl ? (hl.color || '#fff2a8') : (clBg ? tint(clBg, cl.tile ? 0.35 : 0.5) : ''), b: cellSt.some((s) => s.style === 'b') || !!(cl.styled && cl.b), i: cellSt.some((s) => s.style === 'i') || !!(cl.styled && cl.i), u: cellSt.some((s) => s.style === 'u') || !!(cl.styled && cl.u), color: (cellSt.find((s) => s.style === 'color') || {}).color || (cl.styled && cl.c) || '' };
       });
       // the row's own look: a chart marker whose rule says "whole row", a rule column's row case
       const rowStyle = {};

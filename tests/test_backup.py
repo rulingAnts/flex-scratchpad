@@ -345,3 +345,50 @@ def test_a_lock_left_by_a_dead_process_does_not_block_the_next_backup(tmp_path):
     lock.write_text(str(__import__("os").getpid()), encoding="utf-8")
     assert api.backup_now().get("busy")
     lock.unlink()
+
+
+def test_atomic_writes_ride_out_a_busy_target_and_many_threads(tmp_path, monkeypatch):
+    """Windows cannot replace a file another handle has open: `replace_file` retries, and the
+    config saves from many threads at once without tripping over each other (Seth, 2026-10-19:
+    "Access is denied … config.json.tmp -> config.json" on the backup-before-closing screen)."""
+    import os
+    import threading
+    from flex_scratchpad import fsutil
+    from flex_scratchpad.config import AppConfig
+    calls = {"n": 0}
+    real = os.replace
+
+    def flaky(a, b):
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            raise PermissionError(5, "Access is denied")
+        return real(a, b)
+    monkeypatch.setattr(fsutil.os, "replace", flaky)
+    monkeypatch.setattr(fsutil.time, "sleep", lambda s: None)
+    src, dst = tmp_path / "a.tmp", tmp_path / "a.json"
+    src.write_text("x", encoding="utf-8")
+    fsutil.replace_file(src, dst)
+    assert dst.read_text(encoding="utf-8") == "x" and calls["n"] == 3
+    # out of patience: the error comes through and the temp file is gone
+    calls["n"] = -100
+    src.write_text("y", encoding="utf-8")
+    import pytest
+    with pytest.raises(PermissionError):
+        fsutil.replace_file(src, dst, tries=3)
+    assert not src.exists()
+    monkeypatch.setattr(fsutil.os, "replace", real)
+    cfg = AppConfig(tmp_path / "config.json")
+    errors = []
+
+    def one(i):
+        try:
+            cfg.data["k%d" % i] = i
+            cfg.save()
+        except Exception as e:  # noqa: BLE001
+            errors.append(e)
+    ts = [threading.Thread(target=one, args=(i,)) for i in range(16)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    assert not errors and not list(tmp_path.glob("*.tmp"))

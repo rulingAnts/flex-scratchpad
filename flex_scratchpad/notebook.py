@@ -45,6 +45,7 @@ from pathlib import Path
 from typing import Callable, Iterable
 
 from .log import LOG
+from .fsutil import replace_file
 
 CONFIG_NAME = "notebook.json"
 NOTE_KINDS = ("", "examples", "chart")
@@ -1067,7 +1068,7 @@ class Notebook:
                     pass
             else:
                 tmp.write_bytes(data or b"")
-            os.replace(tmp, target)
+            replace_file(tmp, target)
             return f"{ATTACH_DIR}/{target.name}"
 
     def resolve_file(self, ref: str) -> Path:
@@ -1272,4 +1273,4 @@ def _atomic_write(path: Path, text: str) -> None:
     tmp = path.with_name(path.name + ".tmp")
     with open(tmp, "w", encoding="utf-8", newline="\n") as f:
         f.write(text)
-    os.replace(tmp, path)
+    replace_file(tmp, path)

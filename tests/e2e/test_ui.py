@@ -4713,6 +4713,55 @@ def test_chart_options_one_column_hide_empty_zoom_and_the_boundary_under_the_fre
     obj.locator("[data-test=chart-view]").click()
     page.wait_for_function("() => !document.querySelector('#editor .chart-obj.flat')")
     assert "view=flat" not in src()
+    # the parts of ONE chart cell share a box: in the story chart, row 1a's Post-I cell is a marker on its own,
+    # and a cell holding words AND a marker keeps them together (Seth: "inside the same border as the cell")
+    new_note(page, "Flat markers")
+    page.keyboard.type("{{flex:chart %s rows=1 view=flat}}" % CHART)
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#editor .chart-obj.flat tr.crow")
+    g = page.locator("#editor .chart-obj.flat tr.crow[data-label='1a'] .cflat-g")
+    assert g.evaluate_all("els => els.map((e) => e.title)") == ["Nucleus › Subject", "Nucleus › Verb", "Postnuclear › Inner"]
+    assert g.nth(2).locator(".ctag").count() == 1 and g.nth(2).locator(".cflat-lab").inner_text() == "Post-I"
+    assert not errors
+
+
+def test_a_column_is_styled_from_the_charts_flag_popover(app):
+    """Seth, 2026-10-18: "apply specific styles to specific columns … and configure them myself":
+    the ⚑ popover lists the chart's columns; a column's style tints its cells (and heading), its
+    box hides the column; the same column: rules the one-column view and examples use."""
+    h, page, errors = app
+    new_note(page, "Column styles")
+    page.keyboard.type("{{flex:chart d15c0000-0000-4000-8000-00000000c002}}")
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#editor .chart-obj tr.crow")
+    obj = page.locator("#editor .chart-obj")
+    src = lambda: page.evaluate("() => window.__fsEditor.getMarkdown()")  # noqa: E731
+    obj.locator("[data-test=marker-btn]").click()
+    page.wait_for_selector(".popover .tagrow[data-tag='Comment']")
+    names = page.locator(".popover .tagrow").evaluate_all("els => els.map((e) => e.dataset.tag)")
+    assert all(c in names for c in ["Topic", "Comment", "Tail"]) and "Subject" in names, names   # the text's tags and the chart's columns
+    # the look is written at the chosen scope: this chart by default (its embed)
+    page.locator(".popover .tagrow[data-tag='Comment'] [data-test=tag-style]").click()
+    page.locator(".popover [data-test=tag-tile]").click()
+    page.wait_for_function("() => document.querySelector(\"#editor .chart-obj tr.crow[data-label='1'] td[data-col='34']\").classList.contains('col-styled')")
+    assert "column" in src() and "tile" in src(), src()
+    cell = obj.locator("tr.crow[data-label='1'] td[data-col='34']")
+    assert cell.evaluate("e => e.style.background") != ""
+    assert obj.locator("th.th-col", has_text="Comment").evaluate("e => e.classList.contains('col-styled')")
+    assert obj.locator("tr.crow[data-label='1'] td[data-col='33']").evaluate("e => e.classList.contains('col-styled')") is False
+    # bold too; then hidden: the column leaves the table
+    page.locator(".popover [data-test=tag-b]").click()
+    page.wait_for_function("() => document.querySelector(\"#editor .chart-obj tr.crow[data-label='1'] td[data-col='34']\").style.fontWeight === '700'")
+    page.locator(".popover .tagrow[data-tag='Comment'] [data-test=tag-toggle]").click()
+    page.wait_for_function("() => document.querySelectorAll('#editor .chart-obj th.th-col').length === 2")
+    assert obj.locator("th.th-col").all_inner_texts() == ["Topic", "Tail"]
+    page.locator(".popover .tagrow[data-tag='Comment'] [data-test=tag-toggle]").click()
+    page.wait_for_function("() => document.querySelectorAll('#editor .chart-obj th.th-col').length === 3")
+    page.keyboard.press("Escape")
+    # the export model carries the tint and the bold
+    doc = page.evaluate("async () => { const api = window.pywebview.api; const id = document.querySelector('.note-card.active').dataset.id; const note = await api.get_note(id); const d = await FS.exporter.buildDoc(note, window.__fsEditor); return d.blocks.find((b) => b.type === 'chart').rows[0].cells; }")
+    c34 = [c for c in doc if c["col"] == 34][0]
+    assert c34["hl"] and c34["b"] and not [c for c in doc if c["col"] == 33][0]["b"]
     assert not errors
 
 
@@ -4816,7 +4865,7 @@ def test_chart_columns_on_an_example_text_tags_in_a_chart_pivot_and_entry_profil
     page.keyboard.press("Enter")
     page.wait_for_selector("#editor .text-obj .tagbar")
     bars = page.locator("#editor .text-obj .segment[data-n='1'] .tagbar.first")
-    assert sorted(bars.all_inner_texts()) == ["S", "V"], bars.all_inner_texts()
+    assert sorted(bars.all_inner_texts()) == ["Com", "S", "Top", "V"], bars.all_inner_texts()   # both charts on the story: Default (S, V) and Topic-Comment (Top, Com)
     assert page.locator("#editor .text-obj .il-tag[data-tag='Nucleus/Subject']").count() >= 1
     page.locator("#editor .text-obj [data-test=tag-btn]").click()
     page.wait_for_selector("[data-test=tag-popover] .tagrow[data-tag='Nucleus/Subject']")
@@ -4842,5 +4891,5 @@ def test_chart_columns_on_an_example_text_tags_in_a_chart_pivot_and_entry_profil
     page.wait_for_selector("#editor .entry-card [data-test=entry-chart-profile]")
     page.locator("#editor .entry-card [data-test=entry-chart-profile]").click()
     page.wait_for_selector(".profile-table")
-    assert "Subject" in page.locator(".profile-table").inner_text()
+    assert "Subject" in page.locator(".profile-table").first.inner_text()      # one table per template (Default first)
     assert not errors

@@ -191,23 +191,27 @@
    * column's offset the widths of the frozen columns before it (left) or after it (right), read
    * from the <col>s and kept up to date by a ResizeObserver. */
   function placeFrozen(table, colKeys, colEls, frozen) {
+    const put = (cell, prop, v) => { if (cell.style[prop] !== v) cell.style[prop] = v; };   // no write when nothing changed
     const place = () => {
       if (!table.isConnected) { ro.disconnect(); return; }
       const w = (k) => { const c = colEls.get(k); return c ? c.getBoundingClientRect().width : 0; };
       let left = 0;
       for (const k of colKeys) {
         if (frozen.get(k) !== 'l') continue;
-        for (const cell of table.querySelectorAll('[data-ck="' + k + '"]')) cell.style.left = left + 'px';
+        for (const cell of table.querySelectorAll('[data-ck="' + k + '"]')) put(cell, 'left', left + 'px');
         left += w(k);
       }
       let right = 0;
       for (const k of colKeys.slice().reverse()) {
         if (frozen.get(k) !== 'r') continue;
-        for (const cell of table.querySelectorAll('[data-ck="' + k + '"]')) cell.style.right = right + 'px';
+        for (const cell of table.querySelectorAll('[data-ck="' + k + '"]')) put(cell, 'right', right + 'px');
         right += w(k);
       }
     };
-    const ro = new ResizeObserver(place);
+    // the observer's work waits for the next frame: writing styles inside the callback is what
+    // Chromium reports as "ResizeObserver loop completed with undelivered notifications"
+    let queued = false;
+    const ro = new ResizeObserver(() => { if (queued) return; queued = true; requestAnimationFrame(() => { queued = false; place(); }); });
     ro.observe(table);
     place();
   }
@@ -272,17 +276,23 @@
       if (!show) { if (ghost) ghost.style.display = 'none'; return; }
       if (!ghost) build();
       ghost.style.display = '';
-      ghost.style.top = top + 'px';
-      ghost.style.left = sr.left + 'px';
-      ghost.style.width = sr.width + 'px';
+      const g = ghost.style, want = { top: top + 'px', left: sr.left + 'px', width: sr.width + 'px' };
+      for (const k of Object.keys(want)) if (g[k] !== want[k]) g[k] = want[k];
       sync();
     };
-    const stop = () => { if (ghost) ghost.remove(); ghost = null; scroller.removeEventListener('scroll', update); window.removeEventListener('resize', update); if (scroll) scroll.removeEventListener('scroll', update); };
+    let ro = null, sweep = 0;
+    const stop = () => { if (ghost) ghost.remove(); ghost = null; scroller.removeEventListener('scroll', update); window.removeEventListener('resize', update); if (scroll) scroll.removeEventListener('scroll', update); if (ro) ro.disconnect(); ro = null; if (sweep) clearInterval(sweep); sweep = 0; };
     scroller.addEventListener('scroll', update, { passive: true });
     window.addEventListener('resize', update);
     if (scroll) scroll.addEventListener('scroll', update, { passive: true });
-    // the header moves when the pane's sticky strip grows or the table re-lays out: a cheap re-check
-    new ResizeObserver(() => { if (table.isConnected) update(); }).observe(table);
+    // the header moves when the pane's sticky strip grows or the table re-lays out: a cheap
+    // re-check, on the next frame (styles written inside the callback make Chromium report a loop)
+    let queued = false;
+    ro = new ResizeObserver(() => { if (queued) return; queued = true; requestAnimationFrame(() => { queued = false; if (table.isConnected) update(); else stop(); }); });
+    ro.observe(table);
+    // a chart that leaves the page without a scroll (another note opened, a redraw) must take
+    // its copy along (Seth, 2026-10-19: a header "left behind that never goes away")
+    sweep = setInterval(() => { if (!table.isConnected || !box.isConnected) stop(); }, 500);
     box._stickyStop = stop;
     requestAnimationFrame(update);
   }
@@ -325,7 +335,16 @@
     const full = obj;                       // the chart as fetched (the menu's column list, the pivot)
     obj = flatten(obj, spec);
     const flat = !!obj.flat;
-    const cols = visibleColumns(spec, obj);
+    // a column's own look (Seth, 2026-10-18: "apply specific styles to specific columns … and
+    // configure them myself"): the `column:<Group/Name>` rules, from the chart's ⚑ popover or any
+    // scope dialog — its cells tinted / bordered / coloured, a hidden column left out
+    const colLooks = new Map();
+    let cols = visibleColumns(spec, obj);
+    if (!flat) {
+      for (const c of cols) { const lk = columnLook(c, obj, spec); if (lk) colLooks.set(c.n, lk); }
+      const shown = cols.filter((c) => !(colLooks.get(c.n) || {}).hide);
+      if (shown.length) cols = shown;
+    }
     const lines = R.chartLines(spec);
     const free = R.freeMode(spec);
     const headers = !(spec.extra && spec.extra.headers === 'off');
@@ -357,7 +376,7 @@
     // its visual filters): the chart markers, the text's tags, the filter switches, the scopes
     const markersHere = FS.tagstyles && FS.tagstyles.markersIn ? FS.tagstyles.markersIn(obj) : [];
     const tagsHere = FS.tagstyles && FS.tagstyles.tagsIn && (obj.tags || []).length ? FS.tagstyles.tagsIn(obj) : [];
-    if (opts.editable && FS.tagstyles) head.appendChild(el('button', { class: 'lnk tag-btn', 'data-test': 'marker-btn', title: 'Chart markers and text markup tags in this chart: show, hide, style (a marker can style its whole row); visual filters', onclick: (e) => FS.tagstyles.examplePopover(e.currentTarget, spec, obj, Object.assign({}, opts, { markers: true })) }, '⚑' + (markersHere.length + tagsHere.length ? ' ' + (markersHere.length + tagsHere.length) : '')));
+    if (opts.editable && FS.tagstyles) head.appendChild(el('button', { class: 'lnk tag-btn', 'data-test': 'marker-btn', title: 'Chart markers, text markup tags and columns in this chart: show, hide, style (a marker can style its whole row, a column its cells); visual filters', onclick: (e) => FS.tagstyles.examplePopover(e.currentTarget, spec, obj, Object.assign({}, opts, { markers: true, fullChart: full })) }, '⚑' + (markersHere.length + tagsHere.length ? ' ' + (markersHere.length + tagsHere.length) : '')));
     if (opts.editable && !opts.overlay) head.appendChild(el('button', { class: 'lnk', 'data-test': 'collapse-obj', title: 'Collapse to a chip', onclick: () => FS.interlinear.setCollapsed(spec, opts, true) }, '⤡'));
     if (opts.editable && opts.inCell && opts.editCell && !opts.overlay) head.appendChild(el('button', { class: 'lnk', title: 'Edit the cell’s text', onclick: () => opts.editCell() }, '✎'));
     if (opts.editable && !opts.overlay && opts.duplicate) head.appendChild(el('button', { class: 'lnk', title: 'Duplicate this object', onclick: () => opts.duplicate() }, '⧉'));
@@ -438,7 +457,8 @@
         }
         for (const h of hr) {
           const th = el('th', { colspan: h.span > 1 ? h.span : null, class: h.col ? 'th-col' : 'th-group', title: h.col ? ((h.col.path || []).concat([h.col.name]).join(' › ') + (h.col.abbr && h.col.abbr !== h.col.name ? ' (' + h.col.abbr + ')' : '')) : h.text, dataset: h.col ? { col: h.col.n } : null }, h.text);
-          if (h.col && opts.editable) th.addEventListener('click', (e) => stylePopover(e.currentTarget, spec, { col: h.col.n }, opts, 'column ' + h.col.name, null, [{ label: 'Hide this column', test: 'hide-col', fn: () => { const on = visibleColumns(spec, obj).filter((c) => c.n !== h.col.n); if (!on.length) return; spec.extra = spec.extra || {}; spec.extra.cols = on.map((c) => 'c' + c.n).join(','); change(); } }]));
+          if (h.col && opts.editable) th.addEventListener('click', (e) => stylePopover(e.currentTarget, spec, { col: h.col.n }, opts, 'column ' + h.col.name, null, [{ label: 'Hide this column', test: 'hide-col', fn: () => { const on = visibleColumns(spec, obj).filter((c) => c.n !== h.col.n); if (!on.length) return; spec.extra = spec.extra || {}; spec.extra.cols = on.map((c) => 'c' + c.n).join(','); change(); } }, { label: 'Style this column everywhere… (⚑)', test: 'style-col', fn: () => { const b = box.querySelector('[data-test=marker-btn]'); if (b) b.click(); } }]));
+          if (h.col && colLooks.has(h.col.n)) applyColumnLook(th, colLooks.get(h.col.n), true);
           if (h.col) resizer(th, String(h.col.n));
           tr.appendChild(th);
         }
@@ -492,10 +512,16 @@
         const cellStyles = R.chartStylesFor(index, row.n, slot.col.n, 0, '');
         const segsHere = [...new Set(slot.parts.filter((p) => p.kind === 'words' && p.seg).flatMap((p) => { const a = []; for (let n = p.seg; n <= (p.segTo || p.seg); n++) a.push(n); return a; }))];
         const td = el('td', { class: 'ccell' + (slot.parts.length ? '' : ' empty'), colspan: slot.span > 1 ? slot.span : null, dataset: { row: row.n, col: slot.col.n, segs: segsHere.length ? segsHere.join(' ') : null } });
-        applyCellStyles(td, cellStyles);
+        if (colLooks.has(slot.col.n)) applyColumnLook(td, colLooks.get(slot.col.n));
+        applyCellStyles(td, cellStyles);        // the user's own cell styles win over the column's
+        // the one-column view boxes the parts of ONE chart cell together (Seth, 2026-10-18: a
+        // marker "should be inside the same border as the cell they apply to")
+        let group = null;
         for (const part of slot.parts) {
           const node = renderPart(part, row, part.srcCol || slot.col, obj, spec, opts, { lines, index, vern, anal, wordGroups, movedTargets, tbody, showTextTags });
-          td.appendChild(flat && part.srcCol ? flatWrap(node, part, obj, spec) : node);
+          if (!(flat && part.srcCol)) { td.appendChild(node); continue; }
+          if (!group || group.colN !== part.srcCol.n) { group = flatWrap(part, obj, spec); group.colN = part.srcCol.n; td.appendChild(group.wrap); }
+          group.add(node, part);
         }
         if (opts.editable) td.addEventListener('click', (e) => { if (e.target.closest('.cw, .cclause, .ctag, .cmoved, button, a')) return; stylePopover(td, spec, { row: row.n, col: slot.col.n }, opts, 'row ' + row.label + ', ' + slot.col.name); });
         if (free === 'tip') td.addEventListener('click', (e) => { if (e.target.closest('button, a')) return; showTip(box, obj, rowSegs(row), row); });
@@ -571,22 +597,48 @@
   /* A word group in the one-column view: wrapped with its column's abbreviation and the look the
    * column's visual-filter rules give it (`column:<Group/Name>` in tagstyles, the same rules that
    * style chart columns drawn on an example). */
-  function flatWrap(node, part, obj, spec) {
+  /* The look a column's rules give it (`column:<Group/Name>` in tagstyles, resolved for this
+   * chart's text and the current note / tab / folder / project), or null when there is no rule
+   * machinery. */
+  function columnLook(col, obj, spec) {
+    if (!(FS.tagstyles && FS.tagstyles.resolve)) return null;
+    const path = (col.path || []).concat([col.name]);
+    if (FS.tagstyles.noteColumn) FS.tagstyles.noteColumn(col);
+    try {
+      const look = FS.tagstyles.resolve({ guid: 'column:' + (col.guid || col.name), name: path.join('/'), abbr: col.abbr || col.name, group: (col.path || [])[(col.path || []).length - 1] || '', path: col.path || [], column: true, fore: '', back: '' }, spec || null, Object.assign({}, FS.tagstyles.context(), { text: obj.text || '' }));
+      // only a look somebody asked for counts (the palette's default colour is not a style)
+      look.styled = !!(look.styleVia && look.styleVia.kind !== 'default');
+      return look;
+    } catch (e) { return null; }
+  }
+  /* A column's look on one of its cells (or its heading): tile / marker → a tint, box → a border,
+   * colour, bold / italic / underline. Brackets are drawn in the one-column view and on examples. */
+  function applyColumnLook(node, look, heading) {
+    if (!look || !look.styled) return;
+    node.classList.add('col-styled');
+    const bg = look.tile ? (look.tc || look.bg) : look.hl ? look.bg : '';
+    if (bg) node.style.background = rgba(bg, heading ? 0.6 : look.tile ? 0.35 : 0.5);
+    if (look.box) { node.style.boxShadow = 'inset 0 0 0 ' + (look.bw || 2) + 'px ' + (look.bg || 'currentColor'); if (look.bs && look.bs !== 'solid') node.style.outline = (look.bw || 2) + 'px ' + look.bs + ' ' + (look.bg || 'currentColor'); }
+    if (look.c && !heading) node.style.color = look.c;
+    if (look.b) node.style.fontWeight = '700';
+    if (look.i) node.style.fontStyle = 'italic';
+    if (look.u) node.style.textDecoration = 'underline';
+  }
+  function flatWrap(part, obj, spec) {
     const col = part.srcCol;
     const path = (col.path || []).concat([col.name]);
-    const wrap = el('span', { class: 'cflat-g' + (part.kind === 'words' ? ' cflat-words' : ''), dataset: { col: col.n }, title: path.join(' \u203a ') });
-    let look = null;
-    if (FS.tagstyles && FS.tagstyles.resolve) {
-      if (FS.tagstyles.noteColumn) FS.tagstyles.noteColumn(col);
-      try { look = FS.tagstyles.resolve({ guid: 'column:' + (col.guid || col.name), name: path.join('/'), abbr: col.abbr || col.name, group: (col.path || [])[(col.path || []).length - 1] || '', path: col.path || [], column: true, fore: '', back: '' }, spec || null, Object.assign({}, FS.tagstyles.context(), { text: obj.text || '' })); } catch (e) { look = null; }
-    }
+    const wrap = el('span', { class: 'cflat-g', dataset: { col: col.n }, title: path.join(' \u203a ') });
+    const look = columnLook(col, obj, spec);
     if (look && look.hide) wrap.classList.add('hidden');
     const B = FS.tagstyles && FS.tagstyles.BRACKETS;
     const br = look && look.br && B && B[look.br];
     if (br) wrap.appendChild(el('span', { class: 'cflat-br' }, br[0]));
-    wrap.appendChild(node);
+    const body = el('span', { class: 'cflat-body' });
+    wrap.appendChild(body);
     if (br) wrap.appendChild(el('span', { class: 'cflat-br' }, br[1]));
-    if (part.kind === 'words' && !(spec.extra && spec.extra.collab === 'off') && !(look && look.label === false)) wrap.appendChild(el('sub', { class: 'cflat-lab' }, col.abbr || col.name));
+    const label = !(spec.extra && spec.extra.collab === 'off') && !(look && look.label === false) ? el('sub', { class: 'cflat-lab' }, col.abbr || col.name) : null;
+    if (label) wrap.appendChild(label);
+    const add = (node, p) => { body.appendChild(node); if (p.kind === 'words') wrap.classList.add('cflat-words'); };
     if (look) {
       const bg = look.tile ? (look.tc || look.bg) : look.hl ? look.bg : '';
       if (bg) wrap.style.background = rgba(bg, look.tile ? 0.45 : 0.6);
@@ -596,7 +648,7 @@
       if (look.i) wrap.style.fontStyle = 'italic';
       if (look.u) wrap.style.textDecoration = 'underline';
     }
-    return wrap;
+    return { wrap, add };
   }
 
   function applyCellStyles(td, styles) {
@@ -922,5 +974,5 @@
       el('div', { class: 'btn-row' }, el('button', { class: 'btn', 'data-test': 'pivot-copy', onclick: () => { FS.copyText(tsv); FS.toast('Copied as TSV'); } }, 'Copy as TSV'), el('button', { class: 'btn primary', onclick: () => m.close() }, 'Done')));
   }
 
-  FS.chart = { renderChart, visibleColumns, selectedColumns, flatten, isFlat, zoomOf, setZoom, playGroups, headerRows, layoutRow, rowSegs, freeRuns, lineStarts, colWidths, setColWidths, freeText, chartGrid, chartTsv, markerLook, pivot, pivotDialog, LINE_NAMES, FREE_NAMES };
+  FS.chart = { renderChart, visibleColumns, selectedColumns, flatten, isFlat, zoomOf, setZoom, playGroups, columnLook, headerRows, layoutRow, rowSegs, freeRuns, lineStarts, colWidths, setColWidths, freeText, chartGrid, chartTsv, markerLook, pivot, pivotDialog, LINE_NAMES, FREE_NAMES };
 })();

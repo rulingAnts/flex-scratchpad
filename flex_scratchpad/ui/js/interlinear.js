@@ -457,7 +457,14 @@
    * the cells' geometry once they are laid out, again when the row's size changes (a font that
    * arrives late, a narrower window wrapping the row), one piece per visual line. */
   const ovRows = new WeakMap();
-  const ovObserver = typeof ResizeObserver === 'function' ? new ResizeObserver((entries) => { for (const e of entries) { const fn = ovRows.get(e.target); if (fn) fn(); } }) : null;
+  // the overlays are re-placed on the NEXT frame: drawing inside the callback is what Chromium
+  // reports as "ResizeObserver loop completed with undelivered notifications" (Seth's log, 2026-10-19)
+  const ovPending = new Set();
+  const ovObserver = typeof ResizeObserver === 'function' ? new ResizeObserver((entries) => {
+    const first = !ovPending.size;
+    for (const e of entries) ovPending.add(e.target);
+    if (first) requestAnimationFrame(() => { const rows = [...ovPending]; ovPending.clear(); for (const r of rows) { const fn = ovRows.get(r); if (fn) fn(); } });
+  }) : null;
   function placeTagOverlays(row, items) {
     let layer = row.querySelector(':scope > .tag-ovl');
     if (!items.length) { if (layer) layer.remove(); return; }
