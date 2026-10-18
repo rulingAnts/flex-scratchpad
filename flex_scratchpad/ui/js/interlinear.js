@@ -330,6 +330,7 @@
     const box = el('div', { class: 'flex-obj text-obj' + (obj.cached ? ' cached' : '') });
     // FLEx's text markup tags (Seth, 2026-10-17): drawn under the words when the `tag` line is on
     const tagsHere = (obj.tags || []).length && FS.tagstyles ? FS.tagstyles.tagsIn(obj) : [];
+    if (FS.tagstyles && FS.tagstyles.noteTextTitle) FS.tagstyles.noteTextTitle(obj.guid, obj.title);
     box._showTags = tagsHere.length > 0 && R.showsTags(spec);
     if (tagsHere.length) box.dataset.tags = tagsHere.map((x) => x.tag.name).join('\n');   // app.js: filtering the note's examples by tag
     const range = obj.range || [segs[0] && segs[0].n, segs.length && segs[segs.length - 1].n];

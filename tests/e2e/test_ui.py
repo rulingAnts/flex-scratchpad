@@ -3447,7 +3447,12 @@ def test_flex_text_markup_tags_render_and_are_styled_by_scope(app):
     page.locator(".tab-item", has_text="Notes").click(button="right")
     page.locator(".popover .menu-item", has_text="FLEx tag styles for this tab").click()
     page.wait_for_selector("[data-test=tag-dialog]")
+    # the dialog starts EMPTY: tags are added one at a time from the list (Seth, 2026-10-18)
+    assert page.locator("[data-test=tag-dialog-empty]").count() == 1
+    page.locator("[data-test=tag-add]").click()
+    page.locator("[data-test=tag-pick][data-tag='Verb']").click()
     verb = page.locator("[data-test=tag-dialog] .tagrow[data-tag='Verb']")
+    assert verb.count() == 1 and page.locator("[data-test=tag-dialog] .tagrow").count() == 1
     verb.locator("[data-test=tag-bg]").nth(3).click()                 # the 4th palette colour, #bdb2ff
     page.wait_for_function("() => document.querySelector('[data-test=tag-dialog] .tagrow[data-tag=\"Verb\"] [data-test=tag-via]').textContent === 'styled by the tab'")
     assert verb.locator("[data-test=tag-rule-on]").is_checked()
@@ -3461,9 +3466,20 @@ def test_flex_text_markup_tags_render_and_are_styled_by_scope(app):
     page.locator("[data-test=tag-popover] .tag-style-box [data-test=tag-bg]").nth(0).click()        # #ffd6a5
     page.wait_for_function("() => { const b = [...document.querySelectorAll('#editor .text-obj .segment')][0].querySelector('.tagbar'); return b && getComputedStyle(b).backgroundColor === 'rgb(255, 214, 165)'; }")
     assert page.locator("[data-test=tag-popover] .tagrow[data-tag='Verb'] [data-test=tag-via]").inner_text() == "styled by this example"
+    # the same popover can aim its changes at another scope: the TEXT, wherever its examples appear
+    # (Seth, 2026-10-18: "specific texts anywhere they appear") — Object off for the text
+    sel = page.locator("[data-test=tag-scope-pick]")
+    labels = sel.locator("option").all_inner_texts()
+    assert labels[0] == "this example" and "this note" in labels and "this tab" in labels and "the whole notebook" in labels and any(l.startswith("the text “The dog") for l in labels), labels
+    sel.select_option(label=[l for l in labels if l.startswith("the text")][0])
+    page.locator("[data-test=tag-popover] .tagrow[data-tag='Object'] [data-test=tag-toggle]").click()
+    page.wait_for_function("() => document.querySelector('[data-test=tag-popover] .tagrow[data-tag=\"Object\"] [data-test=tag-via]').textContent.startsWith('hidden by the text')")
+    assert h.api.init()["config"]["tagStyles"]["text"][T_STORY] == [{"tag": "Object", "enabled": True, "hide": True}]
     page.keyboard.press("Escape")
     page.wait_for_timeout(900)
     assert "tags=Subject:off,Verb:bg#ffd6a5" in body_of(h), body_of(h)
+    assert "Object" not in body_of(h)                                         # a text rule lives in notebook.json, not in the embed
+    assert page.locator("#editor .text-obj .tagbar", has_text=re.compile(r"^O$")).count() == 0           # in every example of that text
     # the picker's FLEx tags: Topic is used in two places; both inserted as examples
     page.locator("#toolbar button", has_text="FLEx object").click()      # nothing focused: new blocks go after the last
     page.locator(".picker-tabs button", has_text="FLEx tags").click()
@@ -3499,6 +3515,10 @@ def test_tag_styles_for_a_selection_of_examples(app):
     page.locator("[data-test=coll-sel-tags]").click()
     page.wait_for_selector("[data-test=tag-dialog]")
     assert "2 selected examples" in page.locator(".modal .modal-title, .modal h2, .modal header").first.inner_text()
+    for name in ("Subject", "Verb"):
+        page.locator("[data-test=tag-add]").click()
+        page.locator("[data-test=tag-pick-search]").fill(name[:3])
+        page.locator("[data-test=tag-pick][data-tag='%s']" % name).click()
     page.locator("[data-test=tag-dialog] .tagrow[data-tag='Subject'] [data-test=tag-show]").select_option("hide")
     page.locator("[data-test=tag-dialog] .tagrow[data-tag='Verb'] [data-test=tag-b]").click()
     page.wait_for_function("() => document.querySelector('[data-test=tag-dialog] .tagrow[data-tag=\"Subject\"] [data-test=tag-via]').textContent === 'hidden by this example'")
@@ -3546,10 +3566,23 @@ def test_tags_style_the_text_and_visual_filters_and_the_rail_filters_by_tag(app)
     assert seg2.locator(".br-cell.br-open").all_inner_texts() == ["⟨", "["]
     second = page.locator("#editor .text-obj").nth(1)
     assert second.locator(".segment").first.locator(".tag-ov-tile").count() == 1 and second.locator(".segment").first.locator(".tagbar", has_text="Top").count() == 1
-    # switch the filter off in the ⚑ Filters popover: the angle brackets go, the setting is kept
-    page.locator("#btn-tag-filters").click()
+    # the toolbar's ⚑ Filters is a VIEW setting (Seth: "for the whole app or for notebook pages"):
+    # off for THIS NOTE first — the angle brackets go here, the filter stays on by default…
+    page.locator("#btn-filters").click()
+    page.wait_for_selector("[data-test=filters-mode]")
+    assert page.locator("[data-test=filters-mode] .seg-btn.on").inner_text() == "This note"
+    angles = "() => [...document.querySelectorAll('#editor .text-obj .br-cell.br-open')].filter((b) => b.textContent === '⟨').length"
+    assert page.evaluate(angles) > 0
     page.locator("[data-test=filter-on][data-filter=f1]").click()
-    page.wait_for_function("() => document.querySelectorAll('#editor .text-obj .br-cell.br-open').length === 2")
+    page.wait_for_function("(() => { const f = " + angles + "; return f() === 0; })()")
+    cfg = h.api.init()["config"]["tagStyles"]
+    assert cfg["note"][[n for n in h.api.list_notes() if n["title"] == "Markup"][0]["id"]] == [{"tag": "filter:f1", "enabled": True, "hide": True}] and cfg["filters"][0]["enabled"] is True
+    page.locator("[data-test=filter-reset]").click()                                # back to the default: on again
+    page.wait_for_function("(() => { const f = " + angles + "; return f() > 0; })()")
+    # …then off EVERYWHERE
+    page.locator("[data-test=filters-mode] .seg-btn[data-mode=all]").click()
+    page.locator("[data-test=filter-on][data-filter=f1]").click()
+    page.wait_for_function("(() => { const f = " + angles + "; return f() === 0; })()")
     assert h.api.init()["config"]["tagStyles"]["filters"][0]["enabled"] is False
     page.keyboard.press("Escape")
     # the rail lists the FLEx tags the notes use; one click filters the list and dims the other examples
@@ -3564,4 +3597,50 @@ def test_tags_style_the_text_and_visual_filters_and_the_rail_filters_by_tag(app)
     page.locator("[data-test=tagfocus-clear]").click()
     page.wait_for_function("() => document.querySelectorAll('.note-card').length === 3 && document.getElementById('tagfocus').hidden")
     assert "tag-miss" not in first.get_attribute("class")
+    assert not errors
+
+
+def test_rail_parts_fold_and_resize_and_are_never_lost(app):
+    """Seth, 2026-10-18: "the left pane is now too crowded … the borders of each part can be
+    vertically dragged and collapsed/expanded. We don't ever want something hidden beyond recovery
+    in that pane"."""
+    h, page, errors = app
+    tab = h.api.init()["config"]["tabs"][0]["dir"]
+    for i in range(8):
+        h.api.create_folder(tab, "Folder %d" % i)
+    page.reload()
+    page.wait_for_selector(".folder-item")
+    height = lambda sel: page.evaluate("(s) => document.querySelector(s).getBoundingClientRect().height", sel)   # noqa: E731
+    visible_top = lambda sel: page.evaluate("(s) => { const r = document.querySelector(s).getBoundingClientRect(); const p = document.getElementById('rail').getBoundingClientRect(); return r.top >= p.top && r.bottom <= p.bottom; }", sel)   # noqa: E731
+    # every header is in the pane, and the FLEx tags part is hidden until the project is open or notes use tags
+    for sec in ("tabs", "folders", "tags"):
+        assert visible_top("#%s-section h4" % sec)
+    # fold Tags with its header: the body goes, the header stays, the state is remembered
+    page.locator("#tags-section h4").click()
+    assert page.locator("#tags-section.collapsed").count() == 1 and not page.locator("#tags").is_visible()
+    assert visible_top("#tags-section h4")
+    page.reload()
+    page.wait_for_selector(".folder-item")
+    assert page.locator("#tags-section.collapsed").count() == 1
+    page.locator("#tags-section h4").click()
+    assert page.locator("#tags-section.collapsed").count() == 0 and page.locator("#tags").is_visible()
+    # drag the divider under Folders down: Folders gains what Tags loses; double-click resets both
+    before_f, before_t = height("#folders-section"), height("#tags-section")
+    d = page.locator("[data-test=rail-divider]").nth(1).bounding_box()
+    page.mouse.move(d["x"] + 40, d["y"] + 3)
+    page.mouse.down()
+    page.mouse.move(d["x"] + 40, d["y"] + 43, steps=5)
+    page.mouse.up()
+    assert abs(height("#folders-section") - (before_f + 40)) < 3, (before_f, height("#folders-section"))
+    assert abs(height("#tags-section") - (before_t - 40)) < 3
+    st = page.evaluate("JSON.parse(localStorage.getItem('fs:rail'))")
+    assert set(st["sizes"]) == {"folders", "tags"}
+    # a part can never be dragged smaller than its header
+    page.mouse.move(d["x"] + 40, d["y"] + 43)
+    page.mouse.down()
+    page.mouse.move(d["x"] + 40, d["y"] + 900, steps=5)
+    page.mouse.up()
+    assert visible_top("#tags-section h4") and height("#tags-section") >= height("#tags-section h4")
+    page.locator("[data-test=rail-divider]").nth(1).dblclick()
+    assert "sizes" not in page.evaluate("JSON.parse(localStorage.getItem('fs:rail'))") or not page.evaluate("JSON.parse(localStorage.getItem('fs:rail')).sizes")
     assert not errors

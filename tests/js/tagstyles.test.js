@@ -121,5 +121,25 @@ test('a rule styles the TEXT and the bar steps back unless asked for; a group ru
   assert.strictEqual(T.resolve(TOPIC, null, ctx).br, 'an');
   // the scopes list names the filters that are on, between the tab and the project
   assert.deepStrictEqual(plain(T.scopesFor(ctx).map((s) => s.kind)), ['tab', 'filter', 'project']);
+  // a NOTE's view settings sit above its folder and tab: this page turns the filter off for itself
+  T.setConfig({ project: {}, tab: {}, folder: {}, note: { n1: [{ tag: 'filter:f1', hide: true }] }, filters: [{ id: 'f1', name: 'Discourse', enabled: true, rules: [{ tag: 'group:Discourse', br: 'an' }] }] });
+  assert.strictEqual(T.resolve(TOPIC, null, Object.assign({ note: 'n1' }, ctx)).br, '');
+  assert.strictEqual(T.resolve(TOPIC, null, Object.assign({ note: 'n2' }, ctx)).br, 'an');
+  assert.deepStrictEqual(plain(T.scopesFor(Object.assign({ note: 'n2' }, ctx)).map((s) => s.kind)), ['note', 'tab', 'filter', 'project']);
   assert.ok(!T.filterOn({ id: 'f1', enabled: true }, [{ rules: [{ tag: 'filter:f1', hide: true }] }]));
+});
+
+test('a TEXT is a scope of its own: its examples wherever they appear, between the tab and the filters', () => {
+  T.setList([SUBJ, TOPIC]);
+  T.setConfig({ project: { Kalu: [{ tag: 'Subject', bg: '#111111' }] }, tab: {}, folder: {}, note: {}, text: { [G]: [{ tag: 'Subject', hide: true }] },
+    filters: [{ id: 'f1', name: 'F', enabled: true, rules: [{ tag: 'Subject', hide: false, box: true }] }] });
+  const ctx = { project: 'Kalu', tab: 'Notes', folder: '' };
+  const spec = R.parse('{{flex:text ' + G + ' seg=1}}');                    // the example's source text comes from its spec
+  let r = T.resolve(SUBJ, spec, ctx);
+  assert.ok(r.hide && r.hideVia.kind === 'text' && r.box && r.styleVia.kind === 'filter');
+  r = T.resolve(SUBJ, R.parse('{{flex:text 9b1c2d3e-4f50-4a6b-8c7d-0e1f2a3b0002 seg=1}}'), ctx);
+  assert.ok(!r.hide && r.hideVia.kind === 'filter');
+  T.noteTextTitle(G, 'The dog and the river');
+  assert.deepStrictEqual(plain(T.scopesFor(Object.assign({ text: G }, ctx)).map((s) => s.kind)), ['tab', 'text', 'filter', 'project']);
+  assert.strictEqual(T.scopesFor(Object.assign({ text: G }, ctx))[1].label, 'the text “The dog and the river”');
 });

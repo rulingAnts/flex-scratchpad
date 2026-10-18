@@ -149,6 +149,7 @@ elsewhere (marked *cached*).
 | Insert a block | Right-click an example, a table cell, or the space between blocks (or the ⋮ beside any block) → *Insert a new block*: paragraph, heading, list, checklist, quote, table, FLEx example or divider, above or below |
 | A paste lands wrong | `flex-scratchpad --project NAME --locate clip` with the rows still copied writes `flex-scratchpad-locate.json`, which shows what the app read and what the project holds there |
 | Tags look wrong | `flex-scratchpad --project NAME --dump-tags` writes `flex-scratchpad-tags.json`: the tag list and the first tagged texts exactly as the project returns them. Send that file |
+| The left pane | Each part (Tabs, Folders, Tags, FLEx tags) folds with a click on its heading and the dividers between them drag; headings always stay in view, so nothing is ever out of reach |
 | Folders | A folder shows the notes directly in it; tick *Show notes in subfolders* under the list title to see everything below it |
 | Move a note | Drag it onto a tab or folder, or `⋯ → Move to…` |
 | Collect examples for FLEx | `+ New ▾` → *New example collection*: a note that is only interlinear examples, numbered in order. Paste FLEx rows into its paste box, use *Add from FLEx…*, or choose *Add to an example collection…* on any example (its `⋯`, or *＋ Collection* on a chip's preview). Reorder with the arrows or the `⠿` grip |
@@ -205,6 +206,66 @@ are `[line:]segment[.word[:from-to]]` (words counted without punctuation, charac
 clusters) or a quoted string (`morph:"ka-"`, `*"ka-"` for every match); styles are `hl`, `b`, `u`,
 `i`, `s`, `color`, with a colour in brackets (`hl[#fff2a8]=…`). You never have to type it — the
 click popovers write it — but it is readable and diffable.
+
+### FLEx text markup tags and visual filters — how they work
+
+The tags come from FieldWorks' **Text Tagging** view: each is an item of the project's *Text
+Markup Tags* list (which has groups — "Syntax", "Discourse", your own) placed over one or more
+words of a text. FLEx Scratchpad reads them with the text and draws them in every example that
+shows those words.
+
+**What a tag can look like.** By default a tag is a small bar under the words it covers, in FLEx's
+own colour or one from a palette, with its abbreviation on the first word. A *rule* can change
+that for one tag, for every tag of a FLEx group (*All of "Syntax"*), or for all tags (*All tags*):
+
+| the bar | the text itself |
+|---|---|
+| its colour and text colour; the abbreviation on or off; `bar: always / never` | brackets round the tagged words — `[ ]`, `( )`, `{ }`, `⟨ ⟩`, `⟦ ⟧`, `⌈ ⌉`, `⌊ ⌋`, `\| \|` — with the abbreviation on the closing one; a **highlight** marker over the word line; a **tile** (a tinted box) or a **border** round the words *and the glosses under them*; the words' colour; **B** / *I* / U |
+
+A rule that styles the text hides the bar unless you ask for both; tags that overlap nest their
+brackets and boxes. A rule can also just switch a tag **off** (or back **on**).
+
+**Where a rule lives decides what it covers.** From the most specific to the broadest:
+
+1. **one example** — `⚑` on the example, or select several examples and use *FLEx tag styles for
+   the selected examples…*; written into the example itself (`tags=…` in its `{{flex …}}`)
+2. **one note** — the ⚑ Filters button (which visual filters are on for this page)
+3. **a folder** (right-click it), then its parent folders
+4. **a tab** (right-click it)
+5. **one FLEx text** — every example drawn from it, in whatever note it appears
+6. **the visual filters that are on**, in their order
+7. **the whole notebook** (Settings › FLEx text markup tags)
+
+The `⚑` on any example is the one place to do all of this: *Changes apply to* chooses the scope —
+this example, this note, its folder, its tab, its text, the whole notebook, or a visual filter —
+and the toggles and styles below write there. *All rules for …* opens the full list of a scope.
+
+The most specific place that says something about a tag wins; a place that says nothing about a
+tag leaves it exactly as the broader places have it. *Shown or hidden* and *the look* are decided
+separately, so a folder can turn a tag off that the project styles, and an example can turn it
+back on without choosing a colour.
+
+**Visual filters** (modelled on Logos's) are **named sets of rules you switch on and off as a
+whole**, for example *Grammatical relations* (brackets round S, A and P) or *SVC types* (a tile
+behind each serial verb construction, coloured by type). Set them up once — ⚑ Filters › *Set up
+visual filters…*, or Settings — then turn any number of them on or off:
+
+- **for one note** (⚑ Filters › *This note*): the page keeps its own choice; *this note only ↺*
+  goes back to the default;
+- **everywhere** (⚑ Filters › *Everywhere*): the default for every note; a tab or folder can
+  still differ (its tag-styles dialog has a *Visual filters here* section), and so can an example.
+
+A filter starts **empty**; add the tags (or groups) it should style one at a time with *+ Add a
+tag…*. **A tag you have not added to a filter is not affected by that filter at all** — not shown,
+not hidden, not restyled. When several filters are on and more than one styles the same tag, the
+one higher in the list decides; a note's, folder's, tab's or example's own rules win over every
+filter.
+
+**Finding things by tag.** The rail's **FLEx tags** lists the tags the notes of the tab use; click
+one to see only those notes, with the examples that carry the tag marked and the others dimmed
+(▲ ▼ step through them). `tagged:Topic` in the search box does the same across the notebook, and
+the FLEx object dialog's *FLEx tags* lists every place a tag is used in the project, ready to
+insert.
 
 ## Development
 

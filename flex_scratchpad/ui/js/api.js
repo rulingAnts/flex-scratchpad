@@ -74,7 +74,7 @@
     };
     const notes = {};
     const config = { tabs: [{ dir: 'Notes', name: 'Notes', color: '#2f6fdb' }, { dir: 'Grammar', name: 'Grammar', color: '#0f766e' }],
-      tags: [{ name: 'todo', color: '#b45309' }], flex: { source: 'demo', project: 'Kalu Demo' }, media: { byGuid: {}, folders: [] }, settings: { diacriticsInsensitive: true }, tagStyles: { project: {}, tab: {}, folder: {}, filters: [] } };
+      tags: [{ name: 'todo', color: '#b45309' }], flex: { source: 'demo', project: 'Kalu Demo' }, media: { byGuid: {}, folders: [] }, settings: { diacriticsInsensitive: true }, tagStyles: { project: {}, tab: {}, folder: {}, note: {}, text: {}, filters: [] } };
     const folders = { Notes: [], Grammar: ['Verbs', 'Verbs/Aspect'] };
     let seq = 0;
     const now = () => new Date().toISOString().slice(0, 19);
@@ -169,13 +169,13 @@
         const ql = (q || '').toLowerCase();
         return rows.filter((r) => !ql || (r.title + ' ' + r.words + ' ' + r.label).toLowerCase().includes(ql));
       },
-      set_tag_filters: async (filters) => { config.tagStyles = config.tagStyles || { project: {}, tab: {}, folder: {}, filters: [] }; config.tagStyles.filters = (filters || []).map((f, i) => ({ id: f.id || 'f' + i, name: f.name || '', enabled: f.enabled !== false, rules: f.rules || [] })); return config.tagStyles; },
+      set_tag_filters: async (filters) => { config.tagStyles = config.tagStyles || { project: {}, tab: {}, folder: {}, note: {}, text: {}, filters: [] }; config.tagStyles.filters = (filters || []).map((f, i) => ({ id: f.id || 'f' + i, name: f.name || '', enabled: f.enabled !== false, rules: f.rules || [] })); return config.tagStyles; },
       flex_tags_used: async () => {
         const out = {};
         for (const n of list()) for (const m of (n.body || '').matchAll(/\{\{flex:text ([0-9a-f-]{36})/g)) for (const g of ((demo.texts[m[1]] || {}).tags || [])) for (const tok of [g.tag.name, g.tag.abbr]) if (tok) { const k = tok.toLowerCase().replace(/ /g, '_'); (out[k] = out[k] || []).includes(n.id) || out[k].push(n.id); }
         return out;
       },
-      set_tag_styles: async (kind, key, rules) => { config.tagStyles = config.tagStyles || { project: {}, tab: {}, folder: {}, filters: [] }; if (rules && rules.length) config.tagStyles[kind][key] = rules; else delete config.tagStyles[kind][key]; return config.tagStyles; },
+      set_tag_styles: async (kind, key, rules) => { config.tagStyles = config.tagStyles || { project: {}, tab: {}, folder: {}, note: {}, text: {}, filters: [] }; config.tagStyles[kind] = config.tagStyles[kind] || {}; if (rules && rules.length) config.tagStyles[kind][key] = rules; else delete config.tagStyles[kind][key]; return config.tagStyles; },
       flex_choose_file: async () => null, flex_locate: async () => [],
       open_in_flex: async (url) => { FS.toast('Would open in FLEx: ' + url); return true; },
       flex_open_object: async (kind, guid) => { FS.toast('Would open in FLEx: ' + kind + ' ' + guid); return true; },

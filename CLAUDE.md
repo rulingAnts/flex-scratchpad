@@ -351,9 +351,27 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   [{id, name, enabled, rules}]` (`Api.set_tag_filters`), consulted in order between the tab and the
   project (`scopesFor`); a scope turns one on/off for itself with a rule on the pseudo-tag
   `filter:<id>` (`hide` = off; `filterSwitches` in the tab / folder dialogs and the ⚑ popover,
-  `tags=filter%3Aid:off` on an example). ⚑ in the rail's "FLEx tags" header = `filtersPopover`
-  (on/off), "Manage visual filters…" / Settings = `filtersDialog` (add, rename, order, Rules… =
-  the scope dialog in filter scope). FILTERING BY TAG: `Notebook.flex_tags_used()` reads the
+  `tags=filter%3Aid:off` on an example). FILTERS ARE A VIEW SETTING (Seth, 2026-10-18: "a view
+  setting for the whole app or for notebook pages. You set them up and then turn them on and off
+  (multiples allowed)"): a NOTE scope (`tagStyles.note[<id>]`, between example and folder;
+  `ctx.note`) holds a page's own switches; the toolbar's ⚑ Filters = `filtersPopover` with "This
+  note" (writes `filter:<id>` rules into the note scope; "this note only ↺" drops one) /
+  "Everywhere" (the filter's `enabled`); "Set up visual filters…" / Settings = `filtersDialog`
+  (add, rename, order, Rules… = the scope dialog in filter scope). THE SCOPE DIALOG STARTS EMPTY
+  (Seth: "a new rule should have nothing in it and have tags added manually one at a time, chosen
+  from a list … If the user hasn't manually added a tag to a visual filter rule, then that visual
+  filter rule has no effect on that tag one way or another"): it lists only the rules present
+  (plus tags just added and not yet styled, `pending`, which are not saved) and "+ Add a tag…"
+  (`addTagPicker`: All tags, each group as `group:<name>`, each tag, with a search box) — never
+  every tag of the project with an empty control. A RULE CHOOSES ITS SCOPE (Seth, 2026-10-18:
+  "whole notebook, tab, folder, notes doc, selected range in a note, specific texts anywhere they
+  appear"): the ⚑ popover's "Changes apply to" select (`tag-scope-pick`) aims every toggle and
+  style at this example / this note / each folder / the tab / the TEXT / the whole notebook / a
+  filter (`examplePopover`: `target`, `rulesFor`, `write`); a selected range is the note menu's
+  "FLEx tag styles for the selected examples…". The TEXT scope (`tagStyles.text[<guid>]`, between
+  the tab and the filters) comes from the example's own `spec.guid` (`resolve` puts it in
+  `ctx.text`), its label from the titles the renderer registers (`noteTextTitle`); "the project"
+  scope is labelled "the whole notebook" for users. FILTERING BY TAG: `Notebook.flex_tags_used()` reads the
   index's ⚑ tokens → {token: [note ids]} (`Api.flex_tags_used`; `Api.flex_get` re-indexes the
   notes quoting a text as soon as it is fetched, `reindex_mentioning`, so the rail does not wait
   for a save); app.js `ftagRows` merges a tag's name and abbreviation tokens through the project
@@ -516,6 +534,15 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   `flexHasItOpen` from `<project>.fwdata.lock` is a guess too; the UI says nothing on `null`.
   Progress messages (`py:progress`) show in the pill only while they last; an empty message or
   20 s of silence restores the state, and the LCM index sends an empty one when done.
+- THE RAIL'S PARTS (Seth, 2026-10-18: "the left pane is now too crowded … the borders of each part
+  can be vertically dragged and collapsed/expanded. We don't ever want something hidden beyond
+  recovery in that pane"): `#rail-body` is a flex column of `.rail-section`s (Tabs, Folders, Tags,
+  FLEx tags; `data-sec`) with a `.rail-divider` between each pair. A click on a heading folds its
+  part (`.collapsed`: the body goes, the heading stays), a divider drag moves room between the two
+  open parts it separates (both get fixed px; the last open part keeps `flex-grow` so no gap is
+  left), double-click resets them, and a part can never be dragged below its heading's height.
+  State in localStorage `fs:rail` = {collapsed, sizes} (`applyRail` / `setupRail` in app.js; a
+  hidden FLEx-tags part hides its divider). Unsized Tabs and Folders size to their content (`.auto`).
 - The note list (app.js `visibleNotes`): a folder or tab lists only its OWN notes; "Show notes in
   subfolders" (shown where there are subfolders, remembered per computer in localStorage) lists
   the whole tree with each note's subfolder; a folder with notes only below it offers them; a

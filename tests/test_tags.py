@@ -97,8 +97,10 @@ def test_scoped_tag_styles_are_kept_in_notebook_json_and_cleaned(tmp_path):
     assert api.init()["config"]["tagStyles"]["tab"][tab][1]["enabled"] is False
     api.set_tag_styles("folder", tab + "/Verbs", [{"tag": "Topic", "label": False}])
     assert api.set_tag_styles("folder", tab + "/Verbs", [])["folder"] == {}        # no rules: the key goes
+    api.set_tag_styles("note", "n1", [{"tag": "filter:f1", "hide": True}])        # a note's view settings: which filters are on for it
+    assert api.init()["config"]["tagStyles"]["note"]["n1"] == [{"tag": "filter:f1", "enabled": True, "hide": True}]
     with pytest.raises(ValueError):
-        api.set_tag_styles("note", "x", [])
+        api.set_tag_styles("page", "x", [])
 
 
 def test_visual_filters_and_text_styles_are_kept_in_notebook_json(tmp_path):

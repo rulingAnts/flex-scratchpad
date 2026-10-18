@@ -322,7 +322,7 @@ DEFAULT_CONFIG = {
     "flex": {"source": "lcm", "project": "", "flextextPath": ""},
     "media": {"byGuid": {}, "folders": []},
     "settings": {"diacriticsInsensitive": True},
-    "tagStyles": {"project": {}, "tab": {}, "folder": {}, "filters": []},   # FLEx text markup tag styles by scope, and the named visual filters (api.set_tag_styles / set_tag_filters)
+    "tagStyles": {"project": {}, "tab": {}, "folder": {}, "note": {}, "text": {}, "filters": []},   # FLEx text markup tag styles by scope, and the named visual filters (api.set_tag_styles / set_tag_filters)
 }
 
 

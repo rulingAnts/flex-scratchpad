@@ -61,7 +61,7 @@
     FS.toast(hide ? 'Markdown markers hidden' : 'Markdown markers shown');
   }
   // FLEx tag styles (tagstyles.js) resolve against the open note's place; a change anywhere redraws
-  FS.tagstyles.context = () => ({ project: (S.flex && S.flex.project) || '', tab: S.note ? S.note.tab : (S.tab || ''), folder: S.note ? (S.note.folder || '') : (S.folder || '') });
+  FS.tagstyles.context = () => ({ project: (S.flex && S.flex.project) || '', tab: S.note ? S.note.tab : (S.tab || ''), folder: S.note ? (S.note.folder || '') : (S.folder || ''), note: S.note ? S.note.id : '' });
   FS.on('tagstyles', () => { if (isCollection()) { if (S.coll) S.coll.render(); } else if (S.editor) S.editor.renderAll(); renderRail(); });
   function applyInit(init) {
     S.init = init; S.config = init.config; S.notes = init.notes; S.folders = init.folders; S.tags = init.tags; S.flex = init.flex;
@@ -118,7 +118,9 @@
     if (!sec || !host) return;
     const rows = ftagRows();
     const filters = (FS.tagstyles.filters && FS.tagstyles.filters()) || [];
+    const was = sec.hidden;
     sec.hidden = !rows.length && !filters.length && !(S.flex && S.flex.open);
+    if (was !== sec.hidden) applyRail();
     host.innerHTML = '';
     for (const r of rows) {
       const active = S.ftag && r.tokens.includes(S.ftag);
@@ -1045,6 +1047,79 @@
     }
     $('btn-nav').addEventListener('click', () => toggleNav());
     $('btn-nav-hide').addEventListener('click', () => toggleNav(true));
+    setupRail();
+  }
+  /* The rail's parts (Seth, 2026-10-18): each header folds its part (a click), a divider drags
+   * room between the two parts it separates (double-click: back to automatic), all remembered on
+   * this computer — and no part can ever vanish: its header stays, a fold is one click away. */
+  const RAIL_SECS = ['tabs', 'folders', 'tags', 'ftags'];
+  function railState() { try { return JSON.parse(localStorage.getItem('fs:rail') || '{}'); } catch (e) { return {}; } }
+  function saveRail(st) { try { localStorage.setItem('fs:rail', JSON.stringify(st)); } catch (e) { /* ignore */ } }
+  function railSection(sec) { return $(sec + '-section'); }
+  function applyRail() {
+    const st = railState(), sizes = st.sizes || {}, folded = st.collapsed || {};
+    const visible = RAIL_SECS.filter((k) => railSection(k) && !railSection(k).hidden);
+    const open = visible.filter((k) => !folded[k]);
+    const last = open[open.length - 1];
+    for (const k of RAIL_SECS) {
+      const sec = railSection(k);
+      if (!sec) continue;
+      sec.classList.toggle('collapsed', !!folded[k]);
+      sec.classList.remove('auto');
+      const h4 = sec.querySelector('h4');
+      if (h4) h4.title = folded[k] ? 'Show ' + k.replace('ftags', 'FLEx tags') : 'Hide this part (its header stays)';
+      if (folded[k]) { sec.style.flex = ''; continue; }
+      const px = +sizes[k];
+      if (px > 0) sec.style.flex = (k === last ? '1 1 ' : '0 0 ') + Math.round(px) + 'px';
+      else if (k === 'tabs' || k === 'folders') { sec.style.flex = ''; sec.classList.add('auto'); }
+      else sec.style.flex = '';
+    }
+    // a divider only between two visible parts
+    const divs = [...document.querySelectorAll('#rail-body .rail-divider')];
+    divs.forEach((d, i) => { const below = visible.includes(RAIL_SECS[i + 1]); d.hidden = !below; });
+  }
+  function setupRail() {
+    applyRail();
+    for (const k of RAIL_SECS) {
+      const sec = railSection(k);
+      if (!sec) continue;
+      sec.querySelector('h4').addEventListener('click', (e) => {
+        if (e.target.closest('button')) return;
+        const st = railState(); st.collapsed = st.collapsed || {}; st.collapsed[k] = !st.collapsed[k];
+        if (st.sizes) delete st.sizes[k];
+        saveRail(st); applyRail();
+      });
+    }
+    const divs = [...document.querySelectorAll('#rail-body .rail-divider')];
+    divs.forEach((d, i) => {
+      const pair = () => {
+        // the nearest open part above and below this divider
+        const st = railState(), folded = st.collapsed || {};
+        const vis = (k) => railSection(k) && !railSection(k).hidden && !folded[k];
+        let a = i, b = i + 1;
+        while (a >= 0 && !vis(RAIL_SECS[a])) a--;
+        while (b < RAIL_SECS.length && !vis(RAIL_SECS[b])) b++;
+        return a >= 0 && b < RAIL_SECS.length ? [RAIL_SECS[a], RAIL_SECS[b]] : null;
+      };
+      d.addEventListener('mousedown', (e) => {
+        const p = pair();
+        if (!p || e.button !== 0) return;
+        e.preventDefault();
+        const [ka, kb] = p, A = railSection(ka), B = railSection(kb);
+        const hA = A.getBoundingClientRect().height, hB = B.getBoundingClientRect().height, y0 = e.clientY;
+        const minH = (sec) => sec.querySelector('h4').getBoundingClientRect().height + 12;
+        let moved = false;
+        const move = (ev) => {
+          if (!moved) { if (Math.abs(ev.clientY - y0) < 3) return; moved = true; d.classList.add('dragging'); document.body.classList.add('resizing'); }
+          const na = Math.min(hA + hB - minH(B), Math.max(minH(A), hA + ev.clientY - y0));
+          const st = railState(); st.sizes = st.sizes || {}; st.sizes[ka] = na; st.sizes[kb] = hA + hB - na;
+          saveRail(st); applyRail();
+        };
+        const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); d.classList.remove('dragging'); document.body.classList.remove('resizing'); };
+        document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+      });
+      d.addEventListener('dblclick', () => { const p = pair(); if (!p) return; const st = railState(); if (st.sizes) { delete st.sizes[p[0]]; delete st.sizes[p[1]]; } saveRail(st); applyRail(); });
+    });
   }
   function togglePane(k, collapsed) {
     const st = paneState();
@@ -1072,7 +1147,7 @@
     $('btn-add-folder').addEventListener('click', () => newFolder(S.tab, S.folder || ''));
     $('chk-subfolders').addEventListener('change', (e) => setSubfolders(e.target.checked));
     $('btn-edit-tags').addEventListener('click', openSettings);
-    $('btn-tag-filters').addEventListener('click', (e) => FS.tagstyles.filtersPopover(e.currentTarget));
+    $('btn-filters').addEventListener('click', (e) => FS.tagstyles.filtersPopover(e.currentTarget));
     $('btn-settings').addEventListener('click', openSettings);
     $('flex-pill').addEventListener('click', (e) => flexStatusPopover(e.currentTarget));
     $('flex-banner-fix').addEventListener('click', openSettings);

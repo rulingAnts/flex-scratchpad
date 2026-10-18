@@ -13,8 +13,13 @@
  * style is on — "those styles can overlap with tags optionally displayed underneath".
  * Rules live at these scopes, read most specific first:
  *   example  → the embed's own `tags=` (flexref.tagRules; several examples at once from a selection)
+ *   note     → tagStyles.note["<note id>"]: the page's VIEW settings, above all which visual
+ *              filters are on for it (Seth, 2026-10-18: "a view setting for the whole app or for
+ *              notebook pages. You set them up and then turn them on and off")
  *   folder   → notebook.json tagStyles.folder["<tab>/<path>"] (the nearest folder first, then its parents)
  *   tab      → tagStyles.tab["<dir>"]
+ *   text     → tagStyles.text["<text guid>"]: every example drawn from that FLEx text, wherever it
+ *              appears (Seth, 2026-10-18: "specific texts anywhere they appear")
  *   filters  → tagStyles.filters: NAMED rule sets switched on and off as a whole, like Logos's
  *              visual filters (Seth, 2026-10-18); each enabled one in turn. A scope above can turn
  *              one on or off for itself with a rule on the pseudo-tag `filter:<id>` (hide = off).
@@ -32,7 +37,8 @@
   const R = FS.flexref;
   const PALETTE = ['#ffd6a5', '#caffbf', '#9bf6ff', '#bdb2ff', '#ffadad', '#fdffb6', '#a0c4ff', '#ffc6ff', '#b9fbc0', '#f1c0e8'];
   const BRACKETS = { sq: ['[', ']'], rd: ['(', ')'], cu: ['{', '}'], an: ['\u27e8', '\u27e9'], db: ['\u27e6', '\u27e7'], ce: ['\u2308', '\u2309'], fl: ['\u230a', '\u230b'], bar: ['|', '|'] };
-  const EMPTY = () => ({ project: {}, tab: {}, folder: {}, filters: [] });
+  const EMPTY = () => ({ project: {}, tab: {}, folder: {}, note: {}, text: {}, filters: [] });
+  const textTitles = new Map();       // text guid → title, from the examples drawn (the scope's label)
   let config = EMPTY();
   let list = [];                   // the project's tag list [{guid, name, abbr, group, fore, back}]
   let listPromise = null;
@@ -41,8 +47,10 @@
     PALETTE, BRACKETS,
     setConfig(c) { config = Object.assign(EMPTY(), c || {}); if (!Array.isArray(config.filters)) config.filters = []; },
     filters: () => config.filters,
+    noteTextTitle(guid, title) { if (guid && title) textTitles.set(String(guid).toLowerCase(), title); },
+    textLabel: (guid) => 'the text “' + (textTitles.get(String(guid || '').toLowerCase()) || String(guid || '').slice(0, 8) + '…') + '”',
     config: () => config,
-    context: () => ({ project: '', tab: '', folder: '' }),       // app.js: the open note's place
+    context: () => ({ project: '', tab: '', folder: '', note: '' }),   // app.js: the open note's place
     list: () => list,
     setList(l) { list = l || []; },
     loadList(force) {
@@ -58,13 +66,15 @@
     const rulesOf = (kind, key) => (override && override.kind === kind && override.key === key) ? override.rules : ((config[kind] || {})[key] || []);
     const out = [];
     if (exampleRules) out.push({ kind: 'example', key: '', label: 'this example', rules: exampleRules });
+    if (ctx.note) out.push({ kind: 'note', key: ctx.note, label: 'this note', rules: rulesOf('note', ctx.note) });
     const parts = String(ctx.folder || '').split('/').filter(Boolean);
     for (let i = parts.length; i >= 1; i--) {
       const key = (ctx.tab || '') + '/' + parts.slice(0, i).join('/');
       out.push({ kind: 'folder', key, label: 'the folder “' + parts[i - 1] + '”', rules: rulesOf('folder', key) });
     }
     out.push({ kind: 'tab', key: ctx.tab || '', label: 'the tab', rules: rulesOf('tab', ctx.tab || '') });
-    const project = { kind: 'project', key: ctx.project || '', label: 'the project', rules: rulesOf('project', ctx.project || '') };
+    if (ctx.text) out.push({ kind: 'text', key: String(ctx.text).toLowerCase(), label: T.textLabel(ctx.text), rules: rulesOf('text', String(ctx.text).toLowerCase()) });
+    const project = { kind: 'project', key: ctx.project || '', label: 'the whole notebook', rules: rulesOf('project', ctx.project || '') };
     // the visual filters that are on here: a scope's `filter:<id>` rule decides first, else the filter's own switch
     for (const f of config.filters || []) {
       const on = filterOn(f, out.concat([project]));
@@ -109,7 +119,9 @@
     return h;
   }
   function resolve(tag, spec, ctx, override) {
-    const scopes = scopesFor(ctx || T.context(), spec ? R.tagRules(spec) : null, override);
+    const c = Object.assign({}, ctx || T.context());
+    if (spec && spec.guid && !c.text) c.text = spec.guid;       // the example's source text is a scope of its own
+    const scopes = scopesFor(c, spec ? R.tagRules(spec) : null, override);
     const out = { hide: false, bg: '', fg: '', b: false, i: false, u: false, label: true, br: '', hl: false, tile: false, box: false, c: '', bar: null, hideVia: null, styleVia: null };
     for (const sc of scopes) {
       for (const r of rulesIn(sc.rules, tag)) {
@@ -233,41 +245,60 @@
   /* The ⚑ popover on an example: its tags, each with where its look comes from, a show / hide
    * toggle and its own style — all written into the embed's `tags=`. */
   function examplePopover(anchor, spec, obj, opts) {
-    const ctx = T.context();
+    const ctx = Object.assign({}, T.context(), { text: spec.guid });
+    // where a change made here goes (Seth, 2026-10-18: "a rule should let the user choose its
+    // scope (whole notebook, tab, folder, notes doc, selected range in a note, specific texts
+    // anywhere they appear)"): this example by default; a selection of examples is the note
+    // menu's "FLEx tag styles for the selected examples…"
+    const targets = scopesFor(ctx, [], null).map((sc) => ({ kind: sc.kind, key: sc.key, label: sc.kind === 'example' ? 'this example' : sc.label }));
+    let target = targets[0];
     FS.popover(anchor, (pop, close) => {
-      const rules = R.tagRules(spec);
       const openTags = new Set();
-      const write = () => { R.setTagRules(spec, rules); opts.onSpecChange && opts.onSpecChange(spec); };
+      const rulesFor = () => {
+        if (target.kind === 'example') return R.tagRules(spec);
+        if (target.kind === 'filter') return (((config.filters || []).find((f) => f.id === target.key) || {}).rules || []).map((r) => Object.assign({}, r));
+        return ((config[target.kind] || {})[target.key] || []).map((r) => Object.assign({}, r));
+      };
+      let rules = rulesFor();
+      const write = async () => {
+        if (target.kind === 'example') { R.setTagRules(spec, rules); opts.onSpecChange && opts.onSpecChange(spec); return; }
+        try { await save(target.kind, target.key, rules); } catch (e) { FS.toast(e.message, 'error'); }
+      };
       pop.appendChild(el('div', { class: 'row' }, el('b', {}, 'FLEx text markup tags in this example')));
+      const scopeSel = el('select', { 'data-test': 'tag-scope-pick', title: 'Where the changes made here apply' });
+      targets.forEach((t, i) => scopeSel.appendChild(el('option', { value: String(i), selected: t === target }, t.label.replace(/^the folder /, 'folder ').replace(/^the tab$/, 'this tab'))));
+      scopeSel.addEventListener('change', () => { target = targets[+scopeSel.value]; rules = rulesFor(); openTags.clear(); draw(); });
+      pop.appendChild(el('div', { class: 'row', style: { gap: '6px' } }, el('span', { class: 'lbl' }, 'Changes apply to'), scopeSel));
       const host = el('div', { class: 'tag-rules', 'data-test': 'tag-popover' });
       const draw = () => {
         host.innerHTML = '';
         for (const { tag, count } of tagsIn(obj)) {
           const res = resolve(tag, spec, ctx);
           const row = el('div', { class: 'tagrow', dataset: { tag: tag.name } });
-          const cb = el('input', { type: 'checkbox', checked: !res.hide, 'data-test': 'tag-toggle', title: res.hide ? 'Show this tag in this example' : 'Hide this tag in this example' });
-          cb.addEventListener('change', () => {
-            // hidden by a broader scope → "on" here; hidden by this example → just drop that; shown → "off"
-            patchRule(rules, tag.name, { hide: cb.checked ? (res.hideVia && res.hideVia.kind !== 'example' ? false : undefined) : true });
-            write(); draw();
+          const cb = el('input', { type: 'checkbox', checked: !res.hide, 'data-test': 'tag-toggle', title: res.hide ? 'Show this tag (' + target.label + ')' : 'Hide this tag (' + target.label + ')' });
+          cb.addEventListener('change', async () => {
+            // hidden by a broader scope → "on" at the target; hidden by the target itself → just drop that; shown → "off"
+            const decidedHere = res.hideVia && res.hideVia.kind === target.kind && res.hideVia.key === target.key;
+            patchRule(rules, tag.name, { hide: cb.checked ? (decidedHere ? undefined : false) : true });
+            await write(); draw();
           });
           const sw = el('span', { class: 'tag-sw', style: swatchStyle(res) });
           const via = el('span', { class: 'via', 'data-test': 'tag-via' }, res.hide ? 'hidden by ' + res.hideVia.label : (res.hideVia && res.hideVia.kind === 'example' ? 'shown here · ' : '') + 'styled by ' + res.styleVia.label);
           const name = el('span', { class: 'tag-name' }, el('span', {}, tag.name + (tag.abbr && tag.abbr !== tag.name ? ' (' + tag.abbr + ')' : '') + (count > 1 ? '  ×' + count : '')), el('br'), via);
-          const styleBtn = el('button', { class: 'lnk', 'data-test': 'tag-style', title: 'This example’s own look for the tag', onclick: () => { if (openTags.has(tag.name)) openTags.delete(tag.name); else openTags.add(tag.name); draw(); } }, 'Style ▾');
+          const styleBtn = el('button', { class: 'lnk', 'data-test': 'tag-style', title: 'The look of this tag, for ' + target.label, onclick: () => { if (openTags.has(tag.name)) openTags.delete(tag.name); else openTags.add(tag.name); draw(); } }, 'Style ▾');
           const find = FS.openPicker ? el('button', { class: 'lnk', title: 'Find the other places this tag is used, and insert them', onclick: () => { close(); FS.openPicker({ mode: 'tags', tag: tag.guid }); } }, '\u{1F50D}') : null;
           row.append(cb, sw, name, styleBtn, find);
           host.appendChild(row);
-          if (openTags.has(tag.name)) host.appendChild(el('div', { class: 'tag-style-box' }, controls(() => rules.find((x) => norm(x.tag) === norm(tag.name)), (patch) => { patchRule(rules, tag.name, patch); write(); draw(); }, { noShow: true })));
+          if (openTags.has(tag.name)) host.appendChild(el('div', { class: 'tag-style-box' }, controls(() => rules.find((x) => norm(x.tag) === norm(tag.name)), async (patch) => { patchRule(rules, tag.name, patch); await write(); draw(); }, { noShow: true })));
         }
       };
       draw();
       pop.appendChild(host);
-      if ((config.filters || []).length) pop.appendChild(filterSwitches(rules, (key, patch) => { patchRule(rules, key, patch); write(); draw(); }, { inheritLabel: 'as the folder / tab says' }));
+      if ((config.filters || []).length && target.kind !== 'filter') pop.appendChild(filterSwitches(rules, async (key, patch) => { patchRule(rules, key, patch); await write(); draw(); }, { inheritLabel: 'as inherited' }));
       pop.appendChild(el('hr'));
-      if (rules.length) pop.appendChild(el('button', { class: 'menu-item', 'data-test': 'tag-clear', onclick: () => { rules.splice(0); write(); close(); } }, 'Clear this example’s own tag styles'));
-      const links = el('div', { class: 'row', style: { gap: '10px', flexWrap: 'wrap' } }, el('span', { class: 'lbl' }, 'Styles for'));
-      for (const sc of scopesFor(ctx)) { if (sc.kind !== 'filter') links.appendChild(el('button', { class: 'lnk', 'data-test': 'tag-scope-' + sc.kind, onclick: () => { close(); dialog(sc); } }, (sc.kind === 'folder' ? sc.label.replace(/^the /, '') : sc.label.replace(/^the /, 'this ')) + '…')); }
+      if (R.tagRules(spec).length) pop.appendChild(el('button', { class: 'menu-item', 'data-test': 'tag-clear', onclick: () => { R.setTagRules(spec, []); opts.onSpecChange && opts.onSpecChange(spec); close(); } }, 'Clear this example’s own tag styles'));
+      const links = el('div', { class: 'row', style: { gap: '10px', flexWrap: 'wrap' } }, el('span', { class: 'lbl' }, 'All rules for'));
+      for (const sc of scopesFor(ctx)) { if (sc.kind !== 'filter') links.appendChild(el('button', { class: 'lnk', 'data-test': 'tag-scope-' + sc.kind, onclick: () => { close(); dialog(sc); } }, (sc.kind === 'folder' ? sc.label.replace(/^the /, '') : sc.kind === 'text' ? 'this text' : sc.label.replace(/^the /, 'this ')) + '…')); }
       links.appendChild(el('button', { class: 'lnk', 'data-test': 'tag-scope-filters', onclick: () => { close(); filtersDialog(); } }, 'visual filters…'));
       pop.appendChild(links);
     });
@@ -275,7 +306,8 @@
 
   function ctxFor(scope) {
     if (scope.kind === 'project') return { project: scope.key, tab: '', folder: '' };
-    if (scope.kind === 'filter') return T.context();
+    if (scope.kind === 'filter' || scope.kind === 'note') return T.context();
+    if (scope.kind === 'text') return Object.assign({}, T.context(), { text: scope.key });
     if (scope.kind === 'tab') return { project: T.context().project, tab: scope.key, folder: '' };
     const i = scope.key.indexOf('/');
     return { project: T.context().project, tab: scope.key.slice(0, i), folder: scope.key.slice(i + 1) };
@@ -284,18 +316,25 @@
   /* The editor for one scope: every tag of the project (and `*`), the rule here, the effect.
    * scope = {kind: 'project'|'tab'|'folder', key, label}, or {kind: 'example', label, rules,
    * apply(rules)} for a selection of examples (app.js writes the rules into each embed). */
+  /* The editor for one scope: ONLY the tags that were added to it, one at a time from a list (Seth,
+   * 2026-10-18: "by default a new rule should have nothing in it and have tags added manually one
+   * at a time, chosen from a list … If the user hasn't manually added a tag to a visual filter
+   * rule, then that visual filter rule has no effect on that tag one way or another").
+   * scope = {kind: 'project'|'tab'|'folder'|'filter', key, label}, or {kind: 'example', label,
+   * rules, apply(rules)} for a selection of examples (app.js writes the rules into each embed). */
   async function dialog(scope) {
     await T.loadList();
     const example = scope.kind === 'example', filter = scope.kind === 'filter';
-    const m = FS.modal({ title: 'FLEx tag styles — ' + scope.label });
+    const m = FS.modal({ title: (filter ? 'Visual filter — ' : 'FLEx tag styles — ') + scope.label });
     const stored = example ? (scope.rules || []) : filter ? (((config.filters || []).find((f) => f.id === scope.key) || {}).rules || []) : ((config[scope.kind] || {})[scope.key] || []);
     const rules = stored.map((r) => Object.assign({}, r));
+    const pending = [];                 // tags added but not styled yet: shown, not saved
     const ctx = example ? T.context() : ctxFor(scope);
     const override = { kind: scope.kind, key: scope.key, rules };
     m.body.appendChild(el('p', { class: 'small muted' }, example
-      ? 'These settings are written into each selected example and win over its folder, tab and project. Leave a control as it is to keep what the broader scopes say.'
-      : filter ? 'A visual filter is a named set of rules switched on and off as a whole (the ⚑ Filters button, or per tab, folder and example). Its rules apply after an example’s, folder’s and tab’s own, before the project’s.'
-        : 'Rules here apply to every example in ' + scope.label + ' unless a more specific place (a folder inside it, or an example itself) says otherwise. Untick a rule to keep it without using it.'));
+      ? 'These settings are written into each selected example and win over its folder, tab and project. Only the tags you add here are affected.'
+      : filter ? 'A visual filter is a named set of tag styles, switched on and off as a whole — for one note or everywhere (⚑ Filters in the toolbar). Add the tags it should style; a tag you have not added is left exactly as it was. When several filters are on, the first that styles a tag decides; a note’s, folder’s or tab’s own rules still win over any filter.'
+        : 'Rules here apply to every example in ' + scope.label + ' unless a more specific place (a folder inside it, a note, or an example itself) says otherwise. Only the tags you add here are affected; untick a rule to keep it without using it.'));
     const host = el('div', { class: 'tag-rules', 'data-test': 'tag-dialog' });
     m.body.appendChild(host);
     const commit = async () => {
@@ -303,41 +342,77 @@
       catch (e) { FS.toast(e.message, 'error'); }
       draw();
     };
+    // what a rule's key stands for: a tag of the list, a group, every tag, or a name the list no longer has
+    const itemFor = (key) => {
+      const k = norm(key);
+      if (k === '*') return { guid: '*', name: '*', abbr: '', group: '', label: 'All tags', note: 'one rule for every tag; a tag’s or group’s own rule wins' };
+      if (k.startsWith('group:')) { const g = key.slice(6); return { guid: 'group:' + g, name: key, abbr: '', group: g, isGroup: true, label: 'All of “' + g + '”', note: 'one rule for the group’s tags; a tag’s own rule wins' }; }
+      if (k.startsWith('filter:')) return null;
+      const t = list.find((x) => norm(x.name) === k || (x.abbr && norm(x.abbr) === k) || norm(x.guid) === k);
+      return t ? Object.assign({}, t, { label: t.name + (t.abbr && t.abbr !== t.name ? ' (' + t.abbr + ')' : '') }) : { guid: key, name: key, abbr: '', group: '', label: key, note: 'not in the project’s tag list' };
+    };
     const draw = () => {
       host.innerHTML = '';
-      if (!list.length) host.appendChild(el('div', { class: 'muted small' }, 'No text markup tags have been read from the project yet. Open the project (or show an example that carries tags) and come back.'));
       if (!example && !filter) host.appendChild(filterSwitches(rules, (key, patch) => { patchRule(rules, key, patch); commit(); }));
-      let group;
-      const groups = [...new Set(list.map((t) => t.group).filter(Boolean))];
-      // `*`, then each FLEx group as a rule of its own (`group:<name>`) followed by its tags
-      const items = [{ guid: '*', name: '*', abbr: '', group: '' }];
-      for (const tag of list) {
-        if (tag.group !== group) { group = tag.group; if (group && groups.includes(group)) items.push({ guid: 'group:' + group, name: 'group:' + group, abbr: '', group, isGroup: true }); }
-        items.push(tag);
-      }
-      group = undefined;
-      for (const tag of items) {
-        if (tag.guid !== '*' && tag.group !== group) { group = tag.group; host.appendChild(el('div', { class: 'tag-group' }, group || 'Tags')); }
-        const r = rules.find((x) => norm(x.tag) === norm(tag.name)) || null;
+      const keys = [];
+      for (const r of rules) if (!norm(r.tag).startsWith('filter:') && !keys.some((k) => norm(k) === norm(r.tag))) keys.push(r.tag);
+      for (const k of pending) if (!keys.some((x) => norm(x) === norm(k))) keys.push(k);
+      if (!keys.length) host.appendChild(el('div', { class: 'muted small', 'data-test': 'tag-dialog-empty', style: { padding: '8px 0' } }, filter ? 'This filter styles no tag yet. Add the tags it should style.' : 'No tag is styled here yet. Add one to begin.'));
+      for (const key of keys) {
+        const tag = itemFor(key);
+        if (!tag) continue;
+        const r = rules.find((x) => norm(x.tag) === norm(key)) || null;
         const row = el('div', { class: 'tagrow', dataset: { tag: tag.name } });
         if (!example) {
-          const on = el('input', { type: 'checkbox', checked: !r || r.enabled !== false, disabled: !r, 'data-test': 'tag-rule-on', title: r ? 'This rule is in use (untick to keep it but not use it)' : 'No rule here yet' });
+          const on = el('input', { type: 'checkbox', checked: !r || r.enabled !== false, disabled: !r, 'data-test': 'tag-rule-on', title: r ? 'This rule is in use (untick to keep it but not use it)' : 'Choose a style for this tag' });
           on.addEventListener('change', () => { if (r) { r.enabled = on.checked; commit(); } });
           row.appendChild(on);
         }
-        const res = tag.guid === '*' || tag.isGroup ? null : resolve(tag, example ? { extra: { tags: R.serializeTagRules(rules) } } : null, ctx, example ? null : override);
+        const res = tag.guid === '*' || tag.isGroup || !tag.guid ? null : resolve(tag, example ? { extra: { tags: R.serializeTagRules(rules) } } : null, ctx, example ? null : override);
         row.appendChild(el('span', { class: 'tag-sw', style: res ? swatchStyle(res) : { background: 'var(--panel-2)' } }));
         row.appendChild(el('span', { class: 'tag-name' },
-          el('span', {}, tag.guid === '*' ? 'All tags' : tag.isGroup ? 'All of “' + tag.group + '”' : tag.name + (tag.abbr && tag.abbr !== tag.name ? ' (' + tag.abbr + ')' : '')), el('br'),
-          el('span', { class: 'via', 'data-test': 'tag-via' }, res ? (res.hide ? 'hidden by ' + res.hideVia.label : 'styled by ' + res.styleVia.label) : tag.isGroup ? 'one rule for the group’s tags; a tag’s own rule wins' : 'one rule for every tag; a tag’s own rule wins')));
-        row.appendChild(controls(() => r, (patch) => { patchRule(rules, tag.name, patch); commit(); }, { inheritLabel: example ? 'as the folder / tab / project says' : 'as inherited' }));
-        row.appendChild(r ? el('button', { class: 'icon-btn danger', 'data-test': 'tag-rule-remove', title: 'Remove this rule', onclick: () => { rules.splice(rules.indexOf(r), 1); commit(); } }, '✕') : el('span', { style: { width: '26px' } }));
+          el('span', {}, tag.label), el('br'),
+          el('span', { class: 'via', 'data-test': 'tag-via' }, res ? (res.hide ? 'hidden by ' + res.hideVia.label : 'styled by ' + res.styleVia.label) : tag.note || '')));
+        row.appendChild(controls(() => r, (patch) => { patchRule(rules, key, patch); commit(); }, { inheritLabel: example ? 'as the folder / tab / project says' : 'as inherited' }));
+        row.appendChild(el('button', { class: 'icon-btn danger', 'data-test': 'tag-rule-remove', title: 'Remove this tag from here', onclick: () => { if (r) rules.splice(rules.indexOf(r), 1); const i = pending.findIndex((k) => norm(k) === norm(key)); if (i >= 0) pending.splice(i, 1); commit(); } }, '✕'));
         host.appendChild(row);
       }
+      const add = el('button', { class: 'btn', 'data-test': 'tag-add', onclick: (e) => addTagPicker(e.currentTarget, keys, (key) => { pending.push(key); draw(); }) }, '+ Add a tag…');
+      host.appendChild(el('div', { class: 'btn-row', style: { justifyContent: 'flex-start', marginTop: '8px' } }, add));
+      if (!list.length) host.appendChild(el('div', { class: 'muted small' }, 'No text markup tags have been read from the project yet. Open the project (or show an example that carries tags) and come back.'));
     };
     draw();
     m.body.appendChild(el('div', { class: 'btn-row' }, el('button', { class: 'btn primary', onclick: () => m.close() }, 'Done')));
     return m;
+  }
+  /* The list to add a tag from: every tag of the project under its group, each group as a whole,
+   * and all tags; a search box narrows it; what is already in the rule is left out. */
+  function addTagPicker(anchor, have, pick) {
+    const has = (k) => have.some((x) => norm(x) === norm(k));
+    FS.popover(anchor, (pop, close) => {
+      const q = el('input', { type: 'search', placeholder: 'Find a tag…', 'data-test': 'tag-pick-search', style: { width: '100%' } });
+      const lst = el('div', { class: 'tag-pick-list' });
+      const draw = () => {
+        lst.innerHTML = '';
+        const needle = norm(q.value);
+        const row = (key, label, sub, cls) => lst.appendChild(el('button', { class: 'menu-item ' + (cls || ''), 'data-test': 'tag-pick', dataset: { tag: key }, onclick: () => { close(); pick(key); } }, el('span', {}, label), sub ? el('span', { class: 'muted small', style: { marginLeft: '6px' } }, sub) : null));
+        if (!needle && !has('*')) row('*', 'All tags', 'every tag of the project', 'tag-pick-all');
+        let group;
+        for (const t of list) {
+          const gkey = t.group ? 'group:' + t.group : '';
+          if (t.group !== group) { group = t.group; if (gkey && !has(gkey) && (!needle || norm(group).includes(needle))) row(gkey, 'All of “' + group + '”', '', 'tag-pick-group'); }
+          if (has(t.name) || has(t.guid) || (t.abbr && has(t.abbr))) continue;
+          if (needle && !norm(t.name).includes(needle) && !norm(t.abbr).includes(needle) && !norm(t.group).includes(needle)) continue;
+          row(t.name, t.name, t.abbr && t.abbr !== t.name ? t.abbr : '', 'tag-pick-tag');
+        }
+        if (!lst.children.length) lst.appendChild(el('div', { class: 'muted small', style: { padding: '6px' } }, list.length ? 'Nothing else to add.' : 'No tags have been read from the project yet.'));
+      };
+      q.addEventListener('input', draw);
+      pop.appendChild(q);
+      pop.appendChild(lst);
+      draw();
+      setTimeout(() => q.focus(), 0);
+    }, { class: 'tag-pick' });
   }
   /* The swatch of a resolved look: its colour, and a hint of brackets / border when the text is styled. */
   function swatchStyle(res) {
@@ -349,18 +424,48 @@
 
   /* ⚑ Filters: the visual filters switched on and off as a whole (Seth, 2026-10-18: "various
    * 'visual filters' based on text tags like you can do with visual filters in Logos"). */
+  let filtersMode = 'note';          // the popover's switch: 'note' (this page) or 'all' (the default everywhere)
   function filtersPopover(anchor) {
+    const ctx = T.context();
+    if (!ctx.note) filtersMode = 'all';
     FS.popover(anchor, (pop, close) => {
-      pop.appendChild(el('div', { class: 'row' }, el('b', {}, 'Visual filters')));
-      const list = config.filters || [];
-      if (!list.length) pop.appendChild(el('div', { class: 'muted small', style: { padding: '4px 0 8px' } }, 'No visual filters yet. A filter is a named set of tag styles you switch on and off together.'));
-      for (const f of list) {
-        const cb = el('input', { type: 'checkbox', checked: f.enabled !== false, 'data-test': 'filter-on', dataset: { filter: f.id } });
-        cb.addEventListener('change', async () => { try { await saveFilters(list.map((x) => (x.id === f.id ? Object.assign({}, x, { enabled: cb.checked }) : x))); } catch (e) { FS.toast(e.message, 'error'); } });
-        pop.appendChild(el('label', { class: 'menu-item', style: { display: 'flex', gap: '8px', alignItems: 'center' } }, cb, el('span', { style: { flex: 1 } }, f.name || 'untitled filter'), el('span', { class: 'muted small' }, (f.rules || []).length + (f.rules && f.rules.length === 1 ? ' rule' : ' rules'))));
-      }
-      pop.appendChild(el('hr'));
-      pop.appendChild(el('button', { class: 'menu-item', 'data-test': 'filters-manage', onclick: () => { close(); filtersDialog(); } }, 'Manage visual filters…'));
+      const draw = () => {
+        pop.innerHTML = '';
+        const list = config.filters || [];
+        const head = el('div', { class: 'row', style: { gap: '10px' } }, el('b', { style: { flex: 1 } }, 'Visual filters'));
+        if (ctx.note) {
+          const seg = el('span', { class: 'seg', 'data-test': 'filters-mode' });
+          for (const [v, l, ttl] of [['note', 'This note', 'Switch filters on or off for this note only'], ['all', 'Everywhere', 'The default for every note (a note, folder or tab may still differ)']]) {
+            seg.appendChild(el('button', { class: 'seg-btn' + (filtersMode === v ? ' on' : ''), title: ttl, dataset: { mode: v }, onclick: () => { filtersMode = v; draw(); } }, l));
+          }
+          head.appendChild(seg);
+        }
+        pop.appendChild(head);
+        if (!list.length) pop.appendChild(el('div', { class: 'muted small', style: { padding: '4px 0 8px' } }, 'No visual filters yet. A filter is a named set of tag styles you switch on and off together.'));
+        const noteRules = ctx.note ? ((config.note || {})[ctx.note] || []).map((r) => Object.assign({}, r)) : [];
+        const scopes = scopesFor(ctx);
+        for (const f of list) {
+          const key = 'filter:' + f.id;
+          const here = filtersMode === 'note';
+          const own = here ? noteRules.find((r) => norm(r.tag) === norm(key) && r.hide != null) : null;
+          const on = here ? filterOn(f, scopes) : f.enabled !== false;
+          const cb = el('input', { type: 'checkbox', checked: on, 'data-test': 'filter-on', dataset: { filter: f.id } });
+          cb.addEventListener('change', async () => {
+            try {
+              if (here) { patchRule(noteRules, key, { hide: !cb.checked }); await save('note', ctx.note, noteRules); }
+              else await saveFilters(list.map((x) => (x.id === f.id ? Object.assign({}, x, { enabled: cb.checked }) : x)));
+            } catch (e) { FS.toast(e.message, 'error'); }
+            draw();
+          });
+          const row = el('label', { class: 'menu-item', style: { display: 'flex', gap: '8px', alignItems: 'center' } }, cb, el('span', { style: { flex: 1 } }, f.name || 'untitled filter'));
+          if (own) row.appendChild(el('button', { class: 'lnk small', title: 'Back to what the folder, tab or default says', 'data-test': 'filter-reset', onclick: async (e) => { e.preventDefault(); patchRule(noteRules, key, { hide: undefined }); try { await save('note', ctx.note, noteRules); } catch (err) { FS.toast(err.message, 'error'); } draw(); } }, 'this note only ↺'));
+          else row.appendChild(el('span', { class: 'muted small' }, here ? (f.enabled !== false ? 'default on' : 'default off') : (f.rules || []).length + (f.rules && f.rules.length === 1 ? ' rule' : ' rules')));
+          pop.appendChild(row);
+        }
+        pop.appendChild(el('hr'));
+        pop.appendChild(el('button', { class: 'menu-item', 'data-test': 'filters-manage', onclick: () => { close(); filtersDialog(); } }, 'Set up visual filters…'));
+      };
+      draw();
     });
   }
   async function filtersDialog() {

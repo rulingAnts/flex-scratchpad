@@ -807,14 +807,14 @@ class Api:
 
     def _tag_styles(self) -> dict:
         ts = self._nb.config.setdefault("tagStyles", {})
-        for k in ("project", "tab", "folder"):
+        for k in ("project", "tab", "folder", "note", "text"):
             ts.setdefault(k, {})
         ts.setdefault("filters", [])
         return ts
 
     def set_tag_styles(self, kind: str, key: str, rules: list[dict]) -> dict:
-        if kind not in ("project", "tab", "folder"):
-            raise ValueError("tag styles are kept per project, tab or folder")
+        if kind not in ("project", "tab", "folder", "note", "text"):
+            raise ValueError("tag styles are kept per project, tab, folder, note or text")
         clean = self._clean_tag_rules(rules)
         ts = self._tag_styles()
         bucket = ts.setdefault(kind, {})
