@@ -763,6 +763,24 @@ class Notebook:
             self._write_note(note)
             return note
 
+    def set_chart(self, note_id: str, chart_guid: str) -> Note:
+        """Point a chart note at another chart (Seth, 2026-10-18: "change the text chart source for
+        a text chart note"); the body (the view embed, the custom columns, the values) is the
+        page's to rewrite."""
+        g = (chart_guid or "").strip().lower()
+        if not g:
+            raise ValueError("No chart given")
+        with self.lock:
+            note = self.get_note(note_id)
+            if note.kind != "chart":
+                raise ValueError(f"“{note.title or 'Untitled'}” is not a chart note")
+            if g == note.chart:
+                return note
+            note.chart = g
+            note.updated = now_iso()
+            self._write_note(note)
+            return note
+
     def append_examples(self, note_id: str, embeds: list[str]) -> Note:
         """Add examples to the END of an example collection, one paragraph each (the "Add to
         collection" of an example in any note). Only collections take them."""

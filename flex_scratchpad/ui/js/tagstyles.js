@@ -379,9 +379,10 @@
       const host = el('div', { class: 'tag-rules', 'data-test': 'tag-popover' });
       const draw = () => {
         host.innerHTML = '';
-        const here = markerMode ? markersIn(obj) : tagsIn(obj);
+        const here = markerMode ? markersIn(obj).concat((obj.tags || []).length ? tagsIn(obj) : []) : tagsIn(obj);
         const countOf = new Map(here.map((x) => [x.tag.guid, x.count]));
-        if (markerMode) host.appendChild(el('div', { class: 'muted small', style: { padding: '2px 0 6px' } }, 'Chart markers in this chart. “Style ▾” → “whole row” colours every row the marker is in.'));
+        if (markerMode && !here.length) host.appendChild(el('div', { class: 'muted small', style: { padding: '2px 0 6px' } }, 'This chart has no chart markers, and its text no markup tags. The visual filters below still apply to it.'));
+        else if (markerMode) host.appendChild(el('div', { class: 'muted small', style: { padding: '2px 0 6px' } }, 'Chart markers in this chart' + ((obj.tags || []).length ? ', and the text\u2019s markup tags (drawn when the “FLEx tags” line is on)' : '') + '. “Style ▾” → “whole row” colours every row the marker is in.'));
         renderTagTree(host, here.map((x) => x.tag), { leaf: (tag) => {
           const count = countOf.get(tag.guid) || 1;
           const res = resolve(tag, spec, ctx);

@@ -33,8 +33,9 @@
   /* ------------------------------------------------------------------ pure helpers */
   /* The columns an embed shows: all, or those `cols=` names — a column's name, Group/Name, its
    * abbreviation, a group (all of its columns), its GUID, or c3 / c3-c5 by position. */
-  function visibleColumns(spec, chart) {
+  function selectedColumns(spec, chart) {
     const cols = (chart.template && chart.template.columns) || [];
+    if (chart.flat) return cols;
     const sel = spec.extra && spec.extra.cols;
     if (!sel) return cols;
     const want = new Set();
@@ -51,6 +52,38 @@
     }
     const out = cols.filter((c) => want.has(c.n));
     return out.length ? out : cols;
+  }
+  /* The columns an embed shows (`cols=`), less the EMPTY ones when `empty=off` says so (Seth,
+   * 2026-10-18: "option to hide empty columns on all chart objects") — a column with no cell part
+   * in the rows shown; never all of them. */
+  function visibleColumns(spec, chart) {
+    const cols = selectedColumns(spec, chart);
+    if (!(spec.extra && spec.extra.empty === 'off')) return cols;
+    const used = new Set();
+    for (const r of chart.rows || []) for (const c of r.cells || []) used.add(c.colN);
+    const out = cols.filter((c) => used.has(c.n));
+    return out.length ? out : cols;
+  }
+  /* ONE COLUMN (Seth, 2026-10-18: "collapse the text chart data into a single display column that
+   * just displays the row all in one cell with visual filters … the option to switch back and
+   * forth"): `view=flat` — every part of a row in one cell, in the columns' order, each word group
+   * labelled with its column (so column visual filters and markers do the work the columns did).
+   * `flatten` gives the chart that shape: one template column, every cell part on it, its own
+   * column kept as `srcCol` for the styles and the labels; the renderer, the grid / TSV copy and
+   * the exports all take it. */
+  const FLAT_COL = { n: 0, name: 'Text', abbr: 'Text', path: [], guid: 'flat' };
+  const isFlat = (spec) => !!(spec.extra && spec.extra.view === 'flat');
+  function flatten(obj, spec) {
+    if (!isFlat(spec) || obj.flat) return obj;
+    const cols = visibleColumns(spec, obj);
+    const order = new Map(cols.map((c, i) => [c.n, i]));
+    const byN = new Map(cols.map((c) => [c.n, c]));
+    const rows = (obj.rows || []).map((r) => {
+      const parts = (r.cells || []).filter((c) => order.has(c.colN)).map((c, i) => Object.assign({}, c, { srcCol: byN.get(c.colN), colN: 0, mergeAfter: false, mergeBefore: false, _i: i }));
+      parts.sort((a, b) => (order.get(a.srcCol.n) - order.get(b.srcCol.n)) || (a._i - b._i));
+      return Object.assign({}, r, { cells: parts });
+    });
+    return Object.assign({}, obj, { flat: true, template: Object.assign({}, obj.template || {}, { columns: [FLAT_COL] }), rows });
   }
   /* Header rows from the columns' paths: one row per depth, a group spanning its consecutive
    * columns, then the columns themselves. [{text, span, key?, col?}] per row. */
@@ -153,6 +186,32 @@
     const s = [...widths].filter(([, w]) => w > 0).map(([k, w]) => k + ':' + Math.round(w)).join(',');
     if (s) spec.extra.cw = s; else delete spec.extra.cw;
   }
+  /* FROZEN COLUMNS: the row labels, and a chart note's custom columns that ask for it, stay put
+   * while the table scrolls sideways — `position: sticky` inside .chart-scroll, with each frozen
+   * column's offset the widths of the frozen columns before it (left) or after it (right), read
+   * from the <col>s and kept up to date by a ResizeObserver. */
+  function placeFrozen(table, colKeys, colEls, frozen) {
+    const place = () => {
+      if (!table.isConnected) { ro.disconnect(); return; }
+      const w = (k) => { const c = colEls.get(k); return c ? c.getBoundingClientRect().width : 0; };
+      let left = 0;
+      for (const k of colKeys) {
+        if (frozen.get(k) !== 'l') continue;
+        for (const cell of table.querySelectorAll('[data-ck="' + k + '"]')) cell.style.left = left + 'px';
+        left += w(k);
+      }
+      let right = 0;
+      for (const k of colKeys.slice().reverse()) {
+        if (frozen.get(k) !== 'r') continue;
+        for (const cell of table.querySelectorAll('[data-ck="' + k + '"]')) cell.style.right = right + 'px';
+        right += w(k);
+      }
+    };
+    const ro = new ResizeObserver(place);
+    ro.observe(table);
+    place();
+  }
+
   /* STICKY HEADER ROWS (Seth, 2026-10-18: "we want the chart header rows to be sticky"). CSS
    * `position: sticky` cannot do it: the table sits in `.chart-scroll` (its sideways scroller),
    * and a sticky cell sticks to THAT box, which never scrolls up. So while the table's header has
@@ -198,7 +257,11 @@
       while (cg.children.length < widths.length) cg.appendChild(el('col'));
       widths.forEach((w, i) => { if (w) cg.children[i].style.width = w + 'px'; });
       inner.style.width = table.getBoundingClientRect().width + 'px';
-      inner.style.transform = 'translateX(' + (-(scroll ? scroll.scrollLeft : 0)) + 'px)';
+      // the frozen header cells keep their offsets in the copy; the copy scrolls like the table
+      // (scrollLeft, not a transform: a transform would carry the sticky cells along)
+      const mine = inner.tHead.rows;
+      for (let r = 0; r < n && r < mine.length; r++) for (let c = 0; c < live[r].cells.length && c < mine[r].cells.length; c++) { const lc = live[r].cells[c]; if (lc.dataset.frz) { mine[r].cells[c].style.left = lc.style.left; mine[r].cells[c].style.right = lc.style.right; } }
+      ghost.scrollLeft = scroll ? scroll.scrollLeft : 0;
     };
     const update = () => {
       if (!table.isConnected) { stop(); return; }
@@ -259,6 +322,9 @@
   /* ------------------------------------------------------------------ the table */
   function renderChart(obj, spec, opts) {
     opts = opts || {};
+    const full = obj;                       // the chart as fetched (the menu's column list, the pivot)
+    obj = flatten(obj, spec);
+    const flat = !!obj.flat;
     const cols = visibleColumns(spec, obj);
     const lines = R.chartLines(spec);
     const free = R.freeMode(spec);
@@ -268,7 +334,11 @@
     const vern = (obj.ws && obj.ws.vern) || {}, anal = (obj.ws && obj.ws.anal) || {};
     const rows = obj.rows || [];
     const showTextTags = !!(spec.lines && spec.lines.includes('tag')) && (obj.tags || []).length > 0;   // the text's markup tags inside the cells (Seth, 2026-10-18)
-    const box = el('div', { class: 'flex-obj chart-obj' + (obj.cached ? ' cached' : ''), dataset: { chart: obj.guid } });
+    const box = el('div', { class: 'flex-obj chart-obj' + (obj.cached ? ' cached' : '') + (flat ? ' flat' : ''), dataset: { chart: obj.guid } });
+    // ZOOM (Seth, 2026-10-18: "zoom in and out option for our chart notes (and chart examples)"):
+    // `zoom=NN` percent in the embed; the table's font sizes are all multiples of --cz
+    const zoom = zoomOf(spec);
+    if (zoom !== 100) box.style.setProperty('--cz', String(zoom / 100));
     const range = obj.range || [rows[0] && rows[0].n, rows.length && rows[rows.length - 1].n];
     const rangeText = rows.length ? (range[0] === range[1] ? 'row ' + rows[0].label : 'rows ' + rows[0].label + '–' + rows[rows.length - 1].label) + ' of ' + (obj.rowCount || rows.length) : 'no rows';
     const change = () => opts.onSpecChange && opts.onSpecChange(spec);
@@ -276,15 +346,18 @@
     const head = el('div', { class: 'flex-head' + (opts.inCell ? ' compact' : '') },
       opts.editable && !opts.overlay && !opts.context && !opts.collection ? el('span', { class: 'drag-handle', draggable: 'true', title: 'Drag to move this object (Ctrl: copy)' }, '⠿') : null,
       el('span', { class: 'ttl' }, (obj.name || 'Chart') + ' · '),
-      el('span', Object.assign({ class: 'ttl vern' }, wsAttrs(vern)), obj.title || '(untitled text)'),
+      el('span', Object.assign({ class: 'ttl vern', title: obj.title || '' }, wsAttrs(vern)), obj.title || '(untitled text)'),
       el('span', { class: 'badge', 'data-test': 'chart-range' }, rangeText),
       obj.cached ? el('span', { class: 'badge warn', title: obj.liveError || 'Shown from the notebook cache' }, 'cached' + (obj.cachedAt ? ' ' + obj.cachedAt.slice(0, 10) : '')) : null,
       obj.anchorsLost ? el('span', { class: 'badge warn', title: 'Some of these rows are no longer in the chart as they were' }, 'rows changed in FLEx') : null,
       spec.label ? el('span', { class: 'badge' }, spec.label) : null,
       el('span', { class: 'spacer' }));
     head.appendChild(el('button', { class: 'lnk', title: 'Reload from FLEx', onclick: () => opts.refresh && opts.refresh() }, '↻'));
+    // ⚑ on EVERY chart (Seth, 2026-10-18: the Great Flood chart, which has no markers, had no way to
+    // its visual filters): the chart markers, the text's tags, the filter switches, the scopes
     const markersHere = FS.tagstyles && FS.tagstyles.markersIn ? FS.tagstyles.markersIn(obj) : [];
-    if (opts.editable && markersHere.length) head.appendChild(el('button', { class: 'lnk tag-btn', 'data-test': 'marker-btn', title: 'Chart markers in this chart: show, hide, style (a marker can style its whole row)', onclick: (e) => FS.tagstyles.examplePopover(e.currentTarget, spec, obj, Object.assign({}, opts, { markers: true })) }, '⚑ ' + markersHere.length));
+    const tagsHere = FS.tagstyles && FS.tagstyles.tagsIn && (obj.tags || []).length ? FS.tagstyles.tagsIn(obj) : [];
+    if (opts.editable && FS.tagstyles) head.appendChild(el('button', { class: 'lnk tag-btn', 'data-test': 'marker-btn', title: 'Chart markers and text markup tags in this chart: show, hide, style (a marker can style its whole row); visual filters', onclick: (e) => FS.tagstyles.examplePopover(e.currentTarget, spec, obj, Object.assign({}, opts, { markers: true })) }, '⚑' + (markersHere.length + tagsHere.length ? ' ' + (markersHere.length + tagsHere.length) : '')));
     if (opts.editable && !opts.overlay) head.appendChild(el('button', { class: 'lnk', 'data-test': 'collapse-obj', title: 'Collapse to a chip', onclick: () => FS.interlinear.setCollapsed(spec, opts, true) }, '⤡'));
     if (opts.editable && opts.inCell && opts.editCell && !opts.overlay) head.appendChild(el('button', { class: 'lnk', title: 'Edit the cell’s text', onclick: () => opts.editCell() }, '✎'));
     if (opts.editable && !opts.overlay && opts.duplicate) head.appendChild(el('button', { class: 'lnk', title: 'Duplicate this object', onclick: () => opts.duplicate() }, '⧉'));
@@ -292,7 +365,8 @@
     if (!opts.context && spec.seg) head.appendChild(el('button', { class: 'lnk', title: 'See the whole chart', onclick: () => wholeChart(spec, obj) }, '⊡ Whole chart'));
     if (!opts.inCell) head.appendChild(el('button', { class: 'lnk', title: 'Copy as a tab-separated grid (headers, rows, notes)', onclick: () => { FS.copyText(chartTsv(spec, obj)); FS.toast('Copied as TSV'); } }, '⎘ TSV'));
     if (obj.url) head.appendChild(el('a', { href: obj.url, title: 'Open the text in FieldWorks (its Text Chart tab)', onclick: (e) => { e.preventDefault(); FS.interlinear.openInFlex(obj.url); } }, 'Open in FLEx ↗'));
-    if (opts.editable) head.appendChild(el('button', { class: 'lnk', 'data-test': 'chart-menu', title: 'Options', onclick: (e) => chartMenu(e.currentTarget, spec, opts, obj) }, '⋯'));
+    if (opts.editable && !opts.inCell) head.appendChild(el('button', { class: 'lnk', 'data-test': 'chart-view', title: flat ? 'Show the chart columns' : 'One column: each row in one cell, its words labelled with their columns', onclick: () => { spec.extra = spec.extra || {}; if (flat) delete spec.extra.view; else spec.extra.view = 'flat'; change(); } }, flat ? '▦ Columns' : '▤ One column'));
+    if (opts.editable) head.appendChild(el('button', { class: 'lnk', 'data-test': 'chart-menu', title: 'Options', onclick: (e) => chartMenu(e.currentTarget, spec, opts, full) }, '⋯'));
     box.appendChild(head);
 
     if (opts.onObject) { try { opts.onObject(obj); } catch (e) { /* the owner's problem */ } }
@@ -304,13 +378,26 @@
     const mediaByGuid = new Map((obj.media || []).map((m) => [m.guid, m]));
     const textObj = Object.assign({}, obj, { guid: obj.text || obj.guid, title: obj.title });
     const play = (segs, btn) => FS.interlinear.playRange && FS.interlinear.playRange(box, textObj, segs, mediaByGuid, opts, btn);
-    const playBtn = (segs, title, cls) => el('button', { class: 'seg-play ' + (cls || ''), 'data-test': cls || 'chart-play', title, onclick: (e) => { e.stopPropagation(); play(segs, e.currentTarget); } }, '▶');
+    const playBtn = (segs, title, cls, mark) => el('button', { class: 'seg-play ' + (cls || ''), 'data-test': cls || 'chart-play', title, onclick: (e) => { e.stopPropagation(); play(segs, e.currentTarget); } }, '▶', mark ? el('small', {}, mark) : null);
+    // ▶§ a whole SENTENCE (the rows sharing a number: 4a, 4b, 4c) and ▶¶ a whole PARAGRAPH (up to
+    // a row that ends one), on their first row (Seth, 2026-10-18: "play buttons for paragraphs
+    // and sentences … a play button for 4, not just for 4a, 4b, 4c")
+    const groups = playGroups(rows, obj.segments);
     const table = el('table', { class: 'tchart' + (vern.rtl ? ' rtl' : '') });
     const extraCols = (free === 'col' ? 1 : 0) + (notesOn ? 1 : 0) + xcols.length;
     // one <col> per table column, keyed like `cw=`; a sized column keeps its width, the rest lay
     // out as they please; the table grows past the pane when the widths say so (it scrolls)
     const widths = colWidths(spec);
-    const colKeys = ['lab'].concat(cols.map((c) => String(c.n)), xcols.map((xc, i) => 'x' + i), free === 'col' ? ['free'] : [], notesOn ? ['notes'] : []);
+    // a chart note's custom columns sit LEFT or RIGHT of the FLEx columns (Seth, 2026-10-18: "freeze
+    // columns … for custom columns, on either or both sides of the chart"); `xi` is each one's key
+    const xL = xcols.map((xc, i) => Object.assign({ xi: i }, xc)).filter((xc) => xc.side === 'left');
+    const xR = xcols.map((xc, i) => Object.assign({ xi: i }, xc)).filter((xc) => xc.side !== 'left');
+    const colKeys = ['lab'].concat(xL.map((xc) => 'x' + xc.xi), cols.map((c) => String(c.n)), xR.map((xc) => 'x' + xc.xi), free === 'col' ? ['free'] : [], notesOn ? ['notes'] : []);
+    // frozen columns (sticky inside .chart-scroll): the row labels always, a custom column when it says so
+    const frozen = new Map([['lab', 'l']]);
+    for (const xc of xL) if (xc.frozen) frozen.set('x' + xc.xi, 'l');
+    for (const xc of xR) if (xc.frozen) frozen.set('x' + xc.xi, 'r');
+    const frz = (node, key) => { if (frozen.has(key)) { node.dataset.frz = frozen.get(key); node.dataset.ck = key; } return node; };
     const colEls = new Map();
     const colgroup = el('colgroup');
     for (const k of colKeys) { const c = el('col', { dataset: { key: k } }); if (widths.has(k)) c.style.width = widths.get(k) + 'px'; colEls.set(k, c); colgroup.appendChild(c); }
@@ -345,15 +432,18 @@
       const hrows = headerRows(cols);
       hrows.forEach((hr, hi) => {
         const tr = el('tr', { class: hi === hrows.length - 1 ? 'th-cols' : 'th-groups' });
-        if (hi === 0) tr.appendChild(el('th', { class: 'th-lab', rowspan: hrows.length }, timedAll.length && starts.size ? playBtn(timedAll, 'Play the lines of these rows', 'chart-play-all') : null, '#'));
+        if (hi === 0) {
+          tr.appendChild(frz(el('th', { class: 'th-lab', rowspan: hrows.length }, timedAll.length && starts.size ? playBtn(timedAll, 'Play the lines of these rows', 'chart-play-all') : null, '#'), 'lab'));
+          for (const xc of xL) { const th = frz(el('th', { class: 'th-x th-x-' + xc.kind + ' th-x-left', rowspan: hrows.length, dataset: { x: xc.key } }, xc.head ? xc.head() : xc.name), 'x' + xc.xi); resizer(th, 'x' + xc.xi); tr.appendChild(th); }
+        }
         for (const h of hr) {
           const th = el('th', { colspan: h.span > 1 ? h.span : null, class: h.col ? 'th-col' : 'th-group', title: h.col ? ((h.col.path || []).concat([h.col.name]).join(' › ') + (h.col.abbr && h.col.abbr !== h.col.name ? ' (' + h.col.abbr + ')' : '')) : h.text, dataset: h.col ? { col: h.col.n } : null }, h.text);
-          if (h.col && opts.editable) th.addEventListener('click', (e) => stylePopover(e.currentTarget, spec, { col: h.col.n }, opts, 'column ' + h.col.name));
+          if (h.col && opts.editable) th.addEventListener('click', (e) => stylePopover(e.currentTarget, spec, { col: h.col.n }, opts, 'column ' + h.col.name, null, [{ label: 'Hide this column', test: 'hide-col', fn: () => { const on = visibleColumns(spec, obj).filter((c) => c.n !== h.col.n); if (!on.length) return; spec.extra = spec.extra || {}; spec.extra.cols = on.map((c) => 'c' + c.n).join(','); change(); } }]));
           if (h.col) resizer(th, String(h.col.n));
           tr.appendChild(th);
         }
         if (hi === 0) {
-          xcols.forEach((xc, i) => { const th = el('th', { class: 'th-x th-x-' + xc.kind, rowspan: hrows.length, dataset: { x: xc.key } }, xc.head ? xc.head() : xc.name); resizer(th, 'x' + i); tr.appendChild(th); });
+          for (const xc of xR) { const th = frz(el('th', { class: 'th-x th-x-' + xc.kind, rowspan: hrows.length, dataset: { x: xc.key } }, xc.head ? xc.head() : xc.name), 'x' + xc.xi); resizer(th, 'x' + xc.xi); tr.appendChild(th); }
           if (free === 'col') { const th = el('th', { class: 'th-free', rowspan: hrows.length }, 'Free'); resizer(th, 'free'); tr.appendChild(th); }
           if (notesOn) { const th = el('th', { class: 'th-notes', rowspan: hrows.length }, 'Notes'); resizer(th, 'notes'); tr.appendChild(th); }
         }
@@ -371,7 +461,11 @@
     for (const r of rows) for (const c of r.cells || []) if (c.kind === 'moved' && c.target) movedTargets.add(c.target);
 
     rows.forEach((row, ri) => {
-      const tr = el('tr', { class: 'crow cl-' + (row.clause || 'normal') + (row.endSent ? ' end-sent' : '') + (row.endPara ? ' end-para' : '') + (row.depStart ? ' dep-start' : '') + (row.depEnd ? ' dep-end' : ''), dataset: { row: row.n, label: row.label } });
+      // the sentence / paragraph boundary goes UNDER the free translation row when one follows
+      // this row (Seth, 2026-10-18), else under the row itself
+      const freeAfter = free === 'row' && runEnd.has(ri) ? freeText(obj, runEnd.get(ri).segs, true) : [];
+      const bound = (row.endSent ? ' end-sent' : '') + (row.endPara ? ' end-para' : '');
+      const tr = el('tr', { class: 'crow cl-' + (row.clause || 'normal') + (freeAfter.length ? '' : bound) + (row.depStart ? ' dep-start' : '') + (row.depEnd ? ' dep-end' : ''), dataset: { row: row.n, label: row.label } });
       if (opts.rowDecor) { const d = opts.rowDecor(row) || {}; if (d.style) Object.assign(tr.style, d.style); for (const c of d.classes || []) tr.classList.add(c); }
       // a chart marker whose rule says "whole row" (Seth, 2026-10-18) colours the row it is in
       for (const c of row.cells || []) {
@@ -386,21 +480,28 @@
         if (look.u) tr.style.textDecoration = 'underline';
         if (look.c) tr.style.color = look.c;
       }
+      const g = groups.get(ri) || {};
       const lab = el('th', { class: 'rlab', title: 'Row ' + row.label + (row.clause && row.clause !== 'normal' ? ' — ' + row.clause + ' clause' : '') + (row.endSent ? '; ends the sentence' : '') + (row.endPara ? '; ends the paragraph' : '') + (opts.editable ? '. Click to style the row.' : '') },
+        g.para ? playBtn(g.para.segs, 'Play the paragraph (rows ' + g.para.label + ')', 'chart-play-para', '¶') : null,
+        g.sent ? playBtn(g.sent.segs, 'Play sentence ' + g.sent.name + ' (rows ' + g.sent.label + ')', 'chart-play-sent', '§') : null,
         (starts.get(ri) || []).map((sg) => playBtn([sg], 'Play line ' + (sg.label || sg.n) + ' (' + FS.fmtTime(sg.begin) + '–' + FS.fmtTime(sg.end) + ')', 'chart-play')), row.label);
       if (opts.editable) lab.addEventListener('click', (e) => stylePopover(e.currentTarget, spec, { row: row.n }, opts, 'row ' + row.label));
-      tr.appendChild(lab);
+      tr.appendChild(frz(lab, 'lab'));
+      for (const xc of xL) tr.appendChild(frz(el('td', { class: 'xcell xcell-' + xc.kind + ' xcell-left', dataset: { x: xc.key, row: row.n } }, xc.cell(row, obj)), 'x' + xc.xi));
       for (const slot of layoutRow(row, cols)) {
         const cellStyles = R.chartStylesFor(index, row.n, slot.col.n, 0, '');
         const segsHere = [...new Set(slot.parts.filter((p) => p.kind === 'words' && p.seg).flatMap((p) => { const a = []; for (let n = p.seg; n <= (p.segTo || p.seg); n++) a.push(n); return a; }))];
         const td = el('td', { class: 'ccell' + (slot.parts.length ? '' : ' empty'), colspan: slot.span > 1 ? slot.span : null, dataset: { row: row.n, col: slot.col.n, segs: segsHere.length ? segsHere.join(' ') : null } });
         applyCellStyles(td, cellStyles);
-        for (const part of slot.parts) td.appendChild(renderPart(part, row, slot.col, obj, spec, opts, { lines, index, vern, anal, wordGroups, movedTargets, tbody, showTextTags }));
+        for (const part of slot.parts) {
+          const node = renderPart(part, row, part.srcCol || slot.col, obj, spec, opts, { lines, index, vern, anal, wordGroups, movedTargets, tbody, showTextTags });
+          td.appendChild(flat && part.srcCol ? flatWrap(node, part, obj, spec) : node);
+        }
         if (opts.editable) td.addEventListener('click', (e) => { if (e.target.closest('.cw, .cclause, .ctag, .cmoved, button, a')) return; stylePopover(td, spec, { row: row.n, col: slot.col.n }, opts, 'row ' + row.label + ', ' + slot.col.name); });
         if (free === 'tip') td.addEventListener('click', (e) => { if (e.target.closest('button, a')) return; showTip(box, obj, rowSegs(row), row); });
         tr.appendChild(td);
       }
-      for (const xc of xcols) tr.appendChild(el('td', { class: 'xcell xcell-' + xc.kind, dataset: { x: xc.key, row: row.n } }, xc.cell(row, obj)));
+      for (const xc of xR) tr.appendChild(frz(el('td', { class: 'xcell xcell-' + xc.kind, dataset: { x: xc.key, row: row.n } }, xc.cell(row, obj)), 'x' + xc.xi));
       if (free === 'col' && runStart.has(ri)) {
         const run = runStart.get(ri);
         const t = freeText(obj, run.segs, true);
@@ -408,19 +509,94 @@
       }
       if (notesOn) tr.appendChild(el('td', { class: 'cnotes', lang: anal.tag || null }, row.notes || ''));
       tbody.appendChild(tr);
-      if (free === 'row' && runEnd.has(ri)) {
+      if (freeAfter.length) {
         const run = runEnd.get(ri);
-        const t = freeText(obj, run.segs, true);
-        if (t.length) tbody.appendChild(el('tr', { class: 'cfree-row' }, el('th', { class: 'rlab' }), el('td', { colspan: cols.length + extraCols, lang: anal.tag || null }, el('span', { class: 'cfree-text' }, t.join(' ')), el('span', { class: 'cfree-rows', title: 'The chart rows this translation covers' }, rowsLabel(rows, run.from, run.to)))));
+        const t = freeAfter;
+        // the custom columns keep a cell of their own in the translation row (a frozen one would
+        // otherwise cover the start or the end of the text while the chart is scrolled)
+        tbody.appendChild(el('tr', { class: 'cfree-row' + bound }, frz(el('th', { class: 'rlab' }), 'lab'),
+          xL.map((xc) => frz(el('td', { class: 'xcell xcell-left xcell-blank' }), 'x' + xc.xi)),
+          el('td', { colspan: cols.length + extraCols - xcols.length, lang: anal.tag || null }, el('span', { class: 'cfree-text' }, t.join(' ')), el('span', { class: 'cfree-rows', title: 'The chart rows this translation covers' }, rowsLabel(rows, run.from, run.to))),
+          xR.map((xc) => frz(el('td', { class: 'xcell xcell-blank' }), 'x' + xc.xi))));
       }
     });
     if (!rows.length) tbody.appendChild(el('tr', {}, el('td', { colspan: cols.length + 1 + extraCols, class: 'seg-empty' }, 'No rows in this range.')));
     table.appendChild(tbody);
     box.appendChild(el('div', { class: 'chart-scroll' }, table));
+    requestAnimationFrame(() => { if (box.isConnected) placeFrozen(table, colKeys, colEls, frozen); });
     if (headers && !opts.inCell) requestAnimationFrame(() => { if (box.isConnected) wireStickyHead(box, table); });
     if (free === 'tip') box.appendChild(el('div', { class: 'chart-tip muted small', 'data-test': 'chart-tip' }, 'Click a cell to see its free translation here.'));
     if (opts.context) box.classList.add('context');
     return box;
+  }
+
+  const ZOOM_MIN = 50, ZOOM_MAX = 200, ZOOM_STEP = 10;
+  const zoomOf = (spec) => { const z = parseInt(spec.extra && spec.extra.zoom, 10); return z >= ZOOM_MIN && z <= ZOOM_MAX ? z : 100; };
+  function setZoom(spec, z) {
+    spec.extra = spec.extra || {};
+    z = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Math.round(z / ZOOM_STEP) * ZOOM_STEP));
+    if (z === 100) delete spec.extra.zoom; else spec.extra.zoom = String(z);
+    return z;
+  }
+  /* The sentence and paragraph play groups by row index: a SENTENCE is the rows sharing a label
+   * number (4a, 4b, 4c → "4"; FLEx numbers rows by sentence, letters the clauses), a PARAGRAPH runs
+   * up to a row that ends one. A group gets a button on its first row when it spans several rows
+   * (a one-row sentence IS its line) and holds timed lines. → Map(rowIndex → {sent?, para?}) */
+  const sentNo = (r) => (/^\d+/.exec(r.label || '') || [r.label || ''])[0];
+  function playGroups(rows, segments) {
+    const timed = new Map((segments || []).filter((s) => s.begin != null && s.end != null).map((s) => [s.n, s]));
+    const segsOf = (list) => { const seen = new Set(); const out = []; for (const r of list) for (const n of rowSegs(r)) if (!seen.has(n) && timed.has(n)) { seen.add(n); out.push(timed.get(n)); } return out; };
+    const out = new Map();
+    const put = (i, k, v) => { if (!out.has(i)) out.set(i, {}); out.get(i)[k] = v; };
+    const label = (a, b) => (a === b ? rows[a].label : rows[a].label + '\u2013' + rows[b].label);
+    let i = 0;
+    while (i < rows.length) {
+      const name = sentNo(rows[i]);
+      let j = i;
+      while (j + 1 < rows.length && sentNo(rows[j + 1]) === name) j++;
+      if (j > i) { const segs = segsOf(rows.slice(i, j + 1)); if (segs.length) put(i, 'sent', { name, label: label(i, j), segs }); }
+      i = j + 1;
+    }
+    if (rows.some((r) => r.endPara)) {
+      let from = 0;
+      rows.forEach((r, k) => {
+        if (!r.endPara && k < rows.length - 1) return;
+        const names = new Set(rows.slice(from, k + 1).map(sentNo));
+        if (names.size > 1) { const segs = segsOf(rows.slice(from, k + 1)); if (segs.length) put(from, 'para', { label: label(from, k), segs }); }
+        from = k + 1;
+      });
+    }
+    return out;
+  }
+  /* A word group in the one-column view: wrapped with its column's abbreviation and the look the
+   * column's visual-filter rules give it (`column:<Group/Name>` in tagstyles, the same rules that
+   * style chart columns drawn on an example). */
+  function flatWrap(node, part, obj, spec) {
+    const col = part.srcCol;
+    const path = (col.path || []).concat([col.name]);
+    const wrap = el('span', { class: 'cflat-g' + (part.kind === 'words' ? ' cflat-words' : ''), dataset: { col: col.n }, title: path.join(' \u203a ') });
+    let look = null;
+    if (FS.tagstyles && FS.tagstyles.resolve) {
+      if (FS.tagstyles.noteColumn) FS.tagstyles.noteColumn(col);
+      try { look = FS.tagstyles.resolve({ guid: 'column:' + (col.guid || col.name), name: path.join('/'), abbr: col.abbr || col.name, group: (col.path || [])[(col.path || []).length - 1] || '', path: col.path || [], column: true, fore: '', back: '' }, spec || null, Object.assign({}, FS.tagstyles.context(), { text: obj.text || '' })); } catch (e) { look = null; }
+    }
+    if (look && look.hide) wrap.classList.add('hidden');
+    const B = FS.tagstyles && FS.tagstyles.BRACKETS;
+    const br = look && look.br && B && B[look.br];
+    if (br) wrap.appendChild(el('span', { class: 'cflat-br' }, br[0]));
+    wrap.appendChild(node);
+    if (br) wrap.appendChild(el('span', { class: 'cflat-br' }, br[1]));
+    if (part.kind === 'words' && !(spec.extra && spec.extra.collab === 'off') && !(look && look.label === false)) wrap.appendChild(el('sub', { class: 'cflat-lab' }, col.abbr || col.name));
+    if (look) {
+      const bg = look.tile ? (look.tc || look.bg) : look.hl ? look.bg : '';
+      if (bg) wrap.style.background = rgba(bg, look.tile ? 0.45 : 0.6);
+      if (look.box) { wrap.style.border = (look.bw || 2) + 'px ' + (look.bs || 'solid') + ' ' + (look.bg || 'currentColor'); wrap.style.borderRadius = '4px'; }
+      if (look.c) wrap.style.color = look.c;
+      if (look.b) wrap.style.fontWeight = '700';
+      if (look.i) wrap.style.fontStyle = 'italic';
+      if (look.u) wrap.style.textDecoration = 'underline';
+    }
+    return wrap;
   }
 
   function applyCellStyles(td, styles) {
@@ -521,7 +697,7 @@
   }
 
   /* ------------------------------------------------------------------ styles popover */
-  function stylePopover(anchor, spec, target, opts, desc, word) {
+  function stylePopover(anchor, spec, target, opts, desc, word, actions) {
     FS.popover(anchor, (pop, close) => {
       const state = { scope: target.word != null ? 'word' : target.row != null && target.col != null ? 'cell' : target.row != null ? 'row' : 'col', line: target.line || 'txt' };
       const tgt = () => {
@@ -560,6 +736,7 @@
         rows.appendChild(el('div', { class: 'row' },
           el('button', { class: 'tog', onclick: () => { R.clearStyles(spec, tgt()); opts.onSpecChange && opts.onSpecChange(spec); refresh(); } }, 'Clear this'),
           el('button', { class: 'tog', onclick: () => { R.clearStyles(spec, null); opts.onSpecChange && opts.onSpecChange(spec); close(); } }, 'Clear all styles')));
+        for (const a of actions || []) rows.appendChild(el('button', { class: 'menu-item', 'data-test': a.test || null, onclick: () => { close(); a.fn(); } }, a.label));
       }
       refresh();
       pop.appendChild(rows);
@@ -603,10 +780,25 @@
       const ncb = el('input', { type: 'checkbox', checked: x.notes !== 'off' });
       ncb.addEventListener('change', () => { if (ncb.checked) delete x.notes; else x.notes = 'off'; change(); });
       pop.appendChild(el('div', { class: 'row' }, el('label', {}, hcb, ' Column headings'), el('label', {}, ncb, ' Row notes')));
+      // layout: the chart's columns, or every row in one cell; empty columns; zoom
+      const vsel = el('select', { 'data-test': 'chart-view-select', onchange: (e) => { if (e.target.value === 'flat') x.view = 'flat'; else delete x.view; change(); close(); } },
+        el('option', { value: 'cols', selected: !isFlat(spec) }, 'The chart’s columns'), el('option', { value: 'flat', selected: isFlat(spec) }, 'One column: each row in one cell'));
+      pop.appendChild(el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Layout'), vsel));
+      const ecb = el('input', { type: 'checkbox', checked: x.empty === 'off', 'data-test': 'chart-hide-empty' });
+      ecb.addEventListener('change', () => { if (ecb.checked) x.empty = 'off'; else delete x.empty; change(); });
+      const lcb = el('input', { type: 'checkbox', checked: x.collab !== 'off' });
+      lcb.addEventListener('change', () => { if (lcb.checked) delete x.collab; else x.collab = 'off'; change(); });
+      pop.appendChild(el('div', { class: 'row' }, el('label', { title: 'Leave out the columns with nothing in these rows' }, ecb, ' Hide empty columns'), isFlat(spec) ? el('label', { title: 'The column’s abbreviation under each word group' }, lcb, ' Column labels') : null));
+      const zl = el('span', { class: 'zoom-val', 'data-test': 'chart-zoom' }, zoomOf(spec) + '%');
+      pop.appendChild(el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Zoom'),
+        el('button', { class: 'tog', 'data-test': 'chart-zoom-out', title: 'Smaller', onclick: () => { zl.textContent = setZoom(spec, zoomOf(spec) - ZOOM_STEP) + '%'; change(); } }, '\u2212'),
+        zl,
+        el('button', { class: 'tog', 'data-test': 'chart-zoom-in', title: 'Larger', onclick: () => { zl.textContent = setZoom(spec, zoomOf(spec) + ZOOM_STEP) + '%'; change(); } }, '+'),
+        el('button', { class: 'lnk small', onclick: () => { zl.textContent = setZoom(spec, 100) + '%'; change(); } }, 'reset')));
       // columns
       const cols = (obj.template && obj.template.columns) || [];
       if (cols.length) {
-        const shown = new Set(visibleColumns(spec, obj).map((c) => c.n));
+        const shown = new Set(selectedColumns(spec, obj).map((c) => c.n));
         const box = el('div', { class: 'chart-cols' });
         const write = () => { const on = cols.filter((c) => shown.has(c.n)); if (on.length === cols.length || !on.length) delete x.cols; else x.cols = on.map((c) => 'c' + c.n).join(','); change(); };
         let lastGroup = null;
@@ -640,6 +832,13 @@
         pop.appendChild(el('button', { class: 'menu-item', title: 'Every row, cell and word with its GUID', onclick: async () => { close(); try { const p = await FS.api.export_chart(obj.guid, 'json', spec.seg || null); if (p) FS.toast('Saved ' + p); } catch (e) { FS.toast(e.message, 'error'); } } }, 'Export as JSON…'));
       }
       if (FS.newChartNote && !opts.collection) pop.appendChild(el('button', { class: 'menu-item', title: 'A note that is this chart, with its own columns (choice lists, notes, rules) and these styles', onclick: () => { close(); FS.newChartNote(obj.guid, R.serialize(spec)); } }, 'Open as a chart note\u2026'));
+      // another chart in this object (Seth, 2026-10-18): the view settings stay, the rows, the
+      // column choice, the widths and the styles (which name rows and columns of the old chart) go
+      if (FS.pickChart) pop.appendChild(el('button', { class: 'menu-item', 'data-test': 'chart-change', title: 'Show another of the project’s charts here, with these view settings', onclick: () => {
+        close();
+        const retarget = (guid) => { spec.guid = guid; spec.seg = null; spec.at = null; delete x.cw; delete x.cols; R.clearStyles(spec, null); change(); };
+        FS.pickChart({ title: 'Change the chart', current: spec.guid, test: 'pick-chart-change', onPick: async (c) => { try { if (opts.changeChart) await opts.changeChart(c.guid, retarget); else retarget(c.guid); } catch (e) { FS.toast(e.message, 'error'); } } });
+      } }, 'Change the chart…'));
       if (opts.editSource) pop.appendChild(el('button', { class: 'menu-item', onclick: () => { close(); opts.editSource(); } }, 'Edit source'));
       if (opts.duplicate || opts.remove) pop.appendChild(el('hr'));
       if (opts.duplicate) pop.appendChild(el('button', { class: 'menu-item', onclick: () => { close(); opts.duplicate(); } }, 'Duplicate this object'));
@@ -652,6 +851,7 @@
    * visible column (words space-separated; markers as ‹‹1b, [2a], ⟨Top⟩), the free translation
    * and the notes. What "Copy as TSV" and the readable copy in the file (flexcopy.js) use. */
   function chartGrid(spec, obj) {
+    obj = flatten(obj, spec);
     const cols = visibleColumns(spec, obj);
     const lines = R.chartLines(spec);
     const free = R.freeMode(spec);
@@ -669,7 +869,7 @@
     const wg = new Map();
     for (const r of obj.rows || []) for (const c of r.cells || []) if (c.kind === 'words') wg.set(c.guid, { row: r, cell: c });
     const partText = (p) => {
-      if (p.kind === 'words') return (p.words || []).map((w) => w.punct ? (w.txt || '') : lines.map((l) => lineText(w, l)).filter(Boolean).join('/')).join(' ');
+      if (p.kind === 'words') return (p.words || []).map((w) => w.punct ? (w.txt || '') : lines.map((l) => lineText(w, l)).filter(Boolean).join('/')).join(' ') + (p.srcCol && !(spec.extra && spec.extra.collab === 'off') ? ' \u2039' + (p.srcCol.abbr || p.srcCol.name) + '\u203a' : '');
       if (p.kind === 'moved') { const t = wg.get(p.target); return (p.preposed ? '‹‹' : '››') + (t ? t.row.label : ''); }
       if (p.kind === 'clause') return '[' + ((p.labels || []).length > 1 ? p.labels[0] + '–' + p.labels[p.labels.length - 1] : (p.labels || ['?'])[0]) + ']';
       if (p.kind === 'tag') return '⟨' + ((p.tag && (p.tag.abbr || p.tag.name)) || '?') + '⟩';
@@ -722,5 +922,5 @@
       el('div', { class: 'btn-row' }, el('button', { class: 'btn', 'data-test': 'pivot-copy', onclick: () => { FS.copyText(tsv); FS.toast('Copied as TSV'); } }, 'Copy as TSV'), el('button', { class: 'btn primary', onclick: () => m.close() }, 'Done')));
   }
 
-  FS.chart = { renderChart, visibleColumns, headerRows, layoutRow, rowSegs, freeRuns, lineStarts, colWidths, setColWidths, freeText, chartGrid, chartTsv, markerLook, pivot, pivotDialog, LINE_NAMES, FREE_NAMES };
+  FS.chart = { renderChart, visibleColumns, selectedColumns, flatten, isFlat, zoomOf, setZoom, playGroups, headerRows, layoutRow, rowSegs, freeRuns, lineStarts, colWidths, setColWidths, freeText, chartGrid, chartTsv, markerLook, pivot, pivotDialog, LINE_NAMES, FREE_NAMES };
 })();

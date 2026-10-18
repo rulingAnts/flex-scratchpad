@@ -180,6 +180,32 @@ def _chart(story: dict) -> dict:
     return model.finish_chart(ch, by_n)
 
 
+# A SECOND chart on the story with another template (a text has one chart per template it was
+# ever charted with — Seth's project, 2026-10-18): two sentence-level rows, a column nobody filled
+# (what "Hide empty columns" hides), and what "Change the chart…" switches to.
+CHART2 = "d15c0000-0000-4000-8000-00000000c002"
+CHART2_TEMPLATE = "d15c0000-0000-4000-8000-0000000000a1"
+CHART2_COLUMNS = [_col(0x21, "Topic", "Top"), _col(0x22, "Comment", "Com"), _col(0x23, "Tail", "Tail")]
+
+
+def _chart2(story: dict) -> dict:
+    by_n = {s["n"]: s for s in story["segments"]}
+    ch = model.make_chart(CHART2, "", story["guid"], story["title"], story["ws"]["vern"], story["ws"]["anal"],
+                          {"guid": CHART2_TEMPLATE, "name": "Topic-Comment", "columns": CHART2_COLUMNS}, CHART_MARKERS)
+    ch["abbrev"] = story.get("abbrev", "")
+    ch["url"] = story.get("url", "")
+    ch["media"] = [dict(m) for m in story.get("media") or []]
+    g = lambda n: f"d15c0000-0000-4000-8000-0000000002{n:02x}"   # noqa: E731
+    C2 = {c["n"]: c for c in CHART2_COLUMNS}
+    W = lambda guid, col, seg, a, b: model.make_word_cell(guid, col, by_n[seg], a, by_n[seg], b)  # noqa: E731
+    ch["rows"] = [
+        model.make_row(g(0x10), 1, "1", "normal", end_sent=True, cells=[W(g(0x11), C2[0x21], 1, 0, 0), W(g(0x12), C2[0x22], 1, 1, 2)]),
+        model.make_row(g(0x20), 2, "2", "normal", end_sent=True, end_para=True, cells=[W(g(0x21), C2[0x21], 2, 0, 1), W(g(0x22), C2[0x22], 2, 2, 3)]),
+    ]
+    ch["tags"] = list(story.get("tags") or [])
+    return model.finish_chart(ch, by_n)
+
+
 def W(txt, gls="", pos="", morphs=None, punct=False):
     return model.make_word(txt, punct=punct, gls=gls, pos=pos,
                            morphs=[model.make_morph(*m) for m in (morphs or [])])
@@ -287,7 +313,7 @@ class DemoBackend:
     def __init__(self, media_dir: str | Path | None = None, media_map: dict | None = None):
         self.project_name = PROJECT
         self.texts = {T_STORY: _story(), T_ARAB: _arabic()}
-        self.charts = {CHART: _chart(self.texts[T_STORY])}
+        self.charts = {CHART: _chart(self.texts[T_STORY]), CHART2: _chart2(self.texts[T_STORY])}
         self.media_map = dict(media_map or {})
         self.media_dir = Path(media_dir) if media_dir else None
         if self.media_dir:

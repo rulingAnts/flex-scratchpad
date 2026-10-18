@@ -596,7 +596,51 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   under `#sticky-heads` and a collection's / chart note's `.coll-head` — while the header has passed
   the top and the rows are still in view; on the pane's scroll, the chart's sideways scroll, resize
   and a ResizeObserver on the table; it goes with the chart. Not in a cell or the exports (the
-  page's print stylesheet repeats `thead` instead). The chart NOTE kind, the marker filters, the
+  page's print stylesheet repeats `thead` instead). FROZEN COLUMNS (Seth, 2026-10-18: "we always
+  want the play buttons column to be sticky"; "freeze columns … for custom columns, on either or
+  both sides of the chart"): the row-label column (the ▶s) is always `position: sticky` inside
+  `.chart-scroll`, and a chart note's custom column when its Place says so; `renderChart` marks the
+  cells `data-frz="l|r"` + `data-ck=<column key>` (`frz()`), `placeFrozen` sets each one's `left` /
+  `right` from the `<col>` widths of the frozen columns before / after it (a ResizeObserver keeps
+  them right); the ghost header copies the offsets and now follows the sideways scroll by its own
+  `scrollLeft` (a transform would carry the sticky cells along). A custom column's Place is LEFT or
+  RIGHT of the FLEx columns (`xc.side`; `xL` / `xR` in `renderChart`; the export writers split
+  `xcols` / `xcells` by index the same way, `side` on the block's xcols); the translation row gives
+  every custom column an empty cell so a frozen one never covers the text. ⚑ ON EVERY CHART (Seth,
+  2026-10-18: the Great Flood chart, which has no chart markers, "doesn't include a visual filters
+  button"): the button is always there on an editable chart, counting the markers AND the text's
+  tags; the popover in marker mode lists both (`markersIn(obj).concat(tagsIn(obj))`) and says when
+  there is nothing, the filter switches and scopes apply regardless. HIDE COLUMNS: a column
+  heading's popover has "Hide this column" (writes `cols=` like the ⋯ menu's checkboxes, which bring
+  it back); `empty=off` ("Hide empty columns" in the ⋯ menu) drops the columns with no cell part in
+  the rows shown (`visibleColumns` = `selectedColumns` less the empty ones, never all). ZOOM
+  (Seth: "zoom in and out option for our chart notes (and chart examples)"): `zoom=NN` (50–200,
+  steps of 10, 100 not written; `zoomOf` / `setZoom`, the ⋯ menu's − N% +) sets `--cz` on the
+  `.chart-obj`; every font size in `.tchart` is `calc(Npx * var(--cz, 1))`. ONE COLUMN (Seth:
+  "collapse the text chart data into a single display column that just displays the row all in one
+  cell with visual filters … the option to switch back and forth"): `view=flat` (the head's
+  "▤ One column" / "▦ Columns", the ⋯ menu's Layout) — `flatten(obj, spec)` rebuilds the chart with
+  ONE template column ("Text") and every cell part of a row on it in the columns' order, its own
+  column kept as `srcCol`; the renderer, `chartGrid` / the TSV copy and `export.js chartBlock` all
+  take the flattened chart, so the exports follow. Each word group is wrapped (`flatWrap`,
+  `.cflat-g`) with its column's abbreviation as a label (`collab=off` hides them) and the look the
+  column's rules give it — the SAME `column:<Group/Name>` rules that style chart columns on an
+  example (brackets, tile, box, colour, b/i/u, hide), resolved through `tagstyles.resolve` — so a
+  visual filter by column or marker does the work the columns did. Styles on `rNcM` targets keep
+  their meaning (the part's own column). SENTENCE / PARAGRAPH PLAY (Seth: "a play button for 4, not
+  just for 4a, 4b, 4c"): `playGroups(rows, segments)` — a SENTENCE is the rows sharing a label
+  number, a PARAGRAPH runs up to a row that ends one; the first row of a group spanning several
+  rows with timed lines gets ▶§ / ▶¶ (`.chart-play-sent` / `.chart-play-para`) before its line ▶,
+  playing the group's lines through the same `playRange`. BOUNDARIES (Seth: "draw that boundary
+  UNDERNEATH the free translation row"): a row's `end-sent` / `end-para` class moves to the
+  `cfree-row` that follows it when `free=row` puts one there. CHANGE THE CHART (Seth: "change the
+  text chart source for a text chart note or a text chart object, just like I can for interlinear
+  objects"): ⋯ → "Change the chart…" → `FS.pickChart` (app.js `chartChooser`, the same list as the
+  new-chart-note dialog, the current one marked) → the spec is retargeted in place (`guid`; `seg` /
+  `at` / `cw` / `cols` and the styles, which name the old chart's rows and columns, dropped; the
+  view settings stay); a chart note first changes its front matter through `opts.changeChart` →
+  `Api.set_note_chart` (`Notebook.set_chart`; the values it held stay in the file under the old
+  rows' anchors). The chart NOTE kind, the marker filters, the
   chart search / profile / collections and the columns-as-tags are the three bullets below; what is
   still open is in plans/BACKLOG.md › Text Charts.
 - CHART NOTES (Seth, 2026-10-18: "a text chart note type (similar to the example collection, except
@@ -608,7 +652,10 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   pinned by `tests/js/chartnote.test.js`): the VIEW embed first (`{{flex:chart <guid> lines=… free=…
   cols=… hl=r2 …}}` — every view setting and the user's styling, edited through the chart's own
   popovers / ⋯ menu via `onSpecChange`), any other text kept, then `## Custom columns` (a pipe
-  table: Column | Kind (list / notes / rule) | Settings) and `## Values` (Row `1a #<anchor>` | one
+  table: Column | Kind (list / notes / rule) | Settings — and a 4th column Place, `left` and/or
+  `frozen`, written ONLY when some column needs it so older files stay byte-identical; `side` /
+  `frozen` on the column, the dialog's Place select + Freeze box, the heading's ⋯ toggles) and
+  `## Values` (Row `1a #<anchor>` | one
   column per stored column) — Markdown tables, so the file reads anywhere and the notebook index
   searches the values for free; rule columns are computed, never stored; values are keyed by the
   row's anchor (its GUID's last 12 hex) so renumbering never moves them. CHOICE LISTS are
@@ -879,7 +926,12 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   no longer closes first — `on_closing` returns False while `app.backup_then_close` backs up with
   the page's locked "Backing up before closing" screen (bar; Close without backing up / Close now,
   finish in the background → the old detached `--backup` process; after a failure Try again /
-  Close anyway; ✕ again = background), then destroys the window.
+  Close anyway; ✕ again = background), then destroys the window. THE ANSWER IS ACTED ON AT ONCE
+  (Seth, 2026-10-18: "Close and finish backup in background" appeared to do nothing): the run is on
+  its own thread; a choice cancels it and waits `CLOSE_GRACE` (3 s) for it to stop cleanly, then
+  closes anyway; `_mirror_folder`'s planning and clean-up walks (slow on a cloud-synced folder, and
+  uncancellable before) now answer the cancel too; the quiet `--backup` process retries a busy lock
+  for up to two minutes, since the window's run may still be letting go of it.
 - Exporting a collection's examples as a `.flextext` (`flex/flextext_writer.py`, `Api.export_note_flextext`,
   Seth, 2026-10-16): one `<interlinear-text>` PER BASELINE WRITING SYSTEM (a FLEx text has one
   vernacular WS), and since 2026-10-17 each in its OWN FILE, `<name> (<ws>).flextext`, titled

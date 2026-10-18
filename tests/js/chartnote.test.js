@@ -86,3 +86,22 @@ test('rules: terms, operators, outputs and styles', () => {
   assert.throws(() => N.parseRule('(marker:new → x'), /“\)” is missing/);
   assert.throws(() => N.parseRule('marker:new → x [blink]'), /Unknown style/);
 });
+
+test('a custom column keeps its place (left / frozen) in a 4th table column, written only when used', () => {
+  const G = Object.values(FS.demoData().charts)[0].guid;
+  const old = '{{flex:chart ' + G + '}}\n\n## Custom columns\n\n| Column | Kind | Settings |\n|---|---|---|\n| Comment | notes | |\n';
+  const st = N.parse(old);
+  assert.equal(st.columns[0].side, 'right'); assert.equal(st.columns[0].frozen, false);
+  assert.equal(N.serialize(st), old);                       // an old file comes back as it was
+  st.columns[0].side = 'left'; st.columns[0].frozen = true;
+  st.columns.push({ name: 'Status', kind: 'notes', settings: '', side: 'right', frozen: true });
+  const out = N.serialize(st);
+  assert.ok(out.includes('| Column | Kind | Settings | Place |'), out);
+  assert.ok(out.includes('| Comment | notes | | left frozen |') && out.includes('| Status | notes | | frozen |'), out);
+  const back = N.parse(out);
+  assert.deepEqual(back.columns.map((c) => [c.side, c.frozen]), [['left', true], ['right', true]]);
+  assert.equal(N.serialize(back), out);
+  // unfrozen on the right again: the Place column goes
+  back.columns[0].side = 'right'; back.columns[0].frozen = false; back.columns[1].frozen = false;
+  assert.ok(!N.serialize(back).includes('Place'));
+});

@@ -410,10 +410,19 @@ def backup_once(notebook: str | None) -> int:
     from .backup import Backup, BackupError
     from .config import AppConfig
     from .secrets_store import default_store
+    import time
     cfg = AppConfig()
     root = Path(notebook) if notebook else cfg.notebook_dir
     try:
-        r = Backup(cfg, default_store(), lambda: root).run("close")
+        b = Backup(cfg, default_store(), lambda: root)
+        t0 = time.monotonic()
+        while True:
+            r = b.run("close")
+            # the window that started this process may still be letting go of its own cancelled
+            # run (its lock): wait for it, up to two minutes, rather than give up at once
+            if not r.get("busy") or time.monotonic() - t0 > 120:
+                break
+            time.sleep(2)
     except BackupError as e:
         print(e)
         return 2

@@ -320,3 +320,28 @@ def test_closing_backs_up_first_and_honours_each_choice(tmp_path):
     t.start()
     assert backup_then_close(api, lambda: closed.append(3), started.append) == "failed"
     assert ("backupClosing", {"state": "failed", "message": "offline"}) in events and closed[-1] == 3
+    # 4. a run that does not answer the cancel (Seth, 2026-10-18: the button "appears to do
+    #    nothing"): the choice still closes the window after a short grace, the process started
+    import time
+    from flex_scratchpad import app as app_mod
+    app_mod.CLOSE_GRACE = 0.5
+    b.run = lambda reason="manual": (time.sleep(5), {"ok": True})[1]
+    threading.Timer(0.3, lambda: api.backup_close_choice("background")).start()
+    t0 = time.monotonic()
+    assert backup_then_close(api, lambda: closed.append(4), started.append) == "background"
+    assert time.monotonic() - t0 < 3 and closed[-1] == 4 and started[-1] == str(api._nb.root)
+
+
+def test_a_lock_left_by_a_dead_process_does_not_block_the_next_backup(tmp_path):
+    """The window closed with "finish in the background" can end before its backup thread let go
+    of the lock; the quiet process must not wait six hours for that (Seth, 2026-10-18)."""
+    api, b = make(tmp_path)
+    api.backup_save({"kind": "folder", "folder": str(tmp_path / "bk")})
+    lock = b.lock_dir / "backup.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text("999999999", encoding="utf-8")        # no such process
+    assert api.backup_now()["ok"]
+    # a lock whose holder is alive (this process) still blocks
+    lock.write_text(str(__import__("os").getpid()), encoding="utf-8")
+    assert api.backup_now().get("busy")
+    lock.unlink()

@@ -377,9 +377,17 @@ order (Seth, 2026-10-18, "go ahead and start building all this"):
 4. ~~Search and collect~~ — DONE 2026-10-18 (`chart_search`, the column profile, chart collections
    with Find new rows). Still open: lexeme / sense GUIDs in the index (the search is by form and
    gloss text today); the profile on the entry card; filter-in-place in a chart note (rows by
-   marker / column content / clause type, hide empty columns, fold column groups — chart order
-   always kept; "group by marker" as a compiled view, never a sort); pivots (marker × column,
-   category × column) to a table block or CSV.
+   marker / column content / clause type, fold column groups — chart order always kept; "group by
+   marker" as a compiled view, never a sort; hide EMPTY columns is done, 2026-10-18); pivots
+   (marker × column, category × column) to a table block or CSV.
+7. Done 2026-10-18 (CLAUDE.md › TEXT CHARTS): frozen row labels and frozen / left-or-right custom
+   columns, hide a column from its heading, hide empty columns, zoom, the one-column layout with
+   column labels and column / marker visual filters, ▶§ / ▶¶, boundaries under the free row,
+   "Change the chart…". Still open from that round: the one-column layout in the Word / Excel /
+   PowerPoint writers keeps the column labels only as the plain `‹abbr›` text of the TSV copy (the
+   HTML and the page draw them); a frozen column in the exports means nothing (print has no
+   scrolling); zoom is a view setting and is not exported; a paragraph ▶¶ needs FLEx's end-paragraph
+   flags on the rows (a chart without them has only ▶§).
 5. ~~Text markup tags inside chart cells, and chart columns on examples~~ — DONE 2026-10-18 (the
    `cols` line turns the text's chart spans into column tags; `lines=…,tag` on a chart; the pivot;
    the entry card's profile). Still open: choosing ONE template / chart when a text has several

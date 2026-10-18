@@ -154,3 +154,45 @@ test('the pivot counts rows by marker and column', () => {
   const narrow = C.pivot(c, R.parse('{{flex:chart ' + G + ' cols=Nucleus}}'));
   assert.equal(narrow.columns.length, 3);
 });
+
+test('hide empty columns, the one-column view, zoom, and the sentence / paragraph play groups', () => {
+  const c2 = Object.values(FS.demoData().charts)[1];     // Topic-Comment: nobody filled "Tail"
+  const s = R.parse('{{flex:chart ' + c2.guid + ' empty=off}}');
+  assert.deepEqual(C.visibleColumns(R.parse('{{flex:chart ' + c2.guid + '}}'), c2).map((c) => c.name), ['Topic', 'Comment', 'Tail']);
+  assert.deepEqual(C.visibleColumns(s, c2).map((c) => c.name), ['Topic', 'Comment']);
+  assert.equal(R.serialize(s), '{{flex:chart ' + c2.guid + ' empty=off}}');
+  // never every column: an empty range keeps them all
+  assert.equal(C.visibleColumns(s, Object.assign({}, c2, { rows: [] })).length, 3);
+  // the one-column view: every part of a row on ONE column, in the columns' order, its own column kept
+  const c = chart();
+  const f = C.flatten(c, R.parse('{{flex:chart ' + G + ' view=flat}}'));
+  assert.ok(f.flat && f.template.columns.length === 1 && f.template.columns[0].name === 'Text');
+  const r1b = f.rows.find((r) => r.label === '1b');
+  assert.deepEqual(r1b.cells.map((p) => p.srcCol.n), [1, 3, 4, 5, 7]);
+  assert.ok(r1b.cells.every((p) => p.colN === 0));
+  assert.equal(C.flatten(c, R.parse('{{flex:chart ' + G + '}}')), c);          // not asked: the chart itself
+  // a hidden column's parts leave the one cell too
+  const f2 = C.flatten(c, R.parse('{{flex:chart ' + G + ' view=flat cols=Nucleus}}'));
+  assert.deepEqual(f2.rows.find((r) => r.label === '1b').cells.map((p) => p.srcCol.n), [3, 4, 5]);
+  // the grid copy labels each word group with its column
+  const grid = C.chartGrid(R.parse('{{flex:chart ' + G + ' view=flat rows=2 lines=txt}}'), Object.assign({}, c, { rows: c.rows.slice(1, 2) }));
+  assert.ok(grid[grid.length - 1][1].includes('‹Pre-O›') && grid[grid.length - 1][1].includes('‹V›'), grid[grid.length - 1][1]);
+  // zoom: 50–200 in steps of 10; 100 is not written
+  const z = R.parse('{{flex:chart ' + G + '}}');
+  assert.equal(C.zoomOf(z), 100);
+  assert.equal(C.setZoom(z, 123), 120);
+  assert.equal(R.serialize(z), '{{flex:chart ' + G + ' zoom=120}}');
+  assert.equal(C.setZoom(z, 500), 200);
+  assert.equal(C.setZoom(z, 100), 100);
+  assert.equal(R.serialize(z), '{{flex:chart ' + G + '}}');
+  assert.equal(C.zoomOf(R.parse('{{flex:chart ' + G + ' zoom=7}}')), 100);
+  // play groups: a sentence = the rows sharing a number (several rows, timed lines), a paragraph = up to an end-para row with several sentences
+  const g = C.playGroups(c.rows, c.segments);
+  assert.deepEqual([...g.keys()], [0, 2, 5]);
+  assert.equal(g.get(0).sent.name, '1'); assert.equal(g.get(0).sent.label, '1a–1b'); assert.deepEqual(g.get(0).sent.segs.map((x) => x.n), [1, 2]);
+  assert.ok(!g.get(0).para, 'one sentence in the first paragraph: no ¶');
+  assert.equal(g.get(2).sent.label, '2a–2c'); assert.deepEqual(g.get(2).sent.segs.map((x) => x.n), [3, 4]);
+  assert.equal(g.get(5).sent.label, '3a–3b');
+  // untimed: nothing
+  assert.equal(C.playGroups(c.rows, []).size, 0);
+});

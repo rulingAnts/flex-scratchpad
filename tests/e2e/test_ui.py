@@ -247,9 +247,13 @@ def test_a_chart_plays_its_lines_and_lights_their_cells(app):
     page.keyboard.press("Enter")
     page.wait_for_selector(".tchart .rlab .seg-play")
     # one ▶ per timed line, on the row where it starts (demo: rows 1, 2a, 2b start lines 1, 2, 3)
-    assert page.locator(".tchart .rlab .seg-play").count() == 3
+    assert page.locator(".tchart .rlab .chart-play").count() == 3
     assert page.locator(".tchart .th-lab .seg-play").count() == 1
-    page.locator(".tchart .rlab .seg-play").nth(1).click()
+    # ▶§ plays the whole sentence 2 (rows 2a–2b) from its first row (Seth: "a play button for 4, not just for 4a, 4b, 4c")
+    assert page.locator(".tchart .rlab .chart-play-sent").count() == 1          # rows 1a–1b (2a is alone in this range)
+    assert "rows 1a–1b" in page.locator(".tchart .rlab .chart-play-sent").get_attribute("title")
+    assert page.locator(".tchart tr[data-label='1a'] .chart-play-sent").count() == 1
+    page.locator(".tchart .rlab .chart-play").nth(1).click()
     page.wait_for_selector(".chart-obj .transport")
     page.wait_for_timeout(400)
     assert page.evaluate("!!FS.interlinear.audio.current")
@@ -4444,7 +4448,7 @@ def test_text_chart_rows_from_the_picker_with_headings_markers_and_translations(
     assert frees.count() == 2
     assert "Yesterday the child saw the river." in frees.nth(0).inner_text() and frees.nth(0).locator(".cfree-rows").inner_text() == "1b"
     assert frees.nth(1).locator(".cfree-rows").inner_text() == "2a–2b"
-    assert obj.locator("tr.cl-speech th.rlab").inner_text().strip().lstrip("▶") == "2a"
+    assert obj.locator("tr.cl-speech th.rlab").inner_text().strip().lstrip("▶§¶") == "2a"
     # a word styled from its popover; a column from its heading
     obj.locator("tr.crow[data-label='1b'] td[data-col='3'] .cw").first.click()
     page.locator(".popover button.tog", has_text="Bold").click()
@@ -4601,6 +4605,114 @@ def test_a_chart_note_with_custom_columns(app):
     page.locator(".note-card", has_text="Story chart").click()
     page.wait_for_selector("#chartnote th.th-x")
     assert page.locator("#chartnote tr.crow[data-label='1b'] td.xcell .xval").first.inner_text() == "Subject fronted"
+    # the row labels (with the ▶ buttons) are frozen on the left by default (Seth, 2026-10-18)
+    assert page.locator("#chartnote .tchart tr.crow th.rlab[data-frz='l']").count() == 7
+    assert page.evaluate("getComputedStyle(document.querySelector('#chartnote .tchart tr.crow th.rlab')).position") == "sticky"
+    # a custom column moved to the LEFT of the chart and FROZEN (Seth: "freeze columns … for custom columns, on either or both sides")
+    page.locator("#chartnote th.th-x", has_text="Comment").locator("button").click()
+    page.locator(".popover .menu-item", has_text="Move to the left of the chart").click()
+    page.wait_for_selector("#chartnote th.th-x-left")
+    heads = [t.split("\n")[0] for t in page.locator("#chartnote .tchart thead tr").first.locator("th").all_inner_texts()]
+    assert heads[:7] == ["▶#", "Comment", "PRENUCLEAR", "NUCLEUS", "POSTNUCLEAR", "Status", "Role"], heads
+    page.locator("#chartnote th.th-x-left button").click()
+    page.locator(".popover .menu-item", has_text="Freeze").click()
+    page.wait_for_selector("#chartnote td.xcell-left[data-frz='l']")
+    saved()
+    body = page.evaluate("() => window.__fsChartNote.markdown()")
+    assert "| Column | Kind | Settings | Place |" in body and "| Comment | notes | | left frozen |" in body, body
+    assert page.evaluate("document.querySelector('#chartnote td.xcell-left').style.left") not in ("", "0px")   # placed after the label column
+    # the dialog shows the place too
+    page.locator("#chartnote th.th-x-left button").click()
+    page.locator(".popover .menu-item", has_text="Rename / settings").click()
+    assert page.input_value("[data-test=cn-col-side]") == "left" and page.is_checked("[data-test=cn-col-frozen]")
+    page.keyboard.press("Escape")
+    # the exports put a left-side column before the FLEx columns
+    html = page.evaluate("async () => { const api = window.pywebview.api; const id = document.querySelector('.note-card.active').dataset.id; const note = await api.get_note(id); return FS.exporter.toHtml(await FS.exporter.buildDoc(note, window.__fsChartNote.asEditor())); }")
+    assert html.index('<th class="xh" rowspan="2">Comment</th>') < html.index(">Prenuclear<") < html.index('<th class="xh" rowspan="2">Status</th>'), html[:800]
+    # another chart in the same note (Seth: "change the text chart source for a text chart note"): the front matter and the view embed follow
+    page.locator("#chartnote [data-test=chart-menu]").click()
+    page.locator("[data-test=chart-change]").click()
+    page.wait_for_selector("[data-test=pick-chart-change]")
+    assert page.locator("[data-test=pick-chart-change]", has_text="this one").count() == 1
+    page.locator("[data-test=pick-chart-change]", has_text="Topic-Comment").click()
+    page.wait_for_function("() => document.querySelectorAll('#chartnote tr.crow').length === 2")
+    saved()
+    note = h.api.get_note(nid)
+    assert note["chart"] == "d15c0000-0000-4000-8000-00000000c002" and note["body"].startswith("{{flex:chart d15c0000-0000-4000-8000-00000000c002"), note["body"][:120]
+    assert "| Comment | notes | | left frozen |" in note["body"]        # the custom columns stay
+    assert page.locator("#chartnote th.th-col").all_inner_texts() == ["Topic", "Comment", "Tail"]
+    assert not errors
+
+
+def test_chart_options_one_column_hide_empty_zoom_and_the_boundary_under_the_free_row(app):
+    """Seth, 2026-10-18: ⚑ on every chart; "Hide this column" from its heading; "hide empty
+    columns"; zoom; the one-column view with column labels and visual filters; the sentence /
+    paragraph boundary drawn under the free translation row."""
+    h, page, errors = app
+    new_note(page, "Chart options")
+    page.keyboard.type("{{flex:chart d15c0000-0000-4000-8000-00000000c002}}")
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#editor .chart-obj tr.crow")
+    obj = page.locator("#editor .chart-obj")
+    src = lambda: page.evaluate("() => window.__fsEditor.getMarkdown()")  # noqa: E731
+    # the ⚑ button is there although this chart has no markers (its text's tags and the visual filters are switched from it)
+    assert obj.locator("[data-test=marker-btn]").count() == 1
+    obj.locator("[data-test=marker-btn]").click()
+    page.wait_for_selector(".popover [data-test=tag-scope-pick]")
+    assert "markup tags" in page.locator(".popover").inner_text()
+    page.keyboard.press("Escape")
+    # the boundary: row 2 ends a paragraph; its free translation row follows it, so the double rule is under THAT row
+    assert obj.locator("tr.crow[data-label='2'].end-para").count() == 0
+    assert obj.locator("tr.cfree-row.end-para").count() == 1 and obj.locator("tr.cfree-row.end-sent").count() == 2
+    # hide the EMPTY columns (nobody filled Tail): the menu's checkbox, `empty=off` in the note
+    assert obj.locator("th.th-col").all_inner_texts() == ["Topic", "Comment", "Tail"]
+    obj.locator("[data-test=chart-menu]").click()
+    page.locator("[data-test=chart-hide-empty]").check()
+    page.wait_for_function("() => document.querySelectorAll('#editor .chart-obj th.th-col').length === 2")
+    assert "empty=off" in src()
+    page.keyboard.press("Escape")
+    obj.locator("[data-test=chart-menu]").click()
+    page.locator("[data-test=chart-hide-empty]").uncheck()
+    page.wait_for_function("() => document.querySelectorAll('#editor .chart-obj th.th-col').length === 3")
+    assert "empty=off" not in src()
+    page.keyboard.press("Escape")
+    # hide a column from its heading (the "hide columns" feature, now one click away)
+    obj.locator("th.th-col", has_text="Comment").click()
+    page.locator(".popover [data-test=hide-col]").click()
+    page.wait_for_function("() => document.querySelectorAll('#editor .chart-obj th.th-col').length === 2")
+    assert "cols=c33,c35" in src(), src()
+    assert obj.locator("th.th-col").all_inner_texts() == ["Topic", "Tail"]
+    # zoom
+    obj.locator("[data-test=chart-menu]").click()
+    page.locator("[data-test=chart-zoom-in]").click()
+    page.wait_for_function("() => document.querySelector('#editor .chart-obj').style.getPropertyValue('--cz') === '1.1'")
+    assert "zoom=110" in src()
+    assert page.locator("[data-test=chart-zoom]").inner_text() == "110%"
+    page.keyboard.press("Escape")
+    size = lambda: page.evaluate("parseFloat(getComputedStyle(document.querySelector('#editor .chart-obj .cw .il-txt')).fontSize)")  # noqa: E731
+    assert abs(size() - 15.5 * 1.1) < 0.2, size()
+    # every column back (the menu's column checkboxes), then the one-column view: one "Text" column,
+    # each row in one cell, word groups labelled with their column
+    obj.locator("[data-test=chart-menu]").click()
+    page.locator(".popover label.chart-col", has_text="Comment").locator("input").check()
+    page.wait_for_function("() => document.querySelectorAll('#editor .chart-obj th.th-col').length === 3")
+    page.keyboard.press("Escape")
+    obj.locator("[data-test=chart-view]").click()
+    page.wait_for_selector("#editor .chart-obj.flat")
+    assert "view=flat" in src()
+    assert obj.locator("th.th-col").all_inner_texts() == ["Text"]
+    r1 = obj.locator("tr.crow[data-label='1'] td.ccell")
+    assert r1.count() == 1 and r1.locator(".cflat-g").count() == 2
+    assert r1.locator(".cflat-lab").all_inner_texts() == ["Top", "Com"]
+    assert r1.locator(".cflat-g").nth(0).get_attribute("title") == "Topic"
+    # a column visual-filter rule styles the group (the same `column:` rules as on examples)
+    page.evaluate("async () => { const c = await window.pywebview.api.set_tag_styles('project', FS.tagstyles.context().project, [{tag: 'column:Topic', br: 'sq', b: true}]); FS.tagstyles.setConfig(c); FS.emit('tagstyles'); }")
+    page.wait_for_selector("#editor .chart-obj .cflat-br")
+    assert r1.locator(".cflat-g").nth(0).locator(".cflat-br").all_inner_texts() == ["[", "]"]
+    # and back
+    obj.locator("[data-test=chart-view]").click()
+    page.wait_for_function("() => !document.querySelector('#editor .chart-obj.flat')")
+    assert "view=flat" not in src()
     assert not errors
 
 
@@ -4660,7 +4772,7 @@ def test_chart_search_rows_profile_and_a_collection_of_rows(app):
     page.wait_for_selector("#editor .chart-obj tr.crow")
     page.wait_for_function("() => document.getElementById('save-state').textContent === 'Saved'", timeout=5000)
     assert "{{flex:chart %s rows=5 at=" % CHART in body_of(h)
-    assert [x.lstrip("▶") for x in page.locator("#editor .chart-obj tr.crow th.rlab").all_inner_texts()] == ["2c"]
+    assert [x.lstrip("▶§¶") for x in page.locator("#editor .chart-obj tr.crow th.rlab").all_inner_texts()] == ["2c"]
     assert page.locator("#editor .chart-obj thead th.th-col").count() == 7            # the headings always come along
     # the column profile
     page.keyboard.press("Control+Shift+L")
@@ -4669,7 +4781,8 @@ def test_chart_search_rows_profile_and_a_collection_of_rows(app):
     page.wait_for_selector("[data-test=chart-profile]")
     page.locator("[data-test=chart-profile]").click()
     page.wait_for_selector(".profile-table")
-    assert "Subject" in page.locator(".profile-table").inner_text() and page.locator("[data-test=profile-count]").inner_text() == "3"
+    assert page.locator(".profile-table").count() == 2        # one per template: Default, and the Topic-Comment chart
+    assert "Subject" in page.locator(".profile-table").first.inner_text() and page.locator("[data-test=profile-count]").all_inner_texts() == ["3", "1"]
     page.keyboard.press("Escape")
     # a collection of the rows a search matches, with a rule that finds new rows
     page.keyboard.press("Control+Shift+L")

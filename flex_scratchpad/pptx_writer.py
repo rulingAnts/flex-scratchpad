@@ -293,6 +293,9 @@ class _SlideBuilder:
         headers = b.get("headers") or []
         ncols = int(b.get("cols") or 0)
         xcols = b.get("xcols") or []
+        x_left = [(i, xc) for i, xc in enumerate(xcols) if xc.get("side") == "left"]     # custom columns left of the chart
+        x_right = [(i, xc) for i, xc in enumerate(xcols) if xc.get("side") != "left"]
+        nl = len(x_left)
         free_col, notes_col = bool(b.get("freeCol")), bool(b.get("notesCol"))
         total_cols = 1 + ncols + len(xcols) + (1 if free_col else 0) + (1 if notes_col else 0)
         body_rows = b.get("rows") or []
@@ -303,11 +306,11 @@ class _SlideBuilder:
         size = max(800, int(1200 * scale))
         font = (b.get("ws") or {}).get("font") or ""
         # column widths from the words
-        longest = [3] + [4] * ncols + [max(4, len(x.get("name") or "")) for x in xcols] + ([12] if free_col else []) + ([10] if notes_col else [])
+        longest = [3] + [max(4, len(x.get("name") or "")) for _, x in x_left] + [4] * ncols + [max(4, len(x.get("name") or "")) for _, x in x_right] + ([12] if free_col else []) + ([10] if notes_col else [])
         if headers:                                     # a column at least as wide as its heading
-            c = 1
+            c = 1 + nl
             for h in headers[-1]:
-                if int(h.get("span") or 1) == 1 and c <= ncols:
+                if int(h.get("span") or 1) == 1 and c <= ncols + nl:
                     longest[c] = max(longest[c], len(h.get("text") or ""))
                 c += int(h.get("span") or 1)
         for r in body_rows:
@@ -316,7 +319,7 @@ class _SlideBuilder:
                 n = max(len(pl.get("txt") or ""), len(pl.get("gls") or ""))
                 col = int(c.get("col") or 0)
                 if 1 <= col <= ncols and int(c.get("span") or 1) == 1:
-                    longest[col] = max(longest[col], min(28, n))
+                    longest[col + nl] = max(longest[col + nl], min(28, n))
         widths = fit_widths(longest, CONTENT_W, min_w=380000, per_char=int(size * 0.6 * 127))
         if sum(widths) < CONTENT_W:                     # a chart fills the slide's width
             widths = [int(w * CONTENT_W / sum(widths)) for w in widths]
@@ -329,13 +332,19 @@ class _SlideBuilder:
             else:
                 row[0] = {"merged": "v", "fill": head_fill}
             c = 1
+            for _, x in x_left:
+                if hi == 0:
+                    row[c] = {"paras": [para_xml([{"text": x.get("name") or "", "b": True, "color": "1F4F8F"}], size, align="ctr", space_after=0)], "fill": "EEF2FB", "rowspan": len(headers) if len(headers) > 1 else 1}
+                else:
+                    row[c] = {"merged": "v", "fill": "EEF2FB"}
+                c += 1
             for h in hr:
                 span = int(h.get("span") or 1)
                 row[c] = {"paras": [para_xml([{"text": h.get("text") or "", "b": True, "color": MUTED}], size, align="ctr", space_after=0)], "fill": head_fill, "span": span if span > 1 else 1}
                 for k in range(1, span):
                     row[c + k] = {"merged": "h", "fill": head_fill}
                 c += span
-            extras = [(x.get("name") or "", "EEF2FB") for x in xcols] + ([("Free", head_fill)] if free_col else []) + ([("Notes", head_fill)] if notes_col else [])
+            extras = [(x.get("name") or "", "EEF2FB") for _, x in x_right] + ([("Free", head_fill)] if free_col else []) + ([("Notes", head_fill)] if notes_col else [])
             for label, fill in extras:
                 if hi == 0:
                     row[c] = {"paras": [para_xml([{"text": label, "b": True, "color": "1F4F8F" if fill != head_fill else MUTED}], size, align="ctr", space_after=0)], "fill": fill, "rowspan": len(headers) if len(headers) > 1 else 1}
@@ -348,6 +357,14 @@ class _SlideBuilder:
             row = [None] * total_cols
             row[0] = {"paras": [para_xml([{"text": r.get("label") or "", "b": True, "color": MUTED}], size, align="r", space_after=0)], "fill": rs.get("bg") or "F7F8FA"}
             c = 1
+            xcells = r.get("xcells") or []
+
+            def xcell(xc):
+                return {"paras": [para_xml([{"text": xc.get("text") or "", "b": bool(xc.get("b")), "i": bool(xc.get("i")), "u": bool(xc.get("u")), "color": xc.get("color") or ""}], size, space_after=0)], "fill": xc.get("hl") or rs.get("bg") or "FBFCFF"}
+
+            for i, _ in x_left:
+                row[c] = xcell(xcells[i] if i < len(xcells) else {})
+                c += 1
             for cell in r.get("cells") or []:
                 words = cell.get("words") or []
                 # the baseline words on one line, their glosses on the next (no nested tables in a slide)
@@ -374,8 +391,8 @@ class _SlideBuilder:
                 for k in range(1, span):
                     row[c + k] = {"merged": "h"}
                 c += span
-            for xc in r.get("xcells") or []:
-                row[c] = {"paras": [para_xml([{"text": xc.get("text") or "", "b": bool(xc.get("b")), "i": bool(xc.get("i")), "u": bool(xc.get("u")), "color": xc.get("color") or ""}], size, space_after=0)], "fill": xc.get("hl") or rs.get("bg") or "FBFCFF"}
+            for i, _ in x_right:
+                row[c] = xcell(xcells[i] if i < len(xcells) else {})
                 c += 1
             if free_col:
                 fr = r.get("free")

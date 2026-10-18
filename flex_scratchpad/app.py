@@ -237,6 +237,9 @@ def _start_backup_process(notebook: str) -> None:
     subprocess.Popen(args, creationflags=flags, close_fds=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
+CLOSE_GRACE = 3.0       # seconds a cancelled backup gets to stop before the window closes anyway
+
+
 def backup_then_close(api, destroy, start_process=None) -> str:
     """Back up while the window stays open, then close it (what closing the app does when a
     backup is due). The page shows the progress and answers through `Api.backup_close_choice`:
@@ -250,7 +253,25 @@ def backup_then_close(api, destroy, start_process=None) -> str:
             api._close_choice = None
             api._close_evt.clear()
             api._emit("backupClosing", {"state": "running"})
-            r = api._backup.run("close")
+            # The backup runs on its own thread so the user's answer is acted on AT ONCE (Seth,
+            # 2026-10-18: "Close now, finish in the background" did nothing while the backup was
+            # busy in a part of its work that could not be stopped). The choice cancels the run
+            # (Api.backup_close_choice); the run gets a moment to stop cleanly — the lock released,
+            # no half file left — and the window closes whether or not it has.
+            box: dict = {}
+
+            def _run():
+                try:
+                    box["r"] = api._backup.run("close")
+                except Exception as e:  # noqa: BLE001
+                    box["r"] = {"ok": False, "message": str(e)}
+            t = threading.Thread(target=_run, name="backup-on-close", daemon=True)
+            t.start()
+            while t.is_alive():
+                api._close_evt.wait(0.25)
+                if api._close_choice in ("background", "skip"):
+                    t.join(CLOSE_GRACE)
+                    break
             choice = api._close_choice
             if choice == "background":
                 start_process(notebook)
@@ -259,6 +280,7 @@ def backup_then_close(api, destroy, start_process=None) -> str:
             if choice == "skip":
                 how = "skipped"
                 break
+            r = box.get("r") or {}
             if r.get("ok") or r.get("busy"):
                 how = "ok"
                 break

@@ -137,6 +137,16 @@ def test_a_chart_note_is_a_kind_of_note_with_its_chart_in_the_front_matter(tmp_p
         api.create_chart_note(None, "", "", "00000000-0000-4000-8000-000000000000")
     with pytest.raises(ValueError):
         api.create_note(None, "", "x", "", "chart", chart="nope")
+    # another chart for the same note (Seth, 2026-10-18: "change the text chart source for a text
+    # chart note"): the front matter changes, the body is the page's to rewrite; checked GUID; chart notes only
+    from flex_scratchpad.flex.demo import CHART2
+    c = api.set_note_chart(v["id"], CHART2)
+    assert c["chart"] == CHART2 and "chart: " + CHART2 in Path(c["path"]).read_text(encoding="utf-8") and c["body"].startswith("{{flex:chart " + CHART)
+    with pytest.raises(RuntimeError):
+        api.set_note_chart(v["id"], "00000000-0000-4000-8000-000000000000")
+    plain = api.create_note(None, "", "Plain", "hello")
+    with pytest.raises(ValueError):
+        api.set_note_chart(plain["id"], CHART2)
     # the kind survives a rescan, a duplicate keeps the chart, an ordinary note has no chart key
     api.rescan()
     again = api.get_note(n["id"])
@@ -161,30 +171,31 @@ def test_a_chart_note_is_a_kind_of_note_with_its_chart_in_the_front_matter(tmp_p
 def test_chart_search_by_words_columns_markers_and_more(tmp_path):
     api = _api(tmp_path)
     labels = lambda rows: [r["label"] for r in rows]  # noqa: E731
-    assert labels(api.chart_search("kabir")) == ["1a", "2c", "3b"]
+    assert labels(api.chart_search("kabir")) == ["1a", "2c", "3b", "1"]      # row 1 of the second (Topic-Comment) chart too
     assert labels(api.chart_search("col:Subject lex:kabir")) == ["1a", "2c", "3b"]
     assert labels(api.chart_search("col:Verb kabir")) == []
     hit = api.chart_search("col:Verb -mo")[0]
     assert hit["label"] == "1a" and hit["hits"] == [4]
     assert labels(api.chart_search("marker:new")) == ["1a"] and labels(api.chart_search("marker:Reference")) == ["1a", "2c"]
-    assert labels(api.chart_search("marker:*")) == ["1a", "2c"] and labels(api.chart_search("-marker:*")) == ["1b", "2a", "2b", "3a", "3b"]
+    assert labels(api.chart_search("marker:*")) == ["1a", "2c"] and labels(api.chart_search("-marker:*")) == ["1b", "2a", "2b", "3a", "3b", "1", "2"]
     assert labels(api.chart_search("clause:speech")) == ["2a"] and labels(api.chart_search("moved")) == ["1b"] and labels(api.chart_search("moved:postposed")) == []
-    assert labels(api.chart_search("clauseref")) == ["2b"] and labels(api.chart_search("endpara")) == ["1b", "2c", "3b"]
-    assert labels(api.chart_search("gloss:river")) == ["1b", "2c"] and labels(api.chart_search("col:Postnuclear/Inner gloss:river")) == ["2c"]
+    assert labels(api.chart_search("clauseref")) == ["2b"] and labels(api.chart_search("endpara")) == ["1b", "2c", "3b", "2"]
+    assert labels(api.chart_search("gloss:river")) == ["1b", "2c", "2"] and labels(api.chart_search("col:Postnuclear/Inner gloss:river")) == ["2c"]
     assert labels(api.chart_search("col:c1")) == ["1b"] and labels(api.chart_search("col:Pre-O")) == ["1b"]
-    assert labels(api.chart_search("pos:adv")) == ["1b"] and labels(api.chart_search("lex:sila")) == ["1b", "2b"]
+    assert labels(api.chart_search("pos:adv")) == ["1b", "2"] and labels(api.chart_search("lex:sila")) == ["1b", "2b", "2"]
     assert labels(api.chart_search("note:locative")) == ["2c"] and labels(api.chart_search("locative")) == ["2c"]
-    assert labels(api.chart_search('"ka-sila"')) == ["1b", "2b"] and labels(api.chart_search("row:2b")) == ["2b"]
+    assert labels(api.chart_search('"ka-sila"')) == ["1b", "2b", "2"] and labels(api.chart_search("row:2b")) == ["2b"]
     assert labels(api.chart_search("chart:story text:dog template:default")) and labels(api.chart_search("chart:nothing")) == []
-    assert [r["label"] for r in api.chart_search("")] == ["1a", "1b", "2a", "2b", "2c", "3a", "3b"]   # everything
+    assert [r["label"] for r in api.chart_search("")] == ["1a", "1b", "2a", "2b", "2c", "3a", "3b", "1", "2"]   # everything (the Topic-Comment chart's two rows last)
     # the profile: where kabir sits
     p = api.chart_profile("kabir")
-    assert p["total"] == 3 and p["templates"][0]["name"] == "Default"
+    assert p["total"] == 4 and p["templates"][0]["name"] == "Default" and p["templates"][1]["name"] == "Topic-Comment"
     cols = {c["name"]: c["count"] for c in p["templates"][0]["columns"]}
     assert cols == {"Subject": 3}
     assert [r["label"] for r in p["templates"][0]["columns"][0]["rows"]] == ["1a", "2c", "3b"]
-    p2 = api.chart_profile("sleep")        # a gloss: ka-nuwa-mo, ka-nuwa, ka-nuwa-mo
-    assert p2["total"] == 3 and p2["templates"][0]["columns"][0]["name"] == "Verb"
+    assert {c["name"]: c["count"] for c in p["templates"][1]["columns"]} == {"Topic": 1}
+    p2 = api.chart_profile("sleep")        # a gloss: ka-nuwa-mo, ka-nuwa, ka-nuwa-mo (and once in the Topic-Comment chart)
+    assert p2["total"] == 4 and p2["templates"][0]["columns"][0]["name"] == "Verb"
     assert api.chart_profile("")["total"] == 0
 
 
@@ -211,7 +222,7 @@ def test_a_chart_collection_from_a_rule_takes_in_new_rows(tmp_path):
     assert api.get_note(n["id"])["rule"] is None
     api.set_note_rule(n["id"], {"charts": "-marker:nothing"})
     r = api.update_rule_collection(n["id"])
-    assert len(r["added"]) == 2 and r["total"] == 7
+    assert len(r["added"]) == 4 and r["total"] == 9           # 2a, 2b, and the second chart's two rows
 
 
 def test_a_text_knows_its_chart_spans_and_a_chart_its_text_tags(tmp_path):

@@ -492,6 +492,8 @@ class _NoteWriter:
         headers = b.get("headers") or []
         ncols = int(b.get("cols") or 0)
         xcols = b.get("xcols") or []
+        x_left = [(i, xc) for i, xc in enumerate(xcols) if xc.get("side") == "left"]     # custom columns left of the chart
+        x_right = [(i, xc) for i, xc in enumerate(xcols) if xc.get("side") != "left"]
         free_col = bool(b.get("freeCol"))
         notes_col = bool(b.get("notesCol"))
         total = 1 + ncols + len(xcols) + (1 if free_col else 0) + (1 if notes_col else 0)
@@ -503,6 +505,13 @@ class _NoteWriter:
                 s.text(s.row, 1, "#", self.x_head)
                 if len(headers) > 1:
                     s.merge(top, 1, top + len(headers) - 1, 1)
+                for _, xc in x_left:
+                    s.text(s.row, c, xc.get("name") or "", x_xhead)
+                    if len(headers) > 1:
+                        s.merge(top, c, top + len(headers) - 1, c)
+                    c += 1
+            else:
+                c += len(x_left)
             for h in hr:
                 span = int(h.get("span") or 1)
                 s.text(s.row, c, h.get("text") or "", self.x_head)
@@ -512,7 +521,7 @@ class _NoteWriter:
                     s.merge(s.row, c, s.row, c + span - 1)
                 c += span
             if hi == 0:
-                for xc in xcols:
+                for _, xc in x_right:
                     s.text(s.row, c, xc.get("name") or "", x_xhead)
                     if len(headers) > 1:
                         s.merge(top, c, top + len(headers) - 1, c)
@@ -530,6 +539,14 @@ class _NoteWriter:
             label_xf = self.x_label if not rs else self._cell_xf(bg=rs.get("bg"), b=True, color=MUTED, halign="right", size=10)
             s.text(s.row, 1, r.get("label") or "", label_xf)
             c = 2
+            xcells = r.get("xcells") or []
+
+            def xcell(xc, col):
+                s.text(s.row, col, xc.get("text") or "", self._cell_xf(bg=xc.get("hl") or rs.get("bg") or "#fbfcff", b=bool(xc.get("b")), i=bool(xc.get("i")), u=bool(xc.get("u")), color=xc.get("color")))
+
+            for i, _ in x_left:
+                xcell(xcells[i] if i < len(xcells) else {}, c)
+                c += 1
             for cell in r.get("cells") or []:
                 runs: list[dict] = []
                 for wi, w in enumerate(cell.get("words") or []):
@@ -550,8 +567,8 @@ class _NoteWriter:
                 if span > 1:
                     s.merge(s.row, c, s.row, c + span - 1)
                 c += span
-            for xc in r.get("xcells") or []:
-                s.text(s.row, c, xc.get("text") or "", self._cell_xf(bg=xc.get("hl") or rs.get("bg") or "#fbfcff", b=bool(xc.get("b")), i=bool(xc.get("i")), u=bool(xc.get("u")), color=xc.get("color")))
+            for i, _ in x_right:
+                xcell(xcells[i] if i < len(xcells) else {}, c)
                 c += 1
             if free_col:
                 fr = r.get("free")

@@ -507,11 +507,22 @@ class Docx:
         headers = block.get("headers") or []
         ncols = int(block.get("cols") or 0)
         xcols = block.get("xcols") or []          # a chart note's custom columns (export.js chartBlock extras)
-        extra = len(xcols) + (1 if block.get("freeCol") else 0) + (1 if block.get("notesCol") else 0)
-        width = 1 + ncols + extra
+        # a custom column sits LEFT or RIGHT of the FLEx columns (its `side`); xcells are by index
+        x_left = [(i, xc) for i, xc in enumerate(xcols) if xc.get("side") == "left"]
+        x_right = [(i, xc) for i, xc in enumerate(xcols) if xc.get("side") != "left"]
+        extra = len(x_right) + (1 if block.get("freeCol") else 0) + (1 if block.get("notesCol") else 0)
+        width = 1 + len(x_left) + ncols + extra
+
+        def xhead(xc):
+            return {"runs": [{"text": xc.get("name") or "", "b": True, "color": "#68717d"}], "align": "center"}
+
         for hi, hr in enumerate(headers):
             row = [{"runs": [{"text": "#" if hi == 0 else "", "b": True, "color": "#68717d"}]}]
-            ci = 1
+            for _, xc in x_left:
+                row.append(xhead(xc) if hi == 0 else {"runs": []})
+                if hi == 0 and len(headers) > 1:
+                    spans[f"1.{len(row)}"] = {"rows": len(headers), "cols": 1}
+            ci = 1 + len(x_left)
             for h in hr:
                 row.append({"runs": [{"text": h.get("text") or "", "b": True, "color": "#68717d"}], "align": "center"})
                 if int(h.get("span") or 1) > 1:
@@ -520,8 +531,8 @@ class Docx:
                         row.append({"runs": []})
                 ci += int(h.get("span") or 1)
             if hi == 0:
-                for xc in xcols:
-                    row.append({"runs": [{"text": xc.get("name") or "", "b": True, "color": "#68717d"}], "align": "center"})
+                for _, xc in x_right:
+                    row.append(xhead(xc))
                     if len(headers) > 1:
                         spans[f"1.{len(row)}"] = {"rows": len(headers), "cols": 1}
                 if block.get("freeCol"):
@@ -538,8 +549,23 @@ class Docx:
             if len(headers) > 1 and hi == 0:
                 spans["1.1"] = {"rows": len(headers), "cols": 1}
             rows.append(row)
+        def xcell_of(xc):
+            xr = {"text": xc.get("text") or ""}
+            for k in ("b", "i", "u"):
+                if xc.get(k):
+                    xr[k] = True
+            if xc.get("color"):
+                xr["color"] = xc["color"]
+            xcell = {"runs": [xr]}
+            if xc.get("hl"):
+                xcell["bg"] = xc["hl"]
+            return xcell
+
         for r in block.get("rows") or []:
             row = [{"runs": [{"text": r.get("label") or "", "b": True, "color": "#68717d"}], "align": "right"}]
+            xcells = r.get("xcells") or []
+            for i, _ in x_left:
+                row.append(xcell_of(xcells[i] if i < len(xcells) else {}))
             for c in r.get("cells") or []:
                 def dress(runs):
                     out_runs = []
@@ -578,17 +604,8 @@ class Docx:
                     spans[f"{len(rows) + 1}.{len(row)}"] = {"rows": 1, "cols": int(c["span"])}
                     for _ in range(int(c["span"]) - 1):
                         row.append({"runs": []})
-            for xc in r.get("xcells") or []:
-                xr = {"text": xc.get("text") or ""}
-                for k in ("b", "i", "u"):
-                    if xc.get(k):
-                        xr[k] = True
-                if xc.get("color"):
-                    xr["color"] = xc["color"]
-                xcell = {"runs": [xr]}
-                if xc.get("hl"):
-                    xcell["bg"] = xc["hl"]
-                row.append(xcell)
+            for i, _ in x_right:
+                row.append(xcell_of(xcells[i] if i < len(xcells) else {}))
             if block.get("freeCol"):
                 fr = r.get("free")
                 row.append({"runs": [{"text": fr["text"], "i": True}] if fr else []})

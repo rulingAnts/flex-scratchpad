@@ -140,6 +140,7 @@
   function chartBlock(obj, spec, extras) {
     const C = FS.chart;
     extras = extras || null;
+    obj = C.flatten ? C.flatten(obj, spec) : obj;    // the one-column view exports as one column
     const cols = C.visibleColumns(spec, obj);
     const lines = R.chartLines(spec);
     const free = R.freeMode(spec);
@@ -209,7 +210,7 @@
     });
     const segments = (obj.segments || []).map((sg) => ({ n: sg.n, label: sg.label || String(sg.n), free: sg.free || '', begin: sg.begin, end: sg.end, media: sg.media || null }));
     return { type: 'chart', guid: obj.guid, text: obj.text, title: obj.title, name: obj.name, template: (obj.template || {}).name || '', label: spec.label, headers: headers ? C.headerRows(cols).map((hr) => hr.map((h) => ({ text: h.text, span: h.span }))) : [],
-      columns: cols.map((c) => ({ n: c.n, name: c.name, path: (c.path || []).concat([c.name]).join('/'), width: C.colWidths ? (C.colWidths(spec).get(String(c.n)) || 0) : 0 })), xcols: extras ? extras.cols.map((c, i) => ({ name: c.name, kind: c.kind, width: C.colWidths ? (C.colWidths(spec).get('x' + i) || 0) : 0 })) : [],
+      columns: cols.map((c) => ({ n: c.n, name: c.name, path: (c.path || []).concat([c.name]).join('/'), width: C.colWidths ? (C.colWidths(spec).get(String(c.n)) || 0) : 0 })), xcols: extras ? extras.cols.map((c, i) => ({ name: c.name, kind: c.kind, side: c.side === 'left' ? 'left' : 'right', width: C.colWidths ? (C.colWidths(spec).get('x' + i) || 0) : 0 })) : [],
       widths: C.colWidths ? Object.fromEntries(C.colWidths(spec)) : {},
       freeCol: free === 'col', notesCol: notesOn, cols: cols.length, rows, segments, media: obj.media || [], ws: vern, anal, rowCount: obj.rowCount, range: obj.range };
   }
@@ -636,24 +637,27 @@
       case 'chart': {
         const rtl = b.ws && b.ws.rtl;
         const xcols = b.xcols || [];
+        const xL = xcols.map((x, i) => Object.assign({ i }, x)).filter((x) => x.side === 'left'), xR = xcols.map((x, i) => Object.assign({ i }, x)).filter((x) => x.side !== 'left');
         const extra = (b.freeCol ? 1 : 0) + (b.notesCol ? 1 : 0) + xcols.length;
         const st = (c) => (c.hl || c.b || c.i || c.u || c.color ? ' style="' + (c.hl ? 'background:' + c.hl + ';' : '') + (c.b ? 'font-weight:700;' : '') + (c.i ? 'font-style:italic;' : '') + (c.u ? 'text-decoration:underline;' : '') + (c.color ? 'color:' + c.color + ';' : '') + '"' : '');
         const rowSt = (r) => (r.rowStyle ? ' style="' + (r.rowStyle.bg ? 'background:' + r.rowStyle.bg + ';' : '') + (r.rowStyle.color ? 'color:' + r.rowStyle.color + ';' : '') + (r.rowStyle.b ? 'font-weight:700;' : '') + (r.rowStyle.i ? 'font-style:italic;' : '') + (r.rowStyle.u ? 'text-decoration:underline;' : '') + '"' : '');
         const audio = b.audio;          // {src, begin, segs: {n: [begin, end]}} when the export embeds the recording (embedAudio)
         const playBtn = (segs, title) => playButton(b, segs, title);
         const W = b.widths || {};
-        const colTags = ['lab'].concat((b.columns || []).map((c) => String(c.n)), xcols.map((_, i) => 'x' + i), b.freeCol ? ['free'] : [], b.notesCol ? ['notes'] : []).map((k) => '<col' + (W[k] ? ' style="width:' + W[k] + 'px"' : '') + '>').join('');
+        const colTags = ['lab'].concat(xL.map((x) => 'x' + x.i), (b.columns || []).map((c) => String(c.n)), xR.map((x) => 'x' + x.i), b.freeCol ? ['free'] : [], b.notesCol ? ['notes'] : []).map((k) => '<col' + (W[k] ? ' style="width:' + W[k] + 'px"' : '') + '>').join('');
         let h = '<div class="obj chart" data-chart="' + esc(b.guid || '') + '"><div class="head"><span class="ttl">' + esc(b.name || 'Chart') + ' \u00b7 ' + esc(b.title || '') + '</span>' + (b.label ? '<span class="lbl">' + esc(b.label) + '</span>' : '') + '</div>' + audioTag(b) + '<div class="tscroll"><table class="tchart"' + (rtl ? ' dir="rtl"' : '') + (Object.keys(W).length ? ' style="width:max-content;min-width:100%"' : '') + '><colgroup>' + colTags + '</colgroup>';
         if (b.headers.length) {
-          h += '<thead>' + b.headers.map((hr, i) => '<tr>' + (i === 0 ? '<th rowspan="' + b.headers.length + '">' + playBtn(b.segments.map((sg) => sg.n), 'Play these rows') + '#</th>' : '') + hr.map((x) => '<th' + (x.span > 1 ? ' colspan="' + x.span + '"' : '') + '>' + esc(x.text) + '</th>').join('') + (i === 0 ? xcols.map((x) => '<th class="xh" rowspan="' + b.headers.length + '">' + esc(x.name) + '</th>').join('') : '') + (i === 0 && b.freeCol ? '<th rowspan="' + b.headers.length + '">Free</th>' : '') + (i === 0 && b.notesCol ? '<th rowspan="' + b.headers.length + '">Notes</th>' : '') + '</tr>').join('') + '</thead>';
+          const xh = (x) => '<th class="xh" rowspan="' + b.headers.length + '">' + esc(x.name) + '</th>';
+          h += '<thead>' + b.headers.map((hr, i) => '<tr>' + (i === 0 ? '<th rowspan="' + b.headers.length + '">' + playBtn(b.segments.map((sg) => sg.n), 'Play these rows') + '#</th>' + xL.map(xh).join('') : '') + hr.map((x) => '<th' + (x.span > 1 ? ' colspan="' + x.span + '"' : '') + '>' + esc(x.text) + '</th>').join('') + (i === 0 ? xR.map(xh).join('') : '') + (i === 0 && b.freeCol ? '<th rowspan="' + b.headers.length + '">Free</th>' : '') + (i === 0 && b.notesCol ? '<th rowspan="' + b.headers.length + '">Notes</th>' : '') + '</tr>').join('') + '</thead>';
         }
         const starts = FS.chart.lineStarts(b.rows.map((r) => ({ cells: (r.segs || []).map((n) => ({ kind: 'words', seg: n, segTo: n })) })), b.segments);
         h += '<tbody>' + b.rows.map((r, ri) => {
           const sgs = starts.get(ri) || [];
-          let tr = '<tr class="' + esc(r.clause || 'normal') + (r.endSent ? ' end-sent' : '') + (r.endPara ? ' end-para' : '') + '"' + rowSt(r) + '><th>' + sgs.map((sg) => playBtn([sg.n], 'Play line ' + sg.label)).join('') + esc(r.label) + '</th>';
+          const xtd = (x) => { const c = r.xcells[x.i] || { text: '' }; return '<td class="xcell"' + st(c) + '>' + esc(c.text).replace(/\n/g, '<br>') + '</td>'; };
+          let tr = '<tr class="' + esc(r.clause || 'normal') + (r.endSent ? ' end-sent' : '') + (r.endPara ? ' end-para' : '') + '"' + rowSt(r) + '><th>' + sgs.map((sg) => playBtn([sg.n], 'Play line ' + sg.label)).join('') + esc(r.label) + '</th>' + xL.map(xtd).join('');
           tr += r.cells.map((c) => '<td' + (c.span > 1 ? ' colspan="' + c.span + '"' : '') + st(c) + (audio && (c.segs || []).length ? ' data-segs="' + c.segs.join(' ') + '"' : '') + '>'
             + c.words.map((w) => '<span class="cw">' + runsHtml(w).replace(/\n/g, '<br>') + '</span>').join(' ') + (c.marks.length ? ' ' + runsHtml(c.marks) : '') + '</td>').join('');
-          tr += r.xcells.map((c) => '<td class="xcell"' + st(c) + '>' + esc(c.text).replace(/\n/g, '<br>') + '</td>').join('');
+          tr += xR.map(xtd).join('');
           if (r.free) tr += '<td class="free"' + (r.free.span > 1 ? ' rowspan="' + r.free.span + '"' : '') + '>' + esc(r.free.text) + '</td>';
           if (r.notes != null) tr += '<td class="notes">' + esc(r.notes) + '</td>';
           tr += '</tr>';

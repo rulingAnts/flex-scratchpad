@@ -306,6 +306,8 @@ body.md-hide .blk-code .md-marker { display: inline; }
 .flex-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 13px; color: var(--muted); flex-wrap: wrap; }
 .flex-head .ttl { font-weight: 650; color: var(--text); font-size: 14px; }
 .flex-head .ttl.vern { color: var(--vern); font-family: var(--font-vern); font-size: 15px; }
+/* a long title (Seth's "The Great Flood …" chart, 2026-10-18) shrinks with an ellipsis; the buttons keep their room */
+.chart-obj .flex-head .ttl.vern { flex: 0 1 auto; min-width: 4em; max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .flex-head .badge { font-size: 11px; padding: 0 7px; border-radius: 999px; background: var(--panel-2); color: var(--muted); }
 .flex-head .badge.warn { background: #fde9c8; color: #8a5a00; }
 .flex-head .spacer { flex: 1; }
@@ -927,10 +929,10 @@ table.md-table td.drop-target, table.md-table th.drop-target { outline: 2px soli
 
 /* ---- text charts (chart.js; Seth, 2026-10-18) ------------------------------------------- */
 .chart-obj .chart-scroll { overflow-x: auto; max-width: 100%; }
-.tchart { border-collapse: collapse; font-size: 13.5px; min-width: 100%; }
+.tchart { border-collapse: collapse; font-size: calc(13.5px * var(--cz, 1)); min-width: 100%; }
 .tchart th, .tchart td { border: 1px solid var(--border-soft); padding: 3px 7px; vertical-align: top; text-align: left; }
-.tchart thead th { background: var(--panel-2); color: var(--muted); font-weight: 600; font-size: 12px; text-align: center; }
-.tchart thead th.th-group { border-bottom-width: 0; letter-spacing: 0.02em; text-transform: uppercase; font-size: 10.5px; }
+.tchart thead th { background: var(--panel-2); color: var(--muted); font-weight: 600; font-size: calc(12px * var(--cz, 1)); text-align: center; }
+.tchart thead th.th-group { border-bottom-width: 0; letter-spacing: 0.02em; text-transform: uppercase; font-size: calc(10.5px * var(--cz, 1)); }
 .tchart thead th.th-col { cursor: pointer; }
 .tchart thead th.th-col:hover { color: var(--accent); }
 .tchart th.rlab { width: 2.4em; text-align: right; color: var(--muted); font-weight: 600; font-variant-numeric: tabular-nums; background: var(--panel-2); cursor: pointer; white-space: nowrap; }
@@ -954,16 +956,16 @@ table.md-table td.drop-target, table.md-table th.drop-target { outline: 2px soli
 .tchart .cw { display: inline-flex; flex-direction: column; gap: 0; border-radius: 4px; padding: 0 2px; }
 .tchart .cw:hover { background: var(--accent-soft); cursor: pointer; }
 .tchart .cw.punct { color: var(--vern); }
-.tchart .cw .il-txt { font-size: 15.5px; }
-.tchart .cw .il-gls { font-size: 12.5px; }
-.tchart .cw .il-morph { font-size: 13px; display: block; }
-.tchart .cw .il-mgls { font-size: 12px; display: block; }
-.tchart .cw .il-pos { font-size: 11px; }
+.tchart .cw .il-txt { font-size: calc(15.5px * var(--cz, 1)); }
+.tchart .cw .il-gls { font-size: calc(12.5px * var(--cz, 1)); }
+.tchart .cw .il-morph { font-size: calc(13px * var(--cz, 1)); display: block; }
+.tchart .cw .il-mgls { font-size: calc(12px * var(--cz, 1)); display: block; }
+.tchart .cw .il-pos { font-size: calc(11px * var(--cz, 1)); }
 .tchart .cw .il-line { white-space: nowrap; line-height: 1.3; }
 .tchart .cmoved { color: var(--pos); font-weight: 700; cursor: help; padding: 0 3px; }
 .tchart .cclause { color: var(--accent); cursor: pointer; font-weight: 600; }
 .tchart .cclause:hover { text-decoration: underline; }
-.tchart .ctag { display: inline-block; font-size: 11px; font-weight: 700; padding: 0 6px; border-radius: 999px; line-height: 1.6; margin: 1px 2px; }
+.tchart .ctag { display: inline-block; font-size: calc(11px * var(--cz, 1)); font-weight: 700; padding: 0 6px; border-radius: 999px; line-height: 1.6; margin: 1px 2px; }
 .tchart .ctag.missing { background: var(--panel-2); color: var(--muted); }
 .tchart td.cfree, .tchart .cfree-row td { color: var(--text); font-style: italic; }
 .tchart td.cfree { min-width: 12em; vertical-align: middle; background: color-mix(in srgb, var(--gloss) 6%, var(--bg)); }
@@ -1038,3 +1040,23 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 .tchart-sticky { position: fixed; overflow: hidden; z-index: 7; pointer-events: none; box-shadow: 0 6px 10px -9px rgba(0, 0, 0, 0.45); background: var(--paper); }
 .tchart-sticky table.tchart.ghost { table-layout: fixed; min-width: 0; border-collapse: collapse; }
 .tchart-sticky .col-rs { display: none; }
+
+/* frozen columns (chart.js placeFrozen): the row labels, and custom columns that ask for it, stay put while the chart scrolls sideways */
+.tchart [data-frz] { position: sticky; z-index: 2; }
+.tchart thead th[data-frz] { z-index: 3; }
+.tchart td[data-frz="l"], .tchart td[data-frz="r"] { background: var(--paper); }
+.tchart td.xcell[data-frz] { background: color-mix(in srgb, var(--accent-soft) 35%, var(--paper)); }
+.tchart [data-frz="l"] { box-shadow: 1px 0 0 var(--border-soft); }
+.tchart [data-frz="r"] { box-shadow: -1px 0 0 var(--border-soft); }
+.tchart th.th-x-left, .tchart td.xcell-left { border-right: 2px solid var(--border); }
+
+/* ▶§ a sentence, ▶¶ a paragraph (chart.js playGroups) */
+.tchart .seg-play small { font-size: 9px; font-weight: 700; margin-left: 1px; vertical-align: top; }
+.tchart .chart-play-para, .tchart .chart-play-sent { color: var(--accent); }
+/* the one-column view (view=flat): every part of a row in one cell, word groups labelled with their columns */
+.chart-obj.flat .tchart td.ccell { white-space: normal; }
+.cflat-g { display: inline-block; vertical-align: top; margin: 1px 6px 3px 0; padding: 1px 3px; border-radius: 4px; }
+.cflat-g.hidden { display: none; }
+.cflat-g .cflat-lab { font-size: calc(9.5px * var(--cz, 1)); color: var(--muted); margin-left: 2px; letter-spacing: 0.02em; }
+.cflat-g .cflat-br { color: var(--muted); font-weight: 600; margin: 0 1px; }
+.zoom-val { min-width: 3.2em; text-align: center; font-variant-numeric: tabular-nums; }

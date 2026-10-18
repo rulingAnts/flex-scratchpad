@@ -87,7 +87,11 @@
           for (const r of rows) {
             const name = unCell(r[0] || '');
             const kind = unCell(r[1] || '').toLowerCase();
-            if (name && KINDS[kind]) st.columns.push({ name, kind, settings: unCell(r[2] || '') });
+            if (name && KINDS[kind]) {
+              // a 4th column "Place" (since 2026-10-18): `left` / `right`, `frozen` — older files have three
+              const place = unCell(r[3] || '').toLowerCase();
+              st.columns.push({ name, kind, settings: unCell(r[2] || ''), side: /\bleft\b/.test(place) ? 'left' : 'right', frozen: /\bfrozen\b/.test(place) });
+            }
           }
           i = next;
           continue;
@@ -122,9 +126,11 @@
     if (st.view) out.push(st.view);
     if (st.other) out.push('', st.other);
     if (st.columns.length) {
-      out.push('', H_COLS, '', '| Column | Kind | Settings |', '|---|---|---|');
       const row = (cells) => '|' + cells.map((c) => (c ? ' ' + c + ' ' : ' ')).join('|') + '|';
-      for (const c of st.columns) out.push(row([cellText(c.name), c.kind, cellText(c.settings || '')]));
+      const placed = st.columns.some((c) => c.side === 'left' || c.frozen);   // the Place column only when some column needs it: older files stay as they were
+      const place = (c) => [c.side === 'left' ? 'left' : '', c.frozen ? 'frozen' : ''].filter(Boolean).join(' ');
+      out.push('', H_COLS, '', placed ? '| Column | Kind | Settings | Place |' : '| Column | Kind | Settings |', placed ? '|---|---|---|---|' : '|---|---|---|');
+      for (const c of st.columns) out.push(row([cellText(c.name), c.kind, cellText(c.settings || '')].concat(placed ? [place(c)] : [])));
       const stored = st.columns.filter((c) => c.kind !== 'rule');
       const keys = [...st.values.keys()].filter((k) => { const v = st.values.get(k) || {}; return stored.some((c) => v[c.name]); });
       if (stored.length && keys.length) {
@@ -277,7 +283,7 @@
       const self = this;
       const ruleAnswer = (col, row, chart) => { const r = self.cases(col); if (r.error) return null; return applyRule(r.cases, rowCtx(row, chart, self.st.values, self.st.columns)); };
       return {
-        cols: this.st.columns.map((c) => ({ name: c.name, kind: c.kind })),
+        cols: this.st.columns.map((c) => ({ name: c.name, kind: c.kind, side: c.side === 'left' ? 'left' : 'right', frozen: !!c.frozen })),
         cell(i, row, chart) {
           const col = self.st.columns[i];
           if (!col) return { text: '' };
@@ -342,6 +348,8 @@
         extraCols: this.extraCols(),
         rowDecor: (row) => self.rowDecor(row),
         onObject: (obj) => { self.obj = obj; self.drawHead(); },
+        // "Change the chart…" in the ⋯ menu: the note's front matter, then the view embed (retarget → onSpecChange)
+        changeChart: async (guid, retarget) => { if (self.opts.changeChart) await self.opts.changeChart(guid); self.obj = null; retarget(guid); },
       };
       FS.interlinear.render(host, spec, opts);
     }
@@ -351,6 +359,8 @@
       return this.st.columns.map((col, ci) => ({
         key: 'x' + ci,
         name: col.name,
+        side: col.side === 'left' ? 'left' : 'right',
+        frozen: !!col.frozen,
         kind: col.kind,
         head: () => {
           const th = el('span', { class: 'xhead' }, el('span', { class: 'xname' }, col.name), el('span', { class: 'xkind muted' }, ' ' + (KINDS[col.kind] || col.kind).toLowerCase()));
@@ -443,6 +453,8 @@
         const col = self.st.columns[ci];
         pop.appendChild(el('div', { class: 'row' }, el('b', {}, col.name), el('span', { class: 'muted small' }, ' ' + (KINDS[col.kind] || col.kind))));
         pop.appendChild(el('button', { class: 'menu-item', onclick: () => { close(); self.columnDialog(ci); } }, 'Rename / settings…'));
+        pop.appendChild(el('button', { class: 'menu-item', 'data-test': 'cn-col-toggle-side', onclick: () => { close(); col.side = col.side === 'left' ? 'right' : 'left'; self.changed(); self.drawChart(); } }, col.side === 'left' ? 'Move to the right of the chart' : 'Move to the left of the chart'));
+        pop.appendChild(el('button', { class: 'menu-item', 'data-test': 'cn-col-toggle-frozen', onclick: () => { close(); col.frozen = !col.frozen; self.changed(); self.drawChart(); } }, col.frozen ? 'Unfreeze (scrolls with the chart)' : 'Freeze (stays put when the chart scrolls sideways)'));
         pop.appendChild(el('button', { class: 'menu-item', disabled: ci === 0, onclick: () => { close(); self.st.columns.splice(ci - 1, 0, self.st.columns.splice(ci, 1)[0]); self.changed(); self.drawChart(); } }, '← Move left'));
         pop.appendChild(el('button', { class: 'menu-item', disabled: ci === self.st.columns.length - 1, onclick: () => { close(); self.st.columns.splice(ci + 1, 0, self.st.columns.splice(ci, 1)[0]); self.changed(); self.drawChart(); } }, 'Move right →'));
         pop.appendChild(el('hr'));
@@ -459,7 +471,7 @@
     }
     columnDialog(ci) {
       const self = this;
-      const col = ci == null ? { name: '', kind: 'notes', settings: '' } : Object.assign({}, this.st.columns[ci]);
+      const col = ci == null ? { name: '', kind: 'notes', settings: '', side: 'right', frozen: false } : Object.assign({}, this.st.columns[ci]);
       const m = FS.modal({ title: ci == null ? 'New custom column' : 'Column “' + col.name + '”', class: 'cn-col-dlg' });
       const name = el('input', { type: 'text', value: col.name, placeholder: 'Column heading', 'data-test': 'cn-col-name', style: { width: '260px' } });
       const kindSel = el('select', { 'data-test': 'cn-col-kind' });
@@ -512,7 +524,11 @@
       };
       kindSel.addEventListener('change', drawSettings);
       drawSettings();
-      body.append(el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Heading'), name), el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Kind'), kindSel), settingsBox, err);
+      // where the column sits, and whether it stays put when the chart scrolls sideways (Seth, 2026-10-18)
+      const sideSel = el('select', { 'data-test': 'cn-col-side' }, el('option', { value: 'right', selected: col.side !== 'left' }, 'Right of the chart'), el('option', { value: 'left', selected: col.side === 'left' }, 'Left of the chart'));
+      const frozenCb = el('input', { type: 'checkbox', checked: !!col.frozen, 'data-test': 'cn-col-frozen' });
+      body.append(el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Heading'), name), el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Kind'), kindSel), settingsBox,
+        el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Place'), sideSel, el('label', { style: { marginLeft: '12px' } }, frozenCb, ' Freeze (stays put when the chart scrolls sideways)')), err);
       const save = async () => {
         const nm = name.value.trim();
         if (!nm) { err.textContent = 'The column needs a heading.'; return; }
@@ -531,7 +547,7 @@
           try { parseRule(ruleTa.value); } catch (e) { err.textContent = e.message; return; }
           settings = ruleTa.value.trim().replace(/\s*\n\s*/g, ' ');
         }
-        const next = { name: nm, kind, settings };
+        const next = { name: nm, kind, settings, side: sideSel.value === 'left' ? 'left' : 'right', frozen: frozenCb.checked };
         if (ci == null) self.st.columns.push(next);
         else {
           const old = self.st.columns[ci];

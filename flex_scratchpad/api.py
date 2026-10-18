@@ -198,6 +198,16 @@ class Api:
         n = self._nb.create_note(tab, folder, title or ((ch.get("name") or "Chart") + " \u2014 " + (ch.get("title") or "")), body, "chart", chart=g)
         return self.get_note(n.id)
 
+    def set_note_chart(self, note_id: str, chart_guid: str) -> dict:
+        """Change the chart a chart note shows (the page rewrites its view embed; the values it
+        held stay in the file, keyed by the old rows' anchors)."""
+        g = (chart_guid or "").lower()
+        try:
+            self._flex.get_object("chart", g, prefer_cache=False)
+        except FlexError as e:
+            raise RuntimeError(e.message) from e
+        return self.get_note(self._nb.set_chart(note_id, g).id)
+
     def chart_lists(self) -> dict:
         """The notebook's choice lists for chart-note list columns: {name: {options: [...], open: bool}}."""
         return self._nb.config.setdefault("chartLists", {})

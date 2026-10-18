@@ -504,6 +504,8 @@
     S.chartNote = new FS.ChartNote($('chartnote'), {
       onChange: (md) => { if (!isChartNote()) return; S.note.body = md; S.dirty = true; $('save-state').textContent = 'Editing…'; scheduleSave(); },
       chartGuid: () => (S.note && S.note.chart) || '',
+      // another chart for this note: the front matter first (the API checks the chart exists), then the body
+      changeChart: async (guid) => { const n = await FS.api.set_note_chart(S.note.id, guid); S.note.chart = n.chart; },
     });
     window.__fsChartNote = S.chartNote;
     return S.chartNote;
@@ -522,10 +524,16 @@
   }
   FS.newChartNote = newChartNote;
   function newChartNoteDialog() {
-    const m = FS.modal({ title: 'New chart note' });
+    chartChooser({ title: 'New chart note', intro: 'A chart note shows one FieldWorks text chart (Texts & Words › Text Chart) with your own columns — choice lists, notes, rules — and your styling of its words, cells, rows and columns.', test: 'pick-chart-note', onPick: (c) => newChartNote(c.guid, '') });
+  }
+  /* The project's charts to pick one from: a new chart note, or another chart for a chart object /
+   * chart note (Seth, 2026-10-18: "change the text chart source for a text chart note or a text
+   * chart object, just like I can for interlinear objects"). */
+  function chartChooser(o) {
+    const m = FS.modal({ title: o.title || 'Pick a chart' });
     const search = el('input', { type: 'text', placeholder: 'Search charts by text or name…', style: { width: '100%' } });
     const list = el('div', { class: 'pick-list', style: { maxHeight: '50vh', overflow: 'auto', marginTop: '8px' } });
-    m.body.append(el('p', { class: 'muted small' }, 'A chart note shows one FieldWorks text chart (Texts & Words › Text Chart) with your own columns — choice lists, notes, rules — and your styling of its words, cells, rows and columns.'), search, list);
+    m.body.append(o.intro ? el('p', { class: 'muted small' }, o.intro) : null, search, list);
     const draw = async () => {
       list.innerHTML = '<div class="pick-item muted">Loading…</div>';
       let all = [];
@@ -535,8 +543,8 @@
       list.innerHTML = '';
       if (!hits.length) list.appendChild(el('div', { class: 'pick-item muted' }, all.length ? 'No chart matches.' : 'This project has no text charts yet.'));
       for (const c of hits) {
-        const it = el('div', { class: 'pick-item' + (c.rows ? '' : ' muted'), 'data-test': 'pick-chart-note' }, el('span', { class: 'hw' }, c.title || '(untitled text)'), el('span', { class: 'pos' }, c.name || 'chart'), el('span', { class: 'n' }, c.rows ? c.rows + ' row' + (c.rows === 1 ? '' : 's') : 'empty'));
-        it.addEventListener('click', () => { m.close(); newChartNote(c.guid, ''); });
+        const it = el('div', { class: 'pick-item' + (c.rows ? '' : ' muted') + (o.current && c.guid === o.current ? ' on' : ''), 'data-test': o.test || 'pick-chart' }, el('span', { class: 'hw' }, c.title || '(untitled text)'), el('span', { class: 'pos' }, c.name || 'chart'), el('span', { class: 'n' }, c.rows ? c.rows + ' row' + (c.rows === 1 ? '' : 's') : 'empty'), o.current && c.guid === o.current ? el('span', { class: 'muted small' }, ' (this one)') : null);
+        it.addEventListener('click', () => { m.close(); o.onPick(c); });
         list.appendChild(it);
       }
     };
@@ -544,6 +552,7 @@
     draw();
     search.focus();
   }
+  FS.pickChart = chartChooser;
   function ensureCollection() {
     if (S.coll) return S.coll;
     S.coll = new FS.Collection($('collection'), {
