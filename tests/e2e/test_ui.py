@@ -3868,3 +3868,73 @@ def test_gap_bar_between_blocks_adds_and_removes(app):
     page.wait_for_timeout(300)
     assert bar.is_hidden()
     assert not errors
+
+
+def test_collection_from_a_rule_and_find_new_lines(app):
+    """Seth, 2026-10-18: "create a collection with ALL lines that match a specific rule. And to be
+    able to have that collection add new matches found in the database that aren't already in
+    that collection"."""
+    h, page, errors = app
+    page.locator("#btn-new-menu").click()
+    page.locator("[data-test=new-rule-collection]").click()
+    page.wait_for_selector(".rule-dlg [data-test=rule-tags] [data-test=rule-tag]")
+    dlg = page.locator(".rule-dlg")
+    assert dlg.locator("[data-test=rule-count]").inner_text() == "Choose one or more tags."
+    # the tags come as FLEx's tree; a group's box stands for every tag under it
+    assert dlg.locator("[data-test=tag-tree-group][data-group=Arguments]").count() == 1
+    dlg.locator("[data-test=rule-tag][data-tag=Topic]").check()
+    page.wait_for_function("() => /^2 lines match/.test(document.querySelector('[data-test=rule-count]').textContent)")
+    assert dlg.locator("[data-test=rule-preview] div").count() == 2
+    dlg.locator("[data-test=rule-group][data-tag='group:Arguments']").check()
+    page.wait_for_function("() => /^4 lines match/.test(document.querySelector('[data-test=rule-count]').textContent)")
+    assert dlg.locator("[data-test=rule-tag][data-tag=Subject]").is_disabled()        # covered by its group
+    assert dlg.locator("[data-test=rule-title]").get_attribute("placeholder") == "Lines tagged Topic, Arguments"
+    dlg.locator("[data-test=rule-title]").fill("Topics and arguments")
+    dlg.locator("[data-test=rule-ok]").click()
+    page.wait_for_selector("#collection [data-test=coll-rule]")
+    page.wait_for_function("document.querySelectorAll('#collection .coll-item').length === 4")
+    assert page.locator("#note-title").input_value() == "Topics and arguments"
+    assert page.locator("[data-test=coll-rule]").inner_text().startswith("⚑ Topic, all of Arguments")
+    nid = h.api.list_collections()[0]["id"]
+    note = h.api.get_note(nid)
+    assert note["rule"] == {"tags": ["Topic", "group:Arguments"]} and note["body"].count("{{flex:text") == 4
+    assert "seg=5-6 at=" in note["body"]                                                   # the spanning Topic is one line
+    # nothing new yet
+    page.locator("[data-test=coll-rule-update]").click()
+    page.wait_for_selector(".toast:has-text('Nothing new')")
+    # remove two lines by hand, then "Find new lines" brings them back, at the end and selected
+    first = page.locator("#collection .coll-item").first
+    first.locator("[data-test=coll-check]").check()
+    page.locator("#collection .coll-item").nth(1).locator("[data-test=coll-check]").check()
+    page.locator("[data-test=coll-sel-delete]").click()
+    page.wait_for_function("document.querySelectorAll('#collection .coll-item').length === 2")
+    page.wait_for_timeout(900)
+    page.locator("[data-test=coll-rule-update]").click()
+    page.wait_for_selector(".toast:has-text('2 new lines added')")
+    page.wait_for_function("document.querySelectorAll('#collection .coll-item').length === 4")
+    assert page.locator("#collection .coll-item.selected").count() == 2
+    assert [c.inner_text() for c in page.locator("#collection .coll-num").all()] == ["(1)", "(2)", "(3)", "(4)"]
+    body = without_flex_copies(h.api.get_note(nid)["body"])
+    assert body.count("{{flex:text") == 4 and body.rstrip().endswith("}}")
+    # the rule is edited in place: the header follows, the file too
+    page.locator("[data-test=coll-rule-edit]").click()
+    page.wait_for_selector(".rule-dlg [data-test=rule-tag]")
+    assert page.locator(".rule-dlg [data-test=rule-title]").is_disabled()
+    page.locator(".rule-dlg [data-test=rule-group][data-tag='group:Arguments']").uncheck()
+    page.locator(".rule-dlg [data-test=rule-ok]").click()
+    page.wait_for_function("() => document.querySelector('[data-test=coll-rule] .coll-rule-tags').textContent.trim() === '⚑ Topic'")
+    assert h.api.get_note(nid)["rule"] == {"tags": ["Topic"]}
+    # the picker's tag view offers the same, pre-ticked
+    page.locator("#btn-new-menu").click()
+    page.locator("[data-test=new-collection]").click()
+    page.wait_for_selector("#collection .coll-add")
+    page.locator("#collection button", has_text="Add from FLEx").click()
+    page.wait_for_selector(".picker-tabs")
+    page.locator(".picker-tabs button", has_text="FLEx tags").click()
+    page.locator("[data-test=pick-tag]", has_text="Verb").click()
+    page.wait_for_selector("[data-test=collect-tagged]")
+    page.locator("[data-test=collect-tagged]").click()
+    page.wait_for_selector(".rule-dlg [data-test=rule-tag]")
+    assert page.locator(".rule-dlg [data-test=rule-tag][data-tag=Verb]").is_checked()
+    page.keyboard.press("Escape")
+    assert not errors

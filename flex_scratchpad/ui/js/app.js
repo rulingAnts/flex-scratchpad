@@ -496,6 +496,9 @@
       onChange: (md) => { if (!isCollection()) return; S.note.body = md; S.dirty = true; $('save-state').textContent = 'Editing…'; scheduleSave(); },
       onExport: () => exportCollection(),
       onRefreshAll: () => refreshAll(),
+      rule: () => (S.note && S.note.rule) || null,
+      onRuleUpdate: () => updateRuleCollection(),
+      onRuleEdit: () => ruleCollectionDialog({ note: S.note }),
       onTextsUsed: (md) => textsUsedDialog({ note: S.note.id, markdown: md }, 'in the selected items'),
       onTagStyles: (srcs, map) => tagStylesForEmbeds(srcs, map),
       canLocate: () => !!(S.flex && S.flex.open),
@@ -517,6 +520,118 @@
       await openNote(n.id);
       return n;
     } catch (e) { FS.toast(e.message, 'error'); return null; }
+  }
+  /* RULE COLLECTIONS (Seth, 2026-10-18: "create a collection with ALL lines that match a
+   * specific rule. And to be able to have that collection add new matches found in the database
+   * that aren't already in that collection"). The dialog: the project's tags as a tree with a
+   * box per tag (a group's box = every tag under it, `group:<name>`), a visual filter as a
+   * shortcut that ticks the tags its rules name, the live count and a preview of the lines;
+   * Create → Api.create_rule_collection. With `note`, it edits that collection's rule instead. */
+  async function ruleCollectionDialog(opts) {
+    opts = opts || {};
+    let tags;
+    try { tags = await FS.api.flex_text_tags(); } catch (e) { FS.toast(e.message, 'error'); return; }
+    if (FS.tagstyles && !FS.tagstyles.list().length) FS.tagstyles.setList(tags);
+    if (!tags.length) { FS.toast('This project has no text markup tags' + (S.flex && S.flex.open ? '' : ' (connect a FieldWorks project first)'), 'warn'); return; }
+    const editing = opts.note && opts.note.kind === 'examples' ? opts.note : null;
+    const chosen = new Set(((editing && editing.rule && editing.rule.tags) || (opts.tags || [])).map(String));
+    const m = FS.modal({ title: editing ? 'The rule of this collection' : 'New collection from tagged lines', class: 'rule-dlg' });
+    const title = el('input', { type: 'text', 'data-test': 'rule-title', placeholder: 'Title of the collection', style: { width: '100%' }, value: editing ? editing.title || '' : '' });
+    if (editing) title.disabled = true;
+    const count = el('div', { class: 'rule-count', 'data-test': 'rule-count' }, 'Choose one or more tags.');
+    const preview = el('div', { class: 'rule-preview', 'data-test': 'rule-preview' });
+    const tree = el('div', { 'data-test': 'rule-tags' });
+    const byGuid = new Map(tags.map((t) => [t.guid, t]));
+    const nameOf = (sel) => (byGuid.get(sel) || {}).name || sel;
+    const isOn = (t) => chosen.has(t.name) || chosen.has(t.guid) || (t.path || [t.group]).some((g) => g && chosen.has('group:' + g));
+    let lastRows = [];
+    const recount = FS.debounce(async () => {
+      const sels = [...chosen];
+      if (!sels.length) { count.textContent = 'Choose one or more tags.'; preview.innerHTML = ''; lastRows = []; return; }
+      count.textContent = 'Counting…';
+      try { lastRows = await FS.api.rule_matches({ tags: sels }); } catch (e) { count.textContent = e.message; return; }
+      count.textContent = lastRows.length + (lastRows.length === 1 ? ' line matches' : ' lines match') + ' now';
+      preview.innerHTML = '';
+      for (const r of lastRows.slice(0, 60)) preview.appendChild(el('div', {}, el('span', { class: 't' }, (r.title || '(untitled)') + ' ' + r.label + (r.segTo !== r.seg ? '\u2013' + r.labelTo : '')), el('span', { class: 'w', dir: 'auto' }, r.words || ''), el('span', { class: 'muted small' }, (r.tags || []).join(', '))));
+      if (lastRows.length > 60) preview.appendChild(el('div', { class: 'muted small' }, '\u2026 and ' + (lastRows.length - 60) + ' more'));
+      if (!editing && !title.value.trim()) title.placeholder = 'Lines tagged ' + sels.map(nameOf).map((x) => x.replace(/^group:/, '')).join(', ');
+    }, 150);
+    const draw = () => {
+      tree.innerHTML = '';
+      FS.tagstyles.renderTagTree(tree, tags, {
+        open: true,
+        leaf: (t) => {
+          const cb = el('input', { type: 'checkbox', 'data-test': 'rule-tag', dataset: { tag: t.name }, checked: isOn(t), disabled: (t.path || [t.group]).some((g) => g && chosen.has('group:' + g)) || chosen.has('*') });
+          cb.addEventListener('change', () => { cb.checked ? chosen.add(t.name) : chosen.delete(t.name); chosen.delete(t.guid); recount(); });
+          return el('div', { class: 'tag-tree-leaf' }, el('label', {}, cb, el('span', {}, t.name), t.abbr && t.abbr !== t.name ? el('span', { class: 'muted small' }, t.abbr) : null, t.count != null ? el('span', { class: 'muted small' }, t.count + ' place' + (t.count === 1 ? '' : 's')) : null));
+        },
+        head: (n) => {
+          const key = 'group:' + n.name;
+          const cb = el('input', { type: 'checkbox', 'data-test': 'rule-group', dataset: { tag: key }, checked: chosen.has(key), title: 'Every tag under \u201c' + n.name + '\u201d, those added later too' });
+          cb.addEventListener('click', (e) => e.stopPropagation());
+          cb.addEventListener('change', () => { cb.checked ? chosen.add(key) : chosen.delete(key); draw(); recount(); });
+          return el('label', { class: 'small', onclick: (e) => e.stopPropagation() }, cb, ' all of these');
+        },
+      });
+    };
+    const filters = (FS.tagstyles.filters && FS.tagstyles.filters()) || [];
+    if (filters.length) {
+      const sel = el('select', { 'data-test': 'rule-filter' }, el('option', { value: '' }, 'Tick the tags of a visual filter\u2026'));
+      for (const f of filters) sel.appendChild(el('option', { value: f.id }, f.name || f.id));
+      sel.addEventListener('change', () => {
+        const f = filters.find((x) => x.id === sel.value);
+        if (!f) return;
+        for (const r of f.rules || []) if (r.enabled !== false && r.hide !== true && r.tag && !/^filter:/.test(r.tag)) chosen.add(/^group:/i.test(r.tag) || r.tag === '*' ? r.tag : nameOf(r.tag));
+        sel.value = '';
+        draw(); recount();
+      });
+      m.body.appendChild(el('div', { class: 'row', style: { marginBottom: '6px' } }, sel));
+    }
+    m.body.appendChild(el('div', { class: 'row', style: { marginBottom: '6px' } }, title));
+    m.body.appendChild(el('div', { class: 'small muted' }, 'Every FLEx line (a segment, or the segments a tag spans) carrying one of the ticked tags becomes an example. Later, \u201cFind new lines\u201d adds the matches that are not in the collection yet.'));
+    m.body.appendChild(tree);
+    m.body.append(count, preview);
+    const ok = el('button', { class: 'btn primary', 'data-test': 'rule-ok' }, editing ? 'Save rule' : 'Create collection');
+    ok.addEventListener('click', async () => {
+      const rule = { tags: [...chosen] };
+      if (!rule.tags.length) { FS.toast('Choose at least one tag', 'warn'); return; }
+      ok.disabled = true;
+      try {
+        if (editing) {
+          const n = await FS.api.set_note_rule(editing.id, rule);
+          if (S.note && S.note.id === n.id) { S.note.rule = n.rule; ensureCollection().render(); }
+          m.close();
+          FS.toast('Rule saved \u2014 \u201cFind new lines\u201d adds what it matches now', 'ok');
+          return;
+        }
+        await flushSave();
+        const n = await FS.api.create_rule_collection(S.tab, S.folder || '', title.value.trim() || title.placeholder, rule);
+        m.close();
+        clearSearch();
+        await refreshLists();
+        await openNote(n.id);
+        FS.toast(n.matched + (n.matched === 1 ? ' line collected' : ' lines collected'), 'ok');
+      } catch (e) { ok.disabled = false; FS.toast(e.message, 'error'); }
+    });
+    m.body.appendChild(el('div', { class: 'row', style: { justifyContent: 'flex-end', marginTop: '10px' } }, el('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'), ok));
+    draw();
+    recount();
+    setTimeout(() => (editing ? ok : title).focus(), 0);
+  }
+  FS.ruleCollection = (o) => ruleCollectionDialog(o);
+  /* "Find new lines": the matches of the rule that are not in the collection yet, appended and selected. */
+  async function updateRuleCollection() {
+    if (!isCollection() || !S.note.rule) return;
+    await flushSave();
+    let r;
+    try { r = await FS.api.update_rule_collection(S.note.id); } catch (e) { FS.toast(e.message, 'error'); ensureCollection().render(); return; }
+    const n = r.note;
+    n.body = FS.flexcopy.strip(n.body || '', n.id);
+    S.note = n; S.dirty = false;
+    const coll = ensureCollection().load(n.body || '');
+    if (r.added.length) { coll.selectBySrc(r.added); FS.toast(r.added.length + (r.added.length === 1 ? ' new line added' : ' new lines added') + ' (selected)', 'ok'); }
+    else FS.toast('Nothing new: all ' + r.matched + ' matching line' + (r.matched === 1 ? ' is' : 's are') + ' here already', 'ok');
+    await refreshLists();
   }
   /* "Collect the examples into a new collection…": every interlinear example in a note (blocks,
    * inline chips, table cells), in order, copied into a new collection next to it. */
@@ -1149,6 +1264,7 @@
     $('btn-new-menu').addEventListener('click', (e) => FS.popover(e.currentTarget, (pop, close) => {
       pop.appendChild(el('button', { class: 'menu-item', onclick: () => { close(); newNote(); } }, 'New note', el('span', { class: 'muted small' }, '  Ctrl+N')));
       pop.appendChild(el('button', { class: 'menu-item', 'data-test': 'new-collection', title: 'A note that is just interlinear examples, numbered in order — the kind that exports as a FLEx text', onclick: () => { close(); newCollection('', ''); } }, 'New example collection'));
+      pop.appendChild(el('button', { class: 'menu-item', 'data-test': 'new-rule-collection', title: 'A collection of every line in the project that carries the FLEx text markup tags you choose; later it can take in the new matches', onclick: () => { close(); ruleCollectionDialog({}); } }, 'New collection from tagged lines\u2026'));
     }));
     $('btn-add-tab').addEventListener('click', addTab);
     $('btn-add-folder').addEventListener('click', () => newFolder(S.tab, S.folder || ''));

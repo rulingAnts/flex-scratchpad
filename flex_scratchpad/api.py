@@ -21,7 +21,7 @@ from . import APP_NAME, __version__, build_id
 from .config import AppConfig
 from .flex import FlexService
 from .flex.lcm import FlexError
-from .notebook import ATTACH_DIR, Notebook, inline_tags
+from .notebook import ATTACH_DIR, Notebook, clean_rule, example_keys, inline_tags, match_embed, match_keys
 
 
 def safe_filename(name: str) -> str:
@@ -179,6 +179,45 @@ class Api:
     def add_to_collection(self, note_id: str, embeds: list[str]) -> dict:
         """Append examples (embed sources) to an example collection; returns its summary."""
         return self._nb.append_examples(note_id, list(embeds or [])).summary()
+
+    # RULE COLLECTIONS (Seth, 2026-10-18: "create a collection with ALL lines that match a
+    # specific rule. And … have that collection add new matches found in the database that
+    # aren't already in that collection"): the rule is kept in the collection's header.
+    def rule_matches(self, rule: dict) -> list[dict]:
+        """The lines a rule matches now (the dialog's count and preview)."""
+        try:
+            return self._flex.rule_matches(rule or {})
+        except FlexError as e:
+            raise RuntimeError(e.message) from e
+
+    def create_rule_collection(self, tab: str | None, folder: str, title: str, rule: dict) -> dict:
+        """A new collection holding every line the rule matches, one example each, in text order."""
+        rule = clean_rule(rule)
+        if not rule:
+            raise RuntimeError("Choose at least one tag for the rule")
+        rows = self.rule_matches(rule)
+        body = "\n\n".join(match_embed(r) for r in rows)
+        n = self._nb.create_note(tab, folder or "", title or "", body + ("\n" if body else ""), "examples", rule=rule)
+        d = self.get_note(n.id)
+        d["matched"] = len(rows)
+        return d
+
+    def update_rule_collection(self, note_id: str) -> dict:
+        """Add the lines the rule matches now that the collection does not hold yet, at its end.
+        Returns {added: [embed sources], total, matched, note}."""
+        n = self._nb.get_note(note_id)
+        if n.kind != "examples" or not n.rule:
+            raise RuntimeError("This collection has no rule")
+        rows = self.rule_matches(n.rule)
+        have = example_keys(n.body)
+        add = [match_embed(r) for r in rows if not any(k in have for k in match_keys(r))]
+        if add:
+            n = self._nb.append_examples(note_id, add)
+        return {"added": add, "matched": len(rows), "total": n.summary().get("exampleCount", 0), "note": self.get_note(n.id)}
+
+    def set_note_rule(self, note_id: str, rule: dict | None) -> dict:
+        """Change (or remove) a collection's rule; what it holds is left as it is."""
+        return self.get_note(self._nb.set_rule(note_id, rule).id)
 
     def save_note(self, note_id: str, patch: dict) -> dict:
         patch = patch or {}

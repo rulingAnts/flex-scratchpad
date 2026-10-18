@@ -426,6 +426,29 @@
       return c;
     }
 
+    /* A RULE COLLECTION (Seth, 2026-10-18: "a collection with ALL lines that match a specific
+     * rule … add new matches found in the database that aren't already in that collection"):
+     * the rule it was made from, "Find new lines" (the app asks Python for today's matches and
+     * appends the ones not here yet) and "Edit rule…". */
+    ruleBar() {
+      const rule = this.opts.rule ? this.opts.rule() : null;
+      if (!rule || !(rule.tags || []).length) return null;
+      const label = (sel) => (/^group:/i.test(sel) ? 'all of ' + sel.slice(6) : sel === '*' ? 'every tag' : sel);
+      return el('span', { class: 'coll-rule', 'data-test': 'coll-rule', title: 'This collection was made from every line carrying one of these FLEx tags' + (rule.texts && rule.texts.length ? ' in ' + rule.texts.length + ' chosen text' + (rule.texts.length === 1 ? '' : 's') : '') },
+        el('span', { class: 'coll-rule-tags' }, '\u2691 ' + rule.tags.map(label).join(', ')),
+        el('button', { class: 'btn', 'data-test': 'coll-rule-update', title: 'Look through the project again and add the matching lines that are not here yet', onclick: (e) => { e.currentTarget.disabled = true; this.opts.onRuleUpdate && this.opts.onRuleUpdate(); } }, '\u27f3 Find new lines'),
+        el('button', { class: 'btn', 'data-test': 'coll-rule-edit', title: 'Change which tags the rule looks for', onclick: () => this.opts.onRuleEdit && this.opts.onRuleEdit() }, 'Edit rule\u2026'));
+    }
+    /* Select the examples whose source is one of `srcs` (the lines an update just added). */
+    selectBySrc(srcs) {
+      const want = new Set((srcs || []).map((x) => cleanEmbed(x)));
+      this.sel = new Set(this.items.filter((it) => it.t === 'ex' && want.has(cleanEmbed(it.src))));
+      this.lastSel = null;
+      this.render();
+      const first = this.list && this.list.querySelector('.coll-item.selected');
+      if (first) first.scrollIntoView({ block: 'center' });
+    }
+
     /* -- drawing -------------------------------------------------------------------- */
     render() {
       const root = this.root;
@@ -444,6 +467,7 @@
         n ? (this.examples().some((x) => !(x.spec && x.spec.extra && x.spec.extra.collapsed))
           ? el('button', { class: 'btn', 'data-test': 'coll-ex-all', title: 'Show every example as a one-line chip (hover or click one to see it)', onclick: () => this.setExamplesCollapsed(true) }, '\u2921 Examples as chips')
           : el('button', { class: 'btn', 'data-test': 'coll-ex-all', title: 'Show every example in full', onclick: () => this.setExamplesCollapsed(false) }, '\u2922 Examples in full')) : null,
+        this.ruleBar(),
         el('button', { class: 'btn', 'data-test': 'coll-add-group', title: 'A labelled, collapsible block for sorting the examples (not exported)', onclick: () => this.askGroup() }, '➕ Group…'),
         el('button', { class: 'btn', 'data-test': 'coll-refresh', title: 'Take in what was changed in FieldWorks and reload every example', onclick: (e) => { e.currentTarget.disabled = true; this.opts.onRefreshAll && this.opts.onRefreshAll(); } }, '↻ Refresh all'),
         el('button', { class: 'btn', title: 'Find a text and its segments in the project', onclick: () => this.pick() }, '➕ Add from FLEx…'),

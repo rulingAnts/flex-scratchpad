@@ -77,6 +77,7 @@
       tags: [{ name: 'todo', color: '#b45309' }], flex: { source: 'demo', project: 'Kalu Demo' }, media: { byGuid: {}, folders: [] }, settings: { diacriticsInsensitive: true }, tagStyles: { project: {}, tab: {}, folder: {}, note: {}, text: {}, filters: [] } };
     const folders = { Notes: [], Grammar: ['Verbs', 'Verbs/Aspect'] };
     let seq = 0;
+    const ruleEmbed = (r) => '{{flex:text ' + r.text + ' seg=' + r.seg + (r.segTo !== r.seg ? '-' + r.segTo : '') + (r.at && r.at[0] ? ' at=' + r.at[0] + (r.at[1] && r.at[1] !== r.at[0] ? '-' + r.at[1] : '') : '') + '}}';
     const now = () => new Date().toISOString().slice(0, 19);
     function mk(tab, folder, title, body, tags, kind) {
       const id = 'n_' + (++seq).toString(16).padStart(10, '0');
@@ -100,6 +101,46 @@
       list_notes: async () => list(), folders: async () => folders, tags: async () => tags(),
       get_note: async (id) => ({ ...notes[id], inlineTags: summary(notes[id]).inlineTags }),
       create_note: async (tab, folder, title, body, kind) => ({ ...mk(tab || 'Notes', folder || '', title || '', body || '', null, kind || '') }),
+      // rule collections (the mock's version of Api.rule_matches & co.: tags by name / guid / group:<name> / *)
+      rule_matches: async function (rule) {
+        const all = await this.flex_text_tags();
+        const norm = (x) => String(x || '').trim().toLowerCase().replace(/_/g, ' ');
+        const want = new Map();
+        for (const sel of (rule && rule.tags) || []) {
+          if (sel === '*') all.forEach((t) => want.set(t.guid, t));
+          else if (/^group:/i.test(sel)) all.filter((t) => (t.path || [t.group]).some((g) => norm(g) === norm(sel.slice(6)))).forEach((t) => want.set(t.guid, t));
+          else all.filter((t) => t.guid === sel.toLowerCase() || norm(t.name) === norm(sel) || norm(t.abbr) === norm(sel)).forEach((t) => want.set(t.guid, t));
+        }
+        const only = new Set(((rule && rule.texts) || []).map((x) => String(x).toLowerCase()));
+        const rows = new Map();
+        for (const t of want.values()) for (const r of await this.flex_tag_occurrences(t.guid, '')) {
+          if (only.size && !only.has(r.text)) continue;
+          const k = r.text + ':' + r.seg + '-' + r.segTo;
+          if (rows.has(k)) { if (!rows.get(k).tags.includes(t.name)) rows.get(k).tags.push(t.name); } else rows.set(k, { ...r, tags: [t.name] });
+        }
+        return [...rows.values()].sort((a, b) => a.title.localeCompare(b.title) || a.seg - b.seg || a.segTo - b.segTo);
+      },
+      create_rule_collection: async function (tab, folder, title, rule) {
+        const rows = await this.rule_matches(rule);
+        const n = mk(tab || 'Notes', folder || '', title || '', rows.map(ruleEmbed).join('\n\n') + (rows.length ? '\n' : ''), null, 'examples');
+        n.rule = { tags: [...(rule.tags || [])], ...(rule.texts && rule.texts.length ? { texts: [...rule.texts] } : {}) };
+        return { ...n, matched: rows.length };
+      },
+      update_rule_collection: async function (id) {
+        const n = notes[id];
+        if (!n || n.kind !== 'examples' || !n.rule) throw new Error('This collection has no rule');
+        const rows = await this.rule_matches(n.rule);
+        const have = new Set();
+        for (const m of n.body.matchAll(/\{\{flex:text\s+([0-9a-f-]{36})\b([^}]*)\}\}/gi)) {
+          const seg = /\bseg=(\d+)(?:-(\d+))?/.exec(m[2]), at = /\bat=([0-9a-f]+)(?:-([0-9a-f]+))?/i.exec(m[2]);
+          if (at) have.add(m[1].toLowerCase() + '@' + at[1] + '-' + (at[2] || at[1]));
+          if (seg) have.add(m[1].toLowerCase() + '#' + seg[1] + '-' + (seg[2] || seg[1]));
+        }
+        const add = rows.filter((r) => !have.has(r.text + '@' + r.at[0] + '-' + r.at[1]) && !have.has(r.text + '#' + r.seg + '-' + r.segTo)).map(ruleEmbed);
+        if (add.length) await this.add_to_collection(id, add);
+        return { added: add, matched: rows.length, total: (n.body.match(/^\s*\{\{flex:text\b[^\n]*\}\}\s*$/gm) || []).length, note: await this.get_note(id) };
+      },
+      set_note_rule: async function (id, rule) { const n = notes[id]; n.rule = rule && rule.tags && rule.tags.length ? { tags: [...rule.tags] } : null; n.updated = now(); return this.get_note(id); },
       list_collections: async () => Object.values(notes).filter((n) => n.kind === 'examples').sort((a, b) => b.updated.localeCompare(a.updated)).map((n) => ({ id: n.id, title: n.title, tab: n.tab, folder: n.folder, updated: n.updated, count: (n.body.match(/^\s*\{\{flex:text\b[^\n]*\}\}\s*$/gm) || []).length })),
       texts_used: async (scope) => {
         // the mock's version of Api.texts_used: one row per text the examples come from
@@ -126,9 +167,9 @@
       save_note: async (id, patch) => { const n = notes[id]; for (const k of ['title', 'body', 'tags', 'pinned']) if (patch[k] != null) n[k] = patch[k]; n.updated = now(); return summary(n); },
       move_note: async (id, tab, folder) => { notes[id].tab = tab; notes[id].folder = folder || ''; return summary(notes[id]); },
       delete_note: async (id) => { delete notes[id]; return true; },
-      search: async (q, f) => {
+      search: async function (q, f) {
         const tagged = [...q.matchAll(/\btagged:(\S+)/g)].map((m) => m[1].toLowerCase());
-        const used = tagged.length ? await api.flex_tags_used() : {};
+        const used = tagged.length ? await this.flex_tags_used() : {};
         const ql = FS.normalize(q.replace(/\b(tag|tab|folder|tagged):\S+/g, '').trim(), true); f = f || {};
         return list().filter((n) => (!f.tab || n.tab === f.tab) && (!f.tags || !f.tags.length || f.tags.every((t) => n.tags.includes(t) || n.inlineTags.includes(t))) && tagged.every((t) => (used[t] || []).includes(n.id)) && (!ql || FS.normalize(n.title + ' ' + n.body, true).includes(ql))).map((n) => ({ ...n, snippet: n.excerpt, snippetMarks: [], score: 1 }));
       },

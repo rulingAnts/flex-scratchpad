@@ -83,7 +83,9 @@
           results.innerHTML = '';
           const back = el('button', { class: 'lnk', onclick: () => { state.tag = null; search.value = ''; search.placeholder = 'Search tags by name…'; doSearch(); } }, '\u2190 All tags');
           results.appendChild(el('div', { class: 'pick-group', style: { display: 'flex', gap: '8px', alignItems: 'center' } }, back, el('b', {}, state.tag.name), el('span', { class: 'muted' }, rows.length + ' place' + (rows.length === 1 ? '' : 's'))));
-          if (rows.length) results.appendChild(el('div', { class: 'pick-item', style: { justifyContent: 'flex-end' } }, el('button', { class: 'btn', 'data-test': 'insert-all-tagged', title: 'One example per place, in text order', onclick: () => { onInsert(rows.map((o) => embedFor('text', o.text, { seg: [o.seg, o.segTo], at: o.at })).join('\n\n'), true); m.close(); } }, 'Insert all ' + rows.length + ' as examples')));
+          if (rows.length) results.appendChild(el('div', { class: 'pick-item', style: { justifyContent: 'flex-end', gap: '6px' } },
+            FS.ruleCollection ? el('button', { class: 'btn', 'data-test': 'collect-tagged', title: 'A new example collection of every line with this tag, which can take in new matches later', onclick: () => { m.close(); FS.ruleCollection({ tags: [state.tag.name] }); } }, 'Collect into a new collection\u2026') : null,
+            el('button', { class: 'btn', 'data-test': 'insert-all-tagged', title: 'One example per place, in text order', onclick: () => { onInsert(rows.map((o) => embedFor('text', o.text, { seg: [o.seg, o.segTo], at: o.at })).join('\n\n'), true); m.close(); } }, 'Insert all ' + rows.length + ' as examples')));
           if (!rows.length) results.appendChild(el('div', { class: 'pick-item muted' }, search.value ? 'No place matches.' : 'This tag is not used anywhere.'));
           for (const o of rows) {
             const where = o.label + (o.segTo !== o.seg ? '\u2013' + o.labelTo : '');

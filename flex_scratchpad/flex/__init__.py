@@ -859,6 +859,49 @@ class FlexService:
             rows = [r for r in rows if ql in (r.get("title", "") + " " + r.get("words", "") + " " + r.get("label", "")).casefold()]
         return rows
 
+    def rule_matches(self, rule: dict) -> list[dict]:
+        """Every LINE (segment range) carrying any tag a rule names (Seth, 2026-10-18: "a
+        collection with ALL lines that match a specific rule"). A selector is a tag's GUID,
+        name or abbreviation, `group:<name>` (every tag under that group, at any depth) or `*`;
+        `texts` limits the search to those texts. One row per distinct range, in text order,
+        each with the names of the tags that put it there."""
+        rule = rule or {}
+        sels = [str(t).strip() for t in rule.get("tags") or [] if str(t).strip()]
+        if not sels:
+            return []
+        tags = self.text_tags()
+        want: dict[str, None] = {}
+        norm = lambda x: str(x or "").strip().casefold().replace("_", " ")  # noqa: E731
+        for sel in sels:
+            if sel == "*":
+                for t in tags:
+                    want[t["guid"]] = None
+            elif sel.lower().startswith("group:"):
+                g = norm(sel[6:])
+                for t in tags:
+                    if any(norm(p) == g for p in (t.get("path") or [t.get("group")])):
+                        want[t["guid"]] = None
+            else:
+                for t in tags:
+                    if sel.lower() == t["guid"] or norm(sel) in (norm(t.get("name")), norm(t.get("abbr"))):
+                        want[t["guid"]] = None
+        names = {t["guid"]: t.get("name") or t.get("abbr") or "?" for t in tags}
+        only = {str(x).lower() for x in rule.get("texts") or []}
+        rows: dict[tuple, dict] = {}
+        for guid in want:
+            for r in self.tag_occurrences(guid):
+                if only and str(r.get("text", "")).lower() not in only:
+                    continue
+                key = (r.get("text"), r.get("seg"), r.get("segTo"))
+                if key in rows:
+                    if names.get(guid) not in rows[key]["tags"]:
+                        rows[key]["tags"].append(names.get(guid))
+                else:
+                    rows[key] = dict(r, tags=[names.get(guid)])
+        out = list(rows.values())
+        out.sort(key=lambda r: (str(r.get("title", "")).casefold(), r.get("seg") or 0, r.get("segTo") or 0))
+        return out
+
     # -- search index support -----------------------------------------------------
 
     def searchable_text_for_body(self, body: str) -> str:

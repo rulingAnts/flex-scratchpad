@@ -131,3 +131,50 @@ def test_the_notes_that_use_each_flex_tag_are_known_as_soon_as_a_text_is_fetched
     used = api.flex_tags_used()
     assert used["topic"] == [tagged["id"]] and used["top"] == [tagged["id"]] and used["subject"] == [tagged["id"]]
     assert [h["id"] for h in api.search("tagged:topic")] == [tagged["id"]]
+
+
+def test_a_rule_collection_holds_every_tagged_line_and_takes_in_new_matches(tmp_path):
+    """Seth, 2026-10-18: "create a collection with ALL lines that match a specific rule. And to be
+    able to have that collection add new matches found in the database that aren't already in
+    that collection"."""
+    api = make(tmp_path)
+    tab = api.init()["config"]["tabs"][0]["dir"]
+    # the matches: one row per distinct line (segment range), whatever tags put it there
+    rows = api.rule_matches({"tags": ["Subject"]})
+    assert [(r["seg"], r["segTo"], r["tags"]) for r in rows] == [(1, 1, ["Subject"]), (2, 2, ["Subject"])]
+    rows = api.rule_matches({"tags": ["group:Arguments"]})           # Subject + Object: segment 2 once, with both names
+    assert [(r["seg"], r["tags"]) for r in rows] == [(1, ["Subject"]), (2, ["Subject", "Object"])]
+    assert [(r["seg"], r["segTo"]) for r in api.rule_matches({"tags": ["Topic"]})] == [(4, 4), (5, 6)]   # a spanning tag = one line 5–6
+    assert len(api.rule_matches({"tags": ["*"]})) == 4 and api.rule_matches({"tags": ["Topic"], "texts": ["no-such-text"]}) == []
+    assert api.rule_matches({"tags": ["S", TAG_LIST[0]["guid"]]}) == api.rule_matches({"tags": ["Subject"]})   # abbreviation / GUID / name alike
+    # the collection: one example per line, anchored, the rule in its header
+    n = api.create_rule_collection(tab, "", "Subjects", {"tags": ["Subject"], "texts": []})
+    assert n["kind"] == "examples" and n["matched"] == 2 and n["rule"] == {"tags": ["Subject"]}
+    assert n["body"].split("\n\n") == ["{{flex:text %s seg=1 at=0e1f2a3b1001}}" % T_STORY, "{{flex:text %s seg=2 at=0e1f2a3b1002}}\n" % T_STORY]
+    text = Path(n["path"]).read_text(encoding="utf-8")
+    assert "kind: examples\nrule-tags: [Subject]\n" in text and "rule-texts" not in text
+    assert api.get_note(n["id"])["rule"] == {"tags": ["Subject"]}        # read back from the file
+    # nothing new: nothing added; a line removed by hand is found again (it is not in the collection)
+    r = api.update_rule_collection(n["id"])
+    assert r["added"] == [] and r["matched"] == 2 and r["total"] == 2
+    api.save_note(n["id"], {"body": "## Kept\n\n{{flex:text %s seg=2 at=0e1f2a3b1002}}\n> my note\n" % T_STORY})
+    r = api.update_rule_collection(n["id"])
+    assert r["added"] == ["{{flex:text %s seg=1 at=0e1f2a3b1001}}" % T_STORY] and r["total"] == 2
+    assert r["note"]["body"].endswith("> my note\n\n{{flex:text %s seg=1 at=0e1f2a3b1001}}\n" % T_STORY)   # appended at the end; groups and notes untouched
+    # a line held by its numbers only (added by hand, no anchors) still counts as present
+    api.save_note(n["id"], {"body": "{{flex:text %s seg=1}}\n\n{{flex:text %s seg=2 at=0e1f2a3b1002}}\n" % (T_STORY, T_STORY)})
+    assert api.update_rule_collection(n["id"])["added"] == []
+    # the rule can be changed (what is held stays); a wider rule then finds more
+    assert api.set_note_rule(n["id"], {"tags": ["group:Arguments", "Topic"]})["rule"] == {"tags": ["group:Arguments", "Topic"]}
+    r = api.update_rule_collection(n["id"])
+    assert [e.split(" ")[2] for e in r["added"]] == ["seg=4", "seg=5-6"] and r["total"] == 4
+    assert "rule-tags: [group:Arguments, Topic]" in Path(r["note"]["path"]).read_text(encoding="utf-8")
+    assert api.set_note_rule(n["id"], None)["rule"] is None
+    with pytest.raises(RuntimeError):
+        api.update_rule_collection(n["id"])
+    # only a collection takes a rule; an empty rule is refused
+    plain = api.create_note(tab, "", "Plain", "text")
+    with pytest.raises(Exception):
+        api.set_note_rule(plain["id"], {"tags": ["Subject"]})
+    with pytest.raises(RuntimeError):
+        api.create_rule_collection(tab, "", "Nothing", {"tags": []})

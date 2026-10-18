@@ -22,6 +22,9 @@ A note file is a small front-matter header followed by the markdown body:
 An EXAMPLE COLLECTION (Seth, 2026-10-16) is a note whose header also says `kind: examples`: its
 body is nothing but interlinear examples, one `{{flex:text …}}` per paragraph, in order, and it
 is the one kind of note that exports as a FLEx text. Ordinary notes carry no `kind` line.
+A collection made from a RULE (Seth, 2026-10-18) also says `rule-tags: [Topic, group:Arguments]`
+(and `rule-texts: […]` when limited to texts): every line carrying one of those FLEx text markup
+tags; `Api.update_rule_collection` appends the matches it does not hold yet.
 
 Only a YAML *subset* is written and read (scalars, `[a, b]` lists, JSON-quoted strings), so there
 is no PyYAML dependency. Everything is UTF-8 with `\n` newlines; user text is never normalised or
@@ -175,6 +178,11 @@ class Note:
     kind: str = ""           # '' = an ordinary note; 'examples' = an example collection
     body: str = ""
     path: Path | None = None
+    # A RULE COLLECTION (Seth, 2026-10-18: "create a collection with ALL lines that match a
+    # specific rule … and … add new matches found in the database that aren't already in that
+    # collection"): {tags: [tag GUIDs / names / "group:<name>" / "*"], texts: [text GUIDs]} —
+    # in the file as `rule-tags:` and `rule-texts:`; None for every other note.
+    rule: dict | None = None
 
     def meta(self) -> dict:
         d = asdict(self)
@@ -236,6 +244,71 @@ def excerpt(body: str, n: int = 160) -> str:
     s = re.sub(r"[*_`~=]{1,3}", "", s)
     s = _WS.sub(" ", s).strip()
     return s[:n]
+
+
+def clean_rule(rule) -> dict | None:
+    """A collection's rule as the page (or a file) gives it, kept to what matters: the tag
+    selectors and the texts it is limited to; None when it names no tag."""
+    if not isinstance(rule, dict):
+        return None
+    tags = [str(t).strip()[:120] for t in (rule.get("tags") or []) if str(t).strip()]
+    if not tags:
+        return None
+    out = {"tags": list(dict.fromkeys(tags))}
+    texts = [str(t).strip().lower() for t in (rule.get("texts") or []) if str(t).strip()]
+    if texts:
+        out["texts"] = list(dict.fromkeys(texts))
+    return out
+
+
+def rule_from_meta(meta: dict) -> dict | None:
+    tags = meta.get("rule-tags")
+    if isinstance(tags, str):
+        tags = [tags] if tags else []
+    texts = meta.get("rule-texts")
+    if isinstance(texts, str):
+        texts = [texts] if texts else []
+    return clean_rule({"tags": tags or [], "texts": texts or []})
+
+
+_EX_PARTS = re.compile(r"\{\{flex:text\s+([0-9a-f-]{36})\b([^}]*)\}\}", re.I)
+
+
+def example_keys(body: str) -> set[str]:
+    """What a collection already holds, as keys a rule's matches can be compared with: for every
+    example, `<text>@<first anchor>-<last anchor>` when it has `at=`, and `<text>#<seg>-<segTo>`
+    (both when it has both), so a line found again by its anchors or by its numbers counts."""
+    keys: set[str] = set()
+    for m in _EX_PARTS.finditer(body or ""):
+        guid, rest = m.group(1).lower(), m.group(2)
+        seg = re.search(r"\bseg=(\d+)(?:-(\d+))?", rest)
+        at = re.search(r"\bat=([0-9a-f]+)(?:-([0-9a-f]+))?", rest, re.I)
+        if at:
+            keys.add(f"{guid}@{at.group(1).lower()}-{(at.group(2) or at.group(1)).lower()}")
+        if seg:
+            keys.add(f"{guid}#{seg.group(1)}-{seg.group(2) or seg.group(1)}")
+    return keys
+
+
+def match_keys(row: dict) -> list[str]:
+    """The keys of one match of a rule (a tag occurrence row), in the same shapes."""
+    guid = str(row.get("text") or "").lower()
+    out = [f"{guid}#{row.get('seg')}-{row.get('segTo', row.get('seg'))}"]
+    at = row.get("at") or []
+    if at and at[0]:
+        out.insert(0, f"{guid}@{at[0]}-{at[1] if len(at) > 1 and at[1] else at[0]}")
+    return out
+
+
+def match_embed(row: dict) -> str:
+    """The example source for one match: `{{flex:text <guid> seg=a-b at=x-y}}`, as flexref
+    serialises it, so the page and the file agree."""
+    seg = f"seg={row['seg']}" + (f"-{row['segTo']}" if row.get("segTo") not in (None, row["seg"]) else "")
+    at = row.get("at") or []
+    s = f"{{{{flex:text {str(row['text']).lower()} {seg}"
+    if at and at[0]:
+        s += " at=" + at[0] + (f"-{at[1]}" if len(at) > 1 and at[1] and at[1] != at[0] else "")
+    return s + "}}"
 
 
 def inline_tags(body: str) -> list[str]:
@@ -457,6 +530,7 @@ class Notebook:
             updated=str(meta.get("updated") or datetime.fromtimestamp(stat.st_mtime).replace(microsecond=0).isoformat()),
             pinned=bool(meta.get("pinned", False)),
             kind=str(meta.get("kind") or ""),
+            rule=rule_from_meta(meta),
             body=body.replace("\r\n", "\n"),
             path=path,
         )
@@ -578,6 +652,10 @@ class Notebook:
         }
         if note.kind:                       # only collections carry it: ordinary files are unchanged
             meta["kind"] = note.kind
+        if note.rule and note.rule.get("tags"):
+            meta["rule-tags"] = list(note.rule["tags"])
+            if note.rule.get("texts"):
+                meta["rule-texts"] = list(note.rule["texts"])
         target = self._note_path(note)
         target.parent.mkdir(parents=True, exist_ok=True)
         _atomic_write(target, dump_front_matter(meta) + note.body)
@@ -589,16 +667,20 @@ class Notebook:
         note.path = target
         self._reindex(note)
 
-    def create_note(self, tab: str | None = None, folder: str = "", title: str = "", body: str = "", kind: str = "") -> Note:
+    def create_note(self, tab: str | None = None, folder: str = "", title: str = "", body: str = "", kind: str = "",
+                    rule: dict | None = None) -> Note:
         if kind not in NOTE_KINDS:
             raise ValueError(f"Unknown kind of note: {kind}")
+        rule = clean_rule(rule)
+        if rule and kind != "examples":
+            raise ValueError("Only an example collection can have a rule")
         with self.lock:
             tab = tab or (self.tab_dirs()[0] if self.tab_dirs() else DEFAULT_TAB)
             if tab not in self.tab_dirs():
                 self.add_tab(tab)
             ts = now_iso()
             note = Note(id=new_id(), title=title or "", tab=tab, folder=folder or "",
-                        created=ts, updated=ts, body=body, kind=kind)
+                        created=ts, updated=ts, body=body, kind=kind, rule=rule)
             self.notes[note.id] = note
             self._write_note(note)
             return note
@@ -636,6 +718,20 @@ class Notebook:
             if changed:
                 note.updated = now_iso()
                 self._write_note(note)
+            return note
+
+    def set_rule(self, note_id: str, rule: dict | None) -> Note:
+        """Give a collection its rule (or take it away with None)."""
+        rule = clean_rule(rule)
+        with self.lock:
+            note = self.get_note(note_id)
+            if note.kind != "examples":
+                raise ValueError(f"“{note.title or 'Untitled'}” is not an example collection")
+            if rule == note.rule:
+                return note
+            note.rule = rule
+            note.updated = now_iso()
+            self._write_note(note)
             return note
 
     def append_examples(self, note_id: str, embeds: list[str]) -> Note:

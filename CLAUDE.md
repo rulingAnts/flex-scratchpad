@@ -329,6 +329,29 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   collection's file (`cleanEmbed(src, keepCollapsed)`; examples arriving from a note still come
   open), the chip is not draggable there (cards move by their grip), and the export takes every
   example, open or not.
+  RULE COLLECTIONS (Seth, 2026-10-18: "create a collection with ALL lines that match a specific
+  rule. And to be able to have that collection add new matches found in the database that aren't
+  already in that collection"): the note's `rule` = {tags: [selectors], texts?: [guids]}, in the
+  file as `rule-tags: [Topic, group:Arguments]` (+ `rule-texts:`), `Note.rule`, `clean_rule`,
+  `rule_from_meta`. A selector is a tag's name (what the UI writes: readable in the file),
+  abbreviation or GUID, `group:<name>` (every tag under that group at any depth) or `*`.
+  `FlexService.rule_matches(rule)` runs `tag_occurrences` per tag and keeps ONE row per distinct
+  LINE (text, seg, segTo — a tag spanning 5–6 is one line, two tags on one segment one line, with
+  both names in `tags`), in text order. `Api.create_rule_collection` writes one anchored example
+  per row (`match_embed`: `{{flex:text <guid> seg=a-b at=x-y}}`, flexref's own shape);
+  `Api.update_rule_collection` appends the rows whose keys (`match_keys`: by anchors AND by
+  numbers) are not among the collection's (`example_keys` reads both from every example), so a
+  line added by hand with `seg=` only still counts as present; groups and notes are untouched, the
+  new lines go to the END and the page SELECTS them (`Collection.selectBySrc`). A line the user
+  removed comes back at the next update (the semantics Seth asked for, said in the README).
+  `Api.set_note_rule` changes the rule, what is held stays. UI: `ruleCollectionDialog` (app.js;
+  `+ New ▾` → "New collection from tagged lines…", the picker's tag view "Collect into a new
+  collection…" pre-ticked, a collection's "Edit rule…"): the tag tree with a box per tag and an
+  "all of these" box per group (`group:<name>`, which disables the boxes under it), a select that
+  ticks a visual filter's tags, the live count + preview (`Api.rule_matches`); the collection
+  header's `ruleBar` (⚑ the selectors, "⟳ Find new lines" → `updateRuleCollection`, "Edit rule…").
+  The in-browser mock has the same four methods (they call each other through `this`: the
+  mock is a plain object the Proxy applies them on).
 - FLEx TEXT MARKUP TAGS (Seth, 2026-10-17: "read and render (with custom styles) FLEx's TextMarkup
   tags in our examples … project-scoped, folder-scoped, tab-scoped, and specific example-scoped …
   style settings … the most specific one takes precedent … easy to see which ones apply and click
