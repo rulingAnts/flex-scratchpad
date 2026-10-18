@@ -136,6 +136,93 @@
     });
     return out;
   }
+  /* COLUMN WIDTHS (Seth, 2026-10-18: "adjust column sizes (including off the right side,
+   * requiring rightward scroll)"): `cw=4:300,free:160,x0:120` in the embed — a template column by
+   * its number, `free` / `notes`, a custom column by `x<i>` — pixels. Parsed here, written by the
+   * header resizers; a table wider than its pane scrolls in `.chart-scroll`. */
+  function colWidths(spec) {
+    const out = new Map();
+    for (const part of String((spec.extra && spec.extra.cw) || '').split(',')) {
+      const m = /^([a-z0-9]+):(\d+)$/i.exec(part.trim());
+      if (m && +m[2] >= 24) out.set(m[1], +m[2]);
+    }
+    return out;
+  }
+  function setColWidths(spec, widths) {
+    spec.extra = spec.extra || {};
+    const s = [...widths].filter(([, w]) => w > 0).map(([k, w]) => k + ':' + Math.round(w)).join(',');
+    if (s) spec.extra.cw = s; else delete spec.extra.cw;
+  }
+  /* STICKY HEADER ROWS (Seth, 2026-10-18: "we want the chart header rows to be sticky"). CSS
+   * `position: sticky` cannot do it: the table sits in `.chart-scroll` (its sideways scroller),
+   * and a sticky cell sticks to THAT box, which never scrolls up. So while the table's header has
+   * passed the top of the pane and its rows are still in view, a copy of the header (the same
+   * colgroup, the same cell widths) is laid over the top of the pane, fixed, clipped to the
+   * chart's width and shifted with its sideways scroll. Below the note's sticky headings strip and
+   * a collection's / chart note's header. Removed with the chart. */
+  function wireStickyHead(box, table) {
+    let scroller = box.parentElement;
+    while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement;
+    if (!scroller || !table.tHead) return;
+    const scroll = box.querySelector('.chart-scroll');
+    let ghost = null, inner = null;
+    const offset = () => {
+      const sr = scroller.getBoundingClientRect();
+      let off = 0;
+      const sh = document.getElementById('sticky-heads');
+      if (scroller.id === 'editor' && sh && sh.offsetParent && !sh.hidden) off = Math.max(off, sh.getBoundingClientRect().bottom - sr.top);
+      const ch = scroller.querySelector(':scope > .coll-head');
+      if (ch) off = Math.max(off, ch.getBoundingClientRect().bottom - sr.top);
+      return sr.top + off;
+    };
+    const build = () => {
+      ghost = el('div', { class: 'tchart-sticky', 'data-test': 'chart-sticky-head' });
+      inner = el('table', { class: table.className + ' ghost' });
+      const cg = table.querySelector('colgroup');
+      if (cg) inner.appendChild(cg.cloneNode(true));
+      inner.appendChild(table.tHead.cloneNode(true));
+      ghost.appendChild(inner);
+      document.body.appendChild(ghost);
+    };
+    const sync = () => {
+      // the live table's column widths (a single-column header cell per column: the label and
+      // the extras span every header row, the template columns sit in the last row), put on
+      // the copy's <col>s so its fixed layout matches the table under it
+      const live = table.tHead.rows, n = live.length;
+      const widths = [];
+      let pos = 0;
+      for (const cell of live[0].cells) { if (cell.rowSpan >= n) widths[pos] = cell.getBoundingClientRect().width; pos += cell.colSpan; }
+      if (n > 1) { let q = 1; for (const cell of live[n - 1].cells) { widths[q] = cell.getBoundingClientRect().width; q += cell.colSpan; } }
+      let cg = inner.querySelector('colgroup');
+      if (!cg) { cg = el('colgroup'); inner.insertBefore(cg, inner.firstChild); }
+      while (cg.children.length < widths.length) cg.appendChild(el('col'));
+      widths.forEach((w, i) => { if (w) cg.children[i].style.width = w + 'px'; });
+      inner.style.width = table.getBoundingClientRect().width + 'px';
+      inner.style.transform = 'translateX(' + (-(scroll ? scroll.scrollLeft : 0)) + 'px)';
+    };
+    const update = () => {
+      if (!table.isConnected) { stop(); return; }
+      const top = offset();
+      const tr = table.getBoundingClientRect(), hh = table.tHead.getBoundingClientRect().height;
+      const sr = (scroll || table).getBoundingClientRect();
+      const show = tr.top < top && tr.bottom - hh > top && sr.width > 0 && box.offsetParent;
+      if (!show) { if (ghost) ghost.style.display = 'none'; return; }
+      if (!ghost) build();
+      ghost.style.display = '';
+      ghost.style.top = top + 'px';
+      ghost.style.left = sr.left + 'px';
+      ghost.style.width = sr.width + 'px';
+      sync();
+    };
+    const stop = () => { if (ghost) ghost.remove(); ghost = null; scroller.removeEventListener('scroll', update); window.removeEventListener('resize', update); if (scroll) scroll.removeEventListener('scroll', update); };
+    scroller.addEventListener('scroll', update, { passive: true });
+    window.addEventListener('resize', update);
+    if (scroll) scroll.addEventListener('scroll', update, { passive: true });
+    // the header moves when the pane's sticky strip grows or the table re-lays out: a cheap re-check
+    new ResizeObserver(() => { if (table.isConnected) update(); }).observe(table);
+    box._stickyStop = stop;
+    requestAnimationFrame(update);
+  }
   const segsByN = (chart) => new Map((chart.segments || []).map((s) => [s.n, s]));
   /* ‘The dog slept.’ (1.1) · ‘Yesterday…’ (1.2) — the free translations of some segments. */
   function freeText(chart, segs, withLabels) {
@@ -220,6 +307,39 @@
     const playBtn = (segs, title, cls) => el('button', { class: 'seg-play ' + (cls || ''), 'data-test': cls || 'chart-play', title, onclick: (e) => { e.stopPropagation(); play(segs, e.currentTarget); } }, '▶');
     const table = el('table', { class: 'tchart' + (vern.rtl ? ' rtl' : '') });
     const extraCols = (free === 'col' ? 1 : 0) + (notesOn ? 1 : 0) + xcols.length;
+    // one <col> per table column, keyed like `cw=`; a sized column keeps its width, the rest lay
+    // out as they please; the table grows past the pane when the widths say so (it scrolls)
+    const widths = colWidths(spec);
+    const colKeys = ['lab'].concat(cols.map((c) => String(c.n)), xcols.map((xc, i) => 'x' + i), free === 'col' ? ['free'] : [], notesOn ? ['notes'] : []);
+    const colEls = new Map();
+    const colgroup = el('colgroup');
+    for (const k of colKeys) { const c = el('col', { dataset: { key: k } }); if (widths.has(k)) c.style.width = widths.get(k) + 'px'; colEls.set(k, c); colgroup.appendChild(c); }
+    table.appendChild(colgroup);
+    if (widths.size) table.classList.add('sized');
+    const resizer = (th, key) => {
+      if (!opts.editable) return;
+      const grip = el('span', { class: 'col-rs', title: 'Drag to resize this column; double-click to let it size itself', 'data-test': 'col-rs-' + key });
+      grip.addEventListener('click', (e) => e.stopPropagation());
+      grip.addEventListener('dblclick', (e) => { e.stopPropagation(); widths.delete(key); setColWidths(spec, widths); change(); });
+      grip.addEventListener('mousedown', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        const col = colEls.get(key);
+        const startX = e.clientX, startW = th.getBoundingClientRect().width;
+        const scroller = box.querySelector('.chart-scroll');
+        let w = startW;
+        const move = (ev) => {
+          w = Math.max(40, startW + ev.clientX - startX);
+          col.style.width = w + 'px';
+          table.classList.add('sized');
+          if (scroller) { const r = scroller.getBoundingClientRect(); if (ev.clientX > r.right - 24) scroller.scrollLeft += 12; }   // past the right edge: scroll along
+        };
+        const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); document.body.classList.remove('col-resizing'); widths.set(key, Math.round(w)); setColWidths(spec, widths); change(); };
+        document.addEventListener('mousemove', move);
+        document.addEventListener('mouseup', up);
+        document.body.classList.add('col-resizing');
+      });
+      th.appendChild(grip);
+    };
     if (headers) {
       const thead = el('thead');
       const hrows = headerRows(cols);
@@ -229,12 +349,13 @@
         for (const h of hr) {
           const th = el('th', { colspan: h.span > 1 ? h.span : null, class: h.col ? 'th-col' : 'th-group', title: h.col ? ((h.col.path || []).concat([h.col.name]).join(' › ') + (h.col.abbr && h.col.abbr !== h.col.name ? ' (' + h.col.abbr + ')' : '')) : h.text, dataset: h.col ? { col: h.col.n } : null }, h.text);
           if (h.col && opts.editable) th.addEventListener('click', (e) => stylePopover(e.currentTarget, spec, { col: h.col.n }, opts, 'column ' + h.col.name));
+          if (h.col) resizer(th, String(h.col.n));
           tr.appendChild(th);
         }
         if (hi === 0) {
-          for (const xc of xcols) tr.appendChild(el('th', { class: 'th-x th-x-' + xc.kind, rowspan: hrows.length, dataset: { x: xc.key } }, xc.head ? xc.head() : xc.name));
-          if (free === 'col') tr.appendChild(el('th', { class: 'th-free', rowspan: hrows.length }, 'Free'));
-          if (notesOn) tr.appendChild(el('th', { class: 'th-notes', rowspan: hrows.length }, 'Notes'));
+          xcols.forEach((xc, i) => { const th = el('th', { class: 'th-x th-x-' + xc.kind, rowspan: hrows.length, dataset: { x: xc.key } }, xc.head ? xc.head() : xc.name); resizer(th, 'x' + i); tr.appendChild(th); });
+          if (free === 'col') { const th = el('th', { class: 'th-free', rowspan: hrows.length }, 'Free'); resizer(th, 'free'); tr.appendChild(th); }
+          if (notesOn) { const th = el('th', { class: 'th-notes', rowspan: hrows.length }, 'Notes'); resizer(th, 'notes'); tr.appendChild(th); }
         }
         thead.appendChild(tr);
       });
@@ -296,6 +417,7 @@
     if (!rows.length) tbody.appendChild(el('tr', {}, el('td', { colspan: cols.length + 1 + extraCols, class: 'seg-empty' }, 'No rows in this range.')));
     table.appendChild(tbody);
     box.appendChild(el('div', { class: 'chart-scroll' }, table));
+    if (headers && !opts.inCell) requestAnimationFrame(() => { if (box.isConnected) wireStickyHead(box, table); });
     if (free === 'tip') box.appendChild(el('div', { class: 'chart-tip muted small', 'data-test': 'chart-tip' }, 'Click a cell to see its free translation here.'));
     if (opts.context) box.classList.add('context');
     return box;
@@ -510,6 +632,7 @@
       }
       if (obj.url) pop.appendChild(el('button', { class: 'menu-item', onclick: () => { FS.copyText(obj.url); FS.toast('FLEx link copied'); close(); } }, 'Copy FLEx link'));
       pop.appendChild(el('button', { class: 'menu-item', 'data-test': 'chart-pivot', title: 'Counts of rows by marker (and clause type) and by column', onclick: () => { close(); pivotDialog(obj, spec); } }, 'Pivot: markers \u00d7 columns\u2026'));
+      if (colWidths(spec).size) pop.appendChild(el('button', { class: 'menu-item', 'data-test': 'chart-reset-widths', onclick: () => { delete x.cw; change(); close(); } }, 'Reset column widths'));
       pop.appendChild(el('button', { class: 'menu-item', onclick: () => { FS.copyText(chartTsv(spec, obj)); FS.toast('Copied as TSV'); close(); } }, 'Copy as TSV'));
       pop.appendChild(el('button', { class: 'menu-item', onclick: () => { FS.copyText(R.serialize(spec)); FS.toast('Embed code copied'); close(); } }, 'Copy embed code'));
       if (FS.api && FS.api.export_chart) {
@@ -599,5 +722,5 @@
       el('div', { class: 'btn-row' }, el('button', { class: 'btn', 'data-test': 'pivot-copy', onclick: () => { FS.copyText(tsv); FS.toast('Copied as TSV'); } }, 'Copy as TSV'), el('button', { class: 'btn primary', onclick: () => m.close() }, 'Done')));
   }
 
-  FS.chart = { renderChart, visibleColumns, headerRows, layoutRow, rowSegs, freeRuns, lineStarts, freeText, chartGrid, chartTsv, markerLook, pivot, pivotDialog, LINE_NAMES, FREE_NAMES };
+  FS.chart = { renderChart, visibleColumns, headerRows, layoutRow, rowSegs, freeRuns, lineStarts, colWidths, setColWidths, freeText, chartGrid, chartTsv, markerLook, pivot, pivotDialog, LINE_NAMES, FREE_NAMES };
 })();

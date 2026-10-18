@@ -341,6 +341,79 @@ def test_html_export_embeds_the_recordings_as_players(app):
     assert not errors
 
 
+def test_chart_columns_resize_and_a_collapsed_example_exports_as_a_link(app):
+    """Seth, 2026-10-18: "adjust column sizes (including off the right side, requiring rightward
+    scroll)"; a collapsed example or chip exports as "a text abbreviation or title and line range
+    that is a hyperlink to that text in FLEx"."""
+    h, page, errors = app
+    new_note(page, "Widths")
+    page.keyboard.type("{{flex:chart %s rows=1-3}}" % CHART)
+    page.keyboard.press("Enter")
+    page.keyboard.type("{{flex:text %s seg=1-2 collapsed}}" % T_STORY)
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#editor .chart-obj tr.crow")
+    page.wait_for_function("() => document.getElementById('save-state').textContent === 'Saved'", timeout=5000)
+    grip = page.locator("#editor .chart-obj [data-test=col-rs-4]")
+    th = page.locator("#editor .chart-obj thead th.th-col[data-col='4']")
+    before = th.bounding_box()["width"]
+    pane_w = page.evaluate("document.querySelector('#editor .chart-obj .chart-scroll').clientWidth")
+    box = grip.bounding_box()
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    page.mouse.down()
+    page.mouse.move(box["x"] + 420, box["y"] + 2, steps=8)
+    page.mouse.up()
+    page.wait_for_function("() => document.getElementById('save-state').textContent === 'Saved'", timeout=5000)
+    after = page.locator("#editor .chart-obj thead th.th-col[data-col='4']").bounding_box()["width"]
+    assert after > before + 300, (before, after)
+    body = body_of(h)
+    assert re.search(r"cw=4:\d+", body), body
+    # the table outgrew the pane and scrolls sideways
+    assert page.evaluate("() => { const s = document.querySelector('#editor .chart-obj .chart-scroll'); return s.scrollWidth > s.clientWidth; }"), pane_w
+    # the exports: the widths on the page's table, the collapsed example as a FLEx link
+    html = page.evaluate("""async () => {
+      const api = window.pywebview.api; const notes = await api.list_notes(); const note = (await Promise.all(notes.map((n) => api.get_note(n.id)))).find((n) => n.title === 'Widths');
+      const editor = new FS.Editor(document.createElement('div'), {}); editor.load(FS.flexcopy.strip(note.body));
+      const doc = await FS.exporter.buildDoc(note, editor); return FS.exporter.toHtml(doc);
+    }""")
+    assert re.search(r'<col style="width:\d+px">', html) and html.count('class="obj"') == 0 and '<a href="silfw://' in html and "1.1–1.2" in html, html[-800:]
+    # ⋯ → Reset column widths
+    page.locator("#editor .chart-obj [data-test=chart-menu]").click()
+    page.locator("[data-test=chart-reset-widths]").click()
+    page.wait_for_function("() => document.getElementById('save-state').textContent === 'Saved'", timeout=5000)
+    assert "cw=" not in body_of(h)
+    assert not errors
+
+
+def test_chart_header_rows_stick_while_the_chart_scrolls(app):
+    """Seth, 2026-10-18: "we want the chart header rows to be sticky"."""
+    h, page, errors = app
+    new_note(page, "Sticky chart")
+    page.keyboard.type("{{flex:chart %s}}" % CHART)
+    page.keyboard.press("Enter")
+    for i in range(30):
+        page.keyboard.type("Line %d after the chart." % i)
+        page.keyboard.press("Enter")
+    page.wait_for_selector("#editor .chart-obj tr.crow")
+    page.wait_for_timeout(300)
+    assert page.locator("[data-test=chart-sticky-head]").count() == 0 or not page.locator("[data-test=chart-sticky-head]").is_visible()
+    # scroll so the header has passed the top but the last rows are still in view
+    page.evaluate("""() => { const ed = document.getElementById('editor'); const t = document.querySelector('#editor .chart-obj table.tchart'); const r = t.getBoundingClientRect(), e = ed.getBoundingClientRect(); ed.scrollTop += (r.top - e.top) + 120; }""")
+    page.wait_for_selector("[data-test=chart-sticky-head]", state="visible", timeout=3000)
+    ghost = page.locator("[data-test=chart-sticky-head]")
+    assert "NUCLEUS" in ghost.inner_text().upper() and "Subject" in ghost.inner_text()      # (the group row is uppercased by CSS)
+    gb = ghost.bounding_box(); eb = page.locator("#editor").bounding_box()
+    assert abs(gb["y"] - eb["y"]) < 4, (gb, eb)
+    # the copy's columns sit over the table's
+    live = page.locator("#editor .chart-obj table.tchart thead th.th-col[data-col='3']").bounding_box()
+    copy = ghost.locator("th.th-col[data-col='3']").bounding_box()
+    assert abs(live["x"] - copy["x"]) < 2 and abs(live["width"] - copy["width"]) < 2, (live, copy)
+    # gone once the chart has scrolled away
+    page.evaluate("document.getElementById('editor').scrollTop += 2000")
+    page.wait_for_timeout(200)
+    assert not ghost.is_visible()
+    assert not errors
+
+
 def test_search_tags_and_folders(app):
     h, page, errors = app
     new_note(page, "Harmony")
@@ -619,11 +692,14 @@ def test_export_html_and_docx(app):
       return FS.exporter.toHtml(doc);
     }""", [html_path, docx_path])
     assert "<b>bold</b>" in html and 'class="obj"' in html and "ka-nuwa-mo" in html and "<u>-mo</u>" in html
-    assert "The dog slept." in html and "kabir" in html and "a domestic dog" in html
+    # the entry sits in a table cell as a CHIP, so it exports as a link into FLEx (Seth, 2026-10-18), not in full
+    assert "The dog slept." in html and 'href="silfw://' in html and "kabir" in html and "a domestic dog" not in html
     assert (h.tmp / "note.html").read_text(encoding="utf-8").startswith("<!doctype html>")
     import zipfile
     xml = zipfile.ZipFile(docx_path).read("word/document.xml").decode("utf-8")
-    assert "ka-nuwa-mo" in xml and "The dog slept." in xml and "a domestic dog" in xml and '<w:u w:val="single"/>' in xml
+    assert "ka-nuwa-mo" in xml and "The dog slept." in xml and '<w:u w:val="single"/>' in xml
+    assert '<w:tblStyle w:val="LingTeXInterlinear"/>' in xml and '<w:pStyle w:val="LingTeXFree"/>' in xml      # LingTeX-Word's shape
+    assert "<w:hyperlink " in xml and ">kabir" in xml
     assert not errors
 
 

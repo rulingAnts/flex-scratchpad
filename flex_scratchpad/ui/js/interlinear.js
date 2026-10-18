@@ -1431,5 +1431,5 @@
     });
   }
 
-  FS.interlinear = { playRange, audio, blankSeg, peek, segTags, chartTags, withChartTags, nowPlaying, render, renderText, renderEntry, renderWordform, renderChip, hydrateInline, openContext, wholeText, openOverlay, closeOverlay, isCollapsed, setCollapsed, styled, styledParts, invalidate, flexGet, openInFlex, labelOf, numberFor, flexTsv, HL_COLORS };
+  FS.interlinear = { playRange, audio, chipTitle, chipRange, blankSeg, peek, segTags, chartTags, withChartTags, nowPlaying, render, renderText, renderEntry, renderWordform, renderChip, hydrateInline, openContext, wholeText, openOverlay, closeOverlay, isCollapsed, setCollapsed, styled, styledParts, invalidate, flexGet, openInFlex, labelOf, numberFor, flexTsv, HL_COLORS };
 })();

@@ -85,6 +85,139 @@ def grid_widths(rows: list[list[dict]], text_w: int, fixed: dict | None = None, 
     return want
 
 
+# ----------------------------------------------------------------------------- LingTeX-Word
+# Examples are drawn the way LingTeX-Word draws them (rulingAnts/LingTeX-Tools, LingTeX-Word/src,
+# read 2026-10-18; Seth: "all of our IGTs should be rendered using LingTeX Word styling wherever
+# they're expanded"): ONE borderless table per line of text styled "LingTeX Interlinear", one row
+# per tier whose first cell's paragraph style names the tier ("LingTeX Vernacular", "LingTeX
+# Morphemes", "LingTeX Gloss", "LingTeX Word Gloss", "LingTeX Category"), the free translation a
+# "LingTeX Free" paragraph AFTER the table in single quotes, grammatical glosses lowercased with a
+# full-size first letter under the "LingTeX Gram Gloss" character style (small capitals — Word
+# draws only lowercase letters small), the example number in a FIRST column as Word's own list
+# numbering ("LingTeX Example Number", "(%1)"; a second cell "a.", "b." when one example is
+# several lines), wrap lines as further row groups of the same table. A document that already has
+# the add-in re-wraps these tables; one that does not shows them as they are.
+LT_TABLE = "LingTeX Interlinear"
+LT_ROLES = {"txt": "Vernacular", "morph": "Morphemes", "cf": "Morphemes", "mgls": "Gloss", "gls": "Word Gloss", "pos": "Category", "tag": "Category"}
+LT_SMALLCAPS = {"Gloss", "Word Gloss", "Category"}
+LT_NUMBER_HANG = 720            # 36 pt: the number column (LingTeX DEF_NUMBER_HANG)
+LT_SUB_W = 360                  # the "a." cell
+LT_GAP = 120                    # 6 pt between columns (DEF_GAP)
+LT_LINE_GAP = 120               # 6 pt between wrap lines (DEF_LINE_GAP)
+LT_FREE_ABOVE = 120             # 6 pt between the table and the translation (DEF_FREE_ABOVE)
+LT_BASE_COLORS = {"00379C", "2A6E2A", "4A4F57", "68717D", "7A3E9D", "A8B0BA"}   # the app's own line colours, not the user's
+MORPH_DIVS = "-=~<>"
+
+
+def lt_style_id(name: str) -> str:
+    return "".join(ch for ch in name if ch.isalnum())
+
+
+def is_gram_gloss(seg: str) -> bool:
+    """LingTeX-Word's structural test (modFlexParse.IsGramGloss): all capitals, or digit-initial;
+    a lone capital, or one with a period, is not a gloss."""
+    t = seg.strip()
+    if not t:
+        return False
+    if len(t) == 2 and t[1] == "." and (t[0].isupper() or t[0] in "Ŋŋ"):
+        return False
+    core = t
+    while core and not core[0].isalnum():
+        core = core[1:]
+    while core and not core[-1].isalnum():
+        core = core[:-1]
+    if not core:
+        return False
+    if len(core) == 1 and "A" <= core <= "Z":
+        return False
+    if core[0].isdigit():
+        return all(ch.isalnum() or ch == "_" for ch in core[1:])
+    return all(("A" <= ch <= "Z") or ch.isdigit() for ch in core)
+
+
+def split_gloss_segments(text: str) -> list[str]:
+    """modFlexParse.SplitGlossSegments: the morpheme boundaries, '.', ':' and ';' as segments of
+    their own, so the pieces reassemble unchanged."""
+    out: list[str] = []
+    cur = ""
+    for ch in text:
+        if ch in MORPH_DIVS or ch in ".:;":
+            if cur:
+                out.append(cur)
+                cur = ""
+            out.append(ch)
+        else:
+            cur += ch
+    if cur:
+        out.append(cur)
+    return out
+
+
+def small_caps_form(part: str) -> str:
+    """Lowercased, the first LETTER a capital (LingTeX's default, Seth's preference: Erg, 3Sg)."""
+    s = part.lower()
+    for i, ch in enumerate(s):
+        if ch.lower() != ch.upper():
+            return s[:i] + ch.upper() + s[i + 1:]
+    return s
+
+
+def gram_gloss_runs(runs: list[dict]) -> list[dict]:
+    """A meta-language tier's runs with every grammatical segment as its own run under the Gram
+    Gloss character style, in its small-caps form; everything else untouched."""
+    out: list[dict] = []
+    for r in runs:
+        text = str(r.get("text") or "")
+        if not text:
+            continue
+        for seg in split_gloss_segments(text):
+            x = {k: v for k, v in r.items() if k != "text"}
+            if is_gram_gloss(seg):
+                x["text"] = small_caps_form(seg)
+                x["rStyle"] = lt_style_id("LingTeX Gram Gloss")
+            else:
+                x["text"] = seg
+            out.append(x)
+    return out
+
+
+def lt_clean(r: dict) -> dict:
+    """A run as LingTeX draws it: the styles say the look, so the app's own line colours and sizes
+    go; what the USER set (a highlight, bold, underline, a colour of their own) stays."""
+    x = {k: v for k, v in r.items() if k not in ("size",)}
+    if _hex(x.get("color")) in LT_BASE_COLORS:
+        x.pop("color", None)
+    return x
+
+
+LT_STYLES_XML = (
+    # the tier paragraph styles: based on Normal, size inherited, tight and left-aligned
+    "".join(f'<w:style w:type="paragraph" w:styleId="{lt_style_id("LingTeX " + role)}"><w:name w:val="LingTeX {role}"/><w:basedOn w:val="Normal"/>'
+            + (f'<w:next w:val="Normal"/>' if role == "Free" else "")
+            + f'<w:pPr><w:spacing w:before="0" w:after="{60 if role == "Free" else 0}" w:line="240" w:lineRule="auto"/><w:jc w:val="left"/><w:widowControl w:val="0"/>'
+            + ('<w:keepNext/>' if role != "Free" else "") + '</w:pPr>'
+            + '<w:rPr>' + ('<w:rFonts w:ascii="Charis SIL" w:hAnsi="Charis SIL" w:cs="Charis SIL"/><w:i/><w:iCs/>' if role in ("Vernacular", "Morphemes") else "")
+            + ('<w:noProof/>' if role != "Free" else "") + '</w:rPr></w:style>'
+            for role in ("Vernacular", "Morphemes", "Gloss", "Word Gloss", "Category", "Free"))
+    # the grammatical-gloss character style: small capitals
+    + f'<w:style w:type="character" w:styleId="{lt_style_id("LingTeX Gram Gloss")}"><w:name w:val="LingTeX Gram Gloss"/><w:rPr><w:smallCaps/></w:rPr></w:style>'
+    # the number-cell paragraph style, linked to the example-number list
+    + f'<w:style w:type="paragraph" w:styleId="{lt_style_id("LingTeX Example")}"><w:name w:val="LingTeX Example"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/>'
+      '<w:pPr><w:keepNext/><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr><w:spacing w:before="0" w:after="0" w:line="240" w:lineRule="auto"/><w:jc w:val="left"/><w:widowControl w:val="0"/></w:pPr></w:style>'
+    + f'<w:style w:type="numbering" w:styleId="{lt_style_id("LingTeX Example Number")}"><w:name w:val="LingTeX Example Number"/><w:pPr><w:numPr><w:numId w:val="1"/></w:numPr></w:pPr></w:style>'
+    # the table style: the tag, and borderless with no cell padding
+    + f'<w:style w:type="table" w:styleId="{lt_style_id(LT_TABLE)}"><w:name w:val="{LT_TABLE}"/><w:tblPr><w:tblBorders><w:top w:val="nil"/><w:left w:val="nil"/><w:bottom w:val="nil"/><w:right w:val="nil"/><w:insideH w:val="nil"/><w:insideV w:val="nil"/></w:tblBorders>'
+      '<w:tblCellMar><w:top w:w="0" w:type="dxa"/><w:left w:w="0" w:type="dxa"/><w:bottom w:w="0" w:type="dxa"/><w:right w:w="0" w:type="dxa"/></w:tblCellMar></w:tblPr></w:style>'
+)
+
+LT_NUMBERING_XML = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                    '<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+                    f'<w:abstractNum w:abstractNumId="0"><w:multiLevelType w:val="multilevel"/><w:styleLink w:val="{lt_style_id("LingTeX Example Number")}"/>'
+                    '<w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="decimal"/><w:lvlText w:val="(%1)"/><w:lvlJc w:val="left"/><w:pPr><w:ind w:left="0" w:hanging="0"/></w:pPr><w:rPr><w:i w:val="0"/><w:smallCaps w:val="0"/></w:rPr></w:lvl>'
+                    '<w:lvl w:ilvl="1"><w:start w:val="1"/><w:numFmt w:val="lowerLetter"/><w:lvlText w:val="%2."/><w:lvlJc w:val="left"/><w:pPr><w:ind w:left="0" w:hanging="0"/></w:pPr><w:rPr><w:i w:val="0"/><w:smallCaps w:val="0"/></w:rPr></w:lvl>'
+                    '</w:abstractNum><w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num></w:numbering>')
+
+
 class Docx:
     def __init__(self):
         self.body: list[str] = []
@@ -100,6 +233,8 @@ class Docx:
         if text == "":
             return ""
         props = []
+        if r.get("rStyle"):
+            props.append(f'<w:rStyle w:val="{escape(str(r["rStyle"]))}"/>')
         if r.get("font"):
             f = escape(str(r["font"]))
             props.append(f'<w:rFonts w:ascii="{f}" w:hAnsi="{f}" w:cs="{f}" w:eastAsia="{f}"/>')
@@ -207,9 +342,11 @@ class Docx:
                 parts = [self._indent(x, 360 * int(block["indent"])) for x in parts]
             self.body.extend(parts)
             self.body.append("<w:p/>")
-        elif t in ("interlinear", "entry"):
-            parts = self.interlinear(block) if t == "interlinear" else self.entry(block)
-            if block.get("exNum"):      # (1), (2)… on its own line above the example
+        elif t == "interlinear":
+            self.body.extend(self.interlinear(block))      # LingTeX shape: number column, indent inside
+        elif t == "entry":
+            parts = self.entry(block)
+            if block.get("exNum"):      # (1), (2)… on its own line above the entry
                 parts.insert(0, self.para([{"text": str(block["exNum"]), "color": "#68717d"}]))
             if block.get("indent"):
                 parts = [self._indent(x, 360 * int(block["indent"])) for x in parts]
@@ -247,6 +384,8 @@ class Docx:
         if not borders:
             tcpr.append('<w:tcBorders><w:top w:val="nil"/><w:left w:val="nil"/><w:bottom w:val="nil"/><w:right w:val="nil"/></w:tcBorders>')
         inner = []
+        if cell.get("_para"):
+            inner.append(cell["_para"])
         if cell.get("blocks"):
             for b in cell["blocks"]:
                 sub = Docx()
@@ -255,7 +394,7 @@ class Docx:
                 sub.in_cell = True
                 sub.add(b)
                 inner.extend(sub.body)
-        if cell.get("runs") is not None or not inner:
+        if (cell.get("runs") is not None or not inner) and not cell.get("_para"):
             align = cell.get("align")
             jc = f'<w:jc w:val="{ {"center": "center", "right": "right"}.get(align, "left") }"/>' if align in ("center", "right") else ""
             inner.insert(0, self.para(cell.get("runs") or [], extra=jc))
@@ -514,43 +653,111 @@ class Docx:
         return f"<w:tbl>{tblpr}{grid}{''.join(rows)}</w:tbl>"
 
     def interlinear(self, block: dict) -> list[str]:
+        """An example as LingTeX-Word draws it (see the LingTeX section above): per line of text one
+        "LingTeX Interlinear" table — a number column when the embed is numbered (`exNum`: Word's
+        "(1)" on the first line, "a." / "b." when the example has several lines), one row per
+        tier in its tier style, wrap lines as further row groups — then the free translation,
+        literal translation and notes as "LingTeX Free" paragraphs, the source (the text and its
+        FLEx line) after the translation as a link into FieldWorks."""
         out = []
-        head = []
-        if block.get("title"):
-            head.append({"text": block["title"], "b": True, "color": "#00379c", "font": (block.get("ws") or {}).get("font")})
-        if block.get("label"):
-            head.append({"text": "   " + block["label"], "color": "#68717d"})
-        if head:
-            out.append(self.para(head))
-        for seg in block.get("segments", []):
-            lines = seg.get("lines", [])
-            ncols = max((len(l.get("cells", [])) for l in lines), default=0)
+        numbered = bool(block.get("exNum"))
+        indent = 360 * int(block.get("indent") or 0)
+        segs = [sg for sg in block.get("segments", []) if sg.get("lines") or sg.get("free") or sg.get("lit") or sg.get("notes")]
+        several = numbered and len(segs) > 1
+        num_w = LT_NUMBER_HANG if numbered else 0
+        sub_w = LT_SUB_W if several else 0
+        text_w = (TEXT_W_LANDSCAPE if self.landscape else TEXT_W_PORTRAIT) - indent - num_w - sub_w
+        font = (block.get("ws") or {}).get("font") or ""
+        for si, seg in enumerate(segs):
+            lines = [ln for ln in seg.get("lines", []) if ln.get("name") in LT_ROLES]
+            ncols = max((len(ln.get("cells", [])) for ln in lines), default=0)
             if ncols:
-                model = [[{"runs": [{"text": str(seg.get("label") or seg.get("n", "")) if li == 0 else ""}]}] + [{"runs": line["cells"][ci] if ci < len(line["cells"]) else []} for ci in range(ncols)] for li, line in enumerate(lines)]
-                widths = grid_widths(model, TEXT_W_LANDSCAPE if self.landscape else TEXT_W_PORTRAIT, {0: 500}, min_w=400, char_w=120)
-                rows = []
-                for li, line in enumerate(lines):
-                    cells = []
-                    num = {"runs": [{"text": str(seg.get("label") or seg.get("n", "")) if li == 0 else "", "color": "#a8b0ba", "size": 9}]}
-                    cells.append(self.cell(num, widths[0], borders=False))
+                # the cells as LingTeX writes them: object-language tiers keep their spaces unbreakable;
+                # meta-language tiers get their grammatical segments in small capitals
+                grid: list[list[list[dict]]] = []
+                for ln in lines:
+                    role = LT_ROLES[ln["name"]]
+                    row_cells = []
                     for ci in range(ncols):
-                        runs = line["cells"][ci] if ci < len(line["cells"]) else []
-                        cells.append(self.cell({"runs": runs}, widths[ci + 1], borders=False))
-                    rows.append(f"<w:tr>{''.join(cells)}</w:tr>")
-                tblpr = ('<w:tblPr><w:tblW w:w="0" w:type="auto"/><w:tblLayout w:type="autofit"/>'
-                         '<w:tblCellMar><w:left w:w="60" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tblCellMar></w:tblPr>')
-                grid = "<w:tblGrid>" + "".join(f'<w:gridCol w:w="{w}"/>' for w in widths) + "</w:tblGrid>"
-                out.append(f"<w:tbl>{tblpr}{grid}{''.join(rows)}</w:tbl>")
-            # free / literal translation: one paragraph of runs each; notes: one paragraph per note
-            for key, lab in (("free", "Free"), ("lit", "Lit."), ("notes", "Note")):
-                vals = seg.get(key)
-                if not vals:
+                        runs = [lt_clean(dict(x)) for x in (ln["cells"][ci] if ci < len(ln["cells"]) else [])]
+                        if role in LT_SMALLCAPS:
+                            runs = gram_gloss_runs(runs)
+                        elif role in ("Vernacular", "Morphemes"):
+                            for x in runs:
+                                x["text"] = str(x.get("text") or "").replace(" ", "\u00a0")
+                                if font and not x.get("font"):
+                                    x["font"] = font
+                        row_cells.append(runs)
+                    grid.append(row_cells)
+                # column widths from the longest cell of each column, plus the gap; wrap lines when
+                # the columns run past the text width (a column is never split)
+                widths = [max(300, min(40, max((_text_len(grid[t][ci]) for t in range(len(lines))), default=1)) * 130 + LT_GAP) for ci in range(ncols)]
+                wrap_lines: list[list[int]] = [[]]
+                used = 0
+                for ci, w in enumerate(widths):
+                    if wrap_lines[-1] and used + w > text_w:
+                        wrap_lines.append([])
+                        used = 0
+                    wrap_lines[-1].append(ci)
+                    used += w
+                rows = []
+                for g, cols_in_line in enumerate(wrap_lines):
+                    for t, ln in enumerate(lines):
+                        role = LT_ROLES[ln["name"]]
+                        style = lt_style_id("LingTeX " + role)
+                        last_tier = t == len(lines) - 1
+                        gap_after = LT_LINE_GAP if (last_tier and g < len(wrap_lines) - 1) else 0
+                        ppr_extra = f'<w:spacing w:before="0" w:after="{gap_after}"/>'
+                        cells = []
+                        if numbered:
+                            # the number cell: Word's own "(1)" on the very first row of the example, empty elsewhere
+                            if si == 0 and g == 0 and t == 0:
+                                cells.append(self.cell({"runs": None, "blocks": None, "_para": self.para([], lt_style_id("LingTeX Example"), extra=ppr_extra)}, num_w, borders=False))
+                            else:
+                                cells.append(self.cell({"runs": None, "_para": self.para([], style, extra=ppr_extra)}, num_w, borders=False))
+                        if several:
+                            if g == 0 and t == 0:
+                                cells.append(self.cell({"runs": None, "_para": self.para([], lt_style_id("LingTeX Example"), extra='<w:numPr><w:ilvl w:val="1"/><w:numId w:val="1"/></w:numPr>' + ppr_extra)}, sub_w, borders=False))
+                            else:
+                                cells.append(self.cell({"runs": None, "_para": self.para([], style, extra=ppr_extra)}, sub_w, borders=False))
+                        for ci in cols_in_line:
+                            cells.append(self.cell({"runs": None, "_para": self.para(grid[t][ci], style, extra=ppr_extra)}, widths[ci], borders=False))
+                        rows.append(f"<w:tr><w:trPr><w:cantSplit/></w:trPr>{''.join(cells)}</w:tr>")
+                line_w = [num_w + sub_w + sum(widths[ci] for ci in line) for line in wrap_lines]
+                grid_w = [num_w] * bool(numbered) + [sub_w] * bool(several) + [widths[ci] for ci in wrap_lines[0]]
+                tblpr = (f'<w:tblPr><w:tblStyle w:val="{lt_style_id(LT_TABLE)}"/><w:tblW w:w="{max(line_w)}" w:type="dxa"/>'
+                         + (f'<w:tblInd w:w="{indent}" w:type="dxa"/>' if indent else "")
+                         + '<w:tblBorders><w:top w:val="nil"/><w:left w:val="nil"/><w:bottom w:val="nil"/><w:right w:val="nil"/><w:insideH w:val="nil"/><w:insideV w:val="nil"/></w:tblBorders>'
+                         '<w:tblLayout w:type="fixed"/><w:tblCellMar><w:top w:w="0" w:type="dxa"/><w:left w:w="0" w:type="dxa"/><w:bottom w:w="0" w:type="dxa"/><w:right w:w="0" w:type="dxa"/></w:tblCellMar></w:tblPr>')
+                tblgrid = "<w:tblGrid>" + "".join(f'<w:gridCol w:w="{w}"/>' for w in grid_w) + "</w:tblGrid>"
+                out.append(f"<w:tbl>{tblpr}{tblgrid}{''.join(rows)}</w:tbl>")
+            # the translation(s) under the table, in single quotes, indented past the number; the
+            # source reference after the free translation, linked to FLEx
+            free_style = lt_style_id("LingTeX Free")
+            left = indent + num_w + sub_w
+            ind = f'<w:ind w:left="{left}"/>' if left else ""
+            source = [{"text": "  "}, {"text": ((block.get("title") or "") + " " + str(seg.get("label") or seg.get("n") or "")).strip(), "color": "#68717d", "size": 9}]
+            if block.get("url"):
+                source[1]["href"] = block["url"]
+            wrote_free = False
+            for key in ("free", "lit"):
+                v = seg.get(key)
+                if not v:
                     continue
-                paras = vals if key == "notes" else [vals]
-                for v in paras:
-                    runs = [dict(x) for x in v] if isinstance(v, list) else [{"text": str(v)}]
-                    out.append(self.para([{"text": lab + "  ", "color": "#a8b0ba", "size": 8}] + runs, extra='<w:ind w:left="360"/>'))
-            out.append("<w:p/>")
+                runs = [{"text": "\u2018"}] + [lt_clean(dict(x)) for x in (v if isinstance(v, list) else [{"text": str(v)}])] + [{"text": "\u2019"}]
+                if key == "lit":
+                    runs = [{"text": "Lit. ", "color": "#68717d", "size": 9}] + runs
+                if not wrote_free:
+                    runs += source
+                out.append(self.para(runs, free_style, extra=ind + (f'<w:spacing w:before="{LT_FREE_ABOVE}"/>' if not wrote_free and ncols else "")))
+                wrote_free = True
+            for v in seg.get("notes") or []:
+                out.append(self.para([{"text": "Note  ", "color": "#a8b0ba", "size": 8}] + [dict(lt_clean(dict(x)), i=True) for x in (v if isinstance(v, list) else [{"text": str(v)}])], free_style, extra=ind))
+            if not wrote_free:
+                out.append(self.para(source[1:], free_style, extra=ind + (f'<w:spacing w:before="{LT_FREE_ABOVE}"/>' if ncols else "")))
+        if block.get("label"):
+            out.append(self.para([{"text": block["label"], "color": "#68717d", "size": 9}], extra=f'<w:ind w:left="{indent + num_w + sub_w}"/>' if (indent + num_w + sub_w) else ""))
+        out.append("<w:p/>")
         return out
 
     def entry(self, block: dict) -> list[str]:
@@ -624,15 +831,18 @@ class Docx:
                   '<w:style w:type="paragraph" w:styleId="Heading6"><w:name w:val="heading 6"/><w:basedOn w:val="Normal"/><w:pPr><w:spacing w:before="120" w:after="60"/><w:outlineLvl w:val="5"/></w:pPr><w:rPr><w:b/><w:i/><w:color w:val="595959"/><w:sz w:val="22"/></w:rPr></w:style>'
                   '<w:style w:type="paragraph" w:styleId="Quote"><w:name w:val="Quote"/><w:basedOn w:val="Normal"/><w:pPr><w:ind w:left="567"/></w:pPr><w:rPr><w:i/><w:color w:val="555555"/></w:rPr></w:style>'
                   '<w:style w:type="paragraph" w:styleId="Code"><w:name w:val="Code"/><w:basedOn w:val="Normal"/><w:pPr><w:spacing w:after="0"/></w:pPr><w:rPr><w:rFonts w:ascii="Consolas" w:hAnsi="Consolas"/><w:sz w:val="18"/></w:rPr></w:style>'
-                  '</w:styles>')
+                  + LT_STYLES_XML
+                  + '</w:styles>')
         rels = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
                 '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+                '<Relationship Id="rIdNum" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering" Target="numbering.xml"/>'
                 + "".join(self.rels) + '</Relationships>')
         content_types = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
                          '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
                          '<Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/>'
                          '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
                          '<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>'
+                         '<Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/>'
                          '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>'
                          '</Types>')
         root_rels = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
@@ -648,6 +858,7 @@ class Docx:
             z.writestr("_rels/.rels", root_rels)
             z.writestr("word/document.xml", document)
             z.writestr("word/styles.xml", styles)
+            z.writestr("word/numbering.xml", LT_NUMBERING_XML)
             z.writestr("word/_rels/document.xml.rels", rels)
             z.writestr("docProps/core.xml", core)
             for name, raw in self.media:

@@ -583,9 +583,22 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   (▶ in the `#` corner plays every line of the rows shown); it calls the examples' own
   `interlinear.playRange` with the chart as a text (`guid` = the TEXT's, for the clip cache), and
   `light()` there now marks every `.ccell[data-segs~="n"]` of the playing line as well as an
-  example's `.segment` (`playing-line`). The chart NOTE kind, the marker filters, the chart search /
-  profile / collections and the columns-as-tags are the three bullets below; what is still open is
-  in plans/BACKLOG.md › Text Charts.
+  example's `.segment` (`playing-line`). COLUMN WIDTHS (Seth, 2026-10-18: "adjust column sizes
+  (including off the right side, requiring rightward scroll)"): a grip (`.col-rs`) on the right edge
+  of every header cell (a template column, a custom column, Free, Notes) drags its `<col>` width;
+  `cw=4:300,free:160,x0:120` in the embed (`colWidths` / `setColWidths`, pixels; `spec.extra.cw`,
+  round-tripped by flexref like any key); a sized table is `width: max-content` and scrolls
+  sideways in `.chart-scroll` (dragging past the pane's right edge scrolls along); double-click a
+  grip or ⋯ → "Reset column widths" lets go; the HTML export writes the same `<col>` widths. STICKY
+  HEADER ROWS (Seth, 2026-10-18): CSS sticky cannot do it (the table's sticky box is its sideways
+  scroller), so `wireStickyHead` keeps a fixed COPY of the thead (`.tchart-sticky`, the live
+  columns' widths on its `<col>`s, shifted with the sideways scroll) over the top of the pane —
+  under `#sticky-heads` and a collection's / chart note's `.coll-head` — while the header has passed
+  the top and the rows are still in view; on the pane's scroll, the chart's sideways scroll, resize
+  and a ResizeObserver on the table; it goes with the chart. Not in a cell or the exports (the
+  page's print stylesheet repeats `thead` instead). The chart NOTE kind, the marker filters, the
+  chart search / profile / collections and the columns-as-tags are the three bullets below; what is
+  still open is in plans/BACKLOG.md › Text Charts.
 - CHART NOTES (Seth, 2026-10-18: "a text chart note type (similar to the example collection, except
   that it would focus on one text chart …)" with "custom columns … (a) a user-custom-defined list of
   choices … project-wide … (b) some kind of formula or rule … (c) just an extra notes column …
@@ -708,13 +721,44 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   ending in ":" riding along; running text fills slides and continues on "(cont.)" slides;
   `SLIDES_CSS` / `SLIDES_JS` scale a 1280×720 slide to the window and shrink content that overflows,
   keys → ← Space PgUp/PgDn Home End, T contents, F full screen, P print (one slide a page), `#n`
-  in the URL; the players ride along. WORD (docx_writer): every table now writes `<w:tblGrid>` with
-  widths from its content (`grid_widths`; LibreOffice shows nothing without it) and every cell
-  ends in a paragraph; a CHART gets a LANDSCAPE section of its own (`SECT_PORTRAIT` /
-  `SECT_LANDSCAPE` paragraphs around it, never inside a table cell), its label column narrow, its
-  cells' words as a nested borderless `wordgrid` (each word's lines under it) plus a line of marker
-  chips, custom columns and row shading; an example's free translation / literal / notes are RUNS
-  (they were printed as dictionaries before 2026-10-18). EXCEL (xlsx_writer, inline rich strings,
+  in the URL; the players ride along. COLLAPSED OBJECTS AND CHIPS (Seth, 2026-10-18: "When not
+  expanded, then just a text abbreviation or title and line range that is a hyperlink to that text
+  in FLEx"): `linkRun(spec)` — a block embed with `collapsed`, every inline chip, and an object in
+  a table cell unless `expanded` — exports as ONE run: the text's abbreviation (its title when it
+  has none) + its FLEx line numbers (`chipRange`), a chart's name + rows, an entry's headword,
+  `href` = the object's `silfw://` link; every writer shows it as a link (Word: an external
+  hyperlink relationship). WORD (docx_writer): every table writes `<w:tblGrid>` with widths from
+  its content (`grid_widths`; LibreOffice shows nothing without it) and every cell ends in a
+  paragraph; a CHART gets a LANDSCAPE section of its own (`SECT_PORTRAIT` / `SECT_LANDSCAPE`
+  paragraphs around it, never inside a table cell), its label column narrow, its cells' words as a
+  nested borderless `wordgrid` (each word's lines under it) plus a line of marker chips, custom
+  columns and row shading. EXAMPLES IN WORD ARE LINGTEX-WORD TABLES (Seth, 2026-10-18: "all of our
+  IGTs should be rendered using LingTeX Word styling wherever they're expanded"; the add-in is
+  `rulingAnts/LingTeX-Tools/LingTeX-Word`, a REFERENCE clone at `/home/user/rulingants/lingtex-tools`,
+  never changed from here; its `src/modStyles.bas`, `modRender.bas`, `modFlexParse.bas` are the
+  spec): per line of text ONE table styled "LingTeX Interlinear" (borderless, no cell margins, fixed
+  layout; the table style IS the add-in's tag, so a document with the add-in re-wraps ours), one row
+  per tier whose paragraphs carry the tier style — "LingTeX Vernacular" and "LingTeX Morphemes"
+  (italic, Charis SIL pinned), "LingTeX Gloss", "LingTeX Word Gloss", "LingTeX Category" (our lines
+  map txt→Vernacular, morph/cf→Morphemes, mgls→Gloss, gls→Word Gloss, pos/tag→Category, `LT_ROLES`),
+  all based on Normal, size inherited, tight, left, `noProof`; GRAMMATICAL GLOSSES in the three
+  meta-language tiers are found structurally (`is_gram_gloss`: all capitals or digit-initial, a lone
+  capital or "N." is not), split on `- = ~ < >` and `. : ;` (`split_gloss_segments`), LOWERCASED with
+  the first letter kept (`small_caps_form`: Erg, 3Sg — Word's small caps only shrink lowercase
+  letters) and set in the "LingTeX Gram Gloss" character style (`<w:smallCaps/>`); the baseline's
+  spaces become NBSP; the FREE translation is a "LingTeX Free" paragraph AFTER the table in ‘single
+  quotes’ (6 pt above, 3 pt after, indented past the number column), the literal translation and
+  notes the same style, and the SOURCE (text title + FLEx line) follows the free translation as a
+  small grey hyperlink into FLEx (the block's `url`); the NUMBER, when the embed is `ex`-numbered,
+  is Word's own: a first cell 36 pt wide whose paragraph is "LingTeX Example" (linked to numId 1 =
+  the "LingTeX Example Number" list in numbering.xml, "(%1)" at level 0, "%2." lowerLetter at level
+  1), and an example of several lines gets a second cell "a.", "b."… (level 1) with the number on
+  the first line only — LingTeX's xlist shape; a long line WRAPS into further row groups of the same
+  table (ragged rows, `cantSplit`, 6 pt between groups); the app's own line colours
+  (`LT_BASE_COLORS`) and sizes are dropped (the styles carry the look), the user's highlight / bold /
+  underline / colour stay (`lt_clean`). `tests/test_export.py::test_docx_examples_are_lingtex_word_tables`.
+  Not written: a Word document SETTING for the add-in (it reads its settings from document
+  variables); its defaults match what we write. EXCEL (xlsx_writer, inline rich strings,
   styles built as used, merges, frozen headers): sheet "Note" (the blocks in order, an example as
   rows per line with the words across, the chart named and pointed at its sheet), a sheet per chart
   ("Chart", "Chart 2"…: the table with merged header groups, two-colour `word⏎gloss` cells, Free

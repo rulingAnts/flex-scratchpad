@@ -75,6 +75,13 @@ test('headers, visible columns, merged cells, free-translation runs', () => {
   const rows = [{ cells: [seg(1, 0), seg(2, 0)] }, { cells: [seg(2, 1)] }, { cells: [seg(2, 2)] }, { cells: [{ kind: 'tag', tag: {} }] }];
   assert.deepEqual(C.freeRuns(rows).map((r) => [r.from, r.to, r.segs]), [[0, 0, [1]], [1, 3, [2]]]);
   assert.deepEqual(C.freeRuns([]), []);
+  // column widths (Seth, 2026-10-18): `cw=` in the embed, pixels per column key
+  const sp = R.parse('{{flex:chart ' + G + ' cw=3:240,free:160,x0:90,bad:x,2:10}}');
+  assert.deepEqual([...C.colWidths(sp)], [['3', 240], ['free', 160], ['x0', 90]]);       // a bad entry and a width under 24 px are dropped
+  C.setColWidths(sp, new Map([['3', 300.4], ['notes', 0]]));
+  assert.equal(sp.extra.cw, '3:300');
+  C.setColWidths(sp, new Map());
+  assert.equal(sp.extra.cw, undefined);
   // playback: a timed line's ▶ sits on the FIRST row holding its words (Seth, 2026-10-18)
   const timed = [{ n: 1, begin: 0, end: 1000 }, { n: 2, begin: 1000, end: 2000 }, { n: 3 }];
   assert.deepEqual([...C.lineStarts(rows, timed)].map(([i, ss]) => [i, ss.map((s) => s.n)]), [[0, [1, 2]]]);

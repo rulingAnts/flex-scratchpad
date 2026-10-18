@@ -1026,3 +1026,15 @@ table.md-table td.drop-target, table.md-table th.drop-target { outline: 2px soli
 .tchart .rlab .seg-play, .tchart .th-lab .seg-play { width: 18px; height: 18px; font-size: 8px; margin-right: 4px; vertical-align: middle; }
 .tchart td.ccell.playing-line { background: var(--accent-soft); box-shadow: inset 0 0 0 2px var(--accent); transition: background 0.2s; }
 .tchart tr.crow { scroll-margin: 64px 0 72px; }
+
+/* chart column resizing (Seth, 2026-10-18): a grip on each header cell's right edge; a sized table may outgrow the pane and scrolls */
+.tchart thead th { position: relative; }
+.tchart .col-rs { position: absolute; top: 0; right: -4px; width: 8px; height: 100%; cursor: col-resize; z-index: 2; }
+.tchart .col-rs:hover, body.col-resizing .tchart .col-rs { background: linear-gradient(to right, transparent 3px, var(--accent) 3px, var(--accent) 5px, transparent 5px); }
+.tchart.sized { table-layout: auto; width: max-content; min-width: 100%; }
+body.col-resizing { cursor: col-resize; user-select: none; }
+
+/* the chart's header rows, stuck to the top of the pane while its rows scroll (chart.js wireStickyHead) */
+.tchart-sticky { position: fixed; overflow: hidden; z-index: 7; pointer-events: none; box-shadow: 0 6px 10px -9px rgba(0, 0, 0, 0.45); background: var(--paper); }
+.tchart-sticky table.tchart.ghost { table-layout: fixed; min-width: 0; border-collapse: collapse; }
+.tchart-sticky .col-rs { display: none; }

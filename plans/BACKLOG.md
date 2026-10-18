@@ -420,6 +420,16 @@ Open after the first build (CLAUDE.md › EXPORTS):
   page) instead of the one audio question; remember the last choices.
 - **Export a folder or a tab** as one document / deck / workbook (today: one note at a time; the
   notebook zip holds everything).
+- **Print preview and print ranges** (Seth, 2026-10-18: "We may need some advanced print
+  preview/print range editing later for the pretty export to PDF or DOCX. But later."): a preview
+  of the pages before the PDF / Word export, choosing the blocks or the page range, page breaks
+  by hand, a chart's columns split over pages.
+- **LingTeX-Word parity in the Word export**: our tables carry the add-in's styles and shape (CLAUDE.md
+  › EXPORTS); still to do when the add-in's repo settles: the document variables it reads its
+  settings from (number hang, gaps), the `LingTeX Left/Shared Boundary` character styles on
+  morpheme boundaries (ours are word-aligned, so no boundary is split), a column per MORPHEME
+  when the Morphemes line is shown (LingTeX's "a column is an alignment slot"), and charts in the
+  same style family. The reference clone is read-only: `/home/user/rulingants/lingtex-tools`.
 - **The slideshow's speaker notes** (a note's `> quote` block under an example as the presenter's
   note; `S` to show them) and a "section" slide per H1 with its sub-headings as an agenda.
 

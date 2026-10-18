@@ -122,7 +122,7 @@
       if (lines.includes('note') && (seg.notes || []).length) out.notes = seg.notes.map((n) => styledRuns(n, R.stylesFor(index, seg.n, 'note', 0), { i: true, color: '#68717d' }));
       return out;
     });
-    return { type: 'interlinear', guid: obj.guid, text: obj.guid, title: obj.title, label: spec.label, segments: segs, media: obj.media || [], ws: vern, segmentCount: obj.segmentCount, range: obj.range };
+    return { type: 'interlinear', guid: obj.guid, text: obj.guid, title: obj.title, abbrev: obj.abbrev || '', url: obj.url || '', label: spec.label, segments: segs, media: obj.media || [], ws: vern, segmentCount: obj.segmentCount, range: obj.range };
   }
 
   /* A text chart (Seth, 2026-10-18) for the exports: {type: 'chart', title, name, label, headers:
@@ -209,7 +209,8 @@
     });
     const segments = (obj.segments || []).map((sg) => ({ n: sg.n, label: sg.label || String(sg.n), free: sg.free || '', begin: sg.begin, end: sg.end, media: sg.media || null }));
     return { type: 'chart', guid: obj.guid, text: obj.text, title: obj.title, name: obj.name, template: (obj.template || {}).name || '', label: spec.label, headers: headers ? C.headerRows(cols).map((hr) => hr.map((h) => ({ text: h.text, span: h.span }))) : [],
-      columns: cols.map((c) => ({ n: c.n, name: c.name, path: (c.path || []).concat([c.name]).join('/') })), xcols: extras ? extras.cols.map((c) => ({ name: c.name, kind: c.kind })) : [],
+      columns: cols.map((c) => ({ n: c.n, name: c.name, path: (c.path || []).concat([c.name]).join('/'), width: C.colWidths ? (C.colWidths(spec).get(String(c.n)) || 0) : 0 })), xcols: extras ? extras.cols.map((c, i) => ({ name: c.name, kind: c.kind, width: C.colWidths ? (C.colWidths(spec).get('x' + i) || 0) : 0 })) : [],
+      widths: C.colWidths ? Object.fromEntries(C.colWidths(spec)) : {},
       freeCol: free === 'col', notesCol: notesOn, cols: cols.length, rows, segments, media: obj.media || [], ws: vern, anal, rowCount: obj.rowCount, range: obj.range };
   }
   const freeRunsOf = (rows) => FS.chart.freeRuns(rows);
@@ -415,6 +416,7 @@
           const layout = { exNum: x.ex ? '(' + (++exNum) + ')' : '', indent: Math.max(0, Math.min(4, parseInt(x.indent, 10) || 0)) };
           let blk;
           if (spec.kind === 'file') blk = { type: 'p', runs: [await fileRun(spec)] };
+          else if (x.collapsed) blk = { type: 'p', runs: [await linkRun(spec)] };        // a chip in the note: a FLEx link in the export
           else try { blk = await flexBlock(spec, b.extras); } catch (e) { blk = { type: 'p', runs: [{ text: '[FLEx object unavailable: ' + (e.message || e) + ']', color: '#c0392b' }] }; }
           blocks.push(Object.assign(blk, layout));
         }
@@ -425,7 +427,7 @@
         for (const [ri, row] of t.rows.entries()) {
           const cells = [];
           for (const [ci, cell] of row.entries()) {
-            const parts = await textWithEmbeds(cell);
+            const parts = await textWithEmbeds(cell, true);
             const out = (parts.length === 1 && !parts[0].type) ? { runs: parts[0].runs } : { runs: null, blocks: parts.map((p) => (p.type ? p : { type: 'p', runs: p.runs })) };
             const sp = spans.anchors[ri + '.' + ci];
             if (sp) { out.rowspan = sp.rows; out.colspan = sp.cols; }
@@ -448,6 +450,25 @@
     return { title: note.title || 'Untitled', blocks, where, project, date: new Date().toISOString().slice(0, 10) };
   }
 
+  /* A COLLAPSED example, chart or entry, and every inline chip (Seth, 2026-10-18: "When not
+   * expanded, then just a text abbreviation or title and line range that is a hyperlink to that
+   * text in FLEx"): one run, the text's abbreviation (its title when it has none) and the FLEx
+   * line numbers — a chart's name and rows, an entry's headword — linked to the object in FLEx. */
+  async function linkRun(spec) {
+    let obj = null;
+    try { obj = await FS.interlinear.flexGet(spec.kind === 'sense' ? 'entry' : spec.kind, spec.guid, spec.seg ? spec.seg[0] : null, spec.seg ? spec.seg[1] : null, false, spec.kind === 'text' ? spec.ws : null, spec.at || null); } catch (err) { obj = null; }
+    const I = FS.interlinear;
+    let text;
+    if (spec.label) text = spec.label;
+    else if (!obj) text = spec.kind + ' ' + spec.guid.slice(0, 8) + '…';
+    else if (spec.kind === 'text') text = ((obj.abbrev || obj.title || 'text') + ' ' + I.chipRange(spec, obj)).trim();
+    else if (spec.kind === 'chart') text = I.chipTitle(spec, obj) + ' ' + I.chipRange(spec, obj);
+    else text = I.chipTitle(spec, obj);
+    const r = { text, color: '#1f4f8f', u: false, title: obj && obj.title || '' };
+    if (obj && obj.url) r.href = obj.url;
+    return r;
+  }
+
   /* An attached file in an export (Seth, 2026-10-17): a Word / HTML / PDF file cannot hold it,
    * so it is 📎 and its label, LINKED to the file (it opens on this computer; elsewhere it is
    * the name). */
@@ -462,7 +483,7 @@
 
   /* Text that may contain {{flex …}} embeds: split into runs parts and object blocks. An
    * attached file stays IN its line, as a linked run. */
-  async function textWithEmbeds(text) {
+  async function textWithEmbeds(text, inCell) {
     const parts = [];
     let pos = 0, runs = [];
     const flush = () => { if (runs.length) parts.push({ runs }); runs = []; };
@@ -470,6 +491,10 @@
       if (e.start > pos) runs.push(...runsOf(text.slice(pos, e.start)));
       pos = e.end;
       if (e.spec.kind === 'file') { runs.push(await fileRun(e.spec)); continue; }
+      // an object in a line of text is a chip, and in a cell a chip unless `expanded`: the
+      // export shows what the page shows — a FLEx link, or the object in full
+      const expanded = inCell && e.spec.extra && e.spec.extra.expanded;
+      if (!expanded) { runs.push(await linkRun(e.spec)); continue; }
       flush();
       try { parts.push(await flexBlock(e.spec)); } catch (err) { parts.push({ runs: [{ text: '[FLEx object unavailable]', color: '#c0392b' }] }); }
     }
@@ -494,7 +519,7 @@
   table.note { border-collapse: collapse; margin: 8px 0 14px; } table.note th, table.note td { border: 1px solid #d9dde3; padding: 6px 10px; vertical-align: top; } table.note th { background: #f3f4f6; text-align: left; }
   table.note.striped tbody tr:nth-child(even) td { background: #f7f8fa; } table.note.borders-light th, table.note.borders-light td { border-color: #e8ebef; } table.note.borders-none th, table.note.borders-none td { border-color: transparent; }
   .obj { border: 1px solid #e8ebef; border-radius: 10px; padding: 10px 12px; margin: 8px 0 14px; background: #fff; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04); }
-  .obj .head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .obj .head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; } .obj .tscroll { overflow-x: auto; max-width: 100%; }
   .obj .ttl { font-weight: 700; color: #00379c; font-family: "Charis SIL", "Doulos SIL", serif; font-size: 15px; } .obj .lbl { color: #68717d; font-size: 13px; margin-left: 10px; }
   .exrow { display: flex; gap: 10px; align-items: flex-start; } .exrow .exn { flex: none; min-width: 30px; padding-top: 14px; color: #68717d; } .exrow .exbody { flex: 1 1 auto; min-width: 0; }
   .seg { display: flex; gap: 10px; padding: 5px 4px; border-top: 1px dotted #e8ebef; border-radius: 6px; } .seg:first-of-type { border-top: 0; } .n { color: #a8b0ba; font-size: 12px; min-width: 26px; text-align: right; flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 4px; padding-top: 2px; }
@@ -566,7 +591,7 @@
     if (r.i) s = '<i>' + s + '</i>';
     if (r.u) s = '<u>' + s + '</u>';
     if (r.s) s = '<s>' + s + '</s>';
-    if (r.href) s = '<a href="' + esc(r.href) + '">' + s + '</a>';
+    if (r.href) s = '<a href="' + esc(r.href) + '"' + (r.title ? ' title="' + esc(r.title) + '"' : '') + '>' + s + '</a>';
     return css.length ? '<span style="' + css.join(';') + '">' + s + '</span>' : s;
   }
   const runsHtml = (runs) => (runs || []).map(runHtml).join('');
@@ -616,7 +641,9 @@
         const rowSt = (r) => (r.rowStyle ? ' style="' + (r.rowStyle.bg ? 'background:' + r.rowStyle.bg + ';' : '') + (r.rowStyle.color ? 'color:' + r.rowStyle.color + ';' : '') + (r.rowStyle.b ? 'font-weight:700;' : '') + (r.rowStyle.i ? 'font-style:italic;' : '') + (r.rowStyle.u ? 'text-decoration:underline;' : '') + '"' : '');
         const audio = b.audio;          // {src, begin, segs: {n: [begin, end]}} when the export embeds the recording (embedAudio)
         const playBtn = (segs, title) => playButton(b, segs, title);
-        let h = '<div class="obj chart" data-chart="' + esc(b.guid || '') + '"><div class="head"><span class="ttl">' + esc(b.name || 'Chart') + ' \u00b7 ' + esc(b.title || '') + '</span>' + (b.label ? '<span class="lbl">' + esc(b.label) + '</span>' : '') + '</div>' + audioTag(b) + '<table class="tchart"' + (rtl ? ' dir="rtl"' : '') + '>';
+        const W = b.widths || {};
+        const colTags = ['lab'].concat((b.columns || []).map((c) => String(c.n)), xcols.map((_, i) => 'x' + i), b.freeCol ? ['free'] : [], b.notesCol ? ['notes'] : []).map((k) => '<col' + (W[k] ? ' style="width:' + W[k] + 'px"' : '') + '>').join('');
+        let h = '<div class="obj chart" data-chart="' + esc(b.guid || '') + '"><div class="head"><span class="ttl">' + esc(b.name || 'Chart') + ' \u00b7 ' + esc(b.title || '') + '</span>' + (b.label ? '<span class="lbl">' + esc(b.label) + '</span>' : '') + '</div>' + audioTag(b) + '<div class="tscroll"><table class="tchart"' + (rtl ? ' dir="rtl"' : '') + (Object.keys(W).length ? ' style="width:max-content;min-width:100%"' : '') + '><colgroup>' + colTags + '</colgroup>';
         if (b.headers.length) {
           h += '<thead>' + b.headers.map((hr, i) => '<tr>' + (i === 0 ? '<th rowspan="' + b.headers.length + '">' + playBtn(b.segments.map((sg) => sg.n), 'Play these rows') + '#</th>' : '') + hr.map((x) => '<th' + (x.span > 1 ? ' colspan="' + x.span + '"' : '') + '>' + esc(x.text) + '</th>').join('') + (i === 0 ? xcols.map((x) => '<th class="xh" rowspan="' + b.headers.length + '">' + esc(x.name) + '</th>').join('') : '') + (i === 0 && b.freeCol ? '<th rowspan="' + b.headers.length + '">Free</th>' : '') + (i === 0 && b.notesCol ? '<th rowspan="' + b.headers.length + '">Notes</th>' : '') + '</tr>').join('') + '</thead>';
         }
@@ -632,7 +659,7 @@
           tr += '</tr>';
           if (r.freeRow && r.freeRow.text) tr += '<tr class="free-row"><th></th><td colspan="' + (b.cols + extra) + '"><i>' + esc(r.freeRow.text) + '</i> <span class="rows">' + esc(r.freeRow.rows) + '</span></td></tr>';
           return tr;
-        }).join('') + '</tbody></table></div>';
+        }).join('') + '</tbody></table></div></div>';
         return h;
       }
       case 'entry': return '<div class="obj"><div><span class="hw">' + esc(b.headword || '') + '</span>' + (b.citationForm ? ' <span class="pos">' + esc(b.citationForm) + '</span>' : '') + (b.lexemeForm ? ' <span class="pos">' + esc(b.lexemeForm) + '</span>' : '') + (b.morphType ? ' <span class="pos">' + esc(b.morphType) + '</span>' : '') + (b.label ? '<span class="lbl">' + esc(b.label) + '</span>' : '') + '</div>'
@@ -811,5 +838,5 @@
     });
   }
 
-  FS.exporter = { buildDoc, toHtml, toSlides, slidesOf, exportNote, runsOf, flextextItems, exportFlextext, embedAudio, timedBlocks, askEmbedAudio };
+  FS.exporter = { buildDoc, toHtml, toSlides, slidesOf, exportNote, runsOf, flextextItems, exportFlextext, embedAudio, timedBlocks, askEmbedAudio, linkRun };
 })();
