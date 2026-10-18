@@ -142,7 +142,8 @@
   let focusReq = 0;
   function applyTagFocus() {
     const bar = $('tagfocus');
-    const objs = [...document.querySelectorAll('#editor .text-obj, #collection .text-obj')];
+    // every FLEx text example in the note: drawn in full, folded to a chip, or a chip in a line of text
+    const objs = [...document.querySelectorAll('#editor .text-obj, #editor .flex-collapsed.kind-text, #editor .md-embed[data-src*="flex:text"], #collection .text-obj, #collection .flex-collapsed.kind-text')];
     if (!S.ftag || !S.note) { if (bar) { bar.hidden = true; } objs.forEach((o) => o.classList.remove('tag-hit', 'tag-miss')); return; }
     const want = S.ftag;
     const row = ftagRows().find((r) => r.tokens.includes(want));

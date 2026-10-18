@@ -332,7 +332,7 @@
     const tagsHere = (obj.tags || []).length && FS.tagstyles ? FS.tagstyles.tagsIn(obj) : [];
     if (FS.tagstyles && FS.tagstyles.noteTextTitle) FS.tagstyles.noteTextTitle(obj.guid, obj.title);
     box._showTags = tagsHere.length > 0 && R.showsTags(spec);
-    if (tagsHere.length) box.dataset.tags = tagsHere.map((x) => x.tag.name).join('\n');   // app.js: filtering the note's examples by tag
+    if (tagsHere.length) box.dataset.tags = tagNames(obj);   // app.js: filtering the note's examples by tag
     const range = obj.range || [segs[0] && segs[0].n, segs.length && segs[segs.length - 1].n];
     // FLEx's own numbers (paragraph.segment, as its Gloss / Print views show them) are what a
     // reader knows the segments by; the running count is what `seg=` addresses.
@@ -1115,6 +1115,12 @@
     return r[0] === r[1] ? labelOf(obj, r[0]) : labelOf(obj, r[0]) + '–' + labelOf(obj, r[1]);
   }
 
+  /* The names of the tags an object shows, for app.js's filtering of a note's examples by tag —
+   * on a full example, a collapsed chip and an inline chip alike (Seth, 2026-10-18: notes full of
+   * chips said "0 of 0"). */
+  function tagNames(obj) {
+    return obj && (obj.tags || []).length && FS.tagstyles ? FS.tagstyles.tagsIn(obj).map((x) => x.tag.name).join('\n') : '';
+  }
   function renderChip(container, spec, opts) {
     container.innerHTML = '';
     const icon = spec.kind === 'text' ? '¶' : spec.kind === 'wordform' ? 'ω' : '📖';
@@ -1130,7 +1136,7 @@
     // fill the title from the (cached) object without blocking the chip
     const kind = spec.kind === 'sense' ? 'entry' : spec.kind;
     flexGet(kind, spec.guid, spec.kind === 'text' && spec.seg ? spec.seg[0] : null, spec.kind === 'text' && spec.seg ? spec.seg[1] : null, false, null, spec.kind === 'text' ? spec.at : null)
-      .then((obj) => { if (syncAnchors(spec, obj, opts)) return; ttl.textContent = chipTitle(spec, obj); rangeEl.textContent = chipRange(spec, obj); const ws = obj.ws && obj.ws.vern; if (ws && obj.kind !== 'wordform') { if (ws.rtl) ttl.dir = 'rtl'; if (ws.tag) ttl.lang = ws.tag; } if (obj.cached) chip.classList.add('cached'); })
+      .then((obj) => { if (syncAnchors(spec, obj, opts)) return; ttl.textContent = chipTitle(spec, obj); rangeEl.textContent = chipRange(spec, obj); const ws = obj.ws && obj.ws.vern; if (ws && obj.kind !== 'wordform') { if (ws.rtl) ttl.dir = 'rtl'; if (ws.tag) ttl.lang = ws.tag; } if (obj.cached) chip.classList.add('cached'); const tn = tagNames(obj); if (tn) chip.dataset.tags = tn; })
       .catch((e) => { chip.classList.add('err'); chip.title = e.message || String(e); });
     // click → pinned overlay; hover → temporary overlay
     chip.addEventListener('click', (e) => { if (e.target.closest('.cexp')) return; openOverlay(chip, spec, opts, { pinned: true }); });
@@ -1349,7 +1355,7 @@
       }
       const kind = spec.kind === 'sense' ? 'entry' : spec.kind;
       flexGet(kind, spec.guid, spec.kind === 'text' && spec.seg ? spec.seg[0] : null, spec.kind === 'text' && spec.seg ? spec.seg[1] : null, false, null, spec.kind === 'text' ? spec.at : null)
-        .then((obj) => { if (!span.isConnected) return; span.dataset.title = chipTitle(spec, obj); if (spec.kind === 'text') span.dataset.range = chipRange(spec, obj); if (obj.cached) span.classList.add('cached'); })
+        .then((obj) => { if (!span.isConnected) return; span.dataset.title = chipTitle(spec, obj); if (spec.kind === 'text') span.dataset.range = chipRange(spec, obj); if (obj.cached) span.classList.add('cached'); const tn = tagNames(obj); if (tn) span.dataset.tags = tn; })
         .catch((e) => { span.classList.add('err'); span.title = e.message || String(e); });
       if (!opts) return;
       const o = {

@@ -3542,7 +3542,8 @@ def test_tags_style_the_text_and_visual_filters_and_the_rail_filters_by_tag(app)
     text markup tags"."""
     h, page, errors = app
     tab = h.api.init()["config"]["tabs"][0]["dir"]
-    h.api.create_note(tab, "", "Markup", "Intro.\n\n{{flex:text %s seg=1-2}}\n\n{{flex:text %s seg=4-6}}\n" % (T_STORY, T_STORY))
+    # the third example is a collapsed chip, the fourth a chip in a line of text: both count
+    h.api.create_note(tab, "", "Markup", "Intro.\n\n{{flex:text %s seg=1-2}}\n\n{{flex:text %s seg=4-6}}\n\n{{flex:text %s seg=5 collapsed}}\n\nSee {{flex:text %s seg=1}} here.\n" % (T_STORY, T_STORY, T_STORY, T_STORY))
     h.api.create_note(tab, "", "Plain", "No examples here.")
     h.api.set_tag_styles("tab", tab, [{"tag": "Subject", "br": "sq", "hl": True}, {"tag": "Verb", "box": True}, {"tag": "Topic", "tile": True, "bar": True}, {"tag": "Object", "c": "#b45309", "b": True}])
     h.api.set_tag_filters([{"id": "f1", "name": "Discourse", "enabled": True, "rules": [{"tag": "group:Discourse", "br": "an"}]}])
@@ -3592,8 +3593,10 @@ def test_tags_style_the_text_and_visual_filters_and_the_rail_filters_by_tag(app)
     page.wait_for_selector("#tagfocus:not([hidden])")
     page.wait_for_function("() => document.querySelectorAll('.note-card').length === 1")
     assert "1 match with ⚑ Topic" in page.locator("#list-sub").inner_text()
-    assert page.locator("[data-test=tagfocus-count]").inner_text() == "1 of 2 examples in this note"
+    page.wait_for_function("() => document.querySelector('[data-test=tagfocus-count]').textContent === '2 of 4 examples in this note'")
     assert "tag-miss" in first.get_attribute("class") and "tag-hit" in second.get_attribute("class")
+    assert "tag-hit" in page.locator("#editor .flex-collapsed").first.get_attribute("class")      # the chip for 3.1 carries Topic
+    assert "tag-miss" in page.locator("#editor .md-embed").first.get_attribute("class")
     page.locator("[data-test=tagfocus-clear]").click()
     page.wait_for_function("() => document.querySelectorAll('.note-card').length === 3 && document.getElementById('tagfocus').hidden")
     assert "tag-miss" not in first.get_attribute("class")

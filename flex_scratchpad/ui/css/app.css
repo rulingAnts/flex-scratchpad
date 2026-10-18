@@ -869,6 +869,6 @@ table.md-table td.drop-target, table.md-table th.drop-target { outline: 2px soli
 .tagfocus { display: flex; align-items: center; gap: 8px; padding: 4px 28px; font-size: 12.5px; color: var(--muted); background: var(--accent-soft); border-bottom: 1px solid var(--border-soft); }
 .tagfocus b { color: var(--text); }
 .tagfocus .spacer { flex: 1; }
-.text-obj.tag-miss { opacity: 0.4; }
-.text-obj.tag-hit { box-shadow: 0 0 0 2px var(--accent); }
+.text-obj.tag-miss, .flex-collapsed.tag-miss, .md-embed.tag-miss { opacity: 0.4; }
+.text-obj.tag-hit, .flex-collapsed.tag-hit, .md-embed.tag-hit { box-shadow: 0 0 0 2px var(--accent); }
 .pick-group { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); padding: 8px 8px 2px; }
