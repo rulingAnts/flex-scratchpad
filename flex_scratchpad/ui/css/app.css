@@ -182,6 +182,12 @@ body.resizing * { pointer-events: none; }
 .blk { position: relative; margin: 0 0 8px; border-radius: 6px; }   /* a small gap between blocks; lines INSIDE a block are single-spaced (Seth, 2026-10-18) */
 .blk.del-hint { outline: 2px solid #d9534f; outline-offset: 1px; opacity: 0.7; }
 /* the bar between blocks: shown while the pointer rests in a gap (editor.js wireGapBar) */
+.link-dlg .form-row input[type=text] { width: 100%; }
+.shortcuts-dlg h3 { margin: 12px 0 4px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.shortcuts { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+.shortcuts td { padding: 3px 10px 3px 0; vertical-align: top; }
+.shortcuts td:first-child { white-space: nowrap; width: 200px; }
+.shortcuts kbd { font: 12px var(--mono); background: var(--panel); border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; }
 #blk-gap { position: absolute; z-index: 5; display: flex; gap: 4px; align-items: center; padding: 2px 4px; border-radius: 8px; background: color-mix(in srgb, var(--bg) 94%, transparent); border: 1px solid var(--border-soft); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08); white-space: nowrap; }
 #blk-gap[hidden] { display: none; }
 #blk-gap button { border: 1px solid var(--border); background: var(--bg); border-radius: 6px; padding: 0 7px; font-size: 12px; line-height: 18px; color: var(--muted); }

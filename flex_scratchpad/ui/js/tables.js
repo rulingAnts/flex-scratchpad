@@ -936,6 +936,9 @@
         else if (e.key === 'ArrowDown' && e.altKey) { e.preventDefault(); finish(); moveTo(r + 1, c); }
         else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') { e.preventDefault(); wrapSel(ed, '**'); refresh(); }
         else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'i') { e.preventDefault(); wrapSel(ed, '*'); refresh(); }
+        else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'e') { e.preventDefault(); wrapSel(ed, '`'); refresh(); }
+        else if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'x') { e.preventDefault(); wrapSel(ed, '~~'); refresh(); }
+        else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); e.stopPropagation(); if (FS.linkDialog) FS.linkDialog(); }   // ours alone: the app's Ctrl+K must not open a second dialog
         else if (!(e.ctrlKey || e.metaKey)) e.stopPropagation();   // plain keys are the cell's; app shortcuts pass through
       });
       ed.addEventListener('blur', () => setTimeout(() => { if (ed.isConnected) finish(); }, 0));

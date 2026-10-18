@@ -146,6 +146,8 @@ elsewhere (marked *cached*).
 | Table | *Table* button; click a cell to edit (**Tab** moves on, **Shift+Enter** breaks a line, **Enter** goes down); *Column ▾ / Row ▾ / Table ▾* for styling |
 | Chart | *Chart* button; double-click the chart or use *Edit chart* |
 | Search | The box at the top left (**Ctrl+Shift+F**); `tag:todo`, `tab:Grammar`, `"exact phrase"`; **Ctrl+F** finds in the open note |
+| Links | **Ctrl+K** or the 🔗 button: the selected text becomes the link, an address on the clipboard fills in; with the caret in a link it edits or removes it. *Another note in this notebook* makes a `[[Note title]]` link. Ctrl+click follows a link |
+| Keyboard shortcuts | **Ctrl+/** lists them all (also in Settings): Ctrl+B / I / E / Shift+X / Shift+H for bold, italic, code, strikethrough, highlight; Ctrl+Shift+7 / 8 / 9 for a numbered, bulleted list or checklist; Ctrl+Alt+0 plain text; Ctrl+Enter / Ctrl+Shift+Enter a paragraph below / above; Ctrl+D duplicate the block; F2 rename; Ctrl+Shift+N a new collection |
 | Tags | `+ tag` on the note, or type `#tag` anywhere in the text |
 | Headings | `#`…`######` or the toolbar's H ▾ (Ctrl+Alt+1…6); *Promote / Demote all headings* there (Ctrl+Alt+[ / ]) move every heading in the note, or in the selected blocks, one level, keeping their distances; ▾ in the margin collapses a section. The headings above the part of the note in view stay at the top of the window; their ▾ collapses that section in place and goes to the heading (switch it off in the H ▾ menu or Settings) |
 | Insert a block | Right-click an example, a table cell, or the space between blocks (or the ⋮ beside any block) → *Insert a new block*: paragraph, heading, list, checklist, quote, table, FLEx example or divider, above or below |

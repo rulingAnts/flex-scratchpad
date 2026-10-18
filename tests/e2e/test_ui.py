@@ -4015,3 +4015,123 @@ def test_promote_and_demote_all_headings_in_the_note_or_a_selection(app):
     page.keyboard.press("Control+z")
     page.wait_for_function("() => __fsEditor.blocks[2].src === '## B'")
     assert not errors
+
+
+def test_links_dialog_and_the_common_keyboard_shortcuts(app):
+    """Seth, 2026-10-18: "a hyperlink feature to our app (button and keyboard shortcut … what
+    common keyboard shortcuts we should add … Ctrl+Z, Ctrl+Y, Ctrl+K (hyperlink), Ctrl+I …)"."""
+    h, page, errors = app
+    new_note(page, "Links")
+    page.locator("#editor .blk-body").first.click()
+    page.keyboard.type("see docs here")
+    page.wait_for_timeout(200)
+    # Ctrl+K with "docs" selected: the selection is the text, the address gets https:// when it has no scheme
+    page.evaluate("() => { const b = document.querySelector('#editor .blk-body'); FS.editor.setCaret(b, 4, 8); b.focus(); }")
+    page.keyboard.press("Control+k")
+    page.wait_for_selector(".link-dlg")
+    assert page.locator("[data-test=link-text]").input_value() == "docs"
+    page.locator("[data-test=link-url]").fill("example.org/x")
+    page.locator("[data-test=link-ok]").click()
+    page.wait_for_timeout(900)
+    assert body_of(h) == "see [docs](https://example.org/x) here", body_of(h)
+    # the caret inside the link: Ctrl+K edits it; Update rewrites it in place
+    page.evaluate("() => { const b = document.querySelector('#editor .blk-body'); FS.editor.setCaret(b, 7); b.focus(); }")
+    page.keyboard.press("Control+k")
+    page.wait_for_selector(".link-dlg")
+    assert page.locator(".link-dlg .modal-title").inner_text() == "Edit link"
+    assert page.locator("[data-test=link-url]").input_value() == "https://example.org/x" and page.locator("[data-test=link-text]").input_value() == "docs"
+    page.locator("[data-test=link-text]").fill("the docs")
+    page.locator("[data-test=link-ok]").click()
+    page.wait_for_timeout(900)
+    assert body_of(h) == "see [the docs](https://example.org/x) here", body_of(h)
+    # Remove link keeps the text; the toolbar button opens the same dialog; a note link is a wikilink
+    page.evaluate("() => { const b = document.querySelector('#editor .blk-body'); FS.editor.setCaret(b, 6); b.focus(); }")
+    page.locator("[data-test=tb-link]").dispatch_event("mousedown")
+    page.wait_for_selector("[data-test=link-remove]")
+    page.locator("[data-test=link-remove]").click()
+    page.wait_for_timeout(900)
+    assert body_of(h) == "see the docs here", body_of(h)
+    page.keyboard.press("End")
+    page.keyboard.type(" and ")
+    page.keyboard.press("Control+k")
+    page.wait_for_selector(".link-dlg")
+    page.locator("[data-test=link-kind]").select_option("note")
+    page.locator("[data-test=link-note]").fill("Welcome to FLEx Scratchpad")
+    page.locator("[data-test=link-ok]").click()
+    page.wait_for_timeout(900)
+    assert body_of(h) == "see the docs here and [[Welcome to FLEx Scratchpad]]", body_of(h)
+    # the other common keys: Ctrl+E code, Ctrl+Shift+X strike, the lists, plain text, a paragraph above, duplicate
+    page.keyboard.press("Control+Enter")
+    page.keyboard.type("code strike")
+    page.evaluate("() => { const b = document.querySelectorAll('#editor .blk-body')[1]; FS.editor.setCaret(b, 0, 4); b.focus(); }")
+    page.keyboard.press("Control+e")
+    page.evaluate("() => { const b = document.querySelectorAll('#editor .blk-body')[1]; FS.editor.setCaret(b, 7, 13); b.focus(); }")
+    page.keyboard.press("Control+Shift+x")
+    page.wait_for_timeout(900)
+    assert body_of(h).endswith("`code` ~~strike~~"), body_of(h)
+    page.keyboard.press("Control+Shift+Digit8")
+    page.wait_for_timeout(300)
+    assert page.evaluate("() => __fsEditor.blocks[1].src") == "- `code` ~~strike~~"
+    page.keyboard.press("Control+Shift+Digit7")
+    page.wait_for_timeout(300)
+    assert page.evaluate("() => __fsEditor.blocks[1].src") == "1. `code` ~~strike~~"
+    page.keyboard.press("Control+Shift+Digit9")
+    page.wait_for_timeout(300)
+    assert page.evaluate("() => __fsEditor.blocks[1].src") == "- [ ] `code` ~~strike~~"
+    page.keyboard.press("Control+Alt+Digit0")
+    page.wait_for_timeout(300)
+    assert page.evaluate("() => __fsEditor.blocks[1].src") == "`code` ~~strike~~"
+    page.keyboard.press("Control+Shift+Enter")
+    page.keyboard.type("above")
+    page.wait_for_timeout(300)
+    assert page.evaluate("() => __fsEditor.blocks.map((b) => b.src)")[1:3] == ["above", "`code` ~~strike~~"]
+    page.keyboard.press("Control+d")
+    page.wait_for_timeout(300)
+    assert page.evaluate("() => __fsEditor.blocks.map((b) => b.src)")[1:3] == ["above", "above"]
+    # undo / redo still take the keys; Ctrl+/ lists everything; F2 goes to the title
+    page.keyboard.press("Control+z")
+    page.wait_for_timeout(200)
+    assert page.evaluate("() => __fsEditor.blocks.map((b) => b.src)")[1:3] == ["above", "`code` ~~strike~~"]
+    page.keyboard.press("Control+y")
+    page.wait_for_timeout(200)
+    assert page.evaluate("() => __fsEditor.blocks.map((b) => b.src)")[1:3] == ["above", "above"]
+    page.keyboard.press("Control+Slash")
+    page.wait_for_selector(".shortcuts-dlg")
+    assert page.locator(".shortcuts-dlg kbd", has_text="Ctrl+K").count() == 1
+    page.keyboard.press("Escape")
+    page.keyboard.press("F2")
+    assert page.evaluate("() => document.activeElement.id") == "note-title"
+    # a link in a table cell
+    page.locator("#editor .blk-body").first.click()
+    page.keyboard.press("Control+End")
+    page.locator("[data-ins=table]").dispatch_event("mousedown")
+    page.wait_for_selector("#editor table.md-table")
+    page.locator("#editor table.md-table td .cell-view").first.dispatch_event("mousedown")
+    page.wait_for_selector("#editor .cell-edit")
+    page.keyboard.press("Control+k")
+    page.wait_for_selector(".link-dlg")
+    page.locator("[data-test=link-text]").fill("site")
+    page.locator("[data-test=link-url]").fill("https://a.b")
+    page.locator("[data-test=link-ok]").click()
+    page.wait_for_timeout(900)
+    assert "| [site](https://a.b) |" in body_of(h) or "[site](https://a.b)" in body_of(h), body_of(h)
+    # the hidden readable copy of a FLEx object (Seth: "needs to not accidentally expose our hidden md flex
+    # hyperlinks, the ones that end with flex-copy") is never the link under the caret, and survives a link next to it
+    tab = h.api.init()["config"]["tabs"][0]["dir"]
+    n = h.api.create_note(tab, "", "Copies", "See {{flex:text %s seg=1}}[DOG 1.1: \u2018x\u2019](silfw://localhost/link?app=flex&guid=%s \"flex-copy\") after." % (T_STORY, T_STORY))
+    page.reload()
+    page.wait_for_selector(".note-card")
+    page.locator(".note-card", has_text="Copies").first.click()
+    page.wait_for_selector("#editor .md-embed")
+    page.evaluate("() => { const b = document.querySelector('#editor .blk-body'); FS.editor.setCaret(b, b.textContent.indexOf(' after')); b.focus(); }")
+    page.keyboard.press("Control+k")
+    page.wait_for_selector(".link-dlg")
+    assert page.locator(".link-dlg .modal-title").inner_text() == "Insert link"          # not "Edit link" on the hidden copy
+    page.locator("[data-test=link-text]").fill("ref")
+    page.locator("[data-test=link-url]").fill("https://x.y")
+    page.locator("[data-test=link-ok]").click()
+    page.wait_for_timeout(1200)
+    assert body_of(h) == "See {{flex:text %s seg=1}}[ref](https://x.y) after." % T_STORY, body_of(h)
+    raw = h.api.get_note(n["id"])["body"]
+    assert raw.count('"flex-copy")') == 1 and "[ref](https://x.y)" in raw, raw
+    assert not errors

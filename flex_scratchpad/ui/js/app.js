@@ -969,6 +969,7 @@
       case 'italic': return ed.wrapSelection('*');
       case 'mark': return ed.wrapSelection('==');
       case 'code': return ed.wrapSelection('`');
+      case 'link': return linkDialog();
       case 'list': return ed.linePrefix('list');
       case 'task': return ed.linePrefix('task');
       case 'quote': return ed.linePrefix('quote');
@@ -979,6 +980,110 @@
       case 'hr': return ed.insertMarkdown('---', true);
     }
   }
+
+  /* HYPERLINKS (Seth, 2026-10-18: "a hyperlink feature … button and keyboard shortcut"): Ctrl+K /
+   * the 🔗 button opens a small dialog for the caret's place — the selected text becomes the link
+   * text, a URL on the clipboard or in the selection fills the address, a link under the caret is
+   * EDITED (or removed) rather than nested. Two kinds: a web / file / FLEx address → `[text](url)`,
+   * another note of this notebook → `[[Title]]` (the wikilink, which opens the note). A table cell
+   * takes the same dialog and gets the markdown typed into it. */
+  const URLISH = /^(https?:\/\/|mailto:|silfw:\/\/|flexscratchpad:\/\/|file:\/\/\/|ftp:\/\/)/i;
+  function normalizeUrl(u) {
+    u = (u || '').trim();
+    if (!u) return '';
+    if (URLISH.test(u) || /^[a-z][a-z0-9+.-]*:/i.test(u)) return u;
+    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(u)) return 'mailto:' + u;
+    return 'https://' + u;
+  }
+  async function linkDialog() {
+    if (!S.note || isCollection()) return;
+    const ed = ensureEditor();
+    const ae = document.activeElement;
+    const cell = ae && ae.classList && ae.classList.contains('cell-edit') ? ae : null;
+    let ctx = null, cellSel = null;
+    if (cell) {
+      // the dialog takes the focus, which closes the cell editor (its blur commits the cell and
+      // remembers the caret): the selected text is taken out now and the link goes in at that
+      // caret through the table's own insertText; Cancel puts the text back
+      const sel = window.getSelection();
+      cellSel = { text: sel && !sel.isCollapsed ? sel.toString() : '' };
+      if (cellSel.text) document.execCommand('delete');
+    } else {
+      ctx = ed.linkContext();
+      if (!ctx) { FS.toast('Put the caret in a line of text first', 'warn'); return; }
+    }
+    const editing = ctx && ctx.link;
+    const selected = editing ? editing.text : (cell ? cellSel.text : ctx.selected).replace(/\n/g, ' ');
+    let done = false;
+    const m = FS.modal({ title: editing ? 'Edit link' : 'Insert link', class: 'link-dlg', onClose: () => { if (!done && cell && cellSel.text) ed.insertMarkdown(cellSel.text, false); } });
+    const kind = el('select', { 'data-test': 'link-kind' }, el('option', { value: 'url' }, 'A web, file or FLEx address'), el('option', { value: 'note' }, 'Another note in this notebook'));
+    const text = el('input', { type: 'text', 'data-test': 'link-text', placeholder: 'Text to show (the address when empty)', value: selected && !URLISH.test(selected) ? selected : '' });
+    const url = el('input', { type: 'text', 'data-test': 'link-url', placeholder: 'https://… · mailto:… · silfw://… · a file', value: '' });
+    const noteList = el('datalist', { id: 'link-notes' });
+    for (const n of S.notes || []) if (n.title) noteList.appendChild(el('option', { value: n.title }));
+    const note = el('input', { type: 'text', 'data-test': 'link-note', list: 'link-notes', placeholder: 'Title of the note', value: '' });
+    if (editing) {
+      if (editing.href.startsWith('note:')) { kind.value = 'note'; note.value = editing.href.slice(5); } else url.value = editing.href;
+    } else if (selected && URLISH.test(selected)) url.value = selected;
+    const urlRow = el('div', { class: 'form-row' }, el('label', {}, 'Address'), url);
+    const noteRow = el('div', { class: 'form-row' }, el('label', {}, 'Note'), note, noteList);
+    const textRow = el('div', { class: 'form-row' }, el('label', {}, 'Text'), text);
+    const syncKind = () => { const isNote = kind.value === 'note'; urlRow.hidden = isNote; textRow.hidden = isNote; noteRow.hidden = !isNote; };
+    kind.addEventListener('change', syncKind);
+    syncKind();
+    const hint = el('p', { class: 'small muted' }, 'Links open with Ctrl+click in the note (a FLEx link goes to FieldWorks, a note link opens the note).');
+    const ok = el('button', { class: 'btn primary', 'data-test': 'link-ok' }, editing ? 'Update' : 'Insert');
+    const open = el('button', { class: 'btn', 'data-test': 'link-open', title: 'Open the address now', onclick: () => { const u = normalizeUrl(url.value); if (u) openLink(u); } }, 'Open');
+    const remove = editing ? el('button', { class: 'btn danger', 'data-test': 'link-remove', title: 'Keep the text, drop the link', onclick: () => { m.close(); ed.replaceRange(ctx.body, ctx.b, editing.start, editing.end, editing.wiki ? editing.text : editing.text); } }, 'Remove link') : null;
+    const put = (md) => {
+      done = true;
+      m.close();
+      if (cell) { ed.insertMarkdown(md, false); return; }
+      if (editing) ed.replaceRange(ctx.body, ctx.b, editing.start, editing.end, md);
+      else ed.replaceRange(ctx.body, ctx.b, ctx.start, ctx.end, md);
+    };
+    ok.addEventListener('click', () => {
+      if (kind.value === 'note') {
+        const t = note.value.trim();
+        if (!t) { FS.toast('Which note?', 'warn'); note.focus(); return; }
+        put('[[' + t.replace(/[\[\]]/g, '') + ']]');
+        return;
+      }
+      const u = normalizeUrl(url.value);
+      if (!u) { FS.toast('An address is needed', 'warn'); url.focus(); return; }
+      if (/\s/.test(u)) { FS.toast('An address cannot contain spaces (a file path can be dropped on the note instead)', 'warn'); url.focus(); return; }
+      const t = (text.value.trim() || u).replace(/[\[\]]/g, '');
+      put('[' + t + '](' + u + ')');
+    });
+    for (const inp of [text, url, note]) inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); ok.click(); } });
+    m.body.append(el('div', { class: 'form-row' }, el('label', {}, 'Link to'), kind), textRow, urlRow, noteRow, hint,
+      el('div', { class: 'row', style: { justifyContent: 'flex-end', gap: '6px', marginTop: '10px' } }, remove, open, el('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'), ok));
+    // a URL on the clipboard fills the address when nothing else did (WebView2 may never answer: 400 ms, like the tables' paste)
+    if (!editing && !url.value && navigator.clipboard && navigator.clipboard.readText) {
+      Promise.race([navigator.clipboard.readText().catch(() => ''), new Promise((r) => setTimeout(() => r(''), 400))]).then((clip) => { clip = (clip || '').trim(); if (clip && URLISH.test(clip) && !/\s/.test(clip) && !url.value) url.value = clip; });
+    }
+    setTimeout(() => (kind.value === 'note' ? note : (text.value ? url : text)).focus(), 0);
+  }
+  FS.linkDialog = linkDialog;
+
+  /* Every keyboard shortcut in one place (Ctrl+/ and Settings), so they can be found. */
+  const SHORTCUTS = [
+    ['Notes', [['Ctrl+N', 'New note'], ['Ctrl+Shift+N', 'New example collection'], ['Ctrl+S', 'Save now (notes save by themselves)'], ['F2', 'Rename the note (its title)'], ['Ctrl+Shift+F', 'Search the notebook'], ['Ctrl+F', 'Find in the note (Enter / Shift+Enter: next / previous)'], ['Ctrl+,', 'Settings'], ['Ctrl+\\', 'Show / hide the left panes'], ['Ctrl+/', 'This list']]],
+    ['Text', [['Ctrl+B', 'Bold'], ['Ctrl+I', 'Italic'], ['Ctrl+E', 'Inline code'], ['Ctrl+Shift+X', 'Strikethrough'], ['Ctrl+Shift+H', 'Highlight'], ['Ctrl+K', 'Insert or edit a link'], ['Ctrl+Z / Ctrl+Y', 'Undo / redo (Ctrl+Shift+Z too)'], ['Ctrl+A', 'Select the block; again: the whole note'], ['Ctrl+click', 'Follow a link']]],
+    ['Blocks', [['Enter', 'New paragraph / list item'], ['Shift+Enter', 'Line break inside the block'], ['Ctrl+Enter', 'New paragraph below the block'], ['Ctrl+Shift+Enter', 'New paragraph above the block'], ['Ctrl+D', 'Duplicate the block (or the selected blocks)'], ['Alt+Shift+↑ / ↓', 'Move the block or the selected blocks'], ['Shift+click, Shift+↑ / ↓', 'Select across blocks'], ['/', 'The insert menu, on an empty line'], ['Esc', 'Leave the block / clear the selection']]],
+    ['Headings & lists', [['Ctrl+Alt+1 … 6', 'Heading 1 … 6'], ['Ctrl+Alt+0', 'Plain text (no heading, list or quote)'], ['Ctrl+Alt+[ / ]', 'Promote / demote every heading (note or selection)'], ['Ctrl+Shift+8', 'Bulleted list'], ['Ctrl+Shift+7', 'Numbered list'], ['Ctrl+Shift+9', 'Checklist'], ['Tab / Shift+Tab', 'List item in / out (also Ctrl+] / Ctrl+[)']]],
+    ['FLEx & tables', [['Ctrl+Shift+L', 'Insert a FLEx object'], ['Ctrl+V', 'Paste FLEx rows or a FLEx link as an example; a grid as a table'], ['Tab (in a table)', 'Next cell; at the end, a new row'], ['Alt+↑ / ↓ (in a cell)', 'The cell above / below'], ['Esc (while playing)', 'Stop playback']]],
+  ];
+  function shortcutsDialog() {
+    const m = FS.modal({ title: 'Keyboard shortcuts', class: 'shortcuts-dlg' });
+    for (const [group, rows] of SHORTCUTS) {
+      const t = el('table', { class: 'shortcuts' });
+      for (const [k, what] of rows) t.appendChild(el('tr', {}, el('td', {}, ...k.split(' / ').flatMap((p, i) => [i ? ' / ' : null, el('kbd', {}, p)])), el('td', {}, what)));
+      m.body.append(el('h3', {}, group), t);
+    }
+    m.body.appendChild(el('p', { class: 'small muted' }, 'On a Mac, Cmd stands in for Ctrl.'));
+  }
+  FS.shortcutsDialog = shortcutsDialog;
 
   /* Heading levels 1-6 (Seth, 2026-10-16), plain text, and folding every heading at once. The
    * buttons act on mousedown so the caret stays where it is in the note. */
@@ -1044,6 +1149,8 @@
     nb.appendChild(el('label', { class: 'small', style: { display: 'flex', gap: '6px', marginTop: '8px' } }, sh, 'Sticky headings: keep the headings above the part of the note in view at the top of the window (their \u25be collapses the section in place)'));
     body.appendChild(nb);
     // FLEx
+    body.appendChild(el('div', { class: 'setting-block' }, el('h3', {}, 'Keyboard shortcuts'),
+      el('div', { class: 'btn-row', style: { justifyContent: 'flex-start' } }, el('button', { class: 'btn', 'data-test': 'open-shortcuts', onclick: () => { m.close(); shortcutsDialog(); } }, 'Keyboard shortcuts\u2026 (Ctrl+/)'))));
     body.appendChild(el('div', { class: 'setting-block' }, el('h3', {}, 'Backup & storage'),
       el('p', { class: 'muted small' }, 'Back the notebook up to a OneDrive, Google Drive or Dropbox folder, or to S3-compatible storage; see how much space the notebook and its backup take, and clean up.'),
       el('div', { class: 'btn-row', style: { justifyContent: 'flex-start' } }, el('button', { class: 'btn primary', 'data-test': 'open-backup', onclick: () => { m.close(); openBackup(); } }, 'Backup & storage…'))));
@@ -1330,6 +1437,13 @@
         }
       }
       if (mod && e.key.toLowerCase() === 'n' && !e.shiftKey) { e.preventDefault(); newNote(); }
+      else if (mod && e.shiftKey && e.key.toLowerCase() === 'n') { e.preventDefault(); newCollection('', ''); }
+      else if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k') { if (S.note && !isCollection()) { e.preventDefault(); linkDialog(); } }
+      else if (mod && !e.altKey && e.code === 'Slash') { e.preventDefault(); shortcutsDialog(); }
+      else if (e.key === 'F2' && !mod) { if (S.note) { e.preventDefault(); $('note-title').focus(); $('note-title').select(); } }
+      else if (mod && e.shiftKey && !e.altKey && (e.code === 'Digit7' || e.code === 'Digit8' || e.code === 'Digit9')) { if (S.note && !isCollection()) { e.preventDefault(); ensureEditor().linePrefix(e.code === 'Digit7' ? 'num' : e.code === 'Digit8' ? 'list' : 'task'); } }
+      else if (mod && e.altKey && e.code === 'Digit0') { if (S.note && !isCollection()) { e.preventDefault(); ensureEditor().plainText(); } }
+      else if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'd') { const ed = S.editor; if (ed && ed.active && S.note && !isCollection() && !(document.activeElement && document.activeElement.matches('input, textarea, .cell-edit'))) { e.preventDefault(); ed.duplicateBlocks(ed.active); } }
       else if (mod && e.shiftKey && e.key.toLowerCase() === 'f') { e.preventDefault(); $('search').focus(); $('search').select(); }
       else if (mod && !e.shiftKey && e.key.toLowerCase() === 'f') { if (S.note && !isCollection()) { e.preventDefault(); openFind(); } }
       else if (mod && e.shiftKey && e.key.toLowerCase() === 'l') { if (S.note) { e.preventDefault(); if (isCollection()) ensureCollection().pick(); else insertFlex(); } }

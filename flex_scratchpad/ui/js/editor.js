@@ -1249,7 +1249,11 @@
       if (mod && e.key.toLowerCase() === 'b') { e.preventDefault(); this.wrapSelection('**'); return; }
       if (mod && e.key.toLowerCase() === 'i') { e.preventDefault(); this.wrapSelection('*'); return; }
       if (mod && e.shiftKey && e.key.toLowerCase() === 'h') { e.preventDefault(); this.wrapSelection('=='); return; }
-      if (mod && e.key === 'Enter') { e.preventDefault(); this.insertBlockAfter(b, { type: 'p', src: '' }, true); return; }
+      if (mod && e.key === 'Enter') { e.preventDefault(); if (e.shiftKey) this.insertNewBlock(b, 'before', 'p'); else this.insertBlockAfter(b, { type: 'p', src: '' }, true); return; }
+      // the common editing keys (Seth, 2026-10-18): inline code, strikethrough; the lists and
+      // "plain text" are in app.js with the rest of the global shortcuts
+      if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'e') { e.preventDefault(); this.wrapSelection('`'); return; }
+      if (mod && e.shiftKey && e.key.toLowerCase() === 'x') { e.preventDefault(); this.wrapSelection('~~'); return; }
       if (e.key === 'Tab' && (b.type === 'list' || b.type === 'code')) { e.preventDefault(); this.indent(body, b, e.shiftKey ? -1 : 1); return; }
       if (mod && (e.key === ']' || e.key === '[') && b.type === 'list') { e.preventDefault(); this.indent(body, b, e.key === ']' ? 1 : -1); return; }
       if (e.key === 'Escape') { body.blur(); return; }
@@ -1359,6 +1363,51 @@
       const a = getCaret(body), z = getCaretEnd(body);
       const s = body.textContent;
       this.setText(body, b, s.slice(0, a) + text + s.slice(z), a + text.length);
+    }
+    /* Where a link would go (Ctrl+K, the 🔗 button — Seth, 2026-10-18): the focused text block,
+     * the selection in it, and the `[text](url)` / `[[note]]` link under the caret when there is
+     * one (its whole span, text and href), so the dialog edits it instead of nesting a new one.
+     * null when the caret is not in a text block (a table cell has its own route). */
+    linkContext() {
+      const b = this.active;
+      if (!b || !b.el || !TEXT_TYPES.has(b.type) || b.type === 'code') return null;
+      const body = b.el.querySelector('.blk-body');
+      if (!body || document.activeElement !== body) return null;
+      const a = getCaret(body), z = getCaretEnd(body);
+      const s = body.textContent;
+      const ls = s.lastIndexOf('\n', a - 1) + 1, le0 = s.indexOf('\n', a), le = le0 < 0 ? s.length : le0;
+      const line = s.slice(ls, le);
+      const out = { marks: [], embeds: [], links: [], tags: [] };
+      for (let i = 0; i < line.length; i++) out.marks.push(new Set());
+      MD.markInline(line, out, 0);
+      // never the hidden readable copy of a FLEx object (`[…](silfw://… "flex-copy")`, flexcopy.js):
+      // the editor strips them on open, and if one is ever still in the text it is not a link to edit
+      const ours = (l) => /"flex-copy"\)$/.test(line.slice(l.start, l.end));
+      const hit = out.links.find((l) => !ours(l) && a >= l.start && a <= l.end && z >= l.start && z <= l.end);
+      const link = hit ? { start: ls + hit.start, end: ls + hit.end, text: hit.text, href: hit.href, wiki: hit.href.startsWith('note:') && s.slice(ls + hit.start, ls + hit.start + 2) === '[[' } : null;
+      return { body, b, start: a, end: z, selected: s.slice(a, z), link };
+    }
+    /* Replace [start, end) of a text block with `text`, the caret after it (one undo step). */
+    replaceRange(body, b, start, end, text) {
+      const s = body.textContent;
+      if (document.activeElement !== body) body.focus({ preventScroll: true });
+      this.setText(body, b, s.slice(0, start) + text + s.slice(end), start + text.length);
+    }
+    /* Back to plain text: drop the heading, list or quote prefix of the current line(s)
+     * (Ctrl+Alt+0, as in Google Docs). */
+    plainText() {
+      const b = this.active;
+      if (!b || !b.el || !TEXT_TYPES.has(b.type)) return;
+      const body = b.el.querySelector('.blk-body');
+      if (!body) return;
+      const s = body.textContent, a = getCaret(body);
+      const ls = s.lastIndexOf('\n', a - 1) + 1;
+      const line = s.slice(ls, s.indexOf('\n', a) < 0 ? s.length : s.indexOf('\n', a));
+      if (b.type === 'h') return this.linePrefix('h', MD.headingLevel(b));
+      if (b.type === 'quote') return this.linePrefix('quote');
+      if (/^\s*[-*+]\s\[[ xX]\]/.test(line)) return this.linePrefix('task');
+      if (/^\s*\d+[.)]\s/.test(line)) return this.linePrefix('num');
+      if (/^\s*[-*+]\s/.test(line)) return this.linePrefix('list');
     }
     /* A FLEx embed inserted after text on a line goes INLINE as a chip (Seth, 2026-10-13: "put
      * chips inline with text"); at the start of a line, or when it is not a single embed, the

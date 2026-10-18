@@ -237,6 +237,18 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   visible place in a wholly hidden line, so Chromium would put it before the hidden text and the
   typed letter would land in front of the `##`.
 - Undo is our own snapshot stack (innerHTML rebuilds break native undo).
+- LINKS AND SHORTCUTS (Seth, 2026-10-18: "a hyperlink feature … button and keyboard shortcut …
+  investigate what common keyboard shortcuts we should add"): `linkDialog` (app.js; Ctrl+K, the 🔗
+  button, Ctrl+K in a table cell) reads `editor.linkContext()` — the focused text block, its
+  selection, and the `[text](url)` / `[[note]]` under the caret found with `MD.markInline` on the
+  caret's line — and writes `[text](url)` (`normalizeUrl`: `https://` for a bare host, `mailto:` for
+  an address) or `[[Title]]` for a note through `editor.replaceRange` (one undo step); in a cell the
+  markdown is typed with `execCommand('insertText')` after the saved selection is put back. A URL
+  on the clipboard fills the address (400 ms race, as the tables' paste). The complete list of
+  shortcuts is `SHORTCUTS` in app.js → `shortcutsDialog` (Ctrl+/, Settings): keep it true when a
+  key is added. Shift+digit keys are matched by `e.code` (`Digit7`), since `e.key` is the shifted
+  character on most layouts. Not added on purpose: Ctrl+U (Markdown has no underline), Ctrl+H
+  (no replace yet), Ctrl+P.
 
 ## Working here
 
