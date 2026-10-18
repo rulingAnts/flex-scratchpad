@@ -982,6 +982,14 @@
 
   /* Heading levels 1-6 (Seth, 2026-10-16), plain text, and folding every heading at once. The
    * buttons act on mousedown so the caret stays where it is in the note. */
+  /* Promote / demote every heading of the note or the selection, and say what happened. */
+  function shiftHeadings(ed, dir) {
+    const r = ed.shiftHeadings(dir);
+    const where = r.scope === 'selection' ? 'in the selection' : 'in the note';
+    if (!r.n) FS.toast('No headings ' + where, 'warn');
+    else if (r.blocked) FS.toast('A heading ' + where + ' is already at level ' + r.blocked + ' \u2014 ' + (dir < 0 ? 'promoting' : 'demoting') + ' would merge two levels', 'warn');
+    else FS.toast(r.n + (r.n === 1 ? ' heading ' : ' headings ') + (dir < 0 ? 'promoted' : 'demoted') + ' ' + where, 'ok');
+  }
   function headingMenu(btn, ed) {
     FS.popover(btn, (pop, close) => {
       const act = (fn) => (e) => { e.preventDefault(); close(); fn(); };
@@ -991,6 +999,11 @@
           FS.el('span', { class: 'hp-label' }, 'Heading ' + lv), FS.el('kbd', {}, 'Ctrl+Alt+' + lv)));
       }
       if (cur) pop.appendChild(FS.el('button', { class: 'menu-item', onmousedown: act(() => ed.linePrefix('h', cur)) }, 'Plain text'));
+      pop.appendChild(FS.el('hr'));
+      // every heading one level up or down, in the selection or the whole note (Seth, 2026-10-18)
+      const where = ed.msel ? 'in the selection' : 'in the note';
+      pop.appendChild(FS.el('button', { class: 'menu-item heading-pick', 'data-test': 'promote-all', title: 'Every heading one level up (H2 \u2192 H1); the levels keep their distances', onmousedown: act(() => shiftHeadings(ed, -1)) }, FS.el('span', {}, '\u21e4 Promote all headings ' + where), FS.el('kbd', {}, 'Ctrl+Alt+[')));
+      pop.appendChild(FS.el('button', { class: 'menu-item heading-pick', 'data-test': 'demote-all', title: 'Every heading one level down (H1 \u2192 H2)', onmousedown: act(() => shiftHeadings(ed, 1)) }, FS.el('span', {}, '\u21e5 Demote all headings ' + where), FS.el('kbd', {}, 'Ctrl+Alt+]')));
       pop.appendChild(FS.el('hr'));
       pop.appendChild(FS.el('button', { class: 'menu-item', 'data-test': 'fold-all', onmousedown: act(() => ed.setAllFolds(true)) }, '\u25b8 Collapse all headings'));
       pop.appendChild(FS.el('button', { class: 'menu-item', 'data-test': 'unfold-all', onmousedown: act(() => ed.setAllFolds(false)) }, '\u25be Expand all headings'));
@@ -1322,6 +1335,7 @@
       else if (mod && e.shiftKey && e.key.toLowerCase() === 'l') { if (S.note) { e.preventDefault(); if (isCollection()) ensureCollection().pick(); else insertFlex(); } }
       else if (mod && e.key.toLowerCase() === 's') { e.preventDefault(); flushSave().then(() => FS.toast('Saved')); }
       else if (mod && e.altKey && /^[1-6]$/.test(e.key)) { if (!isCollection()) { e.preventDefault(); ensureEditor().linePrefix('h', +e.key); } }
+      else if (mod && e.altKey && (e.key === '[' || e.key === ']')) { if (!isCollection()) { e.preventDefault(); shiftHeadings(ensureEditor(), e.key === '[' ? -1 : 1); } }
       else if (mod && e.key === ',') { e.preventDefault(); openSettings(); }
       else if (mod && (e.key === '\\' || e.code === 'Backslash')) { e.preventDefault(); toggleNav(); }
     });

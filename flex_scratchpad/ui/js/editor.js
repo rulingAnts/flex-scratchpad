@@ -1948,6 +1948,27 @@
       if (b.type !== 'h') return;
       this.setBlockSrc(b, b.src.replace(/^#{1,6}\s+/, '#'.repeat(lv) + ' '));
     }
+    /* Promote (dir -1) or demote (+1) EVERY heading of the note, of the cross-block selection
+     * when there is one, or of `range` [a, z] (Seth, 2026-10-18: "promote and demote all headers
+     * in a note or within a selected range"). The levels keep their distances: when a heading is
+     * already at the end (H1 going up, H6 going down) nothing moves — merging two levels would
+     * lose the outline. Returns {n: headings seen, scope: 'note' | 'selection', blocked?: level}. */
+    shiftHeadings(dir, range) {
+      let a = 0, z = this.blocks.length - 1, scope = 'note';
+      const m = this.msel;
+      if (range) { [a, z] = range; scope = 'selection'; }
+      else if (m) { a = this.blocks.indexOf(m.a.b); z = this.blocks.indexOf(m.z.b); scope = 'selection'; }
+      const heads = this.blocks.slice(a, z + 1).filter((b) => b.type === 'h');
+      const lv = (b) => MD.headingLevel(b);
+      if (!heads.length) return { n: 0, scope };
+      const stuck = heads.find((b) => lv(b) + dir < 1 || lv(b) + dir > 6);
+      if (stuck) return { n: heads.length, scope, blocked: lv(stuck) };
+      for (const b of heads) b.src = b.src.replace(/^#{1,6}(?=\s)/, '#'.repeat(lv(b) + dir));
+      this.renderAll();
+      this.changed({ force: true });
+      if (m && !range) this.setMsel(m.a, m.z);               // the selection stays for the next step
+      return { n: heads.length, scope };
+    }
     blockMenu(anchor, b) {
       FS.popover(anchor, (pop, close) => {
         const item = (label, fn, cls) => pop.appendChild(el('button', { class: 'menu-item ' + (cls || ''), onclick: () => { close(); fn(); } }, label));
@@ -1963,6 +1984,11 @@
           item('Copy', () => this.copyBlocks(b));
           item('Duplicate', () => this.duplicateBlocks(b));
           item('Delete', () => this.deleteBlocks(ra, rz), 'danger');
+          if (this.blocks.slice(ra, rz + 1).some((x) => x.type === 'h')) {
+            pop.appendChild(el('hr'));
+            item('\u21e4 Promote the headings here (H2 \u2192 H1)', () => this.shiftHeadings(-1, [ra, rz]));
+            item('\u21e5 Demote the headings here (H1 \u2192 H2)', () => this.shiftHeadings(1, [ra, rz]));
+          }
           pop.appendChild(el('hr'));
           this.insertSection(pop, close, b);
           return;

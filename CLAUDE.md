@@ -194,7 +194,13 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   section (a paragraph there would belong to the closed section), a closed heading MOVES with its
   section, Find opens what hides a hit, and an edit that leaves the caret in a hidden block opens
   its section. The toolbar's H ▾ picks levels 1–6 (Ctrl+Alt+1…6) and folds all; the ⋮ menu of a
-  heading has its levels and the folds. Word export maps levels 1–6 to Heading 1–6.
+  heading has its levels and the folds. Word export maps levels 1–6 to Heading 1–6. PROMOTE /
+  DEMOTE ALL (Seth, 2026-10-18: "promote and demote all headers in a note or within a selected
+  range"): `editor.shiftHeadings(dir, range?)` moves every heading of the note, of the cross-block
+  selection (`msel`, kept afterwards) or of a block range one level, as ONE undo step; it refuses
+  (`blocked`) when a heading is already at H1 / H6, since merging two levels would lose the
+  outline. The H ▾ menu's "Promote / Demote all headings in the note / selection" (Ctrl+Alt+[ /
+  Ctrl+Alt+]) and the ⋮ menu of several selected blocks ("the headings here").
   STICKY HEADINGS (Seth, 2026-10-17: "make whatever headings apply to the current viewport be
   sticky (optionally, give the user the ability to turn this feature on and off)"): the editor's
   `updateSticky` (on scroll, resize and every `applyFolds`, one rAF) finds the first block whose

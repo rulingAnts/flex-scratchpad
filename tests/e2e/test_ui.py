@@ -3962,3 +3962,56 @@ def test_collection_from_a_rule_and_find_new_lines(app):
     assert page.locator(".rule-dlg [data-test=rule-tag][data-tag=Verb]").is_checked()
     page.keyboard.press("Escape")
     assert not errors
+
+
+def test_promote_and_demote_all_headings_in_the_note_or_a_selection(app):
+    """Seth, 2026-10-18: "the easy ability to promote and demote all headers in a note or within a
+    selected range"."""
+    h, page, errors = app
+    new_note(page, "Outline")
+    page.locator("#editor .blk-body").first.click()
+    paste(page, "# A\n\nx\n\n## B\n\ny\n\n### C\n\nz")
+    page.wait_for_timeout(300)
+    heads = lambda: page.evaluate("() => __fsEditor.blocks.filter((b) => b.type === 'h').map((b) => b.src)")   # noqa: E731
+    # the H menu: demote every heading in the note; Ctrl+Alt+[ promotes them again
+    page.locator("[data-test=tb-heading]").dispatch_event("mousedown")
+    assert page.locator("[data-test=demote-all]").inner_text().startswith("⇥ Demote all headings in the note")
+    page.locator("[data-test=demote-all]").dispatch_event("mousedown")
+    page.wait_for_function("() => __fsEditor.blocks[0].src === '## A'")
+    assert heads() == ["## A", "### B", "#### C"]
+    page.locator("#editor .blk-body").first.click()
+    page.keyboard.press("Control+Alt+[")
+    page.wait_for_function("() => __fsEditor.blocks[0].src === '# A'")
+    assert heads() == ["# A", "## B", "### C"]
+    # at the top already: promoting would merge two levels, so nothing moves
+    page.keyboard.press("Control+Alt+[")
+    page.wait_for_selector(".toast:has-text('already at level 1')")
+    assert heads() == ["# A", "## B", "### C"]
+    # a cross-block selection (B's block to C's block): only the headings in it move, and it stays selected
+    blk = lambda t: page.locator("#editor .blk", has=page.locator(".blk-body", has_text=t)).first   # noqa: E731
+    blk("B").locator(".blk-body").click()
+    blk("C").locator(".blk-body").click(modifiers=["Shift"])
+    page.wait_for_function("() => !!__fsEditor.msel")
+    page.locator("[data-test=tb-heading]").dispatch_event("mousedown")
+    assert page.locator("[data-test=demote-all]").inner_text().startswith("⇥ Demote all headings in the selection")
+    page.locator("[data-test=demote-all]").dispatch_event("mousedown")
+    page.wait_for_function("() => __fsEditor.blocks[2].src === '### B'")
+    assert heads() == ["# A", "### B", "#### C"]
+    assert page.evaluate("() => !!__fsEditor.msel")
+    page.keyboard.press("Control+Alt+[")
+    page.wait_for_function("() => __fsEditor.blocks[2].src === '## B'")
+    assert heads() == ["# A", "## B", "### C"]
+    # the ⋮ menu of a selected block has the same two rows
+    blk("B").hover()
+    blk("B").locator(".blk-handle button").dispatch_event("mousedown")
+    page.locator(".popover .menu-item", has_text="Demote the headings here").click()
+    page.wait_for_function("() => __fsEditor.blocks[2].src === '### B'")
+    assert heads() == ["# A", "### B", "#### C"]
+    page.wait_for_timeout(900)
+    assert body_of(h).startswith("# A\n\nx\n\n### B\n\ny\n\n#### C"), body_of(h)
+    # undo takes the whole step back
+    page.keyboard.press("Escape")
+    page.locator("#editor .blk-body").first.click()
+    page.keyboard.press("Control+z")
+    page.wait_for_function("() => __fsEditor.blocks[2].src === '## B'")
+    assert not errors
