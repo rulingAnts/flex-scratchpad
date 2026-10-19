@@ -87,6 +87,11 @@ class LcmWorker(threading.Thread):
     def call(self, fn, timeout: float = CALL_TIMEOUT):
         label = getattr(fn, "__qualname__", "?").replace(".<locals>.go", "").replace(".<locals>", "")
         t0 = time.perf_counter()
+        if threading.current_thread() is self:
+            # Already on the worker (a backend method calling another, e.g. a scan calling
+            # list_texts): run it here. Queued, it would wait for a thread that is waiting for it —
+            # Seth's --doubled-morphs sat at 0 % CPU for minutes (2026-10-19) until the 600 s timeout.
+            return fn()
         fut: Future = Future()
         self.q.put((fn, fut))
         try:
