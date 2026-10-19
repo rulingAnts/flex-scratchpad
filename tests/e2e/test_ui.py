@@ -457,6 +457,34 @@ def test_mock_mode_without_python(browser):
     ctx.close()
 
 
+def test_inside_the_app_the_page_waits_for_the_api_and_never_shows_the_demo(browser):
+    """Seth, 2026-10-19: the newest wheel started on the page's in-browser demo notebook ("Kalu
+    Demo", nothing else) — pywebview had not handed the page its api and after 15 s the page
+    quietly used the mock. A WebView2 page is known from window.chrome.webview before pywebview
+    injects anything: there the page waits, says so, and takes the api whenever it arrives."""
+    ctx = browser.new_context()
+    ctx.add_init_script("window.chrome = window.chrome || {}; window.chrome.webview = { postMessage() {} }; window.FS_BRIDGE_WAIT_MS = 400; window.FS_BRIDGE_RELOAD_MS = 1500;")
+    page = ctx.new_page()
+    from bridge import UI
+    page.goto(UI.as_uri())
+    page.wait_for_selector("[data-test='bridge-wait']", timeout=5000)
+    assert "Waiting for the app" in page.inner_text("#bridge-wait")
+    assert "flex-scratchpad -v" in page.inner_text("#bridge-wait")
+    page.wait_for_timeout(800)
+    assert page.evaluate("!!window.FS._mockActive") is False
+    assert page.locator("#tabs .tab-item").count() == 0
+    # the retry: the page reloads itself (pywebview injects on every navigation), at most twice
+    page.wait_for_function("sessionStorage.getItem('fs:bridgeReloads') === '1' && document.querySelector('#bridge-wait')", timeout=8000)
+    assert "Reloaded 1 time" in page.inner_text("#bridge-wait")
+    assert page.evaluate("!!window.FS._mockActive") is False
+    # the api arrives late (here: the mock standing in for it): the page goes on as usual
+    page.evaluate("window.pywebview = { api: FS.mockApi() }")
+    page.wait_for_selector("#tabs .tab-item", timeout=5000)
+    page.wait_for_selector("[data-test='bridge-wait']", state="detached", timeout=5000)
+    assert page.evaluate("sessionStorage.getItem('fs:bridgeReloads')") is None
+    ctx.close()
+
+
 def paste(page, plain, html=None):
     page.evaluate("""([plain, html]) => {
       const dt = new DataTransfer(); dt.setData('text/plain', plain); if (html) dt.setData('text/html', html);

@@ -12,6 +12,37 @@
    * later, firing `pywebviewready` when they are there — so "the object exists" is not the
    * test; "init is a function" is. The JS mock is used only when there is no pywebview at all. */
   const live = () => !!(window.pywebview && window.pywebview.api && typeof window.pywebview.api.init === 'function');
+  /* The screen shown while the app's Python side is late (never demo data: see poll()). */
+  function showWait(waited) {
+    let box = document.getElementById('bridge-wait');
+    if (!box) {
+      box = document.createElement('div');
+      box.id = 'bridge-wait';
+      box.setAttribute('data-test', 'bridge-wait');
+      box.innerHTML = '<div class="bw-card"><b>Waiting for the app…</b>'
+        + '<p>The page is open but the program behind it has not answered yet. Nothing is lost: your notebook is on disk and is not touched until the app answers.</p>'
+        + '<p>If this stays, close the window and start the app from a terminal with <code>flex-scratchpad -v</code>, or look at the log: '
+        + '<code>%LOCALAPPDATA%\\FLEx Scratchpad\\log\\flex-scratchpad.log</code>.</p>'
+        + '<p class="bw-time"></p>'
+        + '<p><button type="button" class="btn" data-test="bridge-reload">Reload the page</button></p></div>';
+      box.querySelector('[data-test="bridge-reload"]').addEventListener('click', () => location.reload());
+      (document.body || document.documentElement).appendChild(box);
+    }
+    const reloads = bridgeReloads();
+    box.querySelector('.bw-time').textContent = 'Waited ' + Math.round(waited / 1000) + ' s.' + (reloads ? ' Reloaded ' + reloads + (reloads === 1 ? ' time' : ' times') + ' already.' : '');
+    // the retry: reloading the page makes the window navigate again, and pywebview hands the api
+    // over on every navigation — twice, then the button is left to the user
+    const reloadMs = Number(window.FS_BRIDGE_RELOAD_MS) > 0 ? Number(window.FS_BRIDGE_RELOAD_MS) : 45000;
+    if (waited > reloadMs && reloads < 2) { bridgeReloads(reloads + 1); location.reload(); }
+  }
+  function hideWait() { const box = document.getElementById('bridge-wait'); if (box) box.remove(); bridgeReloads(0); }
+  function bridgeReloads(set) {
+    try {
+      if (set != null) { if (set) sessionStorage.setItem('fs:bridgeReloads', String(set)); else sessionStorage.removeItem('fs:bridgeReloads'); }
+      return Number(sessionStorage.getItem('fs:bridgeReloads') || 0);
+    } catch (e) { return 0; }
+  }
+
   function bridge() {
     if (ready) return ready;
     ready = new Promise((resolve) => {
@@ -20,14 +51,21 @@
       const finish = (api) => { if (!done) { done = true; resolve(api); } };
       window.addEventListener('pywebviewready', () => { if (live()) finish(window.pywebview.api); }, { once: false });
       const started = Date.now();
+      // A pywebview window is known before pywebview itself says so: WebView2 gives every page
+      // window.chrome.webview, WebKit window.webkit.messageHandlers, from the first script on. pywebview
+      // only injects window.pywebview after the page has LOADED and fills its api a moment later.
+      const hosted = () => !!(window.pywebview || (window.chrome && window.chrome.webview) || (window.webkit && window.webkit.messageHandlers));
+      const waitMs = Number(window.FS_BRIDGE_WAIT_MS) > 0 ? Number(window.FS_BRIDGE_WAIT_MS) : 15000;
       const poll = () => {
         if (done) return;
-        if (live()) return finish(window.pywebview.api);
-        const hasPywebview = !!window.pywebview;
+        if (live()) { hideWait(); return finish(window.pywebview.api); }
         const waited = Date.now() - started;
-        // no pywebview object at all after the page loaded → plain browser → mock;
-        // a pywebview object that stays empty for 15 s → give up and mock too (shows demo data)
-        if ((!hasPywebview && document.readyState === 'complete' && waited > 600) || waited > 15000) return finish(FS.mockApi());
+        // no pywebview and no browser host object once the page has loaded → a plain browser → the mock
+        if (!hosted() && document.readyState === 'complete' && waited > 600) return finish(FS.mockApi());
+        // inside the app but the api has not arrived: WAIT, visibly, as long as it takes — NEVER the
+        // mock (Seth, 2026-10-19: the page quietly showed the demo notebook over his own and he
+        // thought his data was gone; "It's just the most recent commit/wheel that does that")
+        if (hosted() && waited > waitMs) showWait(waited);
         setTimeout(poll, 100);
       };
       poll();

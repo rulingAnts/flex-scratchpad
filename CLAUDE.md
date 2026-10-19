@@ -19,6 +19,19 @@ Built 2026-10-12 with Seth; the decisions below are his.
   persistent WebView2 profile cached its responses: a reinstalled app kept showing its old page.
   `webview.start(..., http_server=False)` says it too; `tests/test_app_url.py` guards both.
   Media and images are loaded as `file://` URLs.
+- **THE PAGE NEVER STANDS IN FOR THE APP** (Seth, 2026-10-19: "AAUUHG!! My data's gone" — the newest wheel came up on the page's
+  in-browser demo, "Kalu Demo" and nothing else, once; the next start was fine). pywebview injects `window.pywebview` only
+  AFTER the page has loaded and fills `api` a moment later, on a thread; api.js used to switch to `FS.mockApi()` when no
+  `window.pywebview` existed 600 ms after load, or when it stayed empty for 15 s — a start-up race on a slow machine, or
+  a failure of pywebview's api walk, both looked like an empty demo notebook. Now: a hosted page is known from
+  `window.chrome.webview` / `window.webkit.messageHandlers` from the first script on; there the page WAITS (`showWait`:
+  the `#bridge-wait` screen with the log path and a Reload button, an automatic reload after 45 s, twice at most,
+  `sessionStorage fs:bridgeReloads`), and the mock is for a plain browser only. Python: `app.check_bridge` (on `loaded`)
+  asks the page whether `init` arrived and logs `bridge: …` with `bridge_check.report(api)` — pywebview's own walk of
+  the Api (`dir()`, every public bound method's `getfullargspec`, recursion into public non-callable attributes; ONE
+  attribute that raises leaves the page with NO api), so never give `Api` a public attribute or property;
+  `log.adopt_logger("pywebview")` puts pywebview's own log lines in our log. `tests/test_bridge.py` and the e2e
+  `test_inside_the_app_the_page_waits_for_the_api…` keep all of it.
 - **FLEx is read directly, read-only.** `OpenProject(name, writeEnabled=False)`. The app never
   writes to a project, and none is planned (Seth, 2026-10-17: "Read-only is good for this
   project" — the media-source correction once planned is SHELVED in `plans/BACKLOG.md`); the site

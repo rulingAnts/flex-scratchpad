@@ -1101,3 +1101,11 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 
 /* the on / off / previous box on a tag group's heading (tagstyles.js examplePopover) */
 .tag-tree-head .tag-group-cb { margin: 0 6px 0 auto; order: 9; }
+
+/* The screen shown while the app's Python side is late (api.js showWait): over everything, plain,
+ * never demo data (Seth, 2026-10-19). */
+#bridge-wait { position: fixed; inset: 0; z-index: 10000; background: var(--bg, #fff); display: flex; align-items: center; justify-content: center; padding: 24px; }
+#bridge-wait .bw-card { max-width: 520px; font-size: 14px; line-height: 1.5; color: var(--fg, #1f2937); }
+#bridge-wait .bw-card b { display: block; font-size: 18px; margin-bottom: 8px; }
+#bridge-wait code { font-size: 12px; background: var(--panel, #f3f4f6); padding: 1px 4px; border-radius: 3px; }
+#bridge-wait .bw-time { color: var(--muted, #6b7280); }

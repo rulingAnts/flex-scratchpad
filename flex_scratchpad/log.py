@@ -105,6 +105,35 @@ def setup(verbose: bool | None = None, quiet: bool = False, to_file: bool = True
                 pass
     if not LOG.handlers:
         LOG.addHandler(logging.NullHandler())
+    adopt_logger("pywebview")
+
+
+class _Prefixed(logging.Filter):
+    def __init__(self, prefix: str):
+        super().__init__()
+        self.prefix = prefix
+
+    def filter(self, record: logging.LogRecord) -> bool:  # noqa: A003 — logging's name
+        if not str(record.msg).startswith(self.prefix):
+            record.msg = self.prefix + str(record.msg)
+        return True
+
+
+def adopt_logger(name: str) -> logging.Logger:
+    """Another library's logger writes into OUR handlers, each line prefixed with its name.
+    pywebview logs the one failure that leaves the page without its api ("Error occurred in
+    script", the exception of its api walk) to its own logger, which had no handler here: the
+    message went to Python's last-resort stderr handler — invisible from a shortcut, and missing
+    from the log file Seth sends (2026-10-19)."""
+    other = logging.getLogger(name)
+    other.propagate = False
+    other.setLevel(logging.DEBUG)
+    for h in LOG.handlers:
+        if h not in other.handlers:
+            other.addHandler(h)
+    if not any(isinstance(f, _Prefixed) for f in other.filters):
+        other.addFilter(_Prefixed(name + ": "))
+    return other
 
 
 def banner(argv: list | None = None) -> None:

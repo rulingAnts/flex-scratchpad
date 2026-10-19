@@ -155,6 +155,7 @@ def run(notebook_dir: str | None = None, demo: bool = False, debug: bool = False
             pass
 
     def on_loaded():
+        check_bridge(window, api)
         # A file dropped from Explorer: only pywebview's own drop handler learns its full path
         # (the page sees a name and bytes), which "link instead of copy" needs (Seth, 2026-10-17).
         try:
@@ -189,6 +190,28 @@ def run(notebook_dir: str | None = None, demo: bool = False, debug: bool = False
         shut_down(api, state.get("watcher"))
         lock.release()
     return 0
+
+
+def check_bridge(window, api) -> bool:
+    """Right after pywebview says the page is loaded: did the page actually get the Api?
+    pywebview builds `window.pywebview.api` by walking the Api's attributes, and one attribute
+    that raises leaves the api EMPTY with only a line in pywebview's own logger — the page then
+    waits for an `init` that never comes (Seth, 2026-10-19: the newest wheel showed the page's
+    in-browser demo over his notebook; until that day the page fell back to the demo after 15 s).
+    So the log says what the page sees and, when the api is not there, what pywebview's walk
+    runs into (`bridge_check.report`). Returns True when the page has the Api."""
+    from .bridge_check import report
+    try:
+        kind = window.evaluate_js("typeof (window.pywebview && window.pywebview.api && window.pywebview.api.init)")
+    except Exception as e:  # noqa: BLE001 — the window may be gone already
+        LOG.warning("bridge check: could not ask the page (%s: %s)", type(e).__name__, e)
+        return False
+    if kind == "function":
+        LOG.info("bridge: the page has the Api (%s)", report(api))
+        return True
+    LOG.error("bridge: the page did NOT get the Api — window.pywebview.api.init is %s. pywebview's walk of the Api: %s. "
+              "The page shows \"Waiting for the app\" until it arrives; it never falls back to the demo.", kind, report(api))
+    return False
 
 
 def shut_down(api, watcher=None, wait: float = 5.0) -> None:
