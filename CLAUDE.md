@@ -321,6 +321,9 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   item), and the inserted embed is written with `at=`: an anchor wins over `seg=` when the
   example is drawn, so a running count that differs between the index and the text can never
   move the example (Seth, 2026-10-16: the dialog was right, the example two lines above).
+  A LINE THAT LOOKS WRONG (Seth, 2026-10-19: every morph shown twice in a Morphemes line): ask first for
+  `flex-scratchpad --project NAME --dump "TITLE" --seg 11.1` (`dump_range` in __main__: FLEx's number or a
+  range, or the running count), which prints the line's words and morph bundles exactly as read.
   When a paste does not land, `flex-scratchpad --project NAME --locate clip` (or a file) runs the
   locator against the real project and writes `flex-scratchpad-locate.json`: the rows as read,
   the hits, the best segments per pasted segment, and what the texts holding the pasted numbers

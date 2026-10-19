@@ -30,6 +30,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--version", action="store_true", help="print the version and build fingerprint and exit")
     ap.add_argument("--project", help="FieldWorks project name (with --dump)")
     ap.add_argument("--dump", metavar="TEXT", help="print the first segments of a text (title, part of a title, or GUID) as JSON and exit — for diagnosing what flexicon returns")
+    ap.add_argument("--seg", metavar="LINE", help="with --dump: the line(s) to print instead of the first three — FLEx's own number (11.1, or 11.1-11.3) or the running count (42, 42-44)")
     ap.add_argument("--locate", metavar="SOURCE", help="explain where pasted FLEx rows land: SOURCE is 'clip' (the clipboard, Windows) or a text file; writes a JSON report (--out) and exits")
     ap.add_argument("--dump-tags", nargs="?", const="", metavar="TEXT", help="write what the project's text markup tags look like raw (the list, and the tags of the first texts that have any, or of TEXT) to a JSON report (--out) and exit")
     ap.add_argument("--dump-charts", nargs="?", const="", metavar="TEXT", help="write what the project's text charts look like raw (every chart, the Chart Markers list, and the rows of one chart as read: the first with rows, or the one whose text title, template or GUID holds every word of TEXT, e.g. \"Siakai SVC\") to a JSON report (--out) and exit")
@@ -58,7 +59,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.backup:
         return backup_once(args.notebook)
     if args.dump:
-        return dump(args.project, args.dump)
+        return dump(args.project, args.dump, args.seg)
     if args.locate:
         return locate_report(args.project, args.locate, args.out or "flex-scratchpad-locate.json", demo=args.demo)
     if args.dump_tags is not None:
@@ -84,9 +85,11 @@ def main(argv: list[str] | None = None) -> int:
     return code
 
 
-def dump(project: str | None, which: str) -> int:
-    """Open the project read-only and print one text's first three segments plus the writing
-    systems, so a rendering problem can be diagnosed from the raw data."""
+def dump(project: str | None, which: str, seg: str | None = None) -> int:
+    """Open the project read-only and print one text's first three segments (or the lines `seg`
+    names: FLEx's own numbers such as 11.1-11.3, or the running count) plus the writing systems,
+    so a rendering problem can be diagnosed from the raw data (Seth, 2026-10-19: a Morphemes line
+    showing every morph twice — the dump shows the bundles exactly as the project returns them)."""
     import json
     from .flex.lcm import FlexError, FlexiconBackend
     from .flex.model import is_guid
@@ -107,7 +110,8 @@ def dump(project: str | None, which: str) -> int:
                 print("No text title contains " + repr(which) + ". Texts: " + ", ".join(t["title"] for t in be.list_texts()[:30]), file=sys.stderr)
                 return 2
             guid = hits[0]["guid"]
-        page = be.get_text(guid, 1, 3, diag=True)
+        a, b = dump_range(be, guid, seg)
+        page = be.get_text(guid, a, b, diag=True)
         print(json.dumps(page, ensure_ascii=False, indent=1))
         return 0
     except FlexError as e:
@@ -212,6 +216,35 @@ def _clipboard_text() -> str:
             kernel32.GlobalUnlock(h)
     finally:
         user32.CloseClipboard()
+
+
+def dump_range(be, guid: str, seg: str | None) -> tuple[int, int]:
+    """(first, last) running segment numbers for --seg: `42` / `42-44` as they are; a FLEx number
+    (`11.1`, `11.1-11.3`) found by walking the text's pages for the segments carrying those labels."""
+    from .flex.lcm import FlexError
+    if not seg:
+        return 1, 3
+    parts = [x.strip() for x in str(seg).split("-", 1)]
+    if all(x.isdigit() for x in parts):
+        a = int(parts[0])
+        return a, int(parts[-1])
+    want = {x: None for x in parts}
+    start, total = 1, None
+    while any(v is None for v in want.values()) and (total is None or start <= total):
+        page = be.get_text(guid, start, start + 59)
+        segs = page.get("segments") or []
+        total = page.get("segmentCount") or total or 0
+        for sg in segs:
+            if sg.get("label") in want and want[sg["label"]] is None:
+                want[sg["label"]] = int(sg["n"])
+        if not segs:
+            break
+        start += 60
+    missing = [k for k, v in want.items() if v is None]
+    if missing:
+        raise FlexError("No line numbered " + ", ".join(missing) + " in that text.", "", "no-object")
+    ns = [want[x] for x in parts]
+    return min(ns), max(ns)
 
 
 def locate_report(project: str | None, source: str, out: str, demo: bool = False) -> int:
