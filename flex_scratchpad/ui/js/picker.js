@@ -30,11 +30,14 @@
     const right = el('div', { class: 'picker-right' });
     const tabs = el('div', { class: 'picker-tabs' });
     const search = el('input', { type: 'text', placeholder: 'Search headword or gloss…', autofocus: true });
+    // the chart search built visually (Seth, 2026-10-19: "as GUI/visually creatable as possible")
+    const buildBtn = el('button', { class: 'btn small', 'data-test': 'chart-search-build', title: 'Build the search from lists: words, glosses, markers, columns, clause types… — no query language needed', hidden: true, onclick: () => { if (FS.chartSearchBuilder) FS.chartSearchBuilder({ query: search.value, onApply: (q) => { search.value = q; doSearch(); } }); } }, '☰ Build a search…');
+    const searchRow = el('div', { class: 'picker-search-row' }, search, buildBtn);
     const results = el('div', { class: 'picker-results' });
     const preview = el('div', { class: 'picker-preview' }, el('div', { class: 'muted small' }, 'Pick something on the left.'));
     const optsRow = el('div', { class: 'picker-opts' });
     const btnRow = el('div', { class: 'btn-row' });
-    left.append(tabs, search, results);
+    left.append(tabs, searchRow, results);
     right.append(preview, optsRow, btnRow);
     m.body.appendChild(el('div', { class: 'picker' }, left, right));
     // FLEx text markup TAGS as a way in (Seth, 2026-10-17): a tag, then every place it is used
@@ -42,7 +45,8 @@
     const setMode = (mode) => {
       state.mode = mode; state.sel = null; state.text = null; state.range = null; state.tag = null; state.obj = null; preview.onscroll = null;
       tabs.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.mode === mode));
-      search.placeholder = mode === 'lexicon' ? 'Search headword or gloss…' : mode === 'tags' ? 'Search tags by name…' : mode === 'charts' ? 'Search charts by text or name…' : 'Search text titles…';
+      search.placeholder = mode === 'lexicon' ? 'Search headword or gloss…' : mode === 'tags' ? 'Search tags by name…' : mode === 'charts' ? 'Search every chart: words, col:Subject, marker:Topic, /pattern/… or Build a search' : 'Search text titles…';
+      buildBtn.hidden = mode !== 'charts';
       preview.innerHTML = '<div class="muted small">' + (mode === 'lexicon' ? 'Pick an entry on the left.' : mode === 'tags' ? 'Pick a tag, then one of the places it is used.' : mode === 'charts' ? 'Pick a chart, then click the first and last row of the range (or insert it whole).' : 'Pick a text, then click the first and last segment of the range.') + '</div>';
       optsRow.innerHTML = ''; btnRow.innerHTML = '';
       doSearch();
@@ -87,7 +91,8 @@
               if (rows.length) results.appendChild(el('div', { class: 'pick-item', style: { justifyContent: 'flex-end', gap: '6px' } },
                 FS.chartCollection ? el('button', { class: 'btn', 'data-test': 'collect-chart-rows', title: 'A new collection of these rows, which can take in new matches later', onclick: () => { m.close(); FS.chartCollection(q); } }, 'Collect into a new collection\u2026') : null,
                 el('button', { class: 'btn', 'data-test': 'insert-all-chart-rows', title: 'One chart row per match, in chart order, with the headings', onclick: () => { onInsert(rows.map((r) => embedFor('chart', r.chart, { seg: [r.row, r.row], at: [r.at, r.at] })).join('\n\n'), true); m.close(); } }, 'Insert all ' + rows.length + ' as rows')));
-              if (!rows.length) results.appendChild(el('div', { class: 'pick-item muted' }, 'No chart row matches. Try words, col:Name, marker:Name, lex:form, gloss:…'));
+              if (!rows.length) results.appendChild(el('div', { class: 'pick-item muted' }, 'No chart row matches. Try words, col:Name, marker:Name, lex:form, gloss:…, or Build a search.'));
+              results.appendChild(el('div', { class: 'pick-item muted small', style: { display: 'block' } }, 'Terms: words · word: gloss: form: mgls: cf: lex: pos: · col:Name (then the word terms look in that column) · marker:Name / marker:* · clause:dependent|speech|song · moved / moved:preposed · clauseref endsent endpara · chart: text: template: row: note: · -term excludes · a value may be /pattern/i, a ', FS.regexHelp ? FS.regexHelp('py') : 'Python regular expression', '.'));
               for (const r of rows) {
                 const cells = r.cells.filter((c) => !r.hits.length || r.hits.includes(c.colN));
                 const it = el('div', { class: 'pick-item', 'data-test': 'pick-chart-row' }, el('span', { class: 'hw' }, (r.chartName || 'Chart') + ' \u00b7 ' + (r.title || '')), el('span', { class: 'pos' }, r.label), el('span', { class: 'gl' }, cells.map((c) => c.col + ': ' + c.words.join(' ')).join(' | ') + (r.markers.length ? '  \u2690' + [...new Set(r.markers)].slice(0, 2).join(',') : '')));

@@ -81,7 +81,8 @@ test('rules: terms, operators, outputs and styles', () => {
   assert.equal(run('col:Subject[txt:/^kabir$/i] → K', '1a'), 'K');                  // the words of ONE column
   assert.equal(run('col:Subject[txt:/^kabir$/i] → K', '1b'), null);                 // (Haŋa is the subject of 1b)
   assert.equal(run('col:Verb[gls:/sleep/] and not col:Subject[txt:/kabir/i] → other', '3a'), 'other');
-  assert.equal(run('col:/^Post/[marker:*]', '2c'), null);                           // a column by pattern; markers are not words
+  assert.equal(run('col:/^Post/[marker:*]', '2c'), '✓');                            // a column by pattern: the Given marker sits in Postnuclear › Outer
+  assert.equal(run('col:Subject[marker:*]', '2c'), null);                            // no marker in the Subject column
   assert.equal(run('free:/river/i → r', '2c'), 'r');                                // the free translation of the line
   assert.equal(run('label:/^2/ → two', '2b'), 'two');
   assert.throws(() => N.parseRule('txt:/(/ → x'), /Bad pattern/);
@@ -90,7 +91,23 @@ test('rules: terms, operators, outputs and styles', () => {
   const vals = new Map([[N.anchorOf(c.rows[0].guid), { Status: 'new' }]]);
   const cols = [{ name: 'Status', kind: 'list', settings: 'Information status' }];
   const a = N.applyRule(N.parseRule('Status:new → fresh [row hl#fde68a b]'), N.rowCtx(c.rows[0], c, vals, cols));
-  assert.deepEqual(a, { text: 'fresh', style: { scope: 'row', hl: '#fde68a', b: true } });
+  assert.deepEqual(a, { text: 'fresh', style: { scope: 'row', hl: '#fde68a', b: true }, chips: [] });
+  // MARKER CHIPS AND JOINED ROWS (Seth, 2026-10-19: "show chips … for specific markers"; a ^ShdArg row
+  // continues the row above — "remove the border between them and custom style a range on those rows")
+  const chipsOf = (rule, label) => (N.applyRule(N.parseRule(rule), ctxOf(label)) || { chips: [] }).chips.map((m) => m.name);
+  assert.deepEqual(chipsOf('marker:* → @markers', '1a'), ['New']);                       // every marker of the row
+  assert.deepEqual(chipsOf('any → @markers:/^giv/i', '2c'), ['Given']);                   // by pattern
+  assert.deepEqual(chipsOf('any → @markers:Reference', '2c'), ['Given']);                 // by group
+  assert.deepEqual(chipsOf('any → @markers:new', '2c'), []);
+  const jr = N.applyRule(N.parseRule('marker:/^(New|Given)$/ → @markers [join hl#fde68a row]'), ctxOf('2c'));
+  assert.deepEqual(jr.style, { scope: 'row', join: true, hl: '#fde68a' });
+  assert.equal(jr.text, '');                                                              // chips alone: no ✓
+  assert.equal(N.applyRule(N.parseRule('marker:new → S [chip]'), ctxOf('1a')).style.chip, true);
+  // the builder writes and reads them back
+  const built = N.casesText([{ conds: [{ what: 'marker', how: 'regex', val: '^ShdArg', ci: false }], join: 'and', out: '', style: { scope: 'row', join: true, hl: '#fde68a' }, chips: 'some', chipsHow: 'regex', chipsVal: '^ShdArg' }]);
+  assert.equal(built, 'marker:/^ShdArg/ → @markers:/^ShdArg/ [row join hl#fde68a]');
+  assert.deepEqual(N.casesFrom(built, [])[0].chips, 'some');
+  assert.equal(N.casesFrom(built, [])[0].chipsVal, '^ShdArg');
   assert.equal(N.applyRule(N.parseRule('Status:* → any'), N.rowCtx(c.rows[1], c, vals, cols)), null);
   // styles and outputs
   const cs = N.parseRule('marker:new → "two words" [cell hl u c#c0392b]; any → ·');

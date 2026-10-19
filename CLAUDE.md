@@ -637,6 +637,25 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   their meaning (the part's own column). The parts of ONE chart cell share ONE box (Seth,
   2026-10-18: a marker "should be inside the same border as the cell they apply to"): consecutive
   parts with the same `srcCol` go into the same `.cflat-g` (`flatWrap` returns {wrap, add}).
+  THE GROUPS VIEW (Seth, 2026-10-19: "a major-column view … just the 3 parent columns (and then
+  style text from sub columns within each cell per visual filter rules)"): `view=groups`
+  (`viewOf(spec)` = cols | flat | groups; `isFlat` is true for both flat views) — `flatten` makes one
+  column PER HEADER GROUP (`groupNameOf`: the first path element, else the column itself; n = 1000+,
+  `guid: group:<name>`, `obj.grouped`), each row's parts on their group's cell in column order with
+  `srcCol` kept, so the flat machinery (labels, `columnLook` styles, `applyMovedLooks`, the copy and
+  the exports) does the rest; `flatUnitKey` never forms a group unit there (the cell is the group).
+  The head's "▥ Groups" (`chart-view-groups`, shown when the template has groups) and the ⋯ Layout
+  select. LINE UP ON A COLUMN (Seth, 2026-10-19: in the one-column view "align elements from one or
+  more specific columns so that they do line up … center arrange/align, not center of the column,
+  not center of the page … other elements just adjacent to the left or right and wrapped as
+  needed"): `align=c4,Object` (the `cols=` selectors, `alignedColumns(spec, full)`; the ⋯ menu's "Line
+  up on" boxes, flat and groups views only). In a cell holding an aligned column the parts go into a
+  3-track `.al-grid`: `.al-l` (before the first aligned run, right-aligned to the axis), `.al-a` (the
+  run of neighbouring aligned parts, centred), `.al-r` (the rest); a later aligned part after a gap
+  goes right (one axis per row). `alignFlat(table)` measures after the draw (`--al-l` / `--al-a` set
+  to max-content, the widest left and anchor across the rows taken, the left capped at 45 % of the
+  cell) and sets the two custom properties on the table — a ResizeObserver re-measures on the next
+  frame, writing only on change. A row without the column flows as before. Not in the exports.
   COLUMN STYLES (Seth, 2026-10-18: "apply specific styles to specific columns … and configure them
   myself"): the chart's ⚑ popover lists its template COLUMNS after the markers and the text's tags
   (`tagstyles.columnsIn(obj)` — tag items with `column: true`, `opts.fullChart` so the one-column
@@ -749,7 +768,33 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   <column>" = the `col:X[…]` scope), the text shown (`rb-out`) and the style (scope, highlight, B I
   U, text colour); it WRITES the rule text (`casesText` / `condText`) on every change, and READS one
   back (`casesFrom`: a flat and / or of terms, `not` terms and `col:X[term]` scopes; anything
-  cleverer is left to the Text tab with a note). `tests/js/chartnote.test.js` pins the terms. DRAWN by `FS.chart.renderChart` through `opts.extraCols` (`th.th-x` with the
+  cleverer is left to the Text tab with a note). `tests/js/chartnote.test.js` pins the terms.
+  MARKER CHIPS AND JOINED ROWS (Seth, 2026-10-19: "custom columns … show chips (or custom text
+  chips or styling) for specific markers"; a `^ShdArg` row shares its argument with the row above —
+  "remove the border between them and custom style a range on those rows"): an output token
+  `@markers` / `@markers:Name` / `@markers:group` / `@markers:/re/` (`case.chips`, resolved by
+  `applyRule` against `ctx.markerItems`, the row's tag items; `markerIs`) draws the matching markers
+  as `.ctag.xmark` chips in the look `chart.markerLook` gives them; the style token `chip` draws the
+  text as a `.ctag.xchip`; `join` puts `join-up` on the row (`rowDecor.classes`) and the renderer
+  gives the previous `tr.crow` `join-down` and the case's row style (`d.joinStyle`; `lastCrow` in
+  `renderChart`) — CSS makes the shared border transparent. A pattern on `marker:` / `col:` is tested
+  on the names AS WRITTEN (`ctx.markerItems`, `cell.raw`), never on the lowercased keys, so
+  `/^(New|Given)$/` works; a `col:X[…]` scope also sees the MARKERS in that column (a tag cell is a
+  cell too, with `tags`). The builder's Show row has the chips select (`rb-chips`, named / pattern)
+  and the toggles "as a chip" / "join with the row above". REGEX FLAVOURS (Seth, 2026-10-19: "which
+  type of regex … a link to a regex builder site"): `FS.REGEX_FLAVOURS` / `FS.regexHelp(flavour)`
+  (util.js) is the link every pattern-taking place shows — `js` (the page's RegExp: rules, builders)
+  or `py` (Python's re: the chart search) — opening regex101 set to that flavour through
+  `FS.openWeb` → `Api.open_web` (http(s) only; the mock uses window.open). README › Query languages
+  documents the notebook search, the chart search and the rule language with the flavour
+  differences (FLEx's own Find is .NET). THE CHART SEARCH IS ONE CLICK AWAY (Seth, 2026-10-19: "easy
+  to find and … visually creatable"): the toolbar's `#btn-chart-search` / Ctrl+Shift+K →
+  `FS.searchCharts()` opens the picker on Text charts (in a chart note or a collection the picked
+  rows go into a NEW note "Chart rows"); the picker's Text charts tab has "☰ Build a search…"
+  (`chart-search-build`) → `chartnote.searchBuilder` (`FS.chartSearchBuilder`): one "in column" and
+  a list of conditions (`sb-what` / `sb-how` / `sb-val`, not), the query shown as text (`search-q`)
+  with a live row count, Search → the box; `searchText` / `searchFrom` round-trip the flat language
+  (`-`, `col:`, `/re/i`), and the tab's footer lists the terms with the Python regex link. DRAWN by `FS.chart.renderChart` through `opts.extraCols` (`th.th-x` with the
   column's ⋯: rename / settings, move, remove with Undo; `td.xcell` — notes: click → textarea, Enter
   saves; list: click → select; rule: the text, styled) after the FLEx columns and before Free /
   Notes; `opts.onObject` hands the owner the fetched chart (the header, the rule preview).

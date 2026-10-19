@@ -174,6 +174,18 @@ test('hide empty columns, the one-column view, zoom, and the sentence / paragrap
   // a hidden column's parts leave the one cell too
   const f2 = C.flatten(c, R.parse('{{flex:chart ' + G + ' view=flat cols=Nucleus}}'));
   assert.deepEqual(f2.rows.find((r) => r.label === '1b').cells.map((p) => p.srcCol.n), [3, 4, 5]);
+  // THE GROUPS VIEW (Seth, 2026-10-19: "a major-column view … just the 3 parent columns"): one column per header group
+  const fg = C.flatten(c, R.parse('{{flex:chart ' + G + ' view=groups}}'));
+  assert.ok(fg.flat && fg.grouped);
+  assert.deepEqual(fg.template.columns.map((x) => x.name), ['Prenuclear', 'Nucleus', 'Postnuclear']);
+  const g1b = fg.rows.find((r) => r.label === '1b');
+  assert.deepEqual(g1b.cells.map((p) => [p.srcCol.n, fg.template.columns.find((x) => x.n === p.colN).name]), [[1, 'Prenuclear'], [3, 'Nucleus'], [4, 'Nucleus'], [5, 'Nucleus'], [7, 'Postnuclear']]);
+  assert.equal(C.viewOf(R.parse('{{flex:chart ' + G + ' view=groups}}')), 'groups');
+  assert.equal(C.viewOf(R.parse('{{flex:chart ' + G + ' view=odd}}')), 'cols');
+  // LINE UP ON a column: `align=` names columns like `cols=`, only in the one-column / groups views
+  assert.deepEqual([...C.alignedColumns(R.parse('{{flex:chart ' + G + ' view=flat align=Verb,Object}}'), c)], [4, 5]);
+  assert.deepEqual([...C.alignedColumns(R.parse('{{flex:chart ' + G + ' view=groups align=c4}}'), c)], [4]);
+  assert.equal(C.alignedColumns(R.parse('{{flex:chart ' + G + ' align=Verb}}'), c).size, 0);
   // the grid copy labels each word group with its column
   const grid = C.chartGrid(R.parse('{{flex:chart ' + G + ' view=flat rows=2 lines=txt}}'), Object.assign({}, c, { rows: c.rows.slice(1, 2) }));
   assert.ok(grid[grid.length - 1][1].includes('‹Pre-O›') && grid[grid.length - 1][1].includes('‹V›'), grid[grid.length - 1][1]);

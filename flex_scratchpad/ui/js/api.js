@@ -316,6 +316,7 @@
       set_tag_styles: async (kind, key, rules) => { config.tagStyles = config.tagStyles || { project: {}, tab: {}, folder: {}, note: {}, text: {}, filters: [] }; config.tagStyles[kind] = config.tagStyles[kind] || {}; if (rules && rules.length) config.tagStyles[kind][key] = rules; else delete config.tagStyles[kind][key]; return config.tagStyles; },
       flex_choose_file: async () => null, flex_locate: async () => [],
       open_in_flex: async (url) => { FS.toast('Would open in FLEx: ' + url); return true; },
+      open_web: async (url) => { try { window.open(url, '_blank', 'noopener'); } catch (e) { /* ignore */ } return true; },
       flex_open_object: async (kind, guid) => { FS.toast('Would open in FLEx: ' + kind + ' ' + guid); return true; },
       audio_clip: async () => ({ found: false, fileUrl: '', clipUrl: '', needsCapture: false, mediaGuid: '' }),
       audio_store_clip: async () => ({ clipUrl: '' }), export_clips: async (items) => (items || []).map((it) => ({ id: it.id, error: 'no audio in the browser demo' })), audio_browse_media: async () => null, audio_set_media_path: async () => ({}),

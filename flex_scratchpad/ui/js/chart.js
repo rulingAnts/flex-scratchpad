@@ -72,18 +72,67 @@
    * column kept as `srcCol` for the styles and the labels; the renderer, the grid / TSV copy and
    * the exports all take it. */
   const FLAT_COL = { n: 0, name: 'Text', abbr: 'Text', path: [], guid: 'flat' };
-  const isFlat = (spec) => !!(spec.extra && spec.extra.view === 'flat');
+  const viewOf = (spec) => { const v = spec.extra && spec.extra.view; return v === 'flat' || v === 'groups' ? v : 'cols'; };
+  const isFlat = (spec) => viewOf(spec) !== 'cols';
+  const isGroups = (spec) => viewOf(spec) === 'groups';
+  /* The header GROUP a column belongs to: its first path element, else the column itself. */
+  const groupNameOf = (c) => ((c.path || [])[0] || c.name || '');
+  /* `view=flat`: ONE column; `view=groups` (Seth, 2026-10-19: "a major-column view … just the 3
+   * parent columns (and then style text from sub columns within each cell per visual filter
+   * rules)"): one column PER HEADER GROUP, its sub-columns' parts in order inside each cell, each
+   * labelled and styled by its own column's rules — the same flat machinery with several cells. */
   function flatten(obj, spec) {
     if (!isFlat(spec) || obj.flat) return obj;
     const cols = visibleColumns(spec, obj);
+    const grouped = isGroups(spec);
     const order = new Map(cols.map((c, i) => [c.n, i]));
     const byN = new Map(cols.map((c) => [c.n, c]));
+    const groups = [];                       // the groups view's columns, in the chart's order
+    const groupN = new Map();
+    if (grouped) for (const c of cols) { const g = groupNameOf(c); if (!groupN.has(g)) { groupN.set(g, 1000 + groups.length); groups.push({ n: 1000 + groups.length, name: g, abbr: g, path: [], guid: 'group:' + g, group: true }); } }
     const rows = (obj.rows || []).map((r) => {
-      const parts = (r.cells || []).filter((c) => order.has(c.colN)).map((c, i) => Object.assign({}, c, { srcCol: byN.get(c.colN), colN: 0, mergeAfter: false, mergeBefore: false, _i: i }));
+      const parts = (r.cells || []).filter((c) => order.has(c.colN)).map((c, i) => Object.assign({}, c, { srcCol: byN.get(c.colN), colN: grouped ? groupN.get(groupNameOf(byN.get(c.colN))) : 0, mergeAfter: false, mergeBefore: false, _i: i }));
       parts.sort((a, b) => (order.get(a.srcCol.n) - order.get(b.srcCol.n)) || (a._i - b._i));
       return Object.assign({}, r, { cells: parts });
     });
-    return Object.assign({}, obj, { flat: true, template: Object.assign({}, obj.template || {}, { columns: [FLAT_COL] }), rows });
+    return Object.assign({}, obj, { flat: true, grouped, template: Object.assign({}, obj.template || {}, { columns: grouped ? groups : [FLAT_COL] }), rows });
+  }
+  /* LINE UP ON A COLUMN (Seth, 2026-10-19: in the one-column view "align elements from one or more
+   * specific columns so that they do line up … center arrange/align … other elements just adjacent
+   * to the left or right and wrapped as needed"): `align=` names columns like `cols=` does; in each
+   * cell the parts before the first aligned run go LEFT (ending at a shared axis), the run of
+   * aligned parts sits CENTRED on the axis, the rest flows RIGHT — a 3-track grid whose left and
+   * anchor tracks are as wide as the widest row needs (`alignFlat` measures after drawing). */
+  function alignedColumns(spec, full) {
+    const sel = spec.extra && spec.extra.align;
+    if (!sel || !isFlat(spec)) return new Set();
+    return new Set(selectedColumns({ extra: { cols: sel } }, full).map((c) => c.n));
+  }
+  function alignFlat(table) {
+    const cells = [...table.querySelectorAll('.al-grid')];
+    if (!cells.length) return;
+    const place = () => {
+      if (!table.isConnected) return;
+      table.style.setProperty('--al-l', 'max-content');
+      table.style.setProperty('--al-a', 'max-content');
+      let l = 0, a = 0, w = 0;
+      for (const g of cells) {
+        const L = g.querySelector('.al-l'), A = g.querySelector('.al-a');
+        if (L) l = Math.max(l, L.getBoundingClientRect().width);
+        if (A) a = Math.max(a, A.getBoundingClientRect().width);
+        w = Math.max(w, g.getBoundingClientRect().width);
+      }
+      const left = Math.min(Math.ceil(l), Math.max(60, Math.floor(w * 0.45)));
+      const vl = left + 'px', va = Math.ceil(a) + 'px';
+      if (table.style.getPropertyValue('--al-l') !== vl) table.style.setProperty('--al-l', vl);
+      if (table.style.getPropertyValue('--al-a') !== va) table.style.setProperty('--al-a', va);
+    };
+    place();
+    if (typeof ResizeObserver !== 'undefined') {
+      let queued = false;
+      const ro = new ResizeObserver(() => { if (queued) return; queued = true; requestAnimationFrame(() => { queued = false; if (!table.isConnected) { ro.disconnect(); return; } place(); }); });
+      ro.observe(table);
+    }
   }
   /* Header rows from the columns' paths: one row per depth, a group spanning its consecutive
    * columns, then the columns themselves. [{text, span, key?, col?}] per row. */
@@ -349,6 +398,7 @@
     // configure them myself"): the `column:<Group/Name>` rules, from the chart's ⚑ popover or any
     // scope dialog — its cells tinted / bordered / coloured, a hidden column left out
     const colLooks = new Map();
+    const alignSet = alignedColumns(spec, full);
     let cols = visibleColumns(spec, obj);
     if (!flat) {
       for (const c of cols) { const lk = columnLook(c, obj, spec); if (lk) colLooks.set(c.n, lk); }
@@ -406,6 +456,7 @@
     if (!opts.inCell) head.appendChild(el('button', { class: 'lnk', title: 'Copy as a tab-separated grid (headers, rows, notes)', onclick: () => { FS.copyText(chartTsv(spec, obj)); FS.toast('Copied as TSV'); } }, '⎘ TSV'));
     if (obj.url) head.appendChild(el('a', { href: obj.url, title: 'Open the text in FieldWorks (its Text Chart tab)', onclick: (e) => { e.preventDefault(); FS.interlinear.openInFlex(obj.url); } }, 'Open in FLEx ↗'));
     if (opts.editable && !opts.inCell) head.appendChild(el('button', { class: 'lnk', 'data-test': 'chart-view', title: flat ? 'Show the chart columns' : 'One column: each row in one cell, its words labelled with their columns', onclick: () => { spec.extra = spec.extra || {}; if (flat) delete spec.extra.view; else spec.extra.view = 'flat'; change(); } }, flat ? '▦ Columns' : '▤ One column'));
+    if (opts.editable && !opts.inCell && !isGroups(spec) && ((full.template && full.template.columns) || []).some((c) => (c.path || []).length)) head.appendChild(el('button', { class: 'lnk', 'data-test': 'chart-view-groups', title: 'The header groups only: one cell per group, its columns’ words inside, labelled and styled by their own columns', onclick: () => { spec.extra = spec.extra || {}; spec.extra.view = 'groups'; change(); } }, '▥ Groups'));
     if (opts.editable) head.appendChild(el('button', { class: 'lnk', 'data-test': 'chart-menu', title: 'Options', onclick: (e) => chartMenu(e.currentTarget, spec, opts, full) }, '⋯'));
     box.appendChild(head);
 
@@ -503,13 +554,21 @@
     const movedTargets = new Set();
     for (const r of rows) for (const c of r.cells || []) if (c.kind === 'moved' && c.target) movedTargets.add(c.target);
 
+    let lastCrow = null;                     // the previous row's <tr>, for a `join`
     rows.forEach((row, ri) => {
       // the sentence / paragraph boundary goes UNDER the free translation row when one follows
       // this row (Seth, 2026-10-18), else under the row itself
       const freeAfter = free === 'row' && runEnd.has(ri) ? freeText(obj, runEnd.get(ri).segs, true) : [];
       const bound = (row.endSent ? ' end-sent' : '') + (row.endPara ? ' end-para' : '');
       const tr = el('tr', { class: 'crow cl-' + (row.clause || 'normal') + (freeAfter.length ? '' : bound) + (row.depStart ? ' dep-start' : '') + (row.depEnd ? ' dep-end' : ''), dataset: { row: row.n, label: row.label } });
-      if (opts.rowDecor) { const d = opts.rowDecor(row) || {}; if (d.style) Object.assign(tr.style, d.style); for (const c of d.classes || []) tr.classList.add(c); }
+      if (opts.rowDecor) {
+        const d = opts.rowDecor(row) || {};
+        if (d.style) Object.assign(tr.style, d.style);
+        for (const c of d.classes || []) if (c !== 'join-up' || lastCrow) tr.classList.add(c);   // the first row has nothing above to join
+        // a rule's `join` (chartnote.js): no line between this row and the one above, the style on both
+        if (d.classes && d.classes.includes('join-up') && lastCrow) { lastCrow.classList.add('join-down'); if (d.joinStyle) Object.assign(lastCrow.style, d.joinStyle); Object.assign(tr.style, d.joinStyle || {}); }
+      }
+      lastCrow = tr;
       // a chart marker whose rule says "whole row" (Seth, 2026-10-18) colours the row it is in
       for (const c of row.cells || []) {
         if (c.kind !== 'tag' || !c.tag) continue;
@@ -554,13 +613,19 @@
         // marker "should be inside the same border as the cell they apply to"); the cells of a
         // header group styled as a group share ONE box (Seth, 2026-10-19)
         let group = null;
+        // lining up on a column (Seth, 2026-10-19): left of the axis, the aligned run, the rest
+        const aligning = flat && alignSet.size && slot.parts.some((p) => p.srcCol && alignSet.has(p.srcCol.n));
+        let grid = null, zone = 'l', zones = null;
+        if (aligning) { zones = { l: el('span', { class: 'al-l' }), a: el('span', { class: 'al-a' }), r: el('span', { class: 'al-r' }) }; grid = el('div', { class: 'al-grid' }, zones.l, zones.a, zones.r); td.appendChild(grid); }
+        const into = (p) => { if (!aligning) return td; const on = !!(p.srcCol && alignSet.has(p.srcCol.n)); if (zone === 'l' && on) zone = 'a'; else if (zone === 'a' && !on) zone = 'r'; return zones[zone]; };
         for (const part of slot.parts) {
           if (part.kind === 'moved') movedParts.push({ part, home: part.srcCol || slot.col });
           const cellHasWords = slot.parts.some((q) => q.kind === 'words' && (q.srcCol || slot.col).n === (part.srcCol || slot.col).n);
           const node = renderPart(part, row, part.srcCol || slot.col, obj, spec, opts, { lines, index, vern, anal, wordGroups, movedTargets, tbody, showTextTags, cellHasWords });
-          if (!(flat && part.srcCol)) { td.appendChild(node); continue; }
+          const host = into(part);
+          if (!(flat && part.srcCol)) { host.appendChild(node); continue; }
           const key = flatUnitKey(part.srcCol, obj, spec);
-          if (!group || group.key !== key) { if (group) group.finish(); group = flatWrap(part, obj, spec, key); td.appendChild(group.wrap); }
+          if (!group || group.key !== key || group.host !== host) { if (group) group.finish(); group = flatWrap(part, obj, spec, key); group.host = host; host.appendChild(group.wrap); }
           group.add(node, part);
         }
         if (group) group.finish();
@@ -592,6 +657,7 @@
     table.appendChild(tbody);
     box.appendChild(el('div', { class: 'chart-scroll' }, table));
     requestAnimationFrame(() => { if (box.isConnected) placeFrozen(table, colKeys, colEls, frozen); });
+    if (alignSet.size) requestAnimationFrame(() => { if (box.isConnected) alignFlat(table); });
     if (headers && !opts.inCell) requestAnimationFrame(() => { if (box.isConnected) wireStickyHead(box, table); });
     if (free === 'tip') box.appendChild(el('div', { class: 'chart-tip muted small', 'data-test': 'chart-tip' }, 'Click a cell to see its free translation here.'));
     if (opts.context) box.classList.add('context');
@@ -751,6 +817,7 @@
   /* What a part shares a box with in the one-column view: its column, or — when the column's look
    * comes from a header group's rule — that group (Seth, 2026-10-19: the group's columns as one). */
   function flatUnitKey(col, obj, spec) {
+    if (obj.grouped) return 'c:' + col.n;    // the groups view: the cell already is the group
     const lk = columnLook(col, obj, spec);
     const g = lk && lk.styled ? groupOfLook(lk) : '';
     return g ? 'g:' + g : 'c:' + col.n;
@@ -982,8 +1049,8 @@
       ncb.addEventListener('change', () => { if (ncb.checked) delete x.notes; else x.notes = 'off'; change(); });
       pop.appendChild(el('div', { class: 'row' }, el('label', {}, hcb, ' Column headings'), el('label', {}, ncb, ' Row notes')));
       // layout: the chart's columns, or every row in one cell; empty columns; zoom
-      const vsel = el('select', { 'data-test': 'chart-view-select', onchange: (e) => { if (e.target.value === 'flat') x.view = 'flat'; else delete x.view; change(); close(); } },
-        el('option', { value: 'cols', selected: !isFlat(spec) }, 'The chart’s columns'), el('option', { value: 'flat', selected: isFlat(spec) }, 'One column: each row in one cell'));
+      const vsel = el('select', { 'data-test': 'chart-view-select', onchange: (e) => { if (e.target.value === 'flat' || e.target.value === 'groups') x.view = e.target.value; else delete x.view; change(); close(); } },
+        el('option', { value: 'cols', selected: viewOf(spec) === 'cols' }, 'The chart’s columns'), el('option', { value: 'groups', selected: isGroups(spec) }, 'The header groups: one cell per group'), el('option', { value: 'flat', selected: viewOf(spec) === 'flat' }, 'One column: each row in one cell'));
       pop.appendChild(el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Layout'), vsel));
       const ecb = el('input', { type: 'checkbox', checked: x.empty === 'off', 'data-test': 'chart-hide-empty' });
       ecb.addEventListener('change', () => { if (ecb.checked) x.empty = 'off'; else delete x.empty; change(); });
@@ -999,8 +1066,21 @@
         zl,
         el('button', { class: 'tog', 'data-test': 'chart-zoom-in', title: 'Larger', onclick: () => { zl.textContent = setZoom(spec, zoomOf(spec) + ZOOM_STEP) + '%'; change(); } }, '+'),
         el('button', { class: 'lnk small', onclick: () => { zl.textContent = setZoom(spec, 100) + '%'; change(); } }, 'reset')));
+      // LINE UP ON a column in the one-column / groups views (Seth, 2026-10-19)
+      const allCols = (obj.template && obj.template.columns) || [];
+      if (isFlat(spec) && allCols.length) {
+        const on = alignedColumns(spec, obj);
+        const abox = el('div', { class: 'chart-cols' });
+        const writeAlign = () => { const sel = allCols.filter((c) => on.has(c.n)); if (sel.length) x.align = sel.map((c) => 'c' + c.n).join(','); else delete x.align; change(); };
+        for (const c of allCols) {
+          const cb = el('input', { type: 'checkbox', checked: on.has(c.n), 'data-test': 'chart-align-col', dataset: { col: c.n } });
+          cb.addEventListener('change', () => { if (cb.checked) on.add(c.n); else on.delete(c.n); writeAlign(); });
+          abox.appendChild(el('label', { class: 'chart-col', title: 'Line up this column’s text across the rows: centred on one axis, the rest of the row to its left and right' }, cb, ' ', (c.path || []).concat([c.name]).join(' › ')));
+        }
+        pop.appendChild(el('div', { class: 'row', style: { alignItems: 'flex-start' } }, el('span', { class: 'lbl', title: 'The text of these columns lines up across the rows (a run of neighbouring columns as one block)' }, 'Line up on'), abox));
+      }
       // columns
-      const cols = (obj.template && obj.template.columns) || [];
+      const cols = allCols;
       if (cols.length) {
         const shown = new Set(selectedColumns(spec, obj).map((c) => c.n));
         const box = el('div', { class: 'chart-cols' });
@@ -1126,5 +1206,5 @@
       el('div', { class: 'btn-row' }, el('button', { class: 'btn', 'data-test': 'pivot-copy', onclick: () => { FS.copyText(tsv); FS.toast('Copied as TSV'); } }, 'Copy as TSV'), el('button', { class: 'btn primary', onclick: () => m.close() }, 'Done')));
   }
 
-  FS.chart = { renderChart, visibleColumns, selectedColumns, flatten, isFlat, zoomOf, setZoom, playGroups, columnLook, pseudoLook, markerShown, headerRows, layoutRow, rowSegs, freeRuns, lineStarts, colWidths, setColWidths, freeText, chartGrid, chartTsv, markerLook, pivot, pivotDialog, LINE_NAMES, FREE_NAMES };
+  FS.chart = { renderChart, visibleColumns, selectedColumns, flatten, isFlat, isGroups, viewOf, alignedColumns, zoomOf, setZoom, playGroups, columnLook, pseudoLook, markerShown, headerRows, layoutRow, rowSegs, freeRuns, lineStarts, colWidths, setColWidths, freeText, chartGrid, chartTsv, markerLook, pivot, pivotDialog, LINE_NAMES, FREE_NAMES };
 })();

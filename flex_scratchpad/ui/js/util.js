@@ -60,6 +60,24 @@
     } catch (e) { return s.toLowerCase(); }
   };
 
+  /* A web page in the user's browser (the page itself is file://, so a plain link would navigate the app). */
+  FS.openWeb = function (url) {
+    try { if (FS.api && FS.api.open_web) { FS.api.open_web(url).catch(() => { try { window.open(url, '_blank', 'noopener'); } catch (e) { /* ignore */ } }); return; } } catch (e) { /* fall through */ }
+    try { window.open(url, '_blank', 'noopener'); } catch (e) { /* ignore */ }
+  };
+  /* Wherever a pattern can be typed (Seth, 2026-10-19: "a link to a regex builder site with instructions
+   * for which type of regex to use there"): which flavour this place runs, and a link to regex101 set to it.
+   * 'js' = the page's own JavaScript RegExp (rule columns, the builders); 'py' = Python's re module (the
+   * chart search, which runs in Python). Both are Perl-style; see README › Query languages for the differences. */
+  FS.REGEX_FLAVOURS = {
+    js: { name: 'JavaScript regular expressions', note: 'the page’s own JavaScript (ECMAScript) regular expressions, as in web browsers — flags i m s u', url: 'https://regex101.com/?flavor=javascript' },
+    py: { name: 'Python regular expressions', note: 'Python’s re module (the search runs in Python) — flags i m s', url: 'https://regex101.com/?flavor=python' },
+  };
+  FS.regexHelp = function (flavour) {
+    const f = FS.REGEX_FLAVOURS[flavour] || FS.REGEX_FLAVOURS.js;
+    return FS.el('a', { href: '#', class: 'regex-help', 'data-test': 'regex-help', dataset: { flavour }, title: 'Patterns here are ' + f.note + '. Opens regex101.com in your browser, set to that flavour, to build and test one.', onclick: (e) => { e.preventDefault(); FS.openWeb(f.url); } }, f.name + ' — build and test one ↗');
+  };
+
   FS.fmtTime = function (ms) {
     if (ms == null || isNaN(ms)) return '';
     const s = Math.max(0, ms) / 1000;

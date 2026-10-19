@@ -4603,6 +4603,24 @@ def test_a_chart_note_with_custom_columns(app):
     page.wait_for_function("() => document.querySelectorAll('#chartnote th.th-x').length === 3")
     roles = page.locator("#chartnote tr.crow td.xcell-rule").all_inner_texts()
     assert roles == ["N", "S", "", "", "S", "S", "S"], roles          # 1a: the marker case comes first; 2a / 2b have no Subject
+    # MARKER CHIPS AND A JOINED ROW (Seth, 2026-10-19): a column that shows the row's markers as chips, and a
+    # `join` case that takes the line away between the row and the one above (a ^ShdArg-style continuation)
+    page.locator("[data-test=cn-add-col]").click()
+    page.fill("[data-test=cn-col-name]", "Shared")
+    page.select_option("[data-test=cn-col-kind]", "rule")
+    page.wait_for_selector("[data-test=cn-builder]")
+    page.locator("[data-test=cn-rule-text]").click()
+    page.fill("[data-test=cn-rule]", "marker:/^(New|Given)$/ → @markers [join row hl#fde68a]")
+    page.wait_for_function("() => (document.querySelector('.cn-preview') || {}).textContent.includes('2 rows')")
+    page.locator("[data-test=cn-col-save]").click()
+    page.wait_for_function("() => document.querySelectorAll('#chartnote th.th-x').length === 4")
+    chips = page.locator("#chartnote tr.crow td.xcell-rule .ctag.xmark")
+    assert chips.all_inner_texts() == ["new", "giv"], chips.all_inner_texts()
+    assert page.locator("#chartnote tr.crow[data-label='2c']").evaluate("(e) => e.classList.contains('join-up')")
+    assert page.locator("#chartnote tr.crow[data-label='2b']").evaluate("(e) => e.classList.contains('join-down')")
+    assert page.locator("#chartnote tr.crow[data-label='2c'] td.ccell").first.evaluate("(e) => getComputedStyle(e).borderTopColor") == "rgba(0, 0, 0, 0)"
+    assert page.locator("#chartnote tr.crow[data-label='2b']").evaluate("(e) => e.style.background") != ""   # the row style covers both rows
+    assert page.locator("#chartnote tr.crow[data-label='1a']").evaluate("(e) => e.classList.contains('join-up')") is False   # the first row has nothing above
     saved()
     body = page.evaluate("() => window.__fsChartNote.markdown()")
     assert "## Custom columns" in body and "| Status | list | Information status |" in body and "| Role | rule | marker:new" in body
@@ -4972,6 +4990,98 @@ def test_the_rule_list_keeps_its_place_when_a_rule_changes(app):
     assert page.evaluate("() => document.querySelector('[data-test=tag-dialog]').scrollTop") == 120
     saved = h.api.init()["config"]["tagStyles"]["filters"][0]["rules"]
     assert {"tag": "Object", "enabled": True, "b": True, "box": True, "bc": "#b91c1c"} in saved, saved
+
+
+def test_the_chart_search_is_a_button_and_a_builder(app):
+    """Seth, 2026-10-19: the chart search "easy to find and also as GUI/visually creatable as possible
+    without requiring the user to use a query language", with a regex help link naming the flavour."""
+    h, page, errors = app
+    new_note(page, "Chart search")
+    page.locator("[data-test=btn-chart-search]").click()                       # the toolbar button opens the picker on Text charts
+    page.wait_for_selector("[data-test=chart-search-build]:not([hidden])")
+    assert page.locator(".picker-tabs button.on").inner_text() == "Text charts"
+    page.locator("[data-test=chart-search-build]").click()
+    page.wait_for_selector("[data-test=search-builder]")
+    cond = page.locator("[data-test=sb-cond]").first
+    assert cond.locator("[data-test=sb-what]").input_value() == "marker"      # a first condition to start from
+    cond.locator("[data-test=sb-how]").select_option("is")
+    cond.locator("[data-test=sb-val]").select_option("New")
+    page.locator("[data-test=sb-add]").click()
+    cond2 = page.locator("[data-test=sb-cond]").nth(1)
+    cond2.locator("[data-test=sb-what]").select_option("gloss")
+    cond2.locator("[data-test=sb-how]").select_option("regex")
+    cond2.locator("[data-test=sb-val]").fill("sleep")
+    page.fill("[data-test=sb-col]", "Verb")
+    page.wait_for_function("() => document.querySelector('[data-test=search-q]').textContent === 'col:Verb marker:New gloss:/sleep/'")
+    page.wait_for_function("() => document.querySelector('[data-test=search-count]').textContent === '1 row match'")
+    assert page.locator("[data-test=search-builder] [data-test=regex-help]").get_attribute("data-flavour") == "py"
+    page.locator("[data-test=sb-apply]").click()
+    page.wait_for_selector("[data-test=pick-chart-row]")
+    assert page.locator(".picker input[type=text]").first.input_value() == "col:Verb marker:New gloss:/sleep/"
+    assert page.locator("[data-test=pick-chart-row]").count() == 1 and "1a" in page.locator("[data-test=pick-chart-row]").inner_text()
+    # the query reads back into the builder
+    page.locator("[data-test=chart-search-build]").click()
+    page.wait_for_selector("[data-test=search-builder]")
+    assert page.locator("[data-test=sb-col]").input_value() == "Verb"
+    assert page.locator("[data-test=sb-cond]").count() == 2 and page.locator("[data-test=sb-cond]").nth(1).locator("[data-test=sb-how]").input_value() == "regex"
+    page.keyboard.press("Escape")
+    page.keyboard.press("Escape")
+    # Ctrl+Shift+K from a chart note browses too (the rows go into a new note)
+    page.evaluate("() => FS.newChartNote('%s')" % CHART)
+    page.wait_for_selector("#chartnote tr.crow")
+    page.keyboard.press("Control+Shift+K")
+    page.wait_for_selector("[data-test=chart-search-build]:not([hidden])")
+    page.keyboard.press("Escape")
+    # the rule dialog's help names the JavaScript flavour
+    page.locator("[data-test=cn-add-col]").click()
+    page.select_option("[data-test=cn-col-kind]", "rule")
+    page.wait_for_selector("[data-test=cn-builder] [data-test=regex-help]")
+    assert page.locator("[data-test=cn-builder] [data-test=regex-help]").get_attribute("data-flavour") == "js"
+    assert not errors
+
+
+def test_the_groups_view_and_lining_up_on_a_column(app):
+    """Seth, 2026-10-19: "a major-column view … just the 3 parent columns (and then style text from sub
+    columns within each cell per visual filter rules)", and in the one-column view "align elements
+    from one or more specific columns so that they do line up … center arrange/align"."""
+    h, page, errors = app
+    new_note(page, "Groups view")
+    page.keyboard.type("{{flex:chart %s}}" % CHART)
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#editor .chart-obj tr.crow")
+    obj = page.locator("#editor .chart-obj")
+    src = lambda: page.evaluate("() => window.__fsEditor.getMarkdown()")  # noqa: E731
+    obj.locator("[data-test=chart-view-groups]").click()
+    page.wait_for_function("() => document.querySelectorAll('#editor .chart-obj th.th-col').length === 3")
+    assert "view=groups" in src()
+    assert obj.locator("th.th-col").all_inner_texts() == ["Prenuclear", "Nucleus", "Postnuclear"]
+    r1b = obj.locator("tr.crow[data-label='1b'] td.ccell")
+    assert r1b.count() == 3
+    assert r1b.nth(1).locator(".cflat-g").evaluate_all("els => els.map((e) => e.title)") == ["Nucleus › Subject", "Nucleus › Verb", "Nucleus › Object"]
+    assert r1b.nth(1).locator(".cflat-lab").all_inner_texts() == ["S", "V", "O"]
+    assert obj.locator("[data-test=chart-view-groups]").count() == 0           # already there
+    # a sub-column's rule styles its words inside the group cell
+    page.evaluate("async () => { const c = await window.pywebview.api.set_tag_styles('project', FS.tagstyles.context().project, [{tag: 'column:Nucleus/Verb', br: 'sq', b: true}]); FS.tagstyles.setConfig(c); FS.emit('tagstyles'); }")
+    page.wait_for_selector("#editor .chart-obj tr.crow[data-label='1b'] td.ccell[data-col='1001'] .cflat-br")
+    # LINE UP ON Verb in the one-column view: the Verb runs sit centred on one axis across the rows
+    obj.locator("[data-test=chart-menu]").click()
+    page.select_option("[data-test=chart-view-select]", "flat")
+    page.wait_for_selector("#editor .chart-obj.flat")
+    page.locator("#editor .chart-obj [data-test=chart-menu]").click()
+    page.locator("[data-test=chart-align-col][data-col='4']").check()
+    page.wait_for_function("() => document.querySelectorAll('#editor .chart-obj .al-grid').length > 2")
+    page.keyboard.press("Escape")
+    assert "align=c4" in src(), src()
+    page.wait_for_function("() => /px$/.test(document.querySelector('#editor .chart-obj table.tchart').style.getPropertyValue('--al-a'))")
+    centres = page.evaluate("() => [...document.querySelectorAll(\"#editor .chart-obj tr.crow .al-a\")].filter((a) => a.textContent.trim()).map((a) => { const r = a.getBoundingClientRect(); return [a.closest('tr').dataset.label, Math.round(r.left + r.width / 2)]; })")
+    assert len(centres) >= 4, centres
+    assert max(c[1] for c in centres) - min(c[1] for c in centres) <= 1, centres
+    # the words before the Verb sit to its left (right-aligned to the axis), the rest to its right
+    r1a = page.locator("#editor .chart-obj tr.crow[data-label='1a'] .al-grid")
+    assert "Kabir" in r1a.locator(".al-l").inner_text() and "nuwa" in r1a.locator(".al-a").inner_text()
+    # a row without the column flows as before
+    assert page.locator("#editor .chart-obj tr.crow[data-label='2a'] .al-grid").count() == 0
+    assert not errors
 
 
 def test_chart_structure_and_header_groups_as_visual_filters(app):

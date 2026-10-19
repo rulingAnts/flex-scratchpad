@@ -1123,6 +1123,12 @@ class Api:
             raise RuntimeError("Not a FieldWorks link.")
         return self._open_url(url)
 
+    def open_web(self, url: str) -> bool:
+        """Open an http(s) page in the default browser (the regex help links). Nothing else."""
+        if not url or not re.match(r"^https?://", url, re.I):
+            raise RuntimeError("Not a web address.")
+        return self._open_url(url)
+
     # -- audio ------------------------------------------------------------------------------
 
     def audio_clip(self, text_guid: str, media_guid: str | None, begin: int, end: int) -> dict:

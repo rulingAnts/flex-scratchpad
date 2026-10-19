@@ -153,7 +153,7 @@
     while ((m = re.exec(src))) out.push(m[1] === '->' ? '→' : m[1]);
     return out;
   }
-  const STYLE_TOKEN = /^(row|cell|b|i|u|hl|hl#[0-9a-f]{6}|c#[0-9a-f]{6})$/i;
+  const STYLE_TOKEN = /^(row|cell|b|i|u|hl|hl#[0-9a-f]{6}|c#[0-9a-f]{6}|chip|join)$/i;
   /* → [{expr, out, style: {scope, hl, b, i, u, c}, src}] ; throws on a malformed expression */
   function parseRule(text) {
     const cases = [];
@@ -185,7 +185,7 @@
         let rx = null;
         const rm = /^\/((?:\\.|[^\/\\])*)\/([a-z]*)$/.exec(val);
         if (rm) {
-          try { rx = new RegExp(rm[1], rm[2].replace(/[^ims]/g, '')); } catch (e2) { throw new Error('Bad pattern ' + val + ': ' + e2.message); }
+          try { rx = new RegExp(rm[1], rm[2].replace(/[^imsu]/g, '')); } catch (e2) { throw new Error('Bad pattern ' + val + ': ' + e2.message); }
           val = '';
         } else if (/^".*"$/.test(val)) val = val.slice(1, -1);
         const term = { op: 'term', key, val, raw: t, ws, rx };
@@ -203,13 +203,26 @@
       // the output: text (quoted or bare words) up to the styles in brackets
       let out = '';
       const style = { scope: 'cell' };
+      const chips = [];                       // @markers[:selector]: the row's markers drawn as chips (Seth, 2026-10-19)
       let k = 0;
-      while (k < rest.length && rest[k] !== '[') { const t = rest[k++]; out += (out ? ' ' : '') + (/^".*"$/.test(t) ? t.slice(1, -1) : t); }
+      while (k < rest.length && rest[k] !== '[') {
+        const t = rest[k++];
+        const cm = /^@markers?(?::(.*))?$/i.exec(t);
+        if (cm) {
+          const sel = cm[1] == null ? '' : cm[1];
+          const rm = /^\/((?:\\.|[^\/\\])*)\/([a-z]*)$/.exec(sel);
+          let rx = null;
+          if (rm) { try { rx = new RegExp(rm[1], rm[2].replace(/[^imsu]/g, '')); } catch (e2) { throw new Error('Bad pattern ' + sel + ': ' + e2.message); } }
+          chips.push({ sel: rx ? '' : sel.replace(/^"(.*)"$/, '$1'), rx, raw: t });
+          continue;
+        }
+        out += (out ? ' ' : '') + (/^".*"$/.test(t) ? t.slice(1, -1) : t);
+      }
       if (rest[k] === '[') {
         k++;
         while (k < rest.length && rest[k] !== ']') {
           const t = rest[k++];
-          if (!STYLE_TOKEN.test(t)) throw new Error('Unknown style “' + t + '” (row, cell, hl, hl#rrggbb, b, i, u, c#rrggbb)');
+          if (!STYLE_TOKEN.test(t)) throw new Error('Unknown style “' + t + '” (row, cell, hl, hl#rrggbb, b, i, u, c#rrggbb, chip, join)');
           const tl = t.toLowerCase();
           if (tl === 'row' || tl === 'cell') style.scope = tl;
           else if (tl.startsWith('hl')) style.hl = tl.length > 2 ? tl.slice(2) : '#fff2a8';
@@ -217,7 +230,7 @@
           else style[tl] = true;
         }
       }
-      cases.push({ expr, out: out || (arrow >= 0 ? '' : '✓'), style, src: part.trim() });
+      cases.push({ expr, out: out || (arrow >= 0 || chips.length ? '' : '✓'), chips, style, src: part.trim() });
     }
     return cases;
   }
@@ -226,7 +239,7 @@
   function rowCtx(row, chart, values, columns) {
     const cols = (chart.template && chart.template.columns) || [];
     const byN = new Map(cols.map((c) => [c.n, c]));
-    const ctx = { markers: new Set(), cols: new Set(), clause: row.clause || 'normal', moved: new Set(), flags: new Set(), wl: [], cells: [], free: [], label: row.label || '', lists: {} };
+    const ctx = { markers: new Set(), cols: new Set(), clause: row.clause || 'normal', moved: new Set(), flags: new Set(), wl: [], cells: [], free: [], label: row.label || '', lists: {}, markerItems: [] };
     const segs = new Set();
     for (const c of row.cells || []) {
       const col = byN.get(c.colN);
@@ -236,9 +249,13 @@
         for (const p of col.path || []) keys.add(norm(p));
         const words = (c.words || []).filter((w) => !w.punct);
         ctx.wl.push(...words);
-        ctx.cells.push({ keys, words, col });
+        ctx.cells.push({ keys, words, col, raw: [col.name, col.abbr, (col.path || []).concat([col.name]).join('/')].concat(col.path || []).filter(Boolean) });
         for (let n = c.seg || 0; n && n <= (c.segTo || c.seg); n++) segs.add(n);
-      } else if (c.kind === 'tag' && c.tag) { ctx.markers.add(norm(c.tag.name)); ctx.markers.add(norm(c.tag.abbr)); for (const p of c.tag.path || []) ctx.markers.add(norm(p)); }
+      } else if (c.kind === 'tag' && c.tag) {
+        ctx.markers.add(norm(c.tag.name)); ctx.markers.add(norm(c.tag.abbr)); for (const p of c.tag.path || []) ctx.markers.add(norm(p)); ctx.markerItems.push(c.tag);
+        // a marker cell is a cell too, so col:X[marker:Y] finds a marker IN that column
+        if (col) { const keys = new Set(); for (const k of [col.name, col.abbr, 'c' + col.n, (col.path || []).concat([col.name]).join('/'), col.guid].concat(col.path || [])) if (k) keys.add(norm(k)); ctx.cells.push({ keys, words: [], tags: [c.tag], col, raw: [col.name, col.abbr, (col.path || []).concat([col.name]).join('/')].concat(col.path || []).filter(Boolean) }); }
+      }
       else if (c.kind === 'moved') ctx.moved.add(c.preposed ? 'preposed' : 'postposed');
       else if (c.kind === 'clause') ctx.flags.add('clauseref');
     }
@@ -275,7 +292,7 @@
   }
   /* A value against a term: its regex (on the text as written), or the normalised substring; `exact` = the whole value. */
   const matchVal = (s, e, exact) => { const str = String(s == null ? '' : s); if (e.rx) return e.rx.test(str.normalize ? str.normalize('NFC') : str); const v = norm(e.val); return exact ? norm(str) === v : str !== '' && v !== '' && norm(str).includes(v); };
-  const colMatch = (cell, e) => e.rx ? [...cell.keys].some((k) => e.rx.test(k)) : (norm(e.val) === '*' || cell.keys.has(norm(e.val)));
+  const colMatch = (cell, e) => e.rx ? (cell.raw || []).some((k) => e.rx.test(k)) : (norm(e.val) === '*' || cell.keys.has(norm(e.val)));
   function evalExpr(e, ctx) {
     switch (e.op) {
       case 'or': return evalExpr(e.a, ctx) || evalExpr(e.b, ctx);
@@ -284,7 +301,9 @@
       case 'in': {                                 // col:X[ … ]: the words of that column's cells only
         const cells = ctx.cells.filter((c) => colMatch(c, e.col));
         if (!cells.length) return false;
-        return evalExpr(e.a, Object.assign({}, ctx, { cells, wl: cells.flatMap((c) => c.words), cols: new Set(cells.flatMap((c) => [...c.keys])) }));
+        const items = cells.flatMap((c) => c.tags || []);
+        const names = new Set(items.flatMap((m) => [m.name, m.abbr].concat(m.path || []).filter(Boolean).map(norm)));
+        return evalExpr(e.a, Object.assign({}, ctx, { cells, wl: cells.flatMap((c) => c.words), cols: new Set(cells.filter((c) => c.words.length).flatMap((c) => [...c.keys])), markerItems: items, markers: names }));
       }
       default: break;
     }
@@ -296,7 +315,7 @@
     }
     switch (e.key) {
       case 'any': return true;
-      case 'marker': return e.rx ? [...ctx.markers].some((m) => e.rx.test(m)) : v === '*' ? ctx.markers.size > 0 : ctx.markers.has(v);
+      case 'marker': return e.rx ? (ctx.markerItems || []).some((m) => [m.name, m.abbr].concat(m.path || []).some((x) => x && e.rx.test(x))) : v === '*' ? ctx.markers.size > 0 : ctx.markers.has(v);
       case 'col': case 'column': return e.rx ? ctx.cells.some((c) => colMatch(c, e)) : v === '*' ? ctx.cols.size > 0 : ctx.cols.has(v);
       case 'clause': return ctx.clause === v;
       case 'moved': return v ? ctx.moved.has(v) : ctx.moved.size > 0;
@@ -344,6 +363,8 @@
   function styleText(st) {
     const toks = [];
     if (st.scope === 'row') toks.push('row');
+    if (st.chip) toks.push('chip');
+    if (st.join) toks.push('join');
     if (st.hl) toks.push('hl' + (st.hl === '#fff2a8' ? '' : st.hl));
     for (const k of ['b', 'i', 'u']) if (st[k]) toks.push(k);
     if (st.c) toks.push('c' + st.c);
@@ -354,7 +375,8 @@
     return cases.map((k) => {
       const cond = k.conds.length ? k.conds.map(condText).join(k.join === 'or' ? ' or ' : ' and ') : 'any';
       const st = styleText(k.style || {});
-      return k.out || st ? cond + ' → ' + (k.out ? qv(k.out) : '') + st : cond;
+      const chips = k.chips === 'all' ? ' @markers' : k.chips === 'some' ? ' @markers:' + (k.chipsHow === 'regex' ? rxText({ val: k.chipsVal, ci: k.chipsCi }) : qv(k.chipsVal || '*')) : '';
+      return k.out || st || chips ? cond + ' →' + (k.out ? ' ' + qv(k.out) : '') + chips + st : cond;
     }).join('; ');
   }
   /* The rule text → the builder's cases, or null when the rule is more than the builder shows. */
@@ -395,7 +417,10 @@
         return true;
       };
       if (!walk(k.expr, true)) return null;
-      out.push({ conds, join, out: k.out || '', style: Object.assign({ scope: 'cell' }, k.style || {}) });
+      const ch = (k.chips || [])[0];
+      if ((k.chips || []).length > 1) return null;
+      out.push({ conds, join, out: k.out || '', style: Object.assign({ scope: 'cell' }, k.style || {}),
+        chips: !ch ? '' : (!ch.sel && !ch.rx) ? 'all' : 'some', chipsHow: ch && ch.rx ? 'regex' : 'is', chipsVal: ch ? (ch.rx ? ch.rx.source.replace(/\\\//g, '/') : ch.sel) : '', chipsCi: !!(ch && ch.rx && ch.rx.flags.includes('i')) });
     }
     return out;
   }
@@ -471,22 +496,140 @@
         const cOn = el('input', { type: 'checkbox', checked: !!st.c, onchange: (e) => { st.c = e.target.checked ? (cColor.value || '#c0392b') : ''; write(); draw(); } });
         const cColor = el('input', { type: 'color', value: st.c || '#c0392b', title: 'Text colour', onchange: (e) => { st.c = e.target.value; cOn.checked = true; write(); } });
         const tog = (key, label, title) => el('button', { class: 'tog' + (st[key] ? ' on' : ''), title, 'data-test': 'rb-' + key, onclick: () => { st[key] = !st[key]; write(); draw(); } }, label);
-        box.appendChild(el('div', { class: 'row' }, el('span', {}, 'Show'), outIn));
+        const chipSel = sel([['', 'no marker chips'], ['all', 'chips of all the row’s markers'], ['some', 'chips of the markers…']], k.chips || '', (v) => { k.chips = v; if (v === 'some' && !k.chipsHow) k.chipsHow = markerNames.length ? 'is' : 'regex'; write(); draw(); }, { 'data-test': 'rb-chips' });
+        const chipHow = k.chips === 'some' ? sel([['is', 'named'], ['regex', 'matching pattern']], k.chipsHow || 'is', (v) => { k.chipsHow = v; write(); draw(); }, { 'data-test': 'rb-chips-how' }) : null;
+        const chipVal = k.chips !== 'some' ? null : (k.chipsHow !== 'regex' && markerNames.length)
+          ? sel(markerNames.map((x) => [x, x]).concat(markerNames.includes(k.chipsVal) || !k.chipsVal ? [] : [[k.chipsVal, k.chipsVal]]), k.chipsVal || markerNames[0], (v) => { k.chipsVal = v; write(); }, { 'data-test': 'rb-chips-val' })
+          : el('input', { type: 'text', value: k.chipsVal || '', placeholder: 'pattern, e.g. ^ShdArg', 'data-test': 'rb-chips-val', style: { fontFamily: 'var(--mono)' }, oninput: (e) => { k.chipsVal = e.target.value; write(); } });
+        if (k.chips === 'some' && !k.chipsVal && chipVal && chipVal.tagName === 'SELECT') k.chipsVal = chipVal.value;
+        box.appendChild(el('div', { class: 'row' }, el('span', {}, 'Show'), outIn, chipSel, chipHow, chipVal, k.chips === 'some' && k.chipsHow === 'regex' ? el('label', { class: 'small' }, el('input', { type: 'checkbox', checked: !!k.chipsCi, onchange: (e) => { k.chipsCi = e.target.checked; write(); } }), ' any case') : null));
         box.appendChild(el('div', { class: 'row cn-style' }, el('span', {}, 'Style'),
           sel([['cell', 'this cell'], ['row', 'the whole row']], st.scope || 'cell', (v) => { st.scope = v; write(); }, { 'data-test': 'rb-scope' }),
-          el('label', { class: 'small' }, hlOn, ' highlight'), hlColor, tog('b', 'B', 'Bold'), tog('i', 'I', 'Italic'), tog('u', 'U', 'Underline'), el('label', { class: 'small' }, cOn, ' text colour'), cColor));
+          el('label', { class: 'small' }, hlOn, ' highlight'), hlColor, tog('b', 'B', 'Bold'), tog('i', 'I', 'Italic'), tog('u', 'U', 'Underline'), el('label', { class: 'small' }, cOn, ' text colour'), cColor,
+          tog('chip', 'as a chip', 'Draw the text as a chip'), tog('join', 'join with the row above', 'No line between this row and the one above; a row style covers both')));
         host.appendChild(box);
       });
       host.appendChild(el('button', { class: 'btn small', 'data-test': 'rb-add-case', onclick: () => { cases.push({ conds: [], join: 'and', out: '', style: { scope: 'cell' } }); write(); draw(); } }, '+ case'));
-      host.appendChild(el('p', { class: 'muted small' }, 'The first case that fits a row decides. A pattern is a regular expression (^ start, $ end, . any character, [aeiou], (a|b)…) tested on the text as written; “contains” ignores case and diacritics.'));
+      host.appendChild(el('p', { class: 'muted small' }, 'The first case that fits a row decides. A pattern (^ start, $ end, . any character, [aeiou], (a|b)…) is tested on the text as written — a ', FS.regexHelp ? FS.regexHelp('js') : 'JavaScript regular expression', '; “contains” ignores case and diacritics.'));
     };
     draw();
     return { reload: () => { const c = casesFrom(opts.text(), listNames); if (c) { cases = c.length ? c : cases; draw(); return true; } return false; } };
   }
 
+
+  /* ---------------------------------------------------------- the chart SEARCH builder (Seth,
+   * 2026-10-19: the search "as GUI/visually creatable as possible without requiring the user to use
+   * a query language"). The search language (flex/__init__.py `chart_search`) is flat: terms ANDed,
+   * `-` for not, `col:X` narrows the cells the content terms apply to, a value may be `/pattern/i`
+   * (Python's re). So the builder is a list of conditions and one "in column", and it reads any
+   * query back. */
+  const SEARCH_WHATS = [
+    ['', 'Words anywhere (words, glosses, forms, notes)'], ['word', 'Word'], ['gloss', 'Gloss (word or morpheme)'], ['form', 'Morpheme form'], ['mgls', 'Morpheme gloss'],
+    ['cf', 'Lexeme / citation form'], ['lex', 'Any form'], ['pos', 'Word category'], ['marker', 'Chart marker'], ['clause', 'Clause type'], ['moved', 'Moved text'],
+    ['flag', 'Row flag'], ['row', 'Row label'], ['note', 'Row note'], ['chart', 'Chart name'], ['text', 'Text title'], ['template', 'Template'],
+  ];
+  const SEARCH_FLAGS = [['clauseref', 'has a clause marker [2a]'], ['endsent', 'ends a sentence'], ['endpara', 'ends a paragraph']];
+  const sq = (v) => { v = String(v == null ? '' : v); return /\s/.test(v) || v === '' ? '"' + v.replace(/"/g, '') + '"' : v; };
+  function searchText(q) {
+    const parts = [];
+    if (q.col) parts.push('col:' + sq(q.col));
+    for (const c of q.conds) {
+      const neg = c.neg ? '-' : '';
+      const val = c.how === 'regex' ? '/' + String(c.val || '').replace(/\//g, '\\/') + '/' + (c.ci ? 'i' : '') : sq(c.val);
+      if (c.what === '') { if (c.how === 'regex') parts.push(neg + 'word:' + val); else parts.push(c.neg ? '-word:' + val : val); }
+      else if (c.what === 'flag') parts.push(neg + (c.val || 'clauseref'));
+      else if (c.what === 'moved') parts.push(neg + (c.how === 'any' || !c.val ? 'moved' : 'moved:' + c.val));
+      else if (c.what === 'marker' && c.how === 'any') parts.push(neg + 'marker:*');
+      else if (c.what === 'clause') parts.push(neg + 'clause:' + (c.val || 'dependent'));
+      else parts.push(neg + c.what + ':' + val);
+    }
+    return parts.join(' ');
+  }
+  function searchFrom(text) {
+    const q = { col: '', conds: [] };
+    const re = /(-)?(?:([A-Za-z]+):)?("([^"]*)"|\/((?:\\.|[^\/\\])*)\/([a-z]*)|\S+)/g;
+    let m;
+    while ((m = re.exec(text || ''))) {
+      const neg = !!m[1];
+      let key = (m[2] || '').toLowerCase();
+      const quoted = m[4], pat = m[5], flags = m[6] || '';
+      let val = quoted != null ? quoted : pat != null ? pat : m[3];
+      if (key === 'col' || key === 'column') { if (!neg && !q.col) { q.col = val; continue; } key = 'col'; }
+      if (!key && ['moved', 'clauseref', 'endsent', 'endpara'].includes(val.toLowerCase())) { key = val.toLowerCase(); val = ''; }
+      const c = { neg, what: '', how: pat != null ? 'regex' : 'contains', val, ci: flags.includes('i') };
+      if (key === 'words' || key === 'word' || key === 'txt') c.what = key === 'txt' ? 'word' : key === 'words' ? 'word' : 'word';
+      else if (key === 'gls') c.what = 'gloss';
+      else if (key === 'morph') c.what = 'form';
+      else if (key === 'label') c.what = 'row';
+      else if (key === 'notes') c.what = 'note';
+      else if (['gloss', 'form', 'mgls', 'cf', 'lex', 'pos', 'marker', 'clause', 'row', 'note', 'chart', 'text', 'template'].includes(key)) c.what = key;
+      else if (key === 'moved') { c.what = 'moved'; c.how = val ? 'is' : 'any'; }
+      else if (['clauseref', 'endsent', 'endpara'].includes(key)) { c.what = 'flag'; c.val = key; }
+      else if (key === 'col') { c.what = 'col'; }
+      else if (key) { c.what = ''; c.val = m[0].replace(/^-/, ''); }
+      if (c.what === 'marker' && !c.neg && c.val === '*' && c.how !== 'regex') { c.how = 'any'; c.val = ''; }
+      if (c.what === 'marker' && c.how === 'contains') c.how = 'is';
+      if (c.what === 'pos' || c.what === 'clause' || c.what === 'row') { if (c.how === 'contains') c.how = 'is'; }
+      q.conds.push(c);
+    }
+    return q;
+  }
+  /* The dialog. opts: {query, chart? (markers / columns to offer), onApply(q)}. */
+  async function searchBuilder(opts) {
+    const m = FS.modal({ title: 'Search the text charts', class: 'cn-col-dlg' });
+    const q = searchFrom(opts.query || '');
+    if (!q.conds.length) q.conds.push({ neg: false, what: 'marker', how: 'any', val: '', ci: false });
+    let markers = [], columns = [];
+    try { markers = (await FS.api.flex_chart_markers()).map((x) => x.name).filter(Boolean); } catch (e) { markers = []; }
+    try { const charts = await FS.api.flex_charts(''); const seen = new Set(); for (const c of charts) for (const col of c.columns && Array.isArray(c.columns) ? c.columns : []) { const n = col.name || col; if (!seen.has(n)) { seen.add(n); columns.push(n); } } } catch (e) { columns = []; }
+    if (!columns.length && opts.chart && opts.chart.template) columns = (opts.chart.template.columns || []).map((c) => c.name);
+    const host = el('div', { class: 'cn-builder', 'data-test': 'search-builder' });
+    const out = el('code', { class: 'search-q', 'data-test': 'search-q' });
+    const count = el('span', { class: 'muted small', 'data-test': 'search-count' });
+    const sel = (options, value, onchange, attrs) => { const s = el('select', Object.assign({}, attrs || {})); for (const o of options) { const [v, l] = Array.isArray(o) ? o : [o.value, o.label]; s.appendChild(el('option', { value: v, selected: v === value }, l)); } s.addEventListener('change', () => onchange(s.value)); return s; };
+    const test = FS.debounce(async () => { const t = searchText(q); out.textContent = t || '(everything)'; try { const rows = await FS.api.chart_search(t); count.textContent = rows.length + ' row' + (rows.length === 1 ? '' : 's') + ' match'; } catch (e) { count.textContent = e.message; } }, 200);
+    const draw = () => {
+      host.innerHTML = '';
+      const colIn = el('input', { type: 'text', value: q.col || '', list: 'sb-cols', placeholder: 'any column', 'data-test': 'sb-col', oninput: (e) => { q.col = e.target.value; test(); } });
+      const dl = el('datalist', { id: 'sb-cols' }); for (const c of columns) dl.appendChild(el('option', { value: c }));
+      host.appendChild(el('div', { class: 'row' }, el('span', {}, 'Rows whose cells in column'), colIn, dl, el('span', { class: 'muted small' }, '(the word conditions below look only there)')));
+      host.appendChild(el('div', { class: 'row' }, el('span', {}, 'hold all of these:')));
+      q.conds.forEach((c, ci) => {
+        const row = el('div', { class: 'cn-cond', 'data-test': 'sb-cond' });
+        row.appendChild(el('label', { class: 'small', title: 'The opposite' }, el('input', { type: 'checkbox', checked: !!c.neg, onchange: (e) => { c.neg = e.target.checked; test(); } }), ' not'));
+        row.appendChild(sel(SEARCH_WHATS, c.what, (v) => { c.what = v; c.how = v === 'marker' ? (markers.length ? 'is' : 'any') : v === 'moved' ? 'any' : ['pos', 'clause', 'row', 'flag'].includes(v) ? 'is' : 'contains'; c.val = v === 'clause' ? 'dependent' : v === 'flag' ? 'clauseref' : ''; test(); draw(); }, { 'data-test': 'sb-what' }));
+        const w = c.what;
+        const hows = w === 'marker' ? [['is', 'is'], ['any', 'any'], ['regex', 'matches pattern']] : w === 'moved' ? [['any', 'any'], ['is', 'is']] : w === 'flag' || w === 'clause' ? null
+          : ['pos', 'row'].includes(w) ? [['is', 'is'], ['regex', 'matches pattern']] : [['contains', 'contains'], ['regex', 'matches pattern']];
+        if (hows) row.appendChild(sel(hows, c.how, (v) => { c.how = v; test(); draw(); }, { 'data-test': 'sb-how' }));
+        if (w === 'clause') row.appendChild(sel(CLAUSES.map((x) => [x, x]), c.val || 'dependent', (v) => { c.val = v; test(); }, { 'data-test': 'sb-val' }));
+        else if (w === 'flag') row.appendChild(sel(SEARCH_FLAGS, c.val || 'clauseref', (v) => { c.val = v; test(); }, { 'data-test': 'sb-val' }));
+        else if (w === 'moved' && c.how === 'is') row.appendChild(sel([['preposed', 'preposed'], ['postposed', 'postposed']], c.val || 'preposed', (v) => { c.val = v; test(); }, { 'data-test': 'sb-val' }));
+        else if (w === 'marker' && c.how === 'is' && markers.length) row.appendChild(sel(markers.map((x) => [x, x]).concat(markers.includes(c.val) || !c.val ? [] : [[c.val, c.val]]), c.val || (c.val = markers[0]), (v) => { c.val = v; test(); }, { 'data-test': 'sb-val' }));
+        else if (c.how !== 'any') row.appendChild(el('input', { type: 'text', value: c.val || '', placeholder: c.how === 'regex' ? 'pattern, e.g. ^ka-' : 'text', 'data-test': 'sb-val', style: { fontFamily: c.how === 'regex' ? 'var(--mono)' : '' }, oninput: (e) => { c.val = e.target.value; test(); } }));
+        if (c.how === 'regex') row.appendChild(el('label', { class: 'small' }, el('input', { type: 'checkbox', checked: !!c.ci, onchange: (e) => { c.ci = e.target.checked; test(); } }), ' any case'));
+        row.appendChild(el('button', { class: 'icon-btn danger', title: 'Remove', onclick: () => { q.conds.splice(ci, 1); test(); draw(); } }, '✕'));
+        host.appendChild(row);
+      });
+      host.appendChild(el('button', { class: 'btn small', 'data-test': 'sb-add', onclick: () => { q.conds.push({ neg: false, what: '', how: 'contains', val: '', ci: false }); test(); draw(); } }, '+ condition'));
+      host.appendChild(el('p', { class: 'muted small' }, 'A pattern here is a ', FS.regexHelp ? FS.regexHelp('py') : 'Python regular expression', '. “contains” ignores case and diacritics. The search looks at every chart of the project.'));
+      test();
+    };
+    draw();
+    m.body.append(host, el('div', { class: 'row' }, el('span', { class: 'muted small' }, 'The search as text: '), out, el('span', { class: 'spacer' }), count));
+    m.body.appendChild(el('div', { class: 'btn-row' }, el('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'), el('button', { class: 'btn primary', 'data-test': 'sb-apply', onclick: () => { const t = searchText(q); m.close(); if (opts.onApply) opts.onApply(t); } }, 'Search')));
+    return m;
+  }
+
   /* The rule's answer for a row: {text, style} or null. */
+  const markerIs = (m, sel) => { if (!sel.sel && !sel.rx) return true; if (sel.rx) return [m.name, m.abbr].concat(m.path || []).some((x) => x && sel.rx.test(x)); const v = norm(sel.sel); return v === '*' || norm(m.name) === v || norm(m.abbr) === v || (m.path || []).some((p) => norm(p) === v) || (v.startsWith('group:') && (m.path || []).some((p) => norm(p) === v.slice(6))); };
   function applyRule(cases, ctx) {
-    for (const c of cases) if (evalExpr(c.expr, ctx)) return { text: c.out, style: c.style };
+    for (const c of cases) {
+      if (!evalExpr(c.expr, ctx)) continue;
+      const chips = [];
+      for (const sel of c.chips || []) for (const m of ctx.markerItems || []) if (markerIs(m, sel) && !chips.includes(m)) chips.push(m);
+      return { text: c.out, style: c.style, chips };
+    }
     return null;
   }
 
@@ -621,8 +764,16 @@
         const r = this.cases(col);
         if (r.error) return el('span', { class: 'xerr small', title: r.error }, '⚠');
         const ans = applyRule(r.cases, rowCtx(row, chart, this.st.values, this.st.columns));
-        const node = el('span', { class: 'xrule', dataset: { col: col.name } }, ans ? ans.text : '');
-        if (ans && ans.style.scope === 'cell') styleNode(node, ans.style);
+        const node = el('span', { class: 'xrule', dataset: { col: col.name } });
+        if (ans) {
+          // the row's markers as chips, in the look their rules give them (Seth, 2026-10-19: "show chips … for specific markers")
+          for (const m of ans.chips || []) {
+            const look = FS.chart && FS.chart.markerLook ? FS.chart.markerLook(chart, m, this.st.spec) : { bg: '#eee', fg: '#111' };
+            node.appendChild(el('span', { class: 'ctag xmark', style: { background: look.bg, color: look.fg }, title: m.name + ((m.path || []).length ? ' — ' + m.path.join(' › ') : ''), dataset: { marker: m.name } }, m.abbr || m.name));
+          }
+          if (ans.text) node.appendChild(ans.style.chip ? el('span', { class: 'ctag xchip', style: Object.assign({ background: ans.style.hl || 'var(--panel-2)' }, ans.style.c ? { color: ans.style.c } : {}, ans.style.b ? { fontWeight: '800' } : {}) }, ans.text) : document.createTextNode(ans.text));
+          if (ans.style.scope === 'cell' && !ans.style.chip) styleNode(node, ans.style);
+        }
         return node;
       }
       const cur = this.value(row, col);
@@ -677,6 +828,10 @@
         if (r.error) continue;
         const ans = applyRule(r.cases, rowCtx(row, this.obj, this.st.values, this.st.columns));
         if (ans && ans.style.scope === 'row') Object.assign(out.style, styleOf(ans.style));
+        // `join`: no line between this row and the one above, and the case's row style covers both
+        // (Seth, 2026-10-19: a ^ShdArg row continues the previous row's clause — "remove the border
+        // between them and custom style a range on those rows")
+        if (ans && ans.style.join) { out.classes.push('join-up'); out.joinStyle = Object.assign(out.joinStyle || {}, ans.style.scope === 'row' ? styleOf(ans.style) : {}); }
       }
       return out;
     }
@@ -752,7 +907,7 @@
           };
           // the builder writes the text; typing in the text re-reads the builder when it can (Seth, 2026-10-19)
           const bhost = el('div', { class: 'cn-builder', 'data-test': 'cn-builder' });
-          const help = el('p', { class: 'muted small' }, 'Cases separated by “;”, each  condition → text [styles]. The first case that fits a row gives the cell its text. Terms: marker:Name · col:Name · clause:dependent|speech|song · moved · moved:preposed · clauseref · endsent · endpara · txt:"ka-" · gls:"sleep" · form: · mgls: · pos: · cf: · lex: · free: · label:"2a" · a list column as Status:new; a value may be a pattern, txt:/^ka-/i; a field in one writing system, gls@fr:…; the words of one column only, col:Subject[txt:/^ka-/] — with and, or, not, ( ). Styles: row or cell, hl, hl#rrggbb, b, i, u, c#rrggbb.');
+          const help = el('p', { class: 'muted small' }, 'Cases separated by “;”, each  condition → text [styles]. The first case that fits a row gives the cell its text. Terms: marker:Name · col:Name · clause:dependent|speech|song · moved · moved:preposed · clauseref · endsent · endpara · txt:"ka-" · gls:"sleep" · form: · mgls: · pos: · cf: · lex: · free: · label:"2a" · a list column as Status:new; a value may be a pattern, txt:/^ka-/i; a field in one writing system, gls@fr:…; the words of one column only, col:Subject[txt:/^ka-/] — with and, or, not, ( ). Outputs: text, @markers (the row’s markers as chips), @markers:Name or @markers:/pattern/. Styles: row or cell, hl, hl#rrggbb, b, i, u, c#rrggbb, chip (the text as a chip), join (no line between this row and the one above). A pattern is a ', FS.regexHelp ? FS.regexHelp('js') : 'JavaScript regular expression', '.');
           let builder = null;
           let mode = (col.settings || '').trim() ? 'text' : 'builder';
           try { if (localStorage.getItem('fs:ruleMode') === 'builder' && !(col.settings || '').trim()) mode = 'builder'; } catch (e) { /* ignore */ }
@@ -840,5 +995,6 @@
   const styleNode = (node, st) => Object.assign(node.style, styleOf(st));
 
   FS.ChartNote = ChartNote;
-  FS.chartnote = { parse, serialize, parseRule, evalExpr, applyRule, rowCtx, anchorOf, KINDS, casesText, casesFrom, ruleBuilder, chartWritingSystems };
+  FS.chartnote = { parse, serialize, parseRule, evalExpr, applyRule, rowCtx, anchorOf, KINDS, casesText, casesFrom, ruleBuilder, chartWritingSystems, searchText, searchFrom, searchBuilder };
+  FS.chartSearchBuilder = searchBuilder;
 })();

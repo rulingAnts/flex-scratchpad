@@ -965,6 +965,9 @@ table.md-table td.drop-target, table.md-table th.drop-target { outline: 2px soli
 .tchart .cmoved { color: var(--pos); font-weight: 700; cursor: help; padding: 0 3px; }
 .tchart .cclause { color: var(--accent); cursor: pointer; font-weight: 600; }
 .tchart .cclause:hover { text-decoration: underline; }
+.tchart tr.crow.join-up > td, .tchart tr.crow.join-up > th { border-top-color: transparent; padding-top: 1px; }
+.tchart tr.crow.join-down > td, .tchart tr.crow.join-down > th { border-bottom-color: transparent; padding-bottom: 1px; }
+.tchart .xrule .ctag.xmark, .tchart .xrule .ctag.xchip { margin: 1px 3px 1px 0; }
 .tchart .ctag { display: inline-block; font-size: calc(11px * var(--cz, 1)); font-weight: 700; padding: 0 6px; border-radius: 999px; line-height: 1.6; margin: 1px 2px; }
 .tchart .ctag.missing { background: var(--panel-2); color: var(--muted); }
 .tchart td.cfree, .tchart .cfree-row td { color: var(--text); font-style: italic; }
@@ -1003,6 +1006,9 @@ table.md-table td.drop-target, table.md-table th.drop-target { outline: 2px soli
 .cn-col-dlg .modal-body .row { margin: 6px 0; }
 .cn-settings textarea { font-size: 13px; }
 .cn-preview { margin-top: 4px; }
+.picker-search-row { display: flex; gap: 6px; align-items: center; } .picker-search-row input { flex: 1; min-width: 0; }
+.search-q { font-size: 12px; background: var(--panel); padding: 2px 6px; border-radius: 4px; }
+.regex-help { color: var(--accent); text-decoration: underline dotted; }
 .cn-case { border: 1px solid var(--border-soft); border-radius: 8px; padding: 6px 10px; margin: 6px 0; background: var(--panel); }
 .cn-case .cn-case-head b { font-size: 12.5px; }
 .cn-cond { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; margin: 3px 0 3px 14px; }
@@ -1062,6 +1068,10 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 /* the one-column view (view=flat): every part of a row in one cell, word groups labelled with their columns */
 .chart-obj.flat .tchart td.ccell { white-space: normal; }
 .cflat-g.cflat-void { display: none; }
+.tchart .al-grid { display: grid; grid-template-columns: var(--al-l, max-content) var(--al-a, max-content) minmax(0, 1fr); column-gap: 8px; align-items: start; }
+.tchart .al-l { justify-self: end; text-align: right; min-width: 0; }
+.tchart .al-a { justify-self: center; text-align: center; min-width: 0; }
+.tchart .al-r { justify-self: start; min-width: 0; }
 .cflat-g { display: inline-block; vertical-align: top; margin: 1px 6px 3px 0; padding: 1px 3px; border-radius: 4px; }
 .cflat-g .cflat-body { display: inline-flex; align-items: flex-start; gap: 4px; vertical-align: top; }
 .cflat-g .cflat-body .cwords { display: inline-flex; }

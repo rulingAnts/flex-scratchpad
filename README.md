@@ -140,7 +140,7 @@ elsewhere (marked *cached*).
 | Insert a FLEx object | **Ctrl+Shift+L** → search the lexicon or the texts → click the first and last segment → *Insert segments*; or paste a FLEx hyperlink (*Edit → Copy Location as Hyperlink* in FLEx) |
 | Find a segment by its text | In the picker's text view, *find segment by text…* |
 | A chart note | *+ New ▾ → New chart note…* (or a chart's `⋯` → *Open as a chart note…*): a note that is one text chart, with **your own columns** — a choice list shared by the whole notebook, free notes, or a *rule* that fills each row from its markers and columns — built in the column dialog's **Builder** (pick a marker, a column, a clause type, a word field; *is* / *contains* / *matches pattern*; a writing system; "in <column>"; the text to show and a row or cell style) or typed (`marker:Topic → Top [row hl#fde68a]; col:Subject[txt:/^ka-/i] → S; gls@fr:/dorm/ → sleep`): the word, gloss, morpheme form, morpheme gloss, category, lexeme form or free translation, as text or as a regular expression, in any writing system the chart carries, in one column or anywhere. A rule reads the chart itself, so a marker you have hidden still counts — and your styling of words, cells, rows and columns. Everything is saved in the note's file as tables and found by search |
-| Search the charts | In the FLEx object dialog's *Text charts* tab, type a search: words, `col:Subject`, `marker:Topic` (`marker:*` any), `lex:kabir`, `gloss:dog`, `clause:dependent`, `moved`, `-marker:Topic` to exclude; any value may be a regular expression, `word:/^ka-/i`, `col:/^Post/ gloss:/river/`. The matching rows are listed: click one to insert it, *Insert all* for every one, *Column profile…* to see which columns a lexical item sits in, *Collect into a new collection…* for a collection of the rows that can take in new rows later (*⟳ Find new rows*) |
+| Search the charts | The toolbar's **▦ Search charts** (Ctrl+Shift+K), or the FLEx object dialog's *Text charts* tab. **☰ Build a search…** makes the query from lists (a word, gloss, marker, column, clause type…, *is* / *contains* / *matches pattern*, *not*, "in column"), shows it as text and counts the rows live; or type a search: words, `col:Subject`, `marker:Topic` (`marker:*` any), `lex:kabir`, `gloss:dog`, `clause:dependent`, `moved`, `-marker:Topic` to exclude; any value may be a regular expression, `word:/^ka-/i`, `col:/^Post/ gloss:/river/`. The matching rows are listed: click one to insert it, *Insert all* for every one, *Column profile…* to see which columns a lexical item sits in, *Collect into a new collection…* for a collection of the rows that can take in new rows later (*⟳ Find new rows*) |
 | Chart columns on an example | The `⋯` of an example → *Chart columns*: the columns its words sit in, in the text's charts, drawn like tags (and styled like them: `column:Nucleus/Subject` in any scope). A chart's `⋯` → *FLEx tags* shows the text's markup tags inside its cells; *Pivot: markers × columns…* counts rows by marker and column; an entry card's *▦ In charts* shows which columns the item sits in |
 | Style chart markers | ⚑ on a chart: show, hide and style each marker for this chart, the note, a folder, the tab, the text or the whole notebook, or in a visual filter; *whole row* colours every row the marker is in |
 | Insert a text chart | **Ctrl+Shift+L** → *Text charts* → pick the chart → click the first and last row → *Insert rows* (the column headings always come along), or *Whole chart*. Its `⋯` chooses the lines, the columns, how the free translations are spliced in (a row after each segment's rows, a Free column, a tip for the clicked cell, or hidden), and exports the chart as FLEx's chart XML or JSON. Click a word, a cell, a row label or a column heading to style it |
@@ -173,7 +173,7 @@ elsewhere (marked *cached*).
 | Resize chart columns | Drag the right edge of a column heading (a wide chart scrolls sideways under its headings, which stay put while you scroll down); double-click the edge, or `⋯ → Reset column widths`, to let it size itself. The widths are kept in the note |
 | What a Word export shows | An expanded example is a LingTeX-Word table (the add-in's own styles: *LingTeX Interlinear*, the tier styles, grammatical glosses in small capitals, Word's own (1) numbering, the free translation in quotes with a link to the line in FLEx), so a document with LingTeX-Word installed re-wraps it. A collapsed example, an inline chip or an object in a table cell becomes a link into FLEx: the text's abbreviation and line numbers |
 | Play a chart | ▶ beside the first row of each line (and in the `#` corner for all of them): the line plays from the text's recording and the cells holding its words light up; the same in the web page and slideshow exports. ▶§ plays a whole sentence (the rows 4a, 4b, 4c of sentence 4), ▶¶ a whole paragraph |
-| Chart columns | The row labels (with the ▶s) stay put while a wide chart scrolls sideways. A column heading's popover has *Hide this column*; the `⋯` menu's *Columns* brings columns back, *Hide empty columns* drops the ones with nothing in these rows, *Zoom* makes the chart larger or smaller, and *Layout → One column* (or the ▤ button) shows each row in one cell, every word group labelled with its column, so visual filters by column (`column:Nucleus/Subject`) and by marker take the place of the columns; ▦ brings the columns back. *Change the chart…* shows another of the project's charts with the same view settings |
+| Chart columns | The row labels (with the ▶s) stay put while a wide chart scrolls sideways. A column heading's popover has *Hide this column*; the `⋯` menu's *Columns* brings columns back, *Hide empty columns* drops the ones with nothing in these rows, *Zoom* makes the chart larger or smaller, *Layout → One column* (or the ▤ button) shows each row in one cell, every word group labelled with its column, so visual filters by column (`column:Nucleus/Subject`) and by marker take the place of the columns, and *Layout → The header groups* (▥ Groups) shows one cell per header group with the sub-columns' words inside, labelled and styled by their own columns; ▦ brings the columns back. In those two layouts *Line up on* makes the text of chosen columns sit centred on one shared axis across the rows, the rest of each row to its left and right (a run of neighbouring chosen columns lines up as one block). *Change the chart…* shows another of the project's charts with the same view settings |
 | Custom columns' place | A chart note's custom column can sit left or right of the chart and be frozen (it stays put while the chart scrolls sideways): the heading's `⋯`, or the column dialog's *Place* |
 | Chart structure as filters | ⚑ on a chart also lists its **header groups** (*All of Nucleus*: the group's columns styled as one box) and its **structure**: dependent, speech and song clauses (the whole row), the `[2a]` clause markers, and **moved text** — preposed or postposed word groups get a tint, border, brackets or colour of their own, the look of the column they came from or the one they sit in, and a label such as *‹‹ Subj*. A group heading's box switches everything under it on, off, or back to the mix it had |
 | Style a column | ⚑ on a chart lists its columns with the markers and the text's tags: *Style ▾* on a column gives its cells a tint, a border, a colour, bold / italic / underline (brackets and the rest in the one-column view and on examples), for this chart, the note, a folder, the tab, the text, the whole notebook or a visual filter; the checkbox hides the column. A column heading's popover has *Style this column everywhere…* |
@@ -227,6 +227,59 @@ are `[line:]segment[.word[:from-to]]` (words counted without punctuation, charac
 clusters) or a quoted string (`morph:"ka-"`, `*"ka-"` for every match); styles are `hl`, `b`, `u`,
 `i`, `s`, `color`, with a colour in brackets (`hl[#fff2a8]=…`). You never have to type it — the
 click popovers write it — but it is readable and diffable.
+
+### Query languages — the three places you can type a search, and the regular expressions they take
+
+Everything a search can do is also reachable without typing a language: the notebook search box has
+the rail's tags and FLEx tags, the chart search has **☰ Build a search…** (the **▦ Search charts**
+toolbar button, Ctrl+Shift+K), and a chart note's rule column has the **Builder** tab. The languages
+are documented here because they are what the builders write, and what is saved in your files.
+
+**1. The notebook search box** (Ctrl+Shift+F) — finds notes. Words match titles, bodies, tags and the
+text of the FLEx objects a note quotes (from their snapshots); `"a phrase"`; `tag:Fieldwork`,
+`tab:Grammar`, `tagged:Topic` (notes whose examples carry that FLEx text markup tag), `marker:Topic`
+(notes whose charts carry that chart marker). No regular expressions here.
+
+**2. The chart search** (the FLEx object dialog's *Text charts* tab, the toolbar's *Search charts*,
+chart collections' rules) — finds chart ROWS across every chart of the project. Terms are ANDed;
+`-term` excludes:
+
+| term | matches |
+|---|---|
+| `kabir`, `"ka-sila"` | the row's words, glosses, morpheme forms, lexeme forms or notes |
+| `word:` `gloss:` `form:` `mgls:` `cf:` `lex:` `pos:` | one word field (`lex:` = any form; `pos:` is exact) |
+| `col:Subject` | a column by name, Group/Name, abbreviation or `c3`; the word terms then look only in that column's cells, and the hits name the column |
+| `marker:Topic`, `marker:Reference`, `marker:*` | a chart marker, any marker of a group, any marker |
+| `clause:dependent` (`speech`, `song`, `normal`) · `moved`, `moved:preposed` · `clauseref` `endsent` `endpara` | the row's structure |
+| `chart:` `text:` `template:` `row:2a` `note:` | the chart, its text, its template, a row label, the row's notes |
+
+Any value may be a pattern between slashes, `word:/^ka-/i`, `col:/^Post/`, `marker:/^ShdArg/`. These
+are **Python regular expressions** (the search runs in Python's `re` module): flags `i` (any case),
+`m`, `s`; tested on the text as written, so `i` is what makes `New` and `new` the same. Plain values
+ignore case and diacritics. Build and test one at [regex101.com, flavour Python](https://regex101.com/?flavor=python).
+
+**3. A chart note's rule column** — fills a column per row. `condition → text [styles]`, cases separated
+by `;`, the first case that fits a row decides:
+
+| | |
+|---|---|
+| terms | `marker:Name` (name, abbreviation or group; `*`) · `col:Name` (the column holds words) · `clause:…` · `moved` / `moved:preposed` · `clauseref` `endsent` `endpara` `depstart` `depend` · `label:"2a"` · a list column of the note as `Status:new` / `Status:*` |
+| word fields | `txt:` (the word and its morpheme forms) · `gls:` (word and morpheme glosses) · `form:` `mgls:` `pos:` `cf:` `lex:` · `free:` (the free translation of the line); a plain value is "contains", a pattern `txt:/^ka-/i` is a **JavaScript regular expression** (the page's own; flags `i m s u`) — build one at [regex101.com, flavour JavaScript](https://regex101.com/?flavor=javascript) |
+| one writing system | `gls@fr:…` — when the chart carries that writing system's alternatives |
+| one column only | `col:Subject[txt:/^ka-/ and not gls:/x/]` — the inner condition sees that column's words and markers only |
+| combining | `and`, `or`, `not`, `( )` |
+| outputs | text · `@markers` (the row's markers as chips) · `@markers:Name` · `@markers:/pattern/` |
+| styles | `row` or `cell` · `hl`, `hl#rrggbb` · `b` `i` `u` · `c#rrggbb` · `chip` (the text as a chip) · `join` (no line between the row and the one above; a row style covers both) |
+
+Example, for rows whose argument is shared with the row above (a `^ShdArg…` marker in a project's list):
+`marker:/^ShdArg/ → @markers:/^ShdArg/ [row join hl#fde68a]`.
+
+**Which regular expressions are which.** Both flavours are Perl-style — `^ $ . * + ? [] () |`,
+`\d \w \s \b`, `(?:…)`, look-ahead and look-behind all work in both. The differences you may meet:
+Unicode classes like `\p{L}` work in JavaScript with the `u` flag and not in Python's `re`; named
+groups are `(?<name>…)` in JavaScript and `(?P<name>…)` in Python. FieldWorks' own Find / Replace uses
+.NET regular expressions, a third Perl-style dialect; a pattern that uses only the common core works
+in all three.
 
 ### FLEx text markup tags and visual filters — how they work
 

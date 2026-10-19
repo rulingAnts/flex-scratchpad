@@ -1033,6 +1033,15 @@
 
   /* ------------------------------------------------------------------ insert / slash */
   function insertFlex() { FS.openPicker(); }
+  // the chart search, one click away (Seth, 2026-10-19: "easy to find"): the picker on its Text charts tab;
+  // in a chart note or a collection the rows are browsed and inserted into a NEW note
+  FS.searchCharts = () => {
+    if (!S.note || isChartNote() || isCollection()) {
+      FS.picker.open(async (md) => { try { await flushSave(); const n = await FS.api.create_note(S.tab, S.folder || '', 'Chart rows', md); clearSearch(); await refreshLists(); await openNote(n.id); } catch (e) { FS.toast(e.message, 'error'); } }, { mode: 'charts' });
+      return;
+    }
+    FS.openPicker({ mode: 'charts' });
+  };
   /* The picker, into whatever is open: a note's editor, or a collection (its own add). */
   FS.openPicker = (o) => { if (isChartNote()) { FS.toast('A chart note holds one chart; objects go into ordinary notes.'); return; } if (isCollection()) { if (S.coll) S.coll.pick(undefined, o); return; } FS.picker.open((md, asBlock) => ensureEditor().insertMarkdown(md, asBlock), o); };
   /* Tag styles for SEVERAL examples at once (Seth, 2026-10-17: "applyable to a group of examples by
@@ -1263,7 +1272,7 @@
     ['Text', [['Ctrl+B', 'Bold'], ['Ctrl+I', 'Italic'], ['Ctrl+E', 'Inline code'], ['Ctrl+Shift+X', 'Strikethrough'], ['Ctrl+Shift+H', 'Highlight'], ['Ctrl+K', 'Insert or edit a link'], ['Ctrl+Z / Ctrl+Y', 'Undo / redo (Ctrl+Shift+Z too)'], ['Ctrl+A', 'Select the block; again: the whole note'], ['Ctrl+click', 'Follow a link']]],
     ['Blocks', [['Enter', 'New paragraph / list item'], ['Shift+Enter', 'Line break inside the block'], ['Ctrl+Enter', 'New paragraph below the block'], ['Ctrl+Shift+Enter', 'New paragraph above the block'], ['Ctrl+D', 'Duplicate the block (or the selected blocks)'], ['Alt+Shift+↑ / ↓', 'Move the block or the selected blocks'], ['Shift+click, Shift+↑ / ↓', 'Select across blocks'], ['/', 'The insert menu, on an empty line'], ['Esc', 'Leave the block / clear the selection']]],
     ['Headings & lists', [['Ctrl+Alt+1 … 6', 'Heading 1 … 6'], ['Ctrl+Alt+0', 'Plain text (no heading, list or quote)'], ['Ctrl+Alt+[ / ]', 'Promote / demote every heading (note or selection)'], ['Ctrl+Shift+8', 'Bulleted list'], ['Ctrl+Shift+7', 'Numbered list'], ['Ctrl+Shift+9', 'Checklist'], ['Tab / Shift+Tab', 'List item in / out (also Ctrl+] / Ctrl+[)']]],
-    ['FLEx & tables', [['Ctrl+Shift+L', 'Insert a FLEx object'], ['Ctrl+V', 'Paste FLEx rows or a FLEx link as an example; a grid as a table'], ['Tab (in a table)', 'Next cell; at the end, a new row'], ['Alt+↑ / ↓ (in a cell)', 'The cell above / below'], ['Esc (while playing)', 'Stop playback']]],
+    ['FLEx & tables', [['Ctrl+Shift+L', 'Insert a FLEx object'], ['Ctrl+Shift+K', 'Search the text charts'], ['Ctrl+V', 'Paste FLEx rows or a FLEx link as an example; a grid as a table'], ['Tab (in a table)', 'Next cell; at the end, a new row'], ['Alt+↑ / ↓ (in a cell)', 'The cell above / below'], ['Esc (while playing)', 'Stop playback']]],
   ];
   function shortcutsDialog() {
     const m = FS.modal({ title: 'Keyboard shortcuts', class: 'shortcuts-dlg' });
@@ -1597,6 +1606,7 @@
     $('btn-pin').addEventListener('click', () => { if (!S.note) return; S.note.pinned = !S.note.pinned; saveMeta({ pinned: S.note.pinned }); refreshLists(); });
     $('btn-note-menu').addEventListener('click', (e) => { if (S.note) noteMenu(e.currentTarget, S.note); });
     $('btn-insert-flex').addEventListener('click', insertFlex);
+    $('btn-chart-search').addEventListener('click', () => FS.searchCharts());
     $('backup-pill').addEventListener('click', openBackup);
     $('btn-attach').addEventListener('click', (e) => attachFiles(e.altKey));
     $('btn-attach-more').addEventListener('click', (e) => attachMenu(e.currentTarget));
@@ -1643,6 +1653,7 @@
       else if (mod && e.shiftKey && e.key.toLowerCase() === 'f') { e.preventDefault(); $('search').focus(); $('search').select(); }
       else if (mod && !e.shiftKey && e.key.toLowerCase() === 'f') { if (S.note && !isSpecial()) { e.preventDefault(); openFind(); } }
       else if (mod && e.shiftKey && e.key.toLowerCase() === 'l') { if (S.note) { e.preventDefault(); if (isCollection()) ensureCollection().pick(); else if (!isChartNote()) insertFlex(); } }
+      else if (mod && e.shiftKey && e.key.toLowerCase() === 'k') { e.preventDefault(); FS.searchCharts(); }
       else if (mod && e.key.toLowerCase() === 's') { e.preventDefault(); flushSave().then(() => FS.toast('Saved')); }
       else if (mod && e.altKey && /^[1-6]$/.test(e.key)) { if (!isSpecial()) { e.preventDefault(); ensureEditor().linePrefix('h', +e.key); } }
       else if (mod && e.altKey && (e.key === '[' || e.key === ']')) { if (!isSpecial()) { e.preventDefault(); shiftHeadings(ensureEditor(), e.key === '[' ? -1 : 1); } }
