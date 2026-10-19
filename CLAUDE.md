@@ -658,8 +658,22 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   frame, writing only on change. Which EDGE meets the axis (Seth, 2026-10-19: "line up the left edge,
   right edge, or center of that column"): `alignat=left|center|right` (`alignEdge`, centre when
   unset; the select under the "Line up on" boxes, `chart-align-edge`) puts `al-left` / `al-right` /
-  `al-center` on the table and the CSS justifies `.al-a` accordingly. A row without the column flows
-  as before. Not in the exports.
+  `al-center` on the table and the CSS justifies `.al-a` accordingly. A header GROUP lines up as one
+  block (Seth: "either the parent column header or the daughter"): `align=Nucleus` is its columns
+  (the `cols=` selectors), and the menu's group boxes (`chart-align-group`) tick them. A row without
+  the column flows as before. Not in the exports. MARKER CHIPS ON THEIR OWN LINE (Seth, 2026-10-19:
+  "display marker chips on a separate line (to make column widths smaller) … wrap at word width"):
+  `chips=line|wrap` (`chipsMode`; the ⋯ menu's "Marker chips") — `addPart(container, node, mode)`
+  puts every `.ctag` into one `.chips-line` kept last in its container (a td, a flat group's body, a
+  line-up zone), `.void` when every chip in it is hidden; `wrap` adds `.wrap` and `placeChipLines`
+  sets each line's `max-width` to the widest sibling (the words) after the draw, with the usual rAF
+  ResizeObserver, so a column is never widened by its chips. POPOVERS AND MODALS STAY ON SCREEN
+  (Seth, 2026-10-19: settings "running off the screen … including close buttons. That should never
+  happen"): every `.popover` has `max-height: calc(100vh - 16px)` / `max-width` and scrolls;
+  `FS.popover` pins one taller than the window to the top and sets its `maxHeight` to the room left;
+  `.modal` is capped at `calc(100vh - 24px)` with `.modal-body { min-height: 0; flex: 1 1 auto }` so
+  the body scrolls and the head stays. The ⋯ menu's "Merged cells" and "Marker chips" rows sit right
+  under Layout, before the long column lists.
   MERGED CELLS (Seth, 2026-10-19, agreed after the question was put to him: "I merge columns when
   I'm unsure which column it is because it could be either"): a part merged with its empty
   neighbour (FLEx's MergesAfter / MergesBefore, on word groups and markers alike) belongs to BOTH

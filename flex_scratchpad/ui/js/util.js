@@ -216,8 +216,12 @@
     let left = r.left, top = r.bottom + 6;
     if (left + pw > window.innerWidth - 8) left = Math.max(8, window.innerWidth - pw - 8);
     if (top + ph > window.innerHeight - 8) top = Math.max(8, r.top - ph - 6);
+    // taller than the window: pin it to the top and let it scroll (Seth, 2026-10-19: settings "running
+    // off the screen … including close buttons. That should never happen")
+    if (ph > window.innerHeight - 16) top = 8;
     pop.style.left = left + 'px';
     pop.style.top = top + 'px';
+    pop.style.maxHeight = (window.innerHeight - top - 8) + 'px';
     function onDown(e) { if (!pop.contains(e.target) && e.target !== anchor && !anchor.contains(e.target)) close(); }
     function onKey(e) { if (e.key === 'Escape') close(); }
     setTimeout(() => { document.addEventListener('mousedown', onDown); document.addEventListener('keydown', onKey); }, 0);

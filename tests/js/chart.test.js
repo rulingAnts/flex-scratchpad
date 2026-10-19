@@ -190,6 +190,12 @@ test('hide empty columns, the one-column view, zoom, and the sentence / paragrap
   assert.equal(C.alignEdge(R.parse('{{flex:chart ' + G + ' view=flat align=Verb}}')), 'center');
   assert.equal(C.alignEdge(R.parse('{{flex:chart ' + G + ' view=flat align=Verb alignat=left}}')), 'left');
   assert.equal(C.alignEdge(R.parse('{{flex:chart ' + G + ' view=flat align=Verb alignat=odd}}')), 'center');
+  // a header group as the lined-up block: `align=Nucleus` = its columns
+  assert.deepEqual([...C.alignedColumns(R.parse('{{flex:chart ' + G + ' view=flat align=Nucleus}}'), c)], [3, 4, 5]);
+  // where the marker chips go (Seth, 2026-10-19): beside the words, a line of their own, or wrapped to the words' width
+  assert.equal(C.chipsMode(R.parse('{{flex:chart ' + G + '}}')), 'inline');
+  assert.equal(C.chipsMode(R.parse('{{flex:chart ' + G + ' chips=wrap}}')), 'wrap');
+  assert.equal(C.chipsMode(R.parse('{{flex:chart ' + G + ' chips=odd}}')), 'inline');
   // MERGED CELLS belong to both columns (Seth, 2026-10-19: "it could be either"): 3b's group is owned by Subject
   // (3) and merged into Verb (4); `merge=owner` keeps it to the owner; the flat views keep the flags under srcMerge*
   const all = c.template.columns;

@@ -138,6 +138,46 @@
   }
   /* Which edge of the lined-up column meets the axis (Seth, 2026-10-19: "line up the left edge,
    * right edge, or center of that column"): `alignat=left|center|right`, centre when unset. */
+  /* Where a cell's MARKER CHIPS go (Seth, 2026-10-19: "display marker chips on a separate line (to
+   * make column widths smaller) … wrap at word width"): `chips=inline` (beside the words, the
+   * default), `chips=line` (a line of their own under the words), `chips=wrap` (that line no wider
+   * than the words, so the chips wrap and the column stays as narrow as its words). */
+  const chipsMode = (spec) => { const v = spec && spec.extra && spec.extra.chips; return v === 'line' || v === 'wrap' ? v : 'inline'; };
+  /* Appends a part's node to a container, keeping the marker chips on a `.chips-line` at the end
+   * when the mode says so; `.chips-line.wrap` gets its width from the words after the draw. */
+  function addPart(container, node, mode) {
+    if (mode === 'inline' || !(node.classList && node.classList.contains('ctag'))) {
+      const line = container.querySelector(':scope > .chips-line');
+      if (line) container.insertBefore(node, line); else container.appendChild(node);
+      return;
+    }
+    let line = container.querySelector(':scope > .chips-line');
+    if (!line) { line = el('span', { class: 'chips-line' + (mode === 'wrap' ? ' wrap' : '') }); container.appendChild(line); }
+    line.appendChild(node);
+    if (![...line.children].some((c) => !c.classList.contains('hidden'))) line.classList.add('void'); else line.classList.remove('void');
+  }
+  /* `chips=wrap`: each chip line no wider than the words it belongs with (measured, since a table
+   * column is as wide as its widest cell and the chips must not be what makes it wide). */
+  function placeChipLines(table) {
+    const lines = [...table.querySelectorAll('.chips-line.wrap')];
+    if (!lines.length) return;
+    const place = () => {
+      if (!table.isConnected) return;
+      for (const line of lines) {
+        const host = line.parentElement;
+        let w = 0;
+        for (const n of host.children) if (n !== line && !n.classList.contains('chips-line')) w = Math.max(w, n.getBoundingClientRect().width);
+        const v = Math.max(48, Math.ceil(w)) + 'px';
+        if (line.style.maxWidth !== v) line.style.maxWidth = v;
+      }
+    };
+    place();
+    if (typeof ResizeObserver !== 'undefined') {
+      let queued = false;
+      const ro = new ResizeObserver(() => { if (queued) return; queued = true; requestAnimationFrame(() => { queued = false; if (!table.isConnected) { ro.disconnect(); return; } place(); }); });
+      ro.observe(table);
+    }
+  }
   const alignEdge = (spec) => { const v = spec && spec.extra && spec.extra.alignat; return v === 'left' || v === 'right' ? v : 'center'; };
   function alignFlat(table) {
     const cells = [...table.querySelectorAll('.al-grid')];
@@ -432,6 +472,7 @@
     // scope dialog — its cells tinted / bordered / coloured, a hidden column left out
     const colLooks = new Map();
     const alignSet = alignedColumns(spec, full);
+    const chipMode = chipsMode(spec);
     let cols = visibleColumns(spec, obj);
     if (!flat) {
       for (const c of cols) { const lk = columnLook(c, obj, spec); if (lk) colLooks.set(c.n, lk); }
@@ -666,9 +707,9 @@
           const cellHasWords = slot.parts.some((q) => q.kind === 'words' && colsOf(q).some((n) => mine.includes(n)));
           const node = renderPart(part, row, part.srcCol || slot.col, obj, spec, opts, { lines, index, vern, anal, wordGroups, movedTargets, tbody, showTextTags, cellHasWords });
           const host = into(part);
-          if (!(flat && part.srcCol)) { host.appendChild(node); continue; }
+          if (!(flat && part.srcCol)) { addPart(host, node, chipMode); continue; }
           const key = flatUnitKey(part.srcCol, obj, spec);
-          if (!group || group.key !== key || group.host !== host) { if (group) group.finish(); group = flatWrap(part, obj, spec, key); group.host = host; host.appendChild(group.wrap); }
+          if (!group || group.key !== key || group.host !== host) { if (group) group.finish(); group = flatWrap(part, obj, spec, key, chipMode); group.host = host; host.appendChild(group.wrap); }
           group.add(node, part);
         }
         if (group) group.finish();
@@ -701,6 +742,7 @@
     box.appendChild(el('div', { class: 'chart-scroll' }, table));
     requestAnimationFrame(() => { if (box.isConnected) placeFrozen(table, colKeys, colEls, frozen); });
     if (alignSet.size) { table.classList.add('al-' + alignEdge(spec)); requestAnimationFrame(() => { if (box.isConnected) alignFlat(table); }); }
+    if (chipMode === 'wrap') requestAnimationFrame(() => { if (box.isConnected) placeChipLines(table); });
     // SENTENCE / PARAGRAPH BOUNDARIES as visual-filter targets (Seth, 2026-10-19: "custom style sentence
     // boundaries and paragraph boundaries"): the line under an end-sent / end-para row (or the free
     // translation row that carries it) takes the rule's style, thickness and colour, or goes away
@@ -877,7 +919,7 @@
     const g = lk && lk.styled ? groupOfLook(lk) : '';
     return g ? 'g:' + g : 'c:' + col.n;
   }
-  function flatWrap(part, obj, spec, key) {
+  function flatWrap(part, obj, spec, key, chipMode) {
     const col = part.srcCol;
     const asGroup = !!(key && key.startsWith('g:'));
     const bothCols = partColumns(part, (obj.template && obj.template.srcColumns) || [], spec, true);
@@ -903,7 +945,7 @@
     // 2026-10-19: "if whatever chips were in that cell are invisible, then the cell border, tile
     // or whatever shouldn't draw")
     let shown = false;
-    const add = (node, p) => { if (asGroup && lastCol && p.srcCol && p.srcCol.n !== lastCol.n) colLabel(); lastCol = p.srcCol || lastCol; body.appendChild(node); if (p.kind === 'words') wrap.classList.add('cflat-words'); if (!node.classList.contains('hidden')) shown = true; };
+    const add = (node, p) => { if (asGroup && lastCol && p.srcCol && p.srcCol.n !== lastCol.n) colLabel(); lastCol = p.srcCol || lastCol; addPart(body, node, chipMode || 'inline'); if (p.kind === 'words') wrap.classList.add('cflat-words'); if (!node.classList.contains('hidden')) shown = true; };
     const finish = () => { colLabel(); lastCol = null; if (!shown) wrap.classList.add('cflat-void'); };
     if (look) {
       const bg = look.tile ? (look.tc || look.bg) : look.hl ? look.bg : '';
@@ -1123,6 +1165,16 @@
       const vsel = el('select', { 'data-test': 'chart-view-select', onchange: (e) => { if (e.target.value === 'flat' || e.target.value === 'groups') x.view = e.target.value; else delete x.view; change(); close(); } },
         el('option', { value: 'cols', selected: viewOf(spec) === 'cols' }, 'The chart’s columns'), el('option', { value: 'groups', selected: isGroups(spec) }, 'The header groups: one cell per group'), el('option', { value: 'flat', selected: viewOf(spec) === 'flat' }, 'One column: each row in one cell'));
       pop.appendChild(el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Layout'), vsel));
+      // merged cells (Seth, 2026-10-19: "it could be either" column)
+      const msel = el('select', { 'data-test': 'chart-merge-select', title: 'A cell merged with its empty neighbour could belong to either column', onchange: (e) => { if (e.target.value === 'both') delete x.merge; else x.merge = e.target.value; change(); } },
+        el('option', { value: 'both', selected: mergeMode(spec) === 'both' }, 'both columns: searches, rules and the line-up match either; the neighbour’s look round the owner’s'),
+        el('option', { value: 'lookowner', selected: mergeMode(spec) === 'lookowner' }, 'both for searches and rules; drawn with the owner column’s look only'),
+        el('option', { value: 'owner', selected: mergeMode(spec) === 'owner' }, 'the owner column only'));
+      pop.appendChild(el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Merged cells'), msel));
+      // marker chips (Seth, 2026-10-19: "on a separate line … wrap at word width")
+      const csel = el('select', { 'data-test': 'chart-chips-select', title: 'Where a cell’s chart-marker chips go', onchange: (e) => { if (e.target.value === 'inline') delete x.chips; else x.chips = e.target.value; change(); } },
+        el('option', { value: 'inline', selected: chipsMode(spec) === 'inline' }, 'beside the words'), el('option', { value: 'line', selected: chipsMode(spec) === 'line' }, 'on a line of their own under the words'), el('option', { value: 'wrap', selected: chipsMode(spec) === 'wrap' }, 'on their own line, no wider than the words (they wrap)'));
+      pop.appendChild(el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Marker chips'), csel));
       const ecb = el('input', { type: 'checkbox', checked: x.empty === 'off', 'data-test': 'chart-hide-empty' });
       ecb.addEventListener('change', () => { if (ecb.checked) x.empty = 'off'; else delete x.empty; change(); });
       const mcb = el('input', { type: 'checkbox', checked: x.emptymarkers !== 'off', 'data-test': 'chart-empty-markers' });
@@ -1131,12 +1183,6 @@
       lcb.addEventListener('change', () => { if (lcb.checked) delete x.collab; else x.collab = 'off'; change(); });
       pop.appendChild(el('div', { class: 'row' }, el('label', { title: 'Leave out the columns with nothing in these rows' }, ecb, ' Hide empty columns'), isFlat(spec) ? el('label', { title: 'The column’s abbreviation under each word group' }, lcb, ' Column labels') : null));
       pop.appendChild(el('div', { class: 'row' }, el('label', { title: 'Chart markers in a cell that holds no words (a marker’s own rule in ⚑ can say otherwise)' }, mcb, ' Markers in cells with no words')));
-      // merged cells (Seth, 2026-10-19: "it could be either" column)
-      const msel = el('select', { 'data-test': 'chart-merge-select', title: 'A cell merged with its empty neighbour could belong to either column', onchange: (e) => { if (e.target.value === 'both') delete x.merge; else x.merge = e.target.value; change(); } },
-        el('option', { value: 'both', selected: mergeMode(spec) === 'both' }, 'both columns: searches, rules and the line-up match either; the neighbour’s look round the owner’s'),
-        el('option', { value: 'lookowner', selected: mergeMode(spec) === 'lookowner' }, 'both for searches and rules; drawn with the owner column’s look only'),
-        el('option', { value: 'owner', selected: mergeMode(spec) === 'owner' }, 'the owner column only'));
-      pop.appendChild(el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Merged cells'), msel));
       const zl = el('span', { class: 'zoom-val', 'data-test': 'chart-zoom' }, zoomOf(spec) + '%');
       pop.appendChild(el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Zoom'),
         el('button', { class: 'tog', 'data-test': 'chart-zoom-out', title: 'Smaller', onclick: () => { zl.textContent = setZoom(spec, zoomOf(spec) - ZOOM_STEP) + '%'; change(); } }, '\u2212'),
@@ -1149,7 +1195,17 @@
         const on = alignedColumns(spec, obj);
         const abox = el('div', { class: 'chart-cols' });
         const writeAlign = () => { const sel = allCols.filter((c) => on.has(c.n)); if (sel.length) x.align = sel.map((c) => 'c' + c.n).join(','); else delete x.align; change(); };
+        // a header GROUP lines up as one block (Seth, 2026-10-19: "either the parent column header or the daughter")
+        let lastG = null;
         for (const c of allCols) {
+          const g = (c.path || []).join(' › ');
+          if (g && g !== lastG) {
+            lastG = g;
+            const members = allCols.filter((k) => (k.path || []).join(' › ') === g);
+            const gcb = el('input', { type: 'checkbox', checked: members.every((k) => on.has(k.n)), 'data-test': 'chart-align-group', dataset: { group: g } });
+            gcb.addEventListener('change', () => { for (const k of members) { if (gcb.checked) on.add(k.n); else on.delete(k.n); } writeAlign(); });
+            abox.appendChild(el('label', { class: 'chart-col-group', title: 'Line up the whole group as one block' }, gcb, ' ', g));
+          }
           const cb = el('input', { type: 'checkbox', checked: on.has(c.n), 'data-test': 'chart-align-col', dataset: { col: c.n } });
           cb.addEventListener('change', () => { if (cb.checked) on.add(c.n); else on.delete(c.n); writeAlign(); });
           abox.appendChild(el('label', { class: 'chart-col', title: 'Line up this column’s text across the rows: centred on one axis, the rest of the row to its left and right' }, cb, ' ', (c.path || []).concat([c.name]).join(' › ')));
@@ -1286,5 +1342,5 @@
       el('div', { class: 'btn-row' }, el('button', { class: 'btn', 'data-test': 'pivot-copy', onclick: () => { FS.copyText(tsv); FS.toast('Copied as TSV'); } }, 'Copy as TSV'), el('button', { class: 'btn primary', onclick: () => m.close() }, 'Done')));
   }
 
-  FS.chart = { renderChart, visibleColumns, selectedColumns, flatten, isFlat, isGroups, viewOf, alignedColumns, alignEdge, mergeMode, mergedNeighbour, partColumns, zoomOf, setZoom, playGroups, columnLook, pseudoLook, markerShown, headerRows, layoutRow, rowSegs, freeRuns, lineStarts, colWidths, setColWidths, freeText, chartGrid, chartTsv, markerLook, pivot, pivotDialog, LINE_NAMES, FREE_NAMES };
+  FS.chart = { renderChart, visibleColumns, selectedColumns, flatten, isFlat, isGroups, viewOf, alignedColumns, alignEdge, chipsMode, mergeMode, mergedNeighbour, partColumns, zoomOf, setZoom, playGroups, columnLook, pseudoLook, markerShown, headerRows, layoutRow, rowSegs, freeRuns, lineStarts, colWidths, setColWidths, freeText, chartGrid, chartTsv, markerLook, pivot, pivotDialog, LINE_NAMES, FREE_NAMES };
 })();

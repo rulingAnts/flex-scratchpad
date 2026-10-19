@@ -4900,7 +4900,7 @@ def test_chart_search_rows_profile_and_a_collection_of_rows(app):
     page.locator("[data-test=chart-profile]").click()
     page.wait_for_selector(".profile-table")
     assert page.locator(".profile-table").count() == 2        # one per template: Default, and the Topic-Comment chart
-    assert "Subject" in page.locator(".profile-table").first.inner_text() and page.locator("[data-test=profile-count]").all_inner_texts() == ["3", "1"]
+    assert "Subject" in page.locator(".profile-table").first.inner_text() and page.locator("[data-test=profile-count]").all_inner_texts() == ["3", "1", "1"]   # Subject 3, Verb 1 (3b's merged cell counts for both), Topic 1
     page.keyboard.press("Escape")
     # a collection of the rows a search matches, with a rule that finds new rows
     page.keyboard.press("Control+Shift+L")
@@ -5093,6 +5093,34 @@ def test_the_groups_view_and_lining_up_on_a_column(app):
     page.locator("#editor .chart-obj [data-test=chart-menu]").click()
     page.select_option("[data-test=chart-align-edge]", "center")
     page.wait_for_function("() => !window.__fsEditor.getMarkdown().includes('alignat=')")
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(200)
+    # MARKER CHIPS on a line of their own, no wider than the words (Seth, 2026-10-19): row 1a's New marker shares the
+    # Postnuclear › Inner box with nothing, 2c's Given sits in Postnuclear › Outer; in the columns view a cell that holds
+    # words AND a marker keeps the chip under the words
+    page.locator("#editor .chart-obj [data-test=chart-menu]").click()
+    page.select_option("[data-test=chart-chips-select]", "wrap")
+    page.wait_for_selector("#editor .chart-obj .chips-line.wrap")
+    page.keyboard.press("Escape")
+    assert "chips=wrap" in src()
+    page.wait_for_function("() => [...document.querySelectorAll('#editor .chart-obj .chips-line.wrap')].every((l) => /px$/.test(l.style.maxWidth))")
+    assert page.locator("#editor .chart-obj tr.crow[data-label='1a'] .chips-line .ctag").count() == 1
+    page.locator("#editor .chart-obj [data-test=chart-menu]").click()
+    page.select_option("[data-test=chart-chips-select]", "inline")
+    page.wait_for_function("() => !window.__fsEditor.getMarkdown().includes('chips=')")
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(200)
+    # a header GROUP lines up as one block: the group's box ticks its columns
+    page.locator("#editor .chart-obj [data-test=chart-menu]").click()
+    page.locator("[data-test=chart-align-group][data-group='Nucleus']").check()
+    page.wait_for_function("() => window.__fsEditor.getMarkdown().includes('align=c3,c4,c5')")
+    page.locator("[data-test=chart-align-group][data-group='Nucleus']").uncheck()
+    page.wait_for_function("() => !window.__fsEditor.getMarkdown().includes('align=')")
+    page.keyboard.press("Escape")                                                  # a redraw leaves the open menu behind
+    page.wait_for_timeout(200)
+    page.locator("#editor .chart-obj [data-test=chart-menu]").click()
+    page.locator("[data-test=chart-align-col][data-col='4']").check()
+    page.wait_for_function("() => window.__fsEditor.getMarkdown().includes('align=c4')")
     page.keyboard.press("Escape")
     page.wait_for_timeout(200)
     # MERGED CELLS (Seth, 2026-10-19: "it could be either"): 3b's group is owned by Subject and merged into Verb, so
