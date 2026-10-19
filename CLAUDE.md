@@ -326,8 +326,10 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   range, or the running count), which prints the line's words and morph bundles exactly as read.
   THAT ONE WAS FIELDWORKS (same day): its importer gives a glossed word with no <morphemes> one bundle
   holding the word's form PER GLOSS LANGUAGE (`BIRDInterlinearImporter.UpgradeToWordGloss`), so texts from
-  FlexText Editor glossed in two languages show `budu budu` / `*** ***`. `--doubled-morphs`
-  (`explain_doubled_bundles`, `model.doubled_bundles`) lists every such analysis with its uses, read-only;
+  FlexText Editor glossed in two languages show `budu budu` / `*** ***`. `--doubled-morphs [TEXT]`
+  (`explain_doubled_bundles`, `model.doubled_bundles`; texts first, line by line with a progress line per text — the
+  whole-project wordform walk sat on one number for minutes — then, with no TEXT, the wordforms no text uses) lists
+  every such analysis with its uses, read-only;
   the fix is FLEx's Word Analyses. plans/BACKLOG.md › Known issue elsewhere.
   When a paste does not land, `flex-scratchpad --project NAME --locate clip` (or a file) runs the
   locator against the real project and writes `flex-scratchpad-locate.json`: the rows as read,

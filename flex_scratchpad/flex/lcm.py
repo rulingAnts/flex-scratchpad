@@ -1008,75 +1008,92 @@ class FlexiconBackend:
         except BaseException as e:
             raise _friendly(e, self.project_name)
 
-    def explain_doubled_bundles(self, with_uses: bool = True) -> dict:
+    def explain_doubled_bundles(self, which: str = "") -> dict:
         """Every wordform analysis whose morph bundles repeat the same unlinked form (Seth,
         2026-10-19: "budu budu" with "*** ***" under it — FieldWorks' importer makes one bundle per
         gloss LANGUAGE for a word with no <morphemes>), with the texts and lines that use each
-        analysis. Read-only; for `flex-scratchpad --doubled-morphs`."""
+        analysis. TEXTS FIRST (Seth: the whole-project wordform walk sat on one number for
+        minutes): the analyses of the texts named by `which` (every word of it in the title;
+        '' = every text) are checked as they are met, line by line, with a progress line per
+        text; only a run over EVERY text goes on to the wordforms no text uses, 100 at a time.
+        Read-only; for `flex-scratchpad --doubled-morphs [TEXT]`."""
         def go():
             self._need()
             p = self.project
             rows: list[dict] = []
-            by_analysis: dict[str, dict] = {}
-            n_wf = 0
-            for wf in _t(lambda: list(p.Wordforms.GetAll()), []):
-                n_wf += 1
-                if n_wf % 500 == 0:
-                    self.progress(f"Checking wordforms… {n_wf}")
-                wf = self._c(wf)
-                for an in _t(lambda: list(p.WfiAnalyses.GetAll(wf)), []):
-                    an = self._c(an)
-                    bundles = []
-                    for b in _t(lambda: list(p.WfiMorphBundles.GetAll(an)), []):
-                        b = self._c(b)
-                        bundles.append({
-                            "guid": _guid(b),
-                            "forms": self._ws_alternatives(_t(lambda: b.Form, None)) or {},
-                            "sense": _guid(_t(lambda: b.SenseRA, None)),
-                            "msa": _guid(_t(lambda: b.MsaRA, None)),
-                            "morph": _guid(_t(lambda: b.MorphRA, None)),
-                        })
-                    if len(bundles) < 2:
-                        continue
-                    groups = model.doubled_bundles(bundles)
-                    if not groups:
-                        continue
-                    form = self._vern_text(_t(lambda: wf.Form, None))
-                    row = {
-                        "wordform": form, "wordformGuid": _guid(wf), "analysis": _guid(an),
-                        "bundles": [self._vern_text(_t(lambda: b.Form, None)) for b in
-                                    _t(lambda: list(p.WfiMorphBundles.GetAll(an)), [])],
-                        "bundleGuids": [b["guid"] for b in bundles],
-                        "duplicates": [[bundles[i]["guid"] for i in g] for g in groups],
-                        "extra": sum(len(g) - 1 for g in groups),
-                        "looksLikeBaseline": all(any(v == form for v in bundles[i]["forms"].values()) for g in groups for i in g),
-                        "uses": [],
-                    }
-                    rows.append(row)
-                    by_analysis[row["analysis"]] = row
-            self.progress("")
+            checked: dict[str, dict | None] = {}        # analysis guid → row (None: fine)
+            words = [w.casefold() for w in (which or "").split() if w.strip()]
+
+            def check(an, an_guid: str):
+                if an_guid in checked:
+                    return checked[an_guid]
+                checked[an_guid] = None
+                bundles = []
+                for b in _t(lambda: list(p.WfiMorphBundles.GetAll(an)), []):
+                    b = self._c(b)
+                    bundles.append({
+                        "guid": _guid(b),
+                        "forms": self._ws_alternatives(_t(lambda: b.Form, None)) or {},
+                        "sense": _guid(_t(lambda: b.SenseRA, None)),
+                        "msa": _guid(_t(lambda: b.MsaRA, None)),
+                        "morph": _guid(_t(lambda: b.MorphRA, None)),
+                    })
+                if len(bundles) < 2:
+                    return None
+                groups = model.doubled_bundles(bundles)
+                if not groups:
+                    return None
+                wf = self._c(_t(lambda: an.Wordform, None)) or self._c(_t(lambda: an.Owner, None))
+                form = self._vern_text(_t(lambda: wf.Form, None)) if wf is not None else ""
+                row = {
+                    "wordform": form, "wordformGuid": _guid(wf) if wf is not None else "", "analysis": an_guid,
+                    "bundles": [" ".join(v for v in b["forms"].values()) for b in bundles],
+                    "bundleGuids": [b["guid"] for b in bundles],
+                    "duplicates": [[bundles[i]["guid"] for i in g] for g in groups],
+                    "extra": sum(len(g) - 1 for g in groups),
+                    "looksLikeBaseline": bool(form) and all(any(v == form for v in bundles[i]["forms"].values()) for g in groups for i in g),
+                    "uses": [],
+                }
+                rows.append(row)
+                checked[an_guid] = row
+                return row
+
+            texts = [t for t in self.list_texts() if all(w in t["title"].casefold() for w in words)]
             texts_hit: dict[str, int] = {}
-            if with_uses and rows:
-                texts = self.list_texts()
-                for ti, t in enumerate(texts):
-                    self.progress(f"Checking texts… {ti + 1}/{len(texts)}")
-                    text = self._owning_text(self._c(p.Object(t["guid"])))
-                    if text is None:
-                        continue
-                    for pi, para in enumerate(_t(lambda: list(p.Paragraphs.GetAll(text)), [])):
-                        for si, seg in enumerate(_t(lambda: list(p.Segments.GetAll(para)), [])):
-                            for tok in _t(lambda: list(p.Segments.GetAnalyses(seg)), []):
-                                an = _t(lambda: self._c(tok).Analysis, None)
-                                g = _guid(an) if an is not None else ""
-                                row = by_analysis.get(g)
-                                if row is None:
-                                    continue
+            for ti, t in enumerate(texts):
+                self.progress(f"Checking texts… {ti + 1}/{len(texts)}: {t['title']}")
+                text = self._owning_text(self._c(p.Object(t["guid"])))
+                if text is None:
+                    continue
+                for pi, para in enumerate(_t(lambda: list(p.Paragraphs.GetAll(text)), [])):
+                    for si, seg in enumerate(_t(lambda: list(p.Segments.GetAll(para)), [])):
+                        for tok in _t(lambda: list(p.Segments.GetAnalyses(seg)), []):
+                            an = self._c(_t(lambda: self._c(tok).Analysis, None))
+                            if an is None:
+                                continue
+                            row = check(an, _guid(an))
+                            if row is not None:
                                 row["uses"].append({"text": t["title"], "textGuid": t["guid"], "line": f"{pi + 1}.{si + 1}"})
                                 texts_hit[t["title"]] = texts_hit.get(t["title"], 0) + 1
-                self.progress("")
-            return {"wordformsChecked": n_wf, "analyses": rows, "textsHit": texts_hit}
+            n_wf = 0
+            if not words:                                # the whole project: the analyses no text uses, too
+                import time as _time
+                for wf in _t(lambda: list(p.Wordforms.GetAll()), []):
+                    n_wf += 1
+                    t0 = _time.monotonic()
+                    if n_wf % 100 == 0:
+                        self.progress(f"Checking wordforms no text uses… {n_wf}")
+                    wf = self._c(wf)
+                    for an in _t(lambda: list(p.WfiAnalyses.GetAll(wf)), []):
+                        an = self._c(an)
+                        check(an, _guid(an))
+                    if _time.monotonic() - t0 > 3:
+                        self.progress(f"  (slow wordform: {self._vern_text(_t(lambda: wf.Form, None))!r} took {_time.monotonic() - t0:.0f} s)")
+            self.progress("")
+            return {"texts": [t["title"] for t in texts], "wordformsChecked": n_wf, "analysesChecked": len(checked),
+                    "analyses": rows, "textsHit": texts_hit}
         try:
-            return self.worker.call(go, timeout=OPEN_TIMEOUT * 4)
+            return self.worker.call(go, timeout=OPEN_TIMEOUT * 8)
         except BaseException as e:
             raise _friendly(e, self.project_name)
 

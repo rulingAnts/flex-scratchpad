@@ -34,7 +34,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--locate", metavar="SOURCE", help="explain where pasted FLEx rows land: SOURCE is 'clip' (the clipboard, Windows) or a text file; writes a JSON report (--out) and exits")
     ap.add_argument("--dump-tags", nargs="?", const="", metavar="TEXT", help="write what the project's text markup tags look like raw (the list, and the tags of the first texts that have any, or of TEXT) to a JSON report (--out) and exit")
     ap.add_argument("--dump-charts", nargs="?", const="", metavar="TEXT", help="write what the project's text charts look like raw (every chart, the Chart Markers list, and the rows of one chart as read: the first with rows, or the one whose text title, template or GUID holds every word of TEXT, e.g. \"Siakai SVC\") to a JSON report (--out) and exit")
-    ap.add_argument("--doubled-morphs", action="store_true", help="list every wordform analysis whose Morphemes line repeats the same unlinked form (\"budu budu\", \"*** ***\" — what FieldWorks' import makes of a word glossed in two languages with no morphemes), with the texts and lines using it; writes a JSON report (--out) and exits. Read-only: fix them in FLEx's Word Analyses")
+    ap.add_argument("--doubled-morphs", nargs="?", const="", metavar="TEXT", help="list every wordform analysis whose Morphemes line repeats the same unlinked form (\"budu budu\", \"*** ***\" — what FieldWorks' import makes of a word glossed in two languages with no morphemes), with the texts and lines using it: the texts whose title holds every word of TEXT (e.g. \"Tosokai\"), or with no TEXT the whole project (slower: every wordform); writes a JSON report (--out) and exits. Read-only: fix them in FLEx's Word Analyses")
     ap.add_argument("--out", default=None, help="report file for --locate (flex-scratchpad-locate.json), --dump-tags (flex-scratchpad-tags.json) or --dump-charts (flex-scratchpad-charts.json)")
     ap.add_argument("--backup", action="store_true", help="back the notebook up to the place set in Settings (what closing the app starts), then exit (0 = backed up)")
     ap.add_argument("--register-links", action="store_true", help="register flexscratchpad:// links for this user (Windows) and exit")
@@ -63,8 +63,8 @@ def main(argv: list[str] | None = None) -> int:
         return dump(args.project, args.dump, args.seg)
     if args.locate:
         return locate_report(args.project, args.locate, args.out or "flex-scratchpad-locate.json", demo=args.demo)
-    if args.doubled_morphs:
-        return doubled_report(args.project, args.out or "flex-scratchpad-doubled.json")
+    if args.doubled_morphs is not None:
+        return doubled_report(args.project, args.doubled_morphs, args.out or "flex-scratchpad-doubled.json")
     if args.dump_tags is not None:
         return tags_report(args.project, args.dump_tags, args.out or "flex-scratchpad-tags.json")
     if args.dump_charts is not None:
@@ -156,7 +156,7 @@ def tags_report(project: str | None, which: str, out: str) -> int:
         be.close()
 
 
-def doubled_report(project: str | None, out: str) -> int:
+def doubled_report(project: str | None, which: str, out: str) -> int:
     """Every analysis with repeated unlinked morph bundles (FlexiconBackend.explain_doubled_bundles)
     to a JSON file, and a readable list on the terminal: wordform, its bundles, where it is used."""
     import json
@@ -173,7 +173,7 @@ def doubled_report(project: str | None, out: str) -> int:
             project = names[0]
         be.open(project)
         report = {"app": f"FLEx Scratchpad {__version__} (build {build_id()})", "project": project}
-        report.update(be.explain_doubled_bundles())
+        report.update(be.explain_doubled_bundles(which))
         Path(out).write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
         print_doubled(report)
         print(f"→ {out}")
@@ -189,7 +189,9 @@ def doubled_report(project: str | None, out: str) -> int:
 
 def print_doubled(report: dict, limit: int = 200) -> None:
     rows = report.get("analyses") or []
-    print(f"{report.get('wordformsChecked', 0)} wordforms checked; {len(rows)} analyses repeat an unlinked morph bundle"
+    texts = report.get("texts") or []
+    scope = f"{len(texts)} text(s)" + (f" and {report['wordformsChecked']} wordforms" if report.get("wordformsChecked") else "")
+    print(f"{scope} checked ({report.get('analysesChecked', 0)} analyses); {len(rows)} analyses repeat an unlinked morph bundle"
           + (f", used in {len(report.get('textsHit') or {})} text(s)" if rows else ""))
     for title, n in sorted((report.get("textsHit") or {}).items(), key=lambda kv: -kv[1]):
         print(f"  {n:5d} word(s) in {title}")
