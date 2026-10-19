@@ -1062,3 +1062,18 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 .cflat-g .cflat-lab { font-size: calc(9.5px * var(--cz, 1)); color: var(--muted); margin-left: 2px; letter-spacing: 0.02em; }
 .cflat-g .cflat-br { color: var(--muted); font-weight: 600; margin: 0 1px; }
 .zoom-val { min-width: 3.2em; text-align: center; font-variant-numeric: tabular-nums; }
+
+/* a header group's columns styled as ONE unit (chart.js applyColumnLook with a unit): no inner cell borders */
+.tchart td.cgrp:not(.cgrp-last) { border-right-color: transparent; }
+.tchart td.cgrp:not(.cgrp-first) { border-left-color: transparent; }
+.cflat-g.cflat-group { padding: 2px 5px; }
+.cflat-g .cflat-sublab { margin-right: 6px; }
+/* moved text (chart.js applyMovedLooks): the word group's label and brackets */
+.tchart .cwords.moved-styled { padding: 1px 3px; border-radius: 4px; }
+.tchart .moved-lab { font-size: calc(9.5px * var(--cz, 1)); color: var(--muted); margin-left: 3px; white-space: nowrap; align-self: flex-end; }
+.tchart .cw-br { color: var(--muted); font-weight: 600; align-self: flex-start; }
+.tchart .cmoved.hidden, .tchart .cclause.hidden { display: none; }
+.tchart tr.clause-styled > td.ccell.empty { background: transparent; }
+
+/* the on / off / previous box on a tag group's heading (tagstyles.js examplePopover) */
+.tag-tree-head .tag-group-cb { margin: 0 6px 0 auto; order: 9; }

@@ -649,7 +649,42 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   style); the user's own cell styles are applied after it and win; a column whose rule says `hide`
   leaves the table (never all of them). `export.js chartBlock` carries the same tint / b / i / u /
   colour into the export model and drops hidden columns. A column heading's popover has "Style
-  this column everywhere… (⚑)", which opens that popover. SENTENCE / PARAGRAPH PLAY (Seth: "a play button for 4, not
+  this column everywhere… (⚑)", which opens that popover. HEADER GROUPS AS ONE (Seth, 2026-10-19:
+  "higher level chart columns as visual filter options too … applied as a group, combined to
+  everything within, so not 3 minor columns styled the same"): `columnsIn` also lists every header
+  group as an item (`column:group:<name>`, "All of Nucleus"); a look whose rule is a group rule
+  (`look.styledBy`, which `resolve` now records) is drawn as a UNIT: the group heading wears it,
+  the leaf headings do not, and in each row the run of the group's cells (`unitOf` → first / mid /
+  last) shares one box — ONE look for the whole unit, resolved for the group item itself
+  (`groupLook`; the per-column palette once tinted three cells three colours), the border on the
+  outer edges only (`applyColumnLook(node, look, heading, unit)`), the inner cell borders transparent (`.cgrp`); in the one-column view the group's parts
+  share one `.cflat-group` wrapper labelled with the group's name (`flatUnitKey`), each column's
+  own small label after its words. CHART STRUCTURE AS FILTER TARGETS (Seth, 2026-10-19: "visual
+  filter styling … for subordinate clauses (and sub clause marker) and speech and song clauses
+  (and their markers) … clauses marked as pre-posed from or postposed from"): `tagstyles.STRUCTURE`
+  = pseudo-items `clause:dependent` / `clause:speech` / `clause:song` (the whole row: `skind` row),
+  `clauseref` (the [2a] chips: chip colours, hide), `moved:*` / `moved:preposed` / `moved:postposed`
+  (the moved WORD GROUP: the full text controls plus `ms` = whose look it wears — its own, the
+  column it came FROM, the column it sits IN — and `ml` = its label: ‹‹ / ›› + the home column's
+  abbreviation (default), the current column's, or none; `msfrom` / `mlto` in `tags=`,
+  `_clean_tag_rules` takes both); a fourth namespace in `matches` (`PSEUDO_RE`; `moved:*` covers
+  both directions, ranked broad), `structureIn(obj)` lists those present with counts, the ⚑ popover
+  shows them under "Chart structure", `addTagPicker` offers all seven, `T.structureItem(key)` /
+  `chart.pseudoLook` resolve one. chart.js: a clause row gets `.clause-styled` with the look; a
+  [2a] chip its colours or `.hidden`; a moved-text marker (which sits in the column the words came
+  FROM and names the word group) is collected per row and `applyMovedLooks` styles the target
+  `.cwords` after the body is built (`.moved-styled`, `applyGroupLook`: tint / border / brackets /
+  colour / B I U, the label as a `sub.moved-lab`), in both layouts (`srcCol` for the current column
+  in the flat one). THE ⚑ POPOVER SAYS WHAT IT IS (Seth, 2026-10-19: "UI labels … need to make
+  that clear"): its first line explains that ☑ shows or hides an item, Style ▾ sets how it is
+  DRAWN, and a visual filter is a named set of the same rules. A group heading carries an ON / OFF /
+  PREVIOUS box (`tag-group-toggle`): all shown → all hidden; all hidden → the mix the group had
+  (`groupMix`, remembered per scope while the page lives) or all shown; a mix → all shown with the
+  mix remembered. A group with nothing in this chart starts FOLDED (`renderTagTree`'s
+  `closedByDefault`; the user's own fold choice is kept as true / false in `fs:tagTree`). A missing
+  🔍 button was once appended as the text "null" after every row — `row.append(null)` prints it.
+  NOT YET: a paragraph-analysis column (Seth, 2026-10-19: "a horizontal, right-angle tree whose
+  terminal branches face inward toward the chart lines") — plans/BACKLOG.md › Text Charts. SENTENCE / PARAGRAPH PLAY (Seth: "a play button for 4, not
   just for 4a, 4b, 4c"): `playGroups(rows, segments)` — a SENTENCE is the rows sharing a label
   number, a PARAGRAPH runs up to a row that ends one; the first row of a group spanning several
   rows with timed lines gets ▶§ / ▶¶ (`.chart-play-sent` / `.chart-play-para`) before its line ▶,

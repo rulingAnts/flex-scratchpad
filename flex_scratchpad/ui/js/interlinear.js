@@ -487,7 +487,7 @@
           // a tile is the tag's colour tinted, or the rule's own tile colour, a little stronger (it was chosen as is);
           // a border has the rule's line style and thickness (Seth, 2026-10-18), else 2px solid
           if (o.res.tile) layer.appendChild(el('div', { class: 'tag-ov tag-ov-tile', dataset: { tag: o.t.tag.name }, title, style: Object.assign({ background: o.res.tc ? TS.rgba(o.res.tc, 0.55) : TS.rgba(o.res.bg, 0.38) }, frame) }));
-          if (o.res.box) layer.appendChild(el('div', { class: 'tag-ov tag-ov-box', dataset: { tag: o.t.tag.name }, title, style: Object.assign({ borderColor: o.res.ink, borderStyle: o.res.bs || 'solid', borderWidth: (o.res.bw || 2) + 'px' }, frame) }));
+          if (o.res.box) layer.appendChild(el('div', { class: 'tag-ov tag-ov-box', dataset: { tag: o.t.tag.name }, title, style: Object.assign({ borderColor: o.res.bc || o.res.ink, borderStyle: o.res.bs || 'solid', borderWidth: (o.res.bw || 2) + 'px' }, frame) }));
           if (o.res.hl) {
             const txts = group.map((c) => [c, c.querySelector(':scope > .il-txt')]).filter((x) => x[1]);
             if (txts.length) {

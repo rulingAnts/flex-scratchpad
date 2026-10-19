@@ -388,6 +388,15 @@ order (Seth, 2026-10-18, "go ahead and start building all this"):
    HTML and the page draw them); a frozen column in the exports means nothing (print has no
    scrolling); zoom is a view setting and is not exported; a paragraph ▶¶ needs FLEx's end-paragraph
    flags on the rows (a chart without them has only ▶§).
+8. Done 2026-10-19: column styles from the ⚑ popover, header groups as one unit, the chart's
+   structure (clause types, [2a] markers, moved text with ms / ml) as filter targets, the group
+   on/off/previous box. Still open: the moved-text look in the exports (the page and Word show the
+   ‹‹ marker and the column tint, not the moved group's own look or label).
+9. A PARAGRAPH ANALYSIS COLUMN (Seth, 2026-10-19, "soon"): a custom column of a chart note that
+   draws a horizontal, right-angle tree over the rows — its terminal branches facing inward toward
+   the chart lines — from a grouping the user builds (which rows form a unit, which units a larger
+   one, labelled); the paragraph engine in flextext-editor (`paragraph-model.js`, the `.fxpa` file)
+   is the model for the data; drawn as an SVG in a frozen column, exported as a picture.
 5. ~~Text markup tags inside chart cells, and chart columns on examples~~ — DONE 2026-10-18 (the
    `cols` line turns the text's chart spans into column tags; `lines=…,tag` on a chart; the pivot;
    the entry card's profile). Still open: choosing ONE template / chart when a text has several

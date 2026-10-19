@@ -345,6 +345,17 @@
       const shown = cols.filter((c) => !(colLooks.get(c.n) || {}).hide);
       if (shown.length) cols = shown;
     }
+    // a look that comes from a HEADER GROUP's rule (`column:group:<name>`) styles the group's
+    // columns AS ONE UNIT (Seth, 2026-10-19: "not 3 minor columns styled the same"): the group's
+    // heading wears it, and in each row the run of its cells is one box (`unitOf` → first / mid / last)
+    const groupLooks = new Map();            // norm(group name) → the GROUP's own look (one colour for the whole unit)
+    for (const c of cols) { const lk = colLooks.get(c.n), g = lk && groupOfLook(lk); if (g && !groupLooks.has(g)) groupLooks.set(g, groupLook(g, c, obj, spec) || lk); }
+    const unitOf = (i) => {
+      const lk = colLooks.get(cols[i].n), g = lk && groupOfLook(lk);
+      if (!g) return null;
+      const same = (j) => j >= 0 && j < cols.length && groupOfLook(colLooks.get(cols[j].n) || {}) === g;
+      return { group: g, first: !same(i - 1), last: !same(i + 1) };
+    };
     const lines = R.chartLines(spec);
     const free = R.freeMode(spec);
     const headers = !(spec.extra && spec.extra.headers === 'off');
@@ -458,7 +469,8 @@
         for (const h of hr) {
           const th = el('th', { colspan: h.span > 1 ? h.span : null, class: h.col ? 'th-col' : 'th-group', title: h.col ? ((h.col.path || []).concat([h.col.name]).join(' › ') + (h.col.abbr && h.col.abbr !== h.col.name ? ' (' + h.col.abbr + ')' : '')) : h.text, dataset: h.col ? { col: h.col.n } : null }, h.text);
           if (h.col && opts.editable) th.addEventListener('click', (e) => stylePopover(e.currentTarget, spec, { col: h.col.n }, opts, 'column ' + h.col.name, null, [{ label: 'Hide this column', test: 'hide-col', fn: () => { const on = visibleColumns(spec, obj).filter((c) => c.n !== h.col.n); if (!on.length) return; spec.extra = spec.extra || {}; spec.extra.cols = on.map((c) => 'c' + c.n).join(','); change(); } }, { label: 'Style this column everywhere… (⚑)', test: 'style-col', fn: () => { const b = box.querySelector('[data-test=marker-btn]'); if (b) b.click(); } }]));
-          if (h.col && colLooks.has(h.col.n)) applyColumnLook(th, colLooks.get(h.col.n), true);
+          if (h.col && colLooks.has(h.col.n) && !groupOfLook(colLooks.get(h.col.n))) applyColumnLook(th, colLooks.get(h.col.n), true);
+          if (!h.col && groupLooks.has(normKey(h.text))) applyColumnLook(th, groupLooks.get(normKey(h.text)), true);
           if (h.col) resizer(th, String(h.col.n));
           tr.appendChild(th);
         }
@@ -475,6 +487,7 @@
     const runs = freeRuns(rows);
     const runStart = new Map(runs.map((r) => [r.from, r]));
     const runEnd = new Map(runs.map((r) => [r.to, r]));
+    const movedParts = [];                   // {part, home}: every moved-text marker, for the word groups it points at
     const wordGroups = new Map();
     for (const r of rows) for (const c of r.cells || []) if (c.kind === 'words') wordGroups.set(c.guid, { row: r, cell: c });
     const movedTargets = new Set();
@@ -500,6 +513,18 @@
         if (look.u) tr.style.textDecoration = 'underline';
         if (look.c) tr.style.color = look.c;
       }
+      // a clause TYPE's look (Seth, 2026-10-19: dependent / speech / song clauses as visual filters): the whole row
+      if (row.clause && row.clause !== 'normal') {
+        const lk = pseudoLook('clause:' + row.clause, obj, spec);
+        if (lk && lk.styled && !lk.hide) {
+          tr.classList.add('clause-styled');
+          if (lk.bg) tr.style.background = rgba(lk.bg, 0.45);
+          if (lk.c) tr.style.color = lk.c;
+          if (lk.b) tr.style.fontWeight = '700';
+          if (lk.i) tr.style.fontStyle = 'italic';
+          if (lk.u) tr.style.textDecoration = 'underline';
+        }
+      }
       const g = groups.get(ri) || {};
       const lab = el('th', { class: 'rlab', title: 'Row ' + row.label + (row.clause && row.clause !== 'normal' ? ' — ' + row.clause + ' clause' : '') + (row.endSent ? '; ends the sentence' : '') + (row.endPara ? '; ends the paragraph' : '') + (opts.editable ? '. Click to style the row.' : '') },
         g.para ? playBtn(g.para.segs, 'Play the paragraph (rows ' + g.para.label + ')', 'chart-play-para', '¶') : null,
@@ -512,17 +537,22 @@
         const cellStyles = R.chartStylesFor(index, row.n, slot.col.n, 0, '');
         const segsHere = [...new Set(slot.parts.filter((p) => p.kind === 'words' && p.seg).flatMap((p) => { const a = []; for (let n = p.seg; n <= (p.segTo || p.seg); n++) a.push(n); return a; }))];
         const td = el('td', { class: 'ccell' + (slot.parts.length ? '' : ' empty'), colspan: slot.span > 1 ? slot.span : null, dataset: { row: row.n, col: slot.col.n, segs: segsHere.length ? segsHere.join(' ') : null } });
-        if (colLooks.has(slot.col.n)) applyColumnLook(td, colLooks.get(slot.col.n));
+        const unit = colLooks.has(slot.col.n) ? unitOf(cols.indexOf(slot.col)) : null;
+        if (colLooks.has(slot.col.n)) applyColumnLook(td, unit ? groupLooks.get(unit.group) : colLooks.get(slot.col.n), false, unit);
         applyCellStyles(td, cellStyles);        // the user's own cell styles win over the column's
         // the one-column view boxes the parts of ONE chart cell together (Seth, 2026-10-18: a
-        // marker "should be inside the same border as the cell they apply to")
+        // marker "should be inside the same border as the cell they apply to"); the cells of a
+        // header group styled as a group share ONE box (Seth, 2026-10-19)
         let group = null;
         for (const part of slot.parts) {
+          if (part.kind === 'moved') movedParts.push({ part, home: part.srcCol || slot.col });
           const node = renderPart(part, row, part.srcCol || slot.col, obj, spec, opts, { lines, index, vern, anal, wordGroups, movedTargets, tbody, showTextTags });
           if (!(flat && part.srcCol)) { td.appendChild(node); continue; }
-          if (!group || group.colN !== part.srcCol.n) { group = flatWrap(part, obj, spec); group.colN = part.srcCol.n; td.appendChild(group.wrap); }
+          const key = flatUnitKey(part.srcCol, obj, spec);
+          if (!group || group.key !== key) { if (group) group.finish(); group = flatWrap(part, obj, spec, key); td.appendChild(group.wrap); }
           group.add(node, part);
         }
+        if (group) group.finish();
         if (opts.editable) td.addEventListener('click', (e) => { if (e.target.closest('.cw, .cclause, .ctag, .cmoved, button, a')) return; stylePopover(td, spec, { row: row.n, col: slot.col.n }, opts, 'row ' + row.label + ', ' + slot.col.name); });
         if (free === 'tip') td.addEventListener('click', (e) => { if (e.target.closest('button, a')) return; showTip(box, obj, rowSegs(row), row); });
         tr.appendChild(td);
@@ -547,6 +577,7 @@
       }
     });
     if (!rows.length) tbody.appendChild(el('tr', {}, el('td', { colspan: cols.length + 1 + extraCols, class: 'seg-empty' }, 'No rows in this range.')));
+    applyMovedLooks(tbody, obj, spec, movedParts, wordGroups);
     table.appendChild(tbody);
     box.appendChild(el('div', { class: 'chart-scroll' }, table));
     requestAnimationFrame(() => { if (box.isConnected) placeFrozen(table, colKeys, colEls, frozen); });
@@ -611,24 +642,115 @@
       return look;
     } catch (e) { return null; }
   }
+  const normKey = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  /* The header group a look comes from, when its rule is `column:group:<name>` (else ''). */
+  const groupOfLook = (look) => { const k = look && look.styledBy || ''; return k.startsWith('column:group:') ? k.slice(13) : ''; };
+  /* A header GROUP's own look (`column:group:<name>` rules), resolved for the group itself so every
+   * cell of the unit, in either layout, wears the same colour; `col` is any column under it. */
+  function groupLook(gNorm, col, obj, spec) {
+    if (!(FS.tagstyles && FS.tagstyles.resolve)) return null;
+    const path = col.path || [];
+    const i = path.findIndex((p) => normKey(p) === gNorm);
+    if (i < 0) return null;
+    try {
+      const look = FS.tagstyles.resolve({ guid: 'column:group:' + path[i], name: 'group:' + path[i], abbr: '', group: path[i], path: path.slice(0, i + 1), column: true, isGroup: true, fore: '', back: '' }, spec || null, Object.assign({}, FS.tagstyles.context(), { text: obj.text || '' }));
+      look.styled = !!(look.styleVia && look.styleVia.kind !== 'default');
+      return look;
+    } catch (e) { return null; }
+  }
+  /* The look of a chart-structure item (a clause type, the [2a] markers, moved text), or null. */
+  function pseudoLook(key, obj, spec) {
+    if (!(FS.tagstyles && FS.tagstyles.structureItem)) return null;
+    const item = FS.tagstyles.structureItem(key);
+    if (!item) return null;
+    try {
+      const look = FS.tagstyles.resolve(item, spec || null, Object.assign({}, FS.tagstyles.context(), { text: obj.text || '' }));
+      look.styled = !!(look.styleVia && look.styleVia.kind !== 'default');
+      return look;
+    } catch (e) { return null; }
+  }
   /* A column's look on one of its cells (or its heading): tile / marker → a tint, box → a border,
-   * colour, bold / italic / underline. Brackets are drawn in the one-column view and on examples. */
-  function applyColumnLook(node, look, heading) {
+   * colour, bold / italic / underline. Brackets are drawn in the one-column view and on examples.
+   * `unit` ({group, first, last}) = the cell is part of a header group's run: the box is drawn
+   * round the RUN (top and bottom on every cell, the sides on its ends) and the inner cell
+   * borders go, so the group reads as one. */
+  function applyColumnLook(node, look, heading, unit) {
     if (!look || !look.styled) return;
     node.classList.add('col-styled');
     const bg = look.tile ? (look.tc || look.bg) : look.hl ? look.bg : '';
     if (bg) node.style.background = rgba(bg, heading ? 0.6 : look.tile ? 0.35 : 0.5);
-    if (look.box) { node.style.boxShadow = 'inset 0 0 0 ' + (look.bw || 2) + 'px ' + (look.bg || 'currentColor'); if (look.bs && look.bs !== 'solid') node.style.outline = (look.bw || 2) + 'px ' + look.bs + ' ' + (look.bg || 'currentColor'); }
+    if (unit) { node.classList.add('cgrp'); if (unit.first) node.classList.add('cgrp-first'); if (unit.last) node.classList.add('cgrp-last'); }
+    if (look.box) {
+      const w = (look.bw || 2) + 'px', col = look.bc || look.bg || 'currentColor';
+      if (unit) {
+        const parts = ['inset 0 ' + w + ' 0 0 ' + col, 'inset 0 -' + w + ' 0 0 ' + col];
+        if (unit.first) parts.push('inset ' + w + ' 0 0 0 ' + col);
+        if (unit.last) parts.push('inset -' + w + ' 0 0 0 ' + col);
+        node.style.boxShadow = parts.join(', ');
+      } else {
+        node.style.boxShadow = 'inset 0 0 0 ' + w + ' ' + col;
+        if (look.bs && look.bs !== 'solid') node.style.outline = w + ' ' + look.bs + ' ' + col;
+      }
+    }
     if (look.c && !heading) node.style.color = look.c;
     if (look.b) node.style.fontWeight = '700';
     if (look.i) node.style.fontStyle = 'italic';
     if (look.u) node.style.textDecoration = 'underline';
   }
-  function flatWrap(part, obj, spec) {
+  /* A look on a word group (a `.cwords`): tint, border, brackets, colour, B I U. */
+  function applyGroupLook(g, look) {
+    const bg = look.tile ? (look.tc || look.bg) : look.hl ? look.bg : '';
+    if (bg) g.style.background = rgba(bg, look.tile ? 0.45 : 0.6);
+    if (look.box) { g.style.outline = (look.bw || 2) + 'px ' + (look.bs || 'solid') + ' ' + (look.bc || look.bg || 'currentColor'); g.style.outlineOffset = '1px'; }
+    if (look.c) g.style.color = look.c;
+    if (look.b) g.style.fontWeight = '700';
+    if (look.i) g.style.fontStyle = 'italic';
+    if (look.u) g.style.textDecoration = 'underline';
+    const B = FS.tagstyles && FS.tagstyles.BRACKETS, br = look.br && B && B[look.br];
+    if (br) { g.insertBefore(el('span', { class: 'cw-br' }, br[0]), g.firstChild); g.appendChild(el('span', { class: 'cw-br' }, br[1])); }
+  }
+  /* MOVED TEXT (Seth, 2026-10-19: "detect clauses marked as pre-posed from or postposed from and
+   * highlight those cells … same as the column they're preposed from (so like 'Preposed Subj') or
+   * same as the column they're preposed to (with some kind of preposed marker plus label)"): every
+   * moved-text marker names the word group that was moved and sits in the column it CAME FROM;
+   * the word group (wherever it is charted, in either layout) gets the rule's look — its own, the
+   * home column's (`ms=from`) or the column it sits in (`ms=to`) — and a label: ‹‹ / ›› plus the
+   * home column's abbreviation (default), the current column's (`ml=to`), or none (`ml=off`). */
+  function applyMovedLooks(tbody, obj, spec, moved, wordGroups) {
+    if (!moved.length) return;
+    const colsByN = new Map((((obj.template || {}).columns) || []).map((c) => [c.n, c]));
+    for (const m of moved) {
+      const look = pseudoLook(m.part.preposed ? 'moved:preposed' : 'moved:postposed', obj, spec);
+      if (!look || !look.styled || look.hide) continue;
+      const g = tbody.querySelector('.cwords[data-group="' + m.part.target + '"]');
+      if (!g || g.classList.contains('moved-styled')) continue;
+      g.classList.add('moved-styled');
+      const tgt = wordGroups.get(m.part.target);
+      const cur = tgt ? (tgt.cell.srcCol || colsByN.get(tgt.cell.colN)) : null, home = m.home;   // srcCol: the one-column view's cells sit on the "Text" column
+      let src = look;
+      if (look.ms === 'from' && home) { const cl = columnLook(home, obj, spec); if (cl && cl.styled) src = cl; }
+      else if (look.ms === 'to' && cur) { const cl = columnLook(cur, obj, spec); if (cl && cl.styled) src = cl; }
+      applyGroupLook(g, src);
+      if (look.ml !== 'off') {
+        const col = look.ml === 'to' ? cur : home;
+        g.appendChild(el('sub', { class: 'moved-lab', title: (m.part.preposed ? 'Preposed from ' : 'Postposed from ') + (home ? (home.path || []).concat([home.name]).join(' › ') : '?') }, (m.part.preposed ? '‹‹ ' : '›› ') + (col ? (col.abbr || col.name) : '')));
+      }
+    }
+  }
+  /* What a part shares a box with in the one-column view: its column, or — when the column's look
+   * comes from a header group's rule — that group (Seth, 2026-10-19: the group's columns as one). */
+  function flatUnitKey(col, obj, spec) {
+    const lk = columnLook(col, obj, spec);
+    const g = lk && lk.styled ? groupOfLook(lk) : '';
+    return g ? 'g:' + g : 'c:' + col.n;
+  }
+  function flatWrap(part, obj, spec, key) {
     const col = part.srcCol;
-    const path = (col.path || []).concat([col.name]);
-    const wrap = el('span', { class: 'cflat-g', dataset: { col: col.n }, title: path.join(' \u203a ') });
-    const look = columnLook(col, obj, spec);
+    const asGroup = !!(key && key.startsWith('g:'));
+    const look = asGroup ? (groupLook(key.slice(2), col, obj, spec) || columnLook(col, obj, spec)) : columnLook(col, obj, spec);
+    const groupName = asGroup ? ((col.path || []).find((p) => normKey(p) === key.slice(2)) || key.slice(2)) : '';
+    const path = asGroup ? (col.path || []).slice(0, (col.path || []).findIndex((p) => normKey(p) === key.slice(2)) + 1) : (col.path || []).concat([col.name]);
+    const wrap = el('span', { class: 'cflat-g' + (asGroup ? ' cflat-group' : ''), dataset: { col: asGroup ? null : col.n, group: asGroup ? groupName : null }, title: path.join(' \u203a ') });
     if (look && look.hide) wrap.classList.add('hidden');
     const B = FS.tagstyles && FS.tagstyles.BRACKETS;
     const br = look && look.br && B && B[look.br];
@@ -636,19 +758,24 @@
     const body = el('span', { class: 'cflat-body' });
     wrap.appendChild(body);
     if (br) wrap.appendChild(el('span', { class: 'cflat-br' }, br[1]));
-    const label = !(spec.extra && spec.extra.collab === 'off') && !(look && look.label === false) ? el('sub', { class: 'cflat-lab' }, col.abbr || col.name) : null;
+    const labelsOn = !(spec.extra && spec.extra.collab === 'off') && !(look && look.label === false);
+    const label = labelsOn ? el('sub', { class: 'cflat-lab' }, asGroup ? groupName : (col.abbr || col.name)) : null;
     if (label) wrap.appendChild(label);
-    const add = (node, p) => { body.appendChild(node); if (p.kind === 'words') wrap.classList.add('cflat-words'); };
+    // inside a group's box each column's parts are followed by that column's own small label
+    let lastCol = null;
+    const colLabel = () => { if (asGroup && labelsOn && lastCol) body.appendChild(el('sub', { class: 'cflat-lab cflat-sublab' }, lastCol.abbr || lastCol.name)); };
+    const add = (node, p) => { if (asGroup && lastCol && p.srcCol && p.srcCol.n !== lastCol.n) colLabel(); lastCol = p.srcCol || lastCol; body.appendChild(node); if (p.kind === 'words') wrap.classList.add('cflat-words'); };
+    const finish = () => { colLabel(); lastCol = null; };
     if (look) {
       const bg = look.tile ? (look.tc || look.bg) : look.hl ? look.bg : '';
       if (bg) wrap.style.background = rgba(bg, look.tile ? 0.45 : 0.6);
-      if (look.box) { wrap.style.border = (look.bw || 2) + 'px ' + (look.bs || 'solid') + ' ' + (look.bg || 'currentColor'); wrap.style.borderRadius = '4px'; }
+      if (look.box) { wrap.style.border = (look.bw || 2) + 'px ' + (look.bs || 'solid') + ' ' + (look.bc || look.bg || 'currentColor'); wrap.style.borderRadius = '4px'; }
       if (look.c) wrap.style.color = look.c;
       if (look.b) wrap.style.fontWeight = '700';
       if (look.i) wrap.style.fontStyle = 'italic';
       if (look.u) wrap.style.textDecoration = 'underline';
     }
-    return { wrap, add };
+    return { wrap, add, finish, key };
   }
 
   function applyCellStyles(td, styles) {
@@ -703,7 +830,10 @@
     if (part.kind === 'moved') {
       const tgt = ctx.wordGroups.get(part.target);
       const words = tgt ? (tgt.cell.words || []).filter((w) => !w.punct).map((w) => w.txt).join(' ') : '';
+      const mlk = pseudoLook(part.preposed ? 'moved:preposed' : 'moved:postposed', obj, spec);
+      if (mlk && mlk.hide) return el('span', { class: 'cmoved hidden', dataset: { target: part.target } });
       const m = el('span', { class: 'cmoved' + (part.preposed ? ' pre' : ' post'), title: (part.preposed ? 'Preposed' : 'Postposed') + ' text' + (words ? ': “' + words + '”' : '') + (tgt ? ' — charted in ' + (tgt.cell.colN && colName(obj, tgt.cell.colN)) + (tgt.row !== row ? ' of row ' + tgt.row.label : '') : ''), dataset: { target: part.target } }, part.preposed ? '‹‹' : '››');
+      if (mlk && mlk.styled && !mlk.ms) { if (mlk.bg) { m.style.background = mlk.bg; m.style.color = mlk.fg || (FS.readableTextColor ? FS.readableTextColor(mlk.bg) : ''); m.style.borderRadius = '4px'; m.style.padding = '0 3px'; } if (mlk.b) m.style.fontWeight = '700'; }
       m.addEventListener('mouseenter', () => { const g = ctx.tbody.querySelector('.cwords[data-group="' + part.target + '"]'); if (g) g.classList.add('flash'); });
       m.addEventListener('mouseleave', () => { ctx.tbody.querySelectorAll('.cwords.flash').forEach((g) => g.classList.remove('flash')); });
       return m;
@@ -711,7 +841,10 @@
     if (part.kind === 'clause') {
       const labels = part.labels && part.labels.length ? part.labels : (part.rows || []).map((g) => g.slice(0, 4));
       const text = labels.length > 1 ? labels[0] + '–' + labels[labels.length - 1] : (labels[0] || '?');
+      const clk = pseudoLook('clauseref', obj, spec);
+      if (clk && clk.hide) return el('span', { class: 'cclause hidden', dataset: { rows: (part.rows || []).join(' ') } });
       const c = el('span', { class: 'cclause', title: 'Dependent clause' + (labels.length > 1 ? 's ' : ' ') + labels.join(', ') + ' (click to show)', dataset: { rows: (part.rows || []).join(' ') } }, '[' + text + ']');
+      if (clk && clk.styled) { if (clk.bg) { c.style.background = clk.bg; c.style.color = clk.fg || (FS.readableTextColor ? FS.readableTextColor(clk.bg) : ''); c.style.borderRadius = '4px'; c.style.padding = '0 4px'; } if (clk.b) c.style.fontWeight = '700'; if (clk.i) c.style.fontStyle = 'italic'; if (clk.u) c.style.textDecoration = 'underline'; }
       c.addEventListener('click', (e) => { e.stopPropagation(); for (const lab of labels) { const tr = ctx.tbody.querySelector('.crow[data-label="' + CSS.escape(lab) + '"]'); if (tr) { tr.classList.add('flash'); tr.scrollIntoView({ block: 'nearest' }); setTimeout(() => tr.classList.remove('flash'), 1600); } } });
       return c;
     }
@@ -974,5 +1107,5 @@
       el('div', { class: 'btn-row' }, el('button', { class: 'btn', 'data-test': 'pivot-copy', onclick: () => { FS.copyText(tsv); FS.toast('Copied as TSV'); } }, 'Copy as TSV'), el('button', { class: 'btn primary', onclick: () => m.close() }, 'Done')));
   }
 
-  FS.chart = { renderChart, visibleColumns, selectedColumns, flatten, isFlat, zoomOf, setZoom, playGroups, columnLook, headerRows, layoutRow, rowSegs, freeRuns, lineStarts, colWidths, setColWidths, freeText, chartGrid, chartTsv, markerLook, pivot, pivotDialog, LINE_NAMES, FREE_NAMES };
+  FS.chart = { renderChart, visibleColumns, selectedColumns, flatten, isFlat, zoomOf, setZoom, playGroups, columnLook, pseudoLook, headerRows, layoutRow, rowSegs, freeRuns, lineStarts, colWidths, setColWidths, freeText, chartGrid, chartTsv, markerLook, pivot, pivotDialog, LINE_NAMES, FREE_NAMES };
 })();

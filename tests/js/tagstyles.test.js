@@ -91,12 +91,13 @@ test('tagsIn: the distinct tags on the segments an example shows, blank lines le
 });
 
 test('text styles round-trip through `tags=`: brackets, marker, tile, border, the words’ colour, the bar switch', () => {
-  const rules = [{ tag: 'Subject', br: 'sq', hl: true }, { tag: 'Verb', box: true, bar: true, bs: 'dashed', bw: 3 }, { tag: 'Object', tile: true, c: '#b45309', b: true, bar: false, tc: '#fde68a' }, { tag: 'group:Discourse', br: 'an' }, { tag: 'filter:f1', hide: true }];
+  const rules = [{ tag: 'Subject', br: 'sq', hl: true }, { tag: 'Verb', box: true, bar: true, bs: 'dashed', bw: 3, bc: '#1d4ed8' }, { tag: 'Object', tile: true, c: '#b45309', b: true, bar: false, tc: '#fde68a' }, { tag: 'group:Discourse', br: 'an' }, { tag: 'filter:f1', hide: true }];
   const v = R.serializeTagRules(rules);
   // the border's line style / thickness and the tile's own colour (Seth, 2026-10-18) ride along
-  assert.strictEqual(v, 'Subject:hl+brsq,Verb:box+bsdashed+bw3+bar,Object:c#b45309+b+tile+tc#fde68a+nobar,group%3ADiscourse:bran,filter%3Af1:off');
+  assert.strictEqual(v, 'Subject:hl+brsq,Verb:box+bsdashed+bw3+bc#1d4ed8+bar,Object:c#b45309+b+tile+tc#fde68a+nobar,group%3ADiscourse:bran,filter%3Af1:off');
   assert.deepStrictEqual(plain(R.parseTagRules(v)), rules);
-  assert.deepStrictEqual(plain(R.parseTagRules('Subject:brxx+purple+bswavy+bw9')), []);          // unknown brackets / tokens / line styles / widths are dropped
+  assert.deepStrictEqual(plain(R.parseTagRules('Subject:brxx+purple+bswavy+bw9')), []);
+  assert.deepStrictEqual(plain(R.parseTagRules('Verb:box+bc%23ff0000')), [{ tag: 'Verb', box: true, bc: '#ff0000' }]);   // a hand-encoded # is forgiven          // unknown brackets / tokens / line styles / widths are dropped
   const VERB = { guid: 'v', name: 'Verb', abbr: 'V' };
   T.setList([VERB]);
   T.setConfig({ project: { Kalu: [{ tag: 'Verb', box: true, bs: 'dotted', bw: 4, tile: true, tc: '#abcdef' }] }, tab: {}, folder: {}, filters: [] });

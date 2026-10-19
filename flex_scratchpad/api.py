@@ -977,7 +977,7 @@ class Api:
             out = {"tag": str(r["tag"]).strip()[:120], "enabled": r.get("enabled", True) is not False}
             if r.get("hide") is not None:
                 out["hide"] = bool(r["hide"])
-            for k in ("bg", "fg", "c", "tc"):
+            for k in ("bg", "fg", "c", "tc", "bc"):
                 v = str(r.get(k) or "")
                 if re.fullmatch(r"#[0-9a-fA-F]{6}", v):
                     out[k] = v.lower()
@@ -999,6 +999,11 @@ class Api:
                 out["bar"] = bool(r["bar"])
             if r.get("label") is False:
                 out["label"] = False
+            # moved text (Seth, 2026-10-19): whose look it wears, and its label
+            if r.get("ms") in ("from", "to", "own"):
+                out["ms"] = r["ms"]
+            if r.get("ml") in ("from", "to", "off"):
+                out["ml"] = r["ml"]
             clean.append(out)
         return clean
 

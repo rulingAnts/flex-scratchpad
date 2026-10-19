@@ -3793,6 +3793,9 @@ def test_tags_style_the_text_and_visual_filters_and_the_rail_filters_by_tag(app)
     assert sb.locator("[data-test=tag-bs]").input_value() == "dashed" and sb.locator("[data-test=tag-bw]").input_value() == "3"
     sb.locator("[data-test=tag-bw]").select_option("6")
     page.wait_for_function("() => getComputedStyle(document.querySelector('#editor .text-obj .segment .tag-ov-box')).borderTopWidth === '6px'")
+    # …and the border's own colour (Seth, 2026-10-19: "I should be able to specify a border color")
+    sb.locator("[data-test=tag-bc]").evaluate("(e) => { e.value = '#1d4ed8'; e.dispatchEvent(new Event('change', {bubbles: true})); }")
+    page.wait_for_function("() => getComputedStyle(document.querySelector('#editor .text-obj .segment .tag-ov-box')).borderTopColor === 'rgb(29, 78, 216)'")
     page.keyboard.press("Escape")
     second.locator("[data-test=tag-btn]").click()                       # Topic is on the second example's lines
     page.wait_for_selector("[data-test=tag-popover] .tagrow[data-tag='Topic']")
@@ -3802,7 +3805,7 @@ def test_tags_style_the_text_and_visual_filters_and_the_rail_filters_by_tag(app)
     page.locator("[data-test=tag-popover] .tag-style-box [data-test=tag-tc-auto]").click()
     page.wait_for_function("() => getComputedStyle(document.querySelector('#editor .text-obj:nth-of-type(2) .segment .tag-ov-tile, #editor .text-obj .tag-ov-tile')).backgroundColor !== 'rgba(253, 230, 138, 0.55)'")
     page.keyboard.press("Escape")
-    assert h.api.init()["config"]["tagStyles"]["tab"][tab][1] == {"tag": "Verb", "enabled": True, "box": True, "bs": "dashed", "bw": 6}
+    assert h.api.init()["config"]["tagStyles"]["tab"][tab][1] == {"tag": "Verb", "enabled": True, "box": True, "bs": "dashed", "bw": 6, "bc": "#1d4ed8"}
     assert h.api.init()["config"]["tagStyles"]["tab"][tab][2] == {"tag": "Topic", "enabled": True, "tile": True, "bar": True}
     # the toolbar's ⚑ Filters is a VIEW setting (Seth: "for the whole app or for notebook pages"):
     # off for THIS NOTE first — the angle brackets go here, the filter stays on by default…
@@ -4659,7 +4662,7 @@ def test_chart_options_one_column_hide_empty_zoom_and_the_boundary_under_the_fre
     assert obj.locator("[data-test=marker-btn]").count() == 1
     obj.locator("[data-test=marker-btn]").click()
     page.wait_for_selector(".popover [data-test=tag-scope-pick]")
-    assert "markup tags" in page.locator(".popover").inner_text()
+    assert "What this chart draws" in page.locator(".popover").inner_text()
     page.keyboard.press("Escape")
     # the boundary: row 2 ends a paragraph; its free translation row follows it, so the double rule is under THAT row
     assert obj.locator("tr.crow[data-label='2'].end-para").count() == 0
@@ -4892,4 +4895,105 @@ def test_chart_columns_on_an_example_text_tags_in_a_chart_pivot_and_entry_profil
     page.locator("#editor .entry-card [data-test=entry-chart-profile]").click()
     page.wait_for_selector(".profile-table")
     assert "Subject" in page.locator(".profile-table").first.inner_text()      # one table per template (Default first)
+    assert not errors
+
+
+def test_the_rule_list_keeps_its_place_when_a_rule_changes(app):
+    """Seth, 2026-10-19: adding a border made "the current rule line I'm working on in visual filter
+    jump to the top of the list". The list is its own scroller and every change redraws it whole,
+    which let it fall back to the top; the place is kept now — and the border has a colour of its own."""
+    h, page, _errors = app
+    rules = [{"tag": "Topic", "bg": "#ffd6a5"}, {"tag": "Subject", "b": True}, {"tag": "Verb", "i": True}, {"tag": "Object", "b": True}]
+    rules += [{"tag": "marker:M%d" % i, "bg": "#ffd6a5"} for i in range(60)]
+    h.api.set_tag_filters([{"id": "f1", "name": "Probe", "enabled": True, "rules": rules}])
+    page.reload()
+    page.wait_for_selector(".note-card")
+    page.evaluate("() => FS.tagstyles.dialog({kind: 'filter', key: 'f1', label: 'the filter'})")
+    page.wait_for_selector("[data-test=tag-dialog]")
+    order = lambda: page.evaluate("() => [...document.querySelectorAll('[data-test=tag-dialog] .tagrow')].map((r) => r.dataset.tag)")
+    assert order()[:5] == ["Topic", "Subject", "Object", "Verb", "M0"]           # FLEx's own order within a group, then the markers
+    page.evaluate("() => { document.querySelector('[data-test=tag-dialog]').scrollTop = 120; }")
+    page.wait_for_timeout(100)
+    page.locator("[data-test=tag-dialog] .tagrow[data-tag='Object'] [data-test=tag-box]").click()
+    page.wait_for_selector("[data-test=tag-dialog] .tagrow[data-tag='Object'] [data-test=tag-bc]")
+    page.wait_for_timeout(300)
+    assert page.evaluate("() => document.querySelector('[data-test=tag-dialog]').scrollTop") == 120
+    assert order()[:5] == ["Topic", "Subject", "Object", "Verb", "M0"]
+    page.locator("[data-test=tag-dialog] .tagrow[data-tag='Object'] [data-test=tag-bc]").evaluate("(e) => { e.value = '#b91c1c'; e.dispatchEvent(new Event('change', {bubbles: true})); }")
+    page.wait_for_selector("[data-test=tag-dialog] .tagrow[data-tag='Object'] [data-test=tag-bc-auto]")
+    assert page.evaluate("() => document.querySelector('[data-test=tag-dialog]').scrollTop") == 120
+    saved = h.api.init()["config"]["tagStyles"]["filters"][0]["rules"]
+    assert {"tag": "Object", "enabled": True, "b": True, "box": True, "bc": "#b91c1c"} in saved, saved
+
+
+def test_chart_structure_and_header_groups_as_visual_filters(app):
+    """Seth, 2026-10-19: visual filters for dependent / speech / song clauses and their markers, for
+    moved (preposed / postposed) text with a choice of look and label, and for a header group's
+    columns styled as ONE unit — in both chart layouts."""
+    h, page, errors = app
+    new_note(page, "Structure filters")
+    page.keyboard.type("{{flex:chart %s}}" % CHART)
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#editor .chart-obj tr.crow")
+    obj = page.locator("#editor .chart-obj")
+    # the ⚑ popover lists the chart's structure and its header groups
+    obj.locator("[data-test=marker-btn]").click()
+    page.wait_for_selector(".popover .tagrow[data-tag='moved:preposed']")
+    names = page.locator(".popover .tagrow").evaluate_all("els => els.map((e) => e.dataset.tag)")
+    assert "clause:speech" in names and "clauseref" in names and "moved:*" in names and "group:Nucleus" in names, names
+    page.keyboard.press("Escape")
+    # rules at the project scope: a speech row tinted, the [2a] markers hidden, moved text boxed and
+    # labelled with the column it came from, the Nucleus group tiled as one
+    page.evaluate("""async () => {
+      const c = await window.pywebview.api.set_tag_styles('project', FS.tagstyles.context().project, [
+        {tag: 'clause:speech', bg: '#fde68a'}, {tag: 'clauseref', hide: true},
+        {tag: 'moved:*', box: true, bg: '#c0392b'}, {tag: 'column:group:Nucleus', tile: true, bg: '#bdb2ff'}]);
+      FS.tagstyles.setConfig(c); FS.emit('tagstyles');
+    }""")
+    page.wait_for_selector("#editor .chart-obj tr.clause-styled")
+    assert obj.locator("tr.crow[data-label='2a']").evaluate("e => e.classList.contains('clause-styled') && e.style.background !== ''")
+    assert obj.locator("tr.crow[data-label='2b'] .cclause.hidden").count() == 1 and obj.locator(".cclause:not(.hidden)").count() == 0
+    moved = obj.locator(".cwords.moved-styled")
+    assert moved.count() == 1 and moved.locator(".moved-lab").inner_text() == "‹‹ Post-O"     # row 1b: Haŋa, preposed from Postnuclear › Outer
+    assert moved.evaluate("e => e.style.outline !== ''")
+    # the Nucleus group: one box over Subject · Verb · Object in each row, the group heading styled, the leaf headings not
+    r1a = obj.locator("tr.crow[data-label='1a']")
+    assert r1a.locator("td.cgrp").count() == 3
+    assert r1a.locator("td[data-col='3']").evaluate("e => e.classList.contains('cgrp-first') && !e.classList.contains('cgrp-last')")
+    assert r1a.locator("td[data-col='5']").evaluate("e => e.classList.contains('cgrp-last')")
+    assert obj.locator("th.th-group", has_text="Nucleus").evaluate("e => e.classList.contains('col-styled')")
+    assert obj.locator("th.th-col", has_text="Verb").evaluate("e => e.classList.contains('col-styled')") is False
+    # the label follows the choice: the column the words sit in
+    page.evaluate("""async () => {
+      const c = await window.pywebview.api.set_tag_styles('project', FS.tagstyles.context().project, [
+        {tag: 'clause:speech', bg: '#fde68a'}, {tag: 'clauseref', hide: true},
+        {tag: 'moved:*', box: true, bg: '#c0392b', ml: 'to'}, {tag: 'column:group:Nucleus', tile: true, bg: '#bdb2ff'}]);
+      FS.tagstyles.setConfig(c); FS.emit('tagstyles');
+    }""")
+    page.wait_for_function("() => (document.querySelector('#editor .chart-obj .moved-lab') || {}).textContent === '‹‹ Pre-O'")
+    # the one-column view: the Nucleus parts share one box labelled with the group, columns labelled inside
+    obj.locator("[data-test=chart-view]").click()
+    page.wait_for_selector("#editor .chart-obj.flat")
+    g = page.locator("#editor .chart-obj.flat tr.crow[data-label='1a'] .cflat-g")
+    assert g.evaluate_all("els => els.map((e) => e.dataset.group || e.dataset.col)") == ["Nucleus", "6"]
+    assert g.first.locator(".cflat-lab").all_inner_texts() == ["S", "V", "Nucleus"]      # each column's label after its words, the group's last
+    # the "null" that followed every row (a missing 🔍 appended as text) is gone, and a group heading's box
+    # switches its tags off, back on, and back to a mix (Seth, 2026-10-19)
+    obj.locator("[data-test=marker-btn]").click()
+    page.wait_for_selector(".popover .tagrow")
+    assert "null" not in page.locator(".popover [data-test=tag-popover]").inner_text()
+    grp = page.locator(".popover .tag-tree-head[data-group='Arguments'] [data-test=tag-group-toggle]")
+    assert grp.count() == 1 and grp.is_checked()
+    page.locator(".popover .tagrow[data-tag='Subject'] [data-test=tag-toggle]").click()          # a mix: Subject off, Object on
+    page.wait_for_function("() => document.querySelector(\".popover .tag-tree-head[data-group='Arguments'] [data-test=tag-group-toggle]\").indeterminate")
+    page.locator(".popover .tag-tree-head[data-group='Arguments'] [data-test=tag-group-toggle]").click()   # mix → all on (mix remembered)
+    page.wait_for_function("() => { const b = document.querySelector(\".popover .tag-tree-head[data-group='Arguments'] [data-test=tag-group-toggle]\"); return b.checked && !b.indeterminate; }")
+    page.locator(".popover .tag-tree-head[data-group='Arguments'] [data-test=tag-group-toggle]").click()   # all on → all off
+    page.wait_for_function("() => { const b = document.querySelector(\".popover .tag-tree-head[data-group='Arguments'] [data-test=tag-group-toggle]\"); return !b.checked && !b.indeterminate; }")
+    page.locator(".popover .tag-tree-head[data-group='Arguments'] [data-test=tag-group-toggle]").click()   # all off → the mix again
+    page.wait_for_function("() => document.querySelector(\".popover .tag-tree-head[data-group='Arguments'] [data-test=tag-group-toggle]\").indeterminate")
+    assert page.locator(".popover .tagrow[data-tag='Subject'] [data-test=tag-toggle]").is_checked() is False
+    assert page.locator(".popover .tagrow[data-tag='Object'] [data-test=tag-toggle]").is_checked()
+    page.keyboard.press("Escape")
+    assert page.locator("#editor .chart-obj.flat .moved-lab").inner_text() == "‹‹ Pre-O"
     assert not errors

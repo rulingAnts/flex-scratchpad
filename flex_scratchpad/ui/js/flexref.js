@@ -432,7 +432,9 @@
   // the border's line (Seth, 2026-10-18: "edit line style and thickness"): bs(solid|dashed|dotted|
   // double), bw1…bw6 (px); the tile's own colour ("edit the background color"): tc#rrggbb
   // `row` (Seth, 2026-10-18): a chart MARKER's rule styles the whole row the marker is in (`marker%3ATopic:row+bg#fde68a`)
-  const TAG_TOKEN = /^(off|on|b|i|u|row|nolabel|label|hl|tile|box|bar|nobar|br(sq|rd|cu|an|db|ce|fl|bar)|bs(solid|dashed|dotted|double)|bw[1-6]|bg#[0-9a-f]{6}|fg#[0-9a-f]{6}|c#[0-9a-f]{6}|tc#[0-9a-f]{6})$/;
+  // moved text (Seth, 2026-10-19): ms = whose look a moved word group wears (from = the column it
+  // came from, to = the column it sits in, own = the rule's), ml = its label (from / to / off)
+  const TAG_TOKEN = /^(off|on|b|i|u|row|nolabel|label|hl|tile|box|bar|nobar|br(sq|rd|cu|an|db|ce|fl|bar)|bs(solid|dashed|dotted|double)|bw[1-6]|bg#[0-9a-f]{6}|fg#[0-9a-f]{6}|c#[0-9a-f]{6}|tc#[0-9a-f]{6}|bc#[0-9a-f]{6}|ms(from|to|own)|ml(from|to|off))$/;
   const encodeTagKey = (t) => String(t).replace(/%/g, '%25').replace(/_/g, '%5F').replace(/,/g, '%2C').replace(/:/g, '%3A').replace(/\+/g, '%2B').replace(/ /g, '_');
   const decodeTagKey = (k) => String(k).replace(/_/g, ' ').replace(/%([0-9A-Fa-f]{2})/g, (m, h) => String.fromCharCode(parseInt(h, 16)));
   function parseTagRules(val) {
@@ -442,12 +444,13 @@
       if (i <= 0) continue;
       const r = { tag: decodeTagKey(item.slice(0, i)) };
       for (const tok of item.slice(i + 1).split('+')) {
-        const t = tok.trim().toLowerCase();
+        const t = tok.trim().replace(/%23/gi, '#').toLowerCase();
         if (!TAG_TOKEN.test(t)) continue;
         if (t === 'off') r.hide = true; else if (t === 'on') r.hide = false;
         else if (t === 'nolabel') r.label = false; else if (t === 'label') r.label = true;
         else if (t.startsWith('bg#')) r.bg = t.slice(2); else if (t.startsWith('fg#')) r.fg = t.slice(2); else if (t.startsWith('c#')) r.c = t.slice(1);
-        else if (t.startsWith('tc#')) r.tc = t.slice(2);
+        else if (t.startsWith('tc#')) r.tc = t.slice(2); else if (t.startsWith('bc#')) r.bc = t.slice(2);
+        else if (t.startsWith('ms')) r.ms = t.slice(2); else if (t.startsWith('ml')) r.ml = t.slice(2);
         else if (t.startsWith('bs')) r.bs = t.slice(2); else if (t.startsWith('bw')) r.bw = +t.slice(2);
         else if (t.startsWith('br')) r.br = t.slice(2);
         else if (t === 'bar') r.bar = true; else if (t === 'nobar') r.bar = false;
@@ -466,8 +469,11 @@
       for (const k of ['b', 'i', 'u', 'row', 'hl', 'tile', 'box']) if (r[k]) toks.push(k);
       if (r.br && /^(sq|rd|cu|an|db|ce|fl|bar)$/.test(r.br)) toks.push('br' + r.br);
       if (r.bs && /^(solid|dashed|dotted|double)$/.test(r.bs)) toks.push('bs' + r.bs);
+      if (/^(from|to|own)$/.test(r.ms || '')) toks.push('ms' + r.ms);
+      if (/^(from|to|off)$/.test(r.ml || '')) toks.push('ml' + r.ml);
       if (r.bw >= 1 && r.bw <= 6) toks.push('bw' + Math.round(r.bw));
       if (r.tc) toks.push('tc' + String(r.tc).toLowerCase());
+      if (r.bc) toks.push('bc' + String(r.bc).toLowerCase());
       if (r.bar === true) toks.push('bar'); else if (r.bar === false) toks.push('nobar');
       if (r.label === false) toks.push('nolabel'); else if (r.label === true) toks.push('label');
       return toks.length ? encodeTagKey(r.tag) + ':' + toks.join('+') : '';

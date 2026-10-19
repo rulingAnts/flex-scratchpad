@@ -112,19 +112,51 @@
     let k = norm(rule.tag);
     if (k.startsWith('marker:')) { if (!tag.marker) return false; k = k.slice(7); } else if (tag.marker) return false;
     if (k.startsWith('column:')) { if (!tag.column) return false; k = k.slice(7); } else if (tag.column) return false;
+    // chart STRUCTURE (Seth, 2026-10-19): dependent / speech / song clauses, the [2a] clause
+    // markers, moved text — pseudo-items a rule names exactly (`moved:*` = preposed or postposed)
+    if (PSEUDO_RE.test(k)) { if (!tag.pseudo) return false; return k === 'moved:*' ? norm(tag.name).startsWith('moved:') : k === norm(tag.name); }
+    if (tag.pseudo) return false;
     if (k === '*') return true;
     if (k.startsWith('group:')) { const g = k.slice(6); return (tag.path || (tag.group ? [tag.group] : [])).some((x) => norm(x) === g); }
     if (k.startsWith('filter:')) return false;
     return k === norm(tag.name) || (!!tag.abbr && k === norm(tag.abbr)) || (!!tag.guid && k === norm(tag.guid));
   };
-  const rank = (r) => { const k = norm(r.tag).replace(/^(marker|column):/, ''); return k === '*' ? 2 : k.startsWith('group:') ? 1 : 0; };
+  const rank = (r) => { const k = norm(r.tag).replace(/^(marker|column|moved):/, ''); return k === '*' ? 2 : k.startsWith('group:') ? 1 : 0; };
+  const PSEUDO_RE = /^(clause:(dependent|speech|song)|clauseref|moved:(\*|preposed|postposed))$/;
+  /* The chart's structure as styleable items (Seth, 2026-10-19: "visual filter styling … for
+   * subordinate clauses (and sub clause marker) and speech and song clauses … clauses marked as
+   * pre-posed from or postposed from"). `skind` picks the controls: row (the whole row), chip (the
+   * [2a] marker), moved (the word group, with ms / ml). */
+  const STRUCTURE = [
+    { key: 'clause:dependent', label: 'Dependent clauses', note: 'the rows FLEx marks as dependent (↳)', skind: 'row' },
+    { key: 'clause:speech', label: 'Speech clauses', note: 'the rows marked as speech (“)', skind: 'row' },
+    { key: 'clause:song', label: 'Song clauses', note: 'the rows marked as song (♪)', skind: 'row' },
+    { key: 'clauseref', label: 'Clause markers [2a]', note: 'the markers that point at a dependent clause', skind: 'chip' },
+    { key: 'moved:*', label: 'Moved text (any)', note: 'word groups charted away from their column', skind: 'moved' },
+    { key: 'moved:preposed', label: 'Preposed text', note: 'word groups moved forward (‹‹)', skind: 'moved' },
+    { key: 'moved:postposed', label: 'Postposed text', note: 'word groups moved back (››)', skind: 'moved' },
+  ];
+  const structureItem = (s) => ({ guid: s.key, name: s.key, abbr: '', group: 'Chart structure', path: ['Chart structure'], pseudo: true, skind: s.skind, label: s.label, note: s.note, fore: '', back: '' });
+  T.structure = () => STRUCTURE.map(structureItem);
+  T.structureItem = (key) => { const s = STRUCTURE.find((x) => x.key === norm(key)); return s ? structureItem(s) : null; };
+  /* The structure items this chart has, with counts (rows of each clause type, [2a] markers,
+   * moved word groups by direction); `moved:*` counts both. */
+  function structureIn(obj) {
+    const n = { 'clause:dependent': 0, 'clause:speech': 0, 'clause:song': 0, clauseref: 0, 'moved:preposed': 0, 'moved:postposed': 0 };
+    for (const r of obj.rows || []) {
+      if (r.clause && n['clause:' + r.clause] != null) n['clause:' + r.clause]++;
+      for (const c of r.cells || []) { if (c.kind === 'clause') n.clauseref++; else if (c.kind === 'moved') n[c.preposed ? 'moved:preposed' : 'moved:postposed']++; }
+    }
+    n['moved:*'] = n['moved:preposed'] + n['moved:postposed'];
+    return STRUCTURE.filter((s) => n[s.key] > 0).map((s) => ({ tag: structureItem(s), count: n[s.key] }));
+  }
   /* One scope's rules for a tag, in the order they are consulted: the tag's own, its group's, then `*`. */
   function rulesIn(rules, tag) {
     return (rules || []).filter((r) => r && r.enabled !== false && matches(r, tag)).sort((a, b) => rank(a) - rank(b));
   }
   const TEXT_KEYS = ['br', 'hl', 'tile', 'box', 'c'];
   const BORDER_STYLES = ['solid', 'dashed', 'dotted', 'double'];
-  const hasStyle = (r) => !!(r && (r.bg || r.fg || r.b || r.i || r.u || r.row || r.label === false || r.bar != null || r.bs || r.bw || r.tc || TEXT_KEYS.some((k) => r[k])));
+  const hasStyle = (r) => !!(r && (r.bg || r.fg || r.b || r.i || r.u || r.row || r.label === false || r.bar != null || r.bs || r.bw || r.tc || r.bc || r.ms || r.ml || TEXT_KEYS.some((k) => r[k])));
   const textStyled = (res) => !!(res && (res.br || res.hl || res.tile || res.box || res.c));
   /* '#rrggbb' at an opacity (the overlays blend where tags overlap). */
   const rgba = (hex, a) => { const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex || ''); return m ? 'rgba(' + parseInt(m[1], 16) + ',' + parseInt(m[2], 16) + ',' + parseInt(m[3], 16) + ',' + a + ')' : hex; };
@@ -141,12 +173,12 @@
     const c = Object.assign({}, ctx || T.context());
     if (spec && spec.guid && !c.text) c.text = spec.guid;       // the example's source text is a scope of its own
     const scopes = scopesFor(c, spec ? R.tagRules(spec) : null, override);
-    const out = { hide: false, bg: '', fg: '', b: false, i: false, u: false, label: true, br: '', hl: false, tile: false, box: false, c: '', bar: null, bs: '', bw: 0, tc: '', row: false, hideVia: null, styleVia: null };
+    const out = { hide: false, bg: '', fg: '', b: false, i: false, u: false, label: true, br: '', hl: false, tile: false, box: false, c: '', bar: null, bs: '', bw: 0, tc: '', bc: '', row: false, ms: '', ml: '', styledBy: '', hideVia: null, styleVia: null };
     for (const sc of scopes) {
       for (const r of rulesIn(sc.rules, tag)) {
         if (!out.hideVia && r.hide != null) { out.hide = !!r.hide; out.hideVia = sc; }
         // the border's line style / thickness and the tile's own colour ride with the style (Seth, 2026-10-18)
-        if (!out.styleVia && hasStyle(r)) Object.assign(out, { bg: r.bg || '', fg: r.fg || '', b: !!r.b, i: !!r.i, u: !!r.u, label: r.label !== false, br: BRACKETS[r.br] ? r.br : '', hl: !!r.hl, tile: !!r.tile, box: !!r.box, c: r.c || '', bar: r.bar == null ? null : !!r.bar, bs: BORDER_STYLES.includes(r.bs) ? r.bs : '', bw: r.bw >= 1 && r.bw <= 6 ? Math.round(r.bw) : 0, tc: r.tc || '', row: !!r.row, styleVia: sc });
+        if (!out.styleVia && hasStyle(r)) Object.assign(out, { bg: r.bg || '', fg: r.fg || '', b: !!r.b, i: !!r.i, u: !!r.u, label: r.label !== false, br: BRACKETS[r.br] ? r.br : '', hl: !!r.hl, tile: !!r.tile, box: !!r.box, c: r.c || '', bar: r.bar == null ? null : !!r.bar, bs: BORDER_STYLES.includes(r.bs) ? r.bs : '', bw: r.bw >= 1 && r.bw <= 6 ? Math.round(r.bw) : 0, tc: r.tc || '', bc: r.bc || '', row: !!r.row, ms: r.ms || '', ml: r.ml || '', styledBy: norm(r.tag), styleVia: sc });
       }
       if (out.hideVia && out.styleVia) break;
     }
@@ -185,9 +217,25 @@
   /* opts.leaf(tag, depth) → the row for a tag (null to leave it out); opts.head(node) → extra
    * controls on a group heading; opts.open → every group open (a search is on); opts.flat → no
    * headings at all. Returns the redraw function. */
+  /* The nearest ancestor that scrolls (the modal body, a popover). */
+  function scrollerOf(n) {
+    for (let e = n; e; e = e.parentElement) {
+      try { const o = getComputedStyle(e).overflowY; if ((o === 'auto' || o === 'scroll') && e.scrollHeight > e.clientHeight) return e; } catch (err) { return null; }
+    }
+    return null;
+  }
+  /* Redraw a list in place without losing the user's place in it (Seth, 2026-10-19: adding a border
+   * made "the current rule line … jump to the top of the list"): the full rebuild empties the host,
+   * which lets its scroller fall back to the top; the scroll position is put back on both sides of
+   * the frame the browser lays the new content out in. */
+  function redrawKeepingPlace(host, fn) {
+    const sc = scrollerOf(host), top = sc ? sc.scrollTop : 0;
+    fn();
+    if (sc && top) { sc.scrollTop = top; requestAnimationFrame(() => { sc.scrollTop = top; }); }
+  }
   function renderTagTree(host, items, opts) {
     opts = opts || {};
-    const draw = () => {
+    const draw = () => redrawKeepingPlace(host, () => {
       host.innerHTML = '';
       const st = treeState();
       const walk = (node, depth) => {
@@ -195,17 +243,17 @@
           if (e.tag) { const row = opts.leaf(e.tag, depth); if (row) { if (depth && !opts.flat) row.style.paddingInlineStart = (depth * 14) + 'px'; host.appendChild(row); } continue; }
           const n = e.node;
           if (opts.flat) { walk(n, depth); continue; }
-          const closed = !opts.open && !!st[n.key];
+          const closed = !opts.open && (n.key in st ? !!st[n.key] : !!(opts.closedByDefault && opts.closedByDefault(n)));
           const head = el('div', { class: 'tag-tree-head' + (closed ? ' closed' : ''), 'data-test': 'tag-tree-group', dataset: { group: n.name }, style: { paddingInlineStart: (depth * 14) + 'px' }, title: closed ? 'Show this group' : 'Fold this group' },
             el('span', { class: 'tag-tree-caret' }, closed ? '\u25b8' : '\u25be'), el('span', { class: 'tag-tree-name' }, n.name), el('span', { class: 'tag-tree-n' }, String(n.count)));
-          head.addEventListener('click', (e) => { if (e.target.closest('button, input, select')) return; const s2 = treeState(); if (closed) delete s2[n.key]; else s2[n.key] = true; saveTreeState(s2); draw(); });
+          head.addEventListener('click', (e) => { if (e.target.closest('button, input, select')) return; const s2 = treeState(); s2[n.key] = !closed; saveTreeState(s2); draw(); });
           if (opts.head) { const extra = opts.head(n); if (extra) head.appendChild(extra); }
           host.appendChild(head);
           if (!closed) walk(n, depth + 1);
         }
       };
       walk(tagTree(items), 0);
-    };
+    });
     draw();
     return draw;
   }
@@ -246,11 +294,23 @@
     if (obj.flat) return [];
     const used = new Map();
     for (const r of obj.rows || []) for (const c of r.cells || []) used.set(c.colN, (used.get(c.colN) || 0) + 1);
-    return cols.map((col) => {
+    const out = [];
+    const groupsDone = new Set();
+    for (const col of cols) {
       T.noteColumn(col);
       const path = col.path || [];
-      return { tag: { guid: 'column:' + (col.guid || col.name), name: path.concat([col.name]).join('/'), abbr: col.abbr || col.name, group: path[path.length - 1] || '', path, column: true, fore: '', back: '', colN: col.n }, count: used.get(col.n) || 0 };
-    });
+      // the header GROUPS above the columns (Seth, 2026-10-19: "higher level chart columns as
+      // visual filter options too"): one item per group, `column:group:<name>` — which styles every
+      // column under it AS ONE unit (chart.js draws the group's cells of a row as one box)
+      path.forEach((g, i) => {
+        if (groupsDone.has(g)) return;
+        groupsDone.add(g);
+        const members = cols.filter((c) => (c.path || []).includes(g));
+        out.push({ tag: { guid: 'column:group:' + g, name: 'group:' + g, abbr: '', group: g, path: path.slice(0, i + 1), column: true, isGroup: true, label: 'All of ' + g, note: members.length + ' column' + (members.length === 1 ? '' : 's') + ', styled as one', fore: '', back: '' }, count: members.reduce((n, c) => n + (used.get(c.n) || 0), 0) });
+      });
+      out.push({ tag: { guid: 'column:' + (col.guid || col.name), name: path.concat([col.name]).join('/'), abbr: col.abbr || col.name, group: path[path.length - 1] || '', path, column: true, fore: '', back: '', colN: col.n }, count: used.get(col.n) || 0 });
+    }
+    return out;
   }
 
   async function save(kind, key, rules) {
@@ -300,6 +360,23 @@
     for (const [k, l, ttl, st] of [['b', 'B', 'Bold words', { fontWeight: '700' }], ['i', 'I', 'Italic words', { fontStyle: 'italic' }], ['u', 'U', 'Underline the words in the tag’s colour', { textDecoration: 'underline' }]]) {
       box.appendChild(el('button', { class: 'tog' + (r[k] ? ' on' : ''), 'data-test': 'tag-' + k, title: ttl, style: st, onclick: () => set({ [k]: r[k] ? undefined : true }) }, l));
     }
+    if (o.structure === 'chip') return box;             // a [2a] clause marker: the chip's colours and B I U
+    if (o.structure === 'row') {                          // a clause type: the whole row, always
+      const c = el('input', { type: 'color', value: r.c || '#1a1d21', title: 'Colour of the row’s words' });
+      c.addEventListener('change', () => set({ c: c.value }));
+      box.appendChild(el('span', { class: 'tag-ctl', title: 'Colour of the words' }, 'text', c, r.c ? el('button', { class: 'tog', title: 'Back to the usual word colour', onclick: () => set({ c: undefined }) }, 'auto') : null));
+      return box;
+    }
+    if (o.structure === 'moved') {
+      // moved text (Seth, 2026-10-19): whose look the word group wears, and how it is labelled
+      const ms = el('select', { 'data-test': 'tag-ms', title: 'Whose look the moved words wear' });
+      for (const [v, l] of [['', 'look: this rule’s own'], ['from', 'look: the column it came from'], ['to', 'look: the column it sits in']]) ms.appendChild(el('option', { value: v, selected: (r.ms || '') === v }, l));
+      ms.addEventListener('change', () => set({ ms: ms.value || undefined }));
+      const ml = el('select', { 'data-test': 'tag-ml', title: 'The label on the moved words' });
+      for (const [v, l] of [['', 'label: ‹‹ + the column it came from'], ['to', 'label: ‹‹ + the column it sits in'], ['off', 'no label']]) ml.appendChild(el('option', { value: v, selected: (r.ml || '') === v }, l));
+      ml.addEventListener('change', () => set({ ml: ml.value || undefined }));
+      box.appendChild(el('span', { class: 'tag-ctl' }, ms, ml));
+    }
     if (o.marker) {
       // a chart marker (Seth, 2026-10-18: "row-level markers, so that when they are found anywhere in
       // a row, that whole row is styled"): the chip, or the whole row
@@ -309,7 +386,7 @@
       box.appendChild(el('span', { class: 'tag-ctl', title: 'Colour of the words' }, 'text', c, r.c ? el('button', { class: 'tog', title: 'Back to the usual word colour', onclick: () => set({ c: undefined }) }, 'auto') : null));
       return box;
     }
-    box.appendChild(el('button', { class: 'tog' + (r.label === false ? '' : ' on'), title: 'Show the tag’s abbreviation (off: a thin bar only)', onclick: () => set({ label: r.label === false ? undefined : false }) }, 'label'));
+    if (!o.structure) box.appendChild(el('button', { class: 'tog' + (r.label === false ? '' : ' on'), title: 'Show the tag’s abbreviation (off: a thin bar only)', onclick: () => set({ label: r.label === false ? undefined : false }) }, 'label'));
     // the TEXT itself (Seth, 2026-10-18): brackets round the span, a marker, a tile, a border, a colour
     const txt = el('div', { class: 'tag-ctl tag-ctl-text' });
     const br = el('select', { title: 'Brackets around the tagged words (and the lines under them)', 'data-test': 'tag-br' });
@@ -318,7 +395,7 @@
     br.addEventListener('change', () => set({ br: br.value || undefined }));
     txt.appendChild(br);
     for (const [k, l, ttl] of [['hl', 'highlight', 'A marker over the words'], ['tile', 'tile', 'A tinted box behind the words and their lines'], ['box', 'border', 'A border around the words and their lines']]) {
-      txt.appendChild(el('button', { class: 'tog' + (r[k] ? ' on' : ''), 'data-test': 'tag-' + k, title: ttl, onclick: () => set({ [k]: r[k] ? undefined : true, ...(k === 'box' && r.box ? { bs: undefined, bw: undefined } : {}), ...(k === 'tile' && r.tile ? { tc: undefined } : {}) }) }, l));
+      txt.appendChild(el('button', { class: 'tog' + (r[k] ? ' on' : ''), 'data-test': 'tag-' + k, title: ttl, onclick: () => set({ [k]: r[k] ? undefined : true, ...(k === 'box' && r.box ? { bs: undefined, bw: undefined, bc: undefined } : {}), ...(k === 'tile' && r.tile ? { tc: undefined } : {}) }) }, l));
       if (k === 'tile' && r.tile) {        // the tile's own colour (Seth, 2026-10-18: "edit the background color"); unset = the tag's colour, tinted
         const tc = el('input', { type: 'color', value: r.tc || r.bg || '#ffd6a5', 'data-test': 'tag-tc', title: 'Colour of the tile (the tag’s colour, tinted, when unset)' });
         tc.addEventListener('change', () => set({ tc: tc.value }));
@@ -331,16 +408,21 @@
         const bw = el('select', { 'data-test': 'tag-bw', title: 'Thickness of the border' });
         for (const v of [1, 2, 3, 4, 6]) bw.appendChild(el('option', { value: String(v), selected: (r.bw || 2) === v }, v + ' px'));
         bw.addEventListener('change', () => set({ bw: +bw.value === 2 ? undefined : +bw.value }));
-        txt.append(bs, bw);
+        // the border's own colour (Seth, 2026-10-19: "I should be able to specify a border color"); unset = the tag's colour
+        const bc = el('input', { type: 'color', value: r.bc || r.bg || '#1a1d21', 'data-test': 'tag-bc', title: 'Colour of the border (the tag’s colour when unset)' });
+        bc.addEventListener('change', () => set({ bc: bc.value }));
+        txt.append(bs, bw, el('span', { class: 'tag-ctl', title: 'Colour of the border' }, bc, r.bc ? el('button', { class: 'tog', 'data-test': 'tag-bc-auto', title: 'Back to the tag’s colour', onclick: () => set({ bc: undefined }) }, 'auto') : null));
       }
     }
     const c = el('input', { type: 'color', value: r.c || '#1a1d21', title: 'Colour of the words' });
     c.addEventListener('change', () => set({ c: c.value }));
     txt.appendChild(el('span', { class: 'tag-ctl', title: 'Colour of the words' }, 'text', c, r.c ? el('button', { class: 'tog', title: 'Back to the usual word colour', onclick: () => set({ c: undefined }) }, 'auto') : null));
-    const bar = el('select', { title: 'The tag’s bar under the words', 'data-test': 'tag-bar' });
-    for (const [v, l] of [['', 'bar: when nothing else shows the tag'], ['on', 'bar: always'], ['off', 'bar: never']]) bar.appendChild(el('option', { value: v, selected: (r.bar === true ? 'on' : r.bar === false ? 'off' : '') === v }, l));
-    bar.addEventListener('change', () => set({ bar: bar.value === '' ? undefined : bar.value === 'on' }));
-    txt.appendChild(bar);
+    if (!o.structure) {
+      const bar = el('select', { title: 'The tag’s bar under the words', 'data-test': 'tag-bar' });
+      for (const [v, l] of [['', 'bar: when nothing else shows the tag'], ['on', 'bar: always'], ['off', 'bar: never']]) bar.appendChild(el('option', { value: v, selected: (r.bar === true ? 'on' : r.bar === false ? 'off' : '') === v }, l));
+      bar.addEventListener('change', () => set({ bar: bar.value === '' ? undefined : bar.value === 'on' }));
+      txt.appendChild(bar);
+    }
     box.appendChild(txt);
     return box;
   }
@@ -364,6 +446,7 @@
 
   /* The ⚑ popover on an example: its tags, each with where its look comes from, a show / hide
    * toggle and its own style — all written into the embed's `tags=`. */
+  const groupMix = new Map();            // a group's on/off mix, kept while the page lives (the heading's ↺)
   function examplePopover(anchor, spec, obj, opts) {
     const markerMode = !!(opts && opts.markers);
     const ctx = Object.assign({}, T.context(), { text: markerMode ? (obj.text || spec.guid) : spec.guid });
@@ -386,21 +469,49 @@
         if (target.kind === 'example') { R.setTagRules(spec, rules); opts.onSpecChange && opts.onSpecChange(spec); return; }
         try { await save(target.kind, target.key, rules); } catch (e) { FS.toast(e.message, 'error'); }
       };
-      pop.appendChild(el('div', { class: 'row' }, el('b', {}, 'FLEx text markup tags in this example')));
+      pop.appendChild(el('div', { class: 'row' }, el('b', {}, markerMode ? 'What this chart draws, and how' : 'FLEx text markup tags on this example')));
+      pop.appendChild(el('div', { class: 'muted small', style: { marginBottom: '6px' } }, markerMode
+        ? '☑ shows or hides an item here. “Style ▾” sets how it is DRAWN: a marker’s chip (or its whole row), a column’s cells, a word group. A group heading’s box switches everything under it on, off, or back to the mix it had. A visual filter is a named set of these same rules, switched on and off together.'
+        : '☑ shows or hides a tag here. “Style ▾” sets how it is DRAWN: the bar under the words, and the words themselves (brackets, a tile, a border, a colour). A group heading’s box switches every tag under it on, off, or back to the mix it had. A visual filter is a named set of these same rules, switched on and off together.'));
       const scopeSel = el('select', { 'data-test': 'tag-scope-pick', title: 'Where the changes made here apply' });
       targets.forEach((t, i) => scopeSel.appendChild(el('option', { value: String(i), selected: t === target }, t.label.replace(/^the folder /, 'folder ').replace(/^the tab$/, 'this tab'))));
       scopeSel.addEventListener('change', () => { target = targets[+scopeSel.value]; rules = rulesFor(); openTags.clear(); draw(); });
       pop.appendChild(el('div', { class: 'row', style: { gap: '6px' } }, el('span', { class: 'lbl' }, 'Changes apply to'), scopeSel));
       const host = el('div', { class: 'tag-rules', 'data-test': 'tag-popover' });
-      const draw = () => {
+      const draw = () => redrawKeepingPlace(pop, () => {
         host.innerHTML = '';
         const marks = markerMode ? markersIn(obj).concat((obj.tags || []).length ? tagsIn(obj) : []) : [];
         const columns = markerMode ? columnsIn(opts.fullChart || obj) : [];
-        const here = markerMode ? marks.concat(columns) : tagsIn(obj);
+        const structure = markerMode ? structureIn(opts.fullChart || obj) : [];
+        const here = markerMode ? marks.concat(columns, structure) : tagsIn(obj);
         const countOf = new Map(here.map((x) => [x.tag.guid, x.count]));
         if (markerMode && !marks.length) host.appendChild(el('div', { class: 'muted small', style: { padding: '2px 0 6px' } }, 'This chart has no chart markers, and its text no markup tags. Its columns are listed below; the visual filters apply to it too.'));
         else if (markerMode) host.appendChild(el('div', { class: 'muted small', style: { padding: '2px 0 6px' } }, 'Chart markers in this chart' + ((obj.tags || []).length ? ', the text\u2019s markup tags (drawn when the “FLEx tags” line is on)' : '') + ', and its columns. “Style ▾” → “whole row” colours every row a marker is in; a column\u2019s style colours its cells (and its word groups in the one-column view), its box hides the column.'));
-        renderTagTree(host, here.map((x) => x.tag), { leaf: (tag) => {
+        // the tags under a heading (any depth)
+        const leavesOf = (n) => n.entries.flatMap((e) => (e.tag ? [e.tag] : leavesOf(e.node)));
+        renderTagTree(host, here.map((x) => x.tag), { closedByDefault: (n) => leavesOf(n).every((t) => !(countOf.get(t.guid) > 0)), head: (n) => {
+          // ON / OFF / PREVIOUS for a whole group (Seth, 2026-10-19: "a checkbox for parents to toggle
+          // the parent on/off/previous … back to whatever mix was checked before"): all shown → all
+          // hidden; all hidden → the mix it had (remembered for this scope while the page lives), or
+          // all shown; a mix → all shown (the mix is remembered first)
+          const leaves = leavesOf(n).filter((t) => !t.pseudo && !t.isGroup);
+          if (!leaves.length) return null;
+          const states = leaves.map((t) => !resolve(t, spec, ctx).hide);
+          const allOn = states.every(Boolean), allOff = !states.some(Boolean);
+          const memKey = target.kind + '|' + target.key + '|' + n.key;
+          const cb = el('input', { type: 'checkbox', class: 'tag-group-cb', 'data-test': 'tag-group-toggle', checked: allOn, title: allOn ? 'Hide every tag in this group' : allOff ? (groupMix.has(memKey) ? 'Back to the mix this group had' : 'Show every tag in this group') : 'Show every tag in this group (the mix is remembered)' });
+          cb.indeterminate = !allOn && !allOff;
+          cb.addEventListener('click', async (e) => {
+            e.preventDefault(); e.stopPropagation();
+            const setAll = (hide) => { for (const t of leaves) { const res = resolve(t, spec, ctx); const decidedHere = res.hideVia && res.hideVia.kind === target.kind && res.hideVia.key === target.key; patchRule(rules, keyOf(t), { hide: hide ? true : (decidedHere ? undefined : false) }); } };
+            if (allOn) setAll(true);
+            else if (allOff && groupMix.has(memKey)) { const mix = groupMix.get(memKey); for (const t of leaves) patchRule(rules, keyOf(t), { hide: mix.get(keyOf(t)) ? true : undefined }); groupMix.delete(memKey); }
+            else if (allOff) setAll(false);
+            else { groupMix.set(memKey, new Map(leaves.map((t, i) => [keyOf(t), !states[i]]))); setAll(false); }
+            await write(); draw();
+          });
+          return cb;
+        }, leaf: (tag) => {
           const count = countOf.get(tag.guid) || 1;
           const res = resolve(tag, spec, ctx);
           const row = el('div', { class: 'tagrow', dataset: { tag: tag.name } });
@@ -413,14 +524,15 @@
           });
           const sw = el('span', { class: 'tag-sw', style: swatchStyle(res) });
           const via = el('span', { class: 'via', 'data-test': 'tag-via' }, res.hide ? 'hidden by ' + res.hideVia.label : (res.hideVia && res.hideVia.kind === 'example' ? 'shown here · ' : '') + 'styled by ' + res.styleVia.label);
-          const name = el('span', { class: 'tag-name' }, el('span', {}, tag.name + (tag.abbr && tag.abbr !== tag.name ? ' (' + tag.abbr + ')' : '') + (count > 1 ? '  ×' + count : '')), el('br'), via);
+          const name = el('span', { class: 'tag-name' }, el('span', {}, (tag.label || tag.name) + (tag.abbr && tag.abbr !== tag.name ? ' (' + tag.abbr + ')' : '') + (count > 1 ? '  ×' + count : '')), tag.note ? el('span', { class: 'muted small' }, ' — ' + tag.note) : null, el('br'), via);
           const styleBtn = el('button', { class: 'lnk', 'data-test': 'tag-style', title: 'The look of this tag, for ' + target.label, onclick: () => { if (openTags.has(tag.name)) openTags.delete(tag.name); else openTags.add(tag.name); draw(); } }, 'Style ▾');
           const find = FS.openPicker && !tag.marker && !tag.column ? el('button', { class: 'lnk', title: 'Find the other places this tag is used, and insert them', onclick: () => { close(); FS.openPicker({ mode: 'tags', tag: tag.guid }); } }, '\u{1F50D}') : null;
-          row.append(cb, sw, name, styleBtn, find);
+          row.append(cb, sw, name, styleBtn);
+          if (find) row.append(find);
           if (!openTags.has(tag.name)) return row;
-          return el('div', {}, row, el('div', { class: 'tag-style-box' }, controls(() => rules.find((x) => norm(x.tag) === norm(keyOf(tag))), async (patch) => { patchRule(rules, keyOf(tag), patch); await write(); draw(); }, { noShow: true, marker: !!tag.marker })));
+          return el('div', {}, row, el('div', { class: 'tag-style-box' }, controls(() => rules.find((x) => norm(x.tag) === norm(keyOf(tag))), async (patch) => { patchRule(rules, keyOf(tag), patch); await write(); draw(); }, { noShow: true, marker: !!tag.marker, structure: tag.skind || '' })));
         } });
-      };
+      });
       draw();
       pop.appendChild(host);
       if ((config.filters || []).length && target.kind !== 'filter') pop.appendChild(filterSwitches(rules, async (key, patch) => { patchRule(rules, key, patch); await write(); draw(); }, { inheritLabel: 'as inherited' }));
@@ -474,6 +586,7 @@
     // what a rule's key stands for: a tag of the list, a group, every tag, or a name the list no longer has
     const itemFor = (key) => {
       const k = norm(key);
+      if (PSEUDO_RE.test(k)) { const it = T.structureItem(k); return Object.assign({}, it, { isMarker: true, label: it.label + ' (chart structure)' }); }
       if (k.startsWith('column:')) {
         const ck = k.slice(7);
         if (ck === '*') return { guid: 'column:*', name: key, abbr: '', group: '', column: true, isBroad: true, label: 'All chart columns', note: 'one rule for every chart column drawn on an example' };
@@ -494,7 +607,7 @@
       const t = list.find((x) => norm(x.name) === k || (x.abbr && norm(x.abbr) === k) || norm(x.guid) === k);
       return t ? Object.assign({}, t, { label: t.name + (t.abbr && t.abbr !== t.name ? ' (' + t.abbr + ')' : '') }) : { guid: key, name: key, abbr: '', group: '', label: key, note: 'not in the project’s tag list' };
     };
-    const draw = () => {
+    const draw = () => redrawKeepingPlace(host, () => {
       host.innerHTML = '';
       if (!example && !filter) host.appendChild(filterSwitches(rules, (key, patch) => { patchRule(rules, key, patch); commit(); }));
       const keys = [];
@@ -516,7 +629,7 @@
         row.appendChild(el('span', { class: 'tag-name' },
           el('span', {}, tag.label), el('br'),
           el('span', { class: 'via', 'data-test': 'tag-via' }, res ? (res.hide ? 'hidden by ' + res.hideVia.label : 'styled by ' + res.styleVia.label) : tag.note || '')));
-        row.appendChild(controls(() => r, (patch) => { patchRule(rules, key, patch); commit(); }, { inheritLabel: example ? 'as the folder / tab / project says' : 'as inherited', marker: !!tag.marker }));
+        row.appendChild(controls(() => r, (patch) => { patchRule(rules, key, patch); commit(); }, { inheritLabel: example ? 'as the folder / tab / project says' : 'as inherited', marker: !!tag.marker, structure: tag.skind || '' }));
         row.appendChild(el('button', { class: 'icon-btn danger', 'data-test': 'tag-rule-remove', title: 'Remove this tag from here', onclick: () => { if (r) rules.splice(rules.indexOf(r), 1); const i = pending.findIndex((k) => norm(k) === norm(key)); if (i >= 0) pending.splice(i, 1); commit(); } }, '✕'));
         return row;
       };
@@ -534,7 +647,7 @@
       const add = el('button', { class: 'btn', 'data-test': 'tag-add', onclick: (e) => addTagPicker(e.currentTarget, keys, (key) => { pending.push(key); draw(); }) }, '+ Add a tag…');
       host.appendChild(el('div', { class: 'btn-row', style: { justifyContent: 'flex-start', marginTop: '8px' } }, add));
       if (!list.length) host.appendChild(el('div', { class: 'muted small' }, 'No text markup tags have been read from the project yet. Open the project (or show an example that carries tags) and come back.'));
-    };
+    });
     draw();
     m.body.appendChild(el('div', { class: 'btn-row' }, el('button', { class: 'btn primary', onclick: () => m.close() }, 'Done')));
     return m;
@@ -584,6 +697,11 @@
           });
           lst.appendChild(ctree);
         }
+        const sitems = STRUCTURE.filter((s) => !has(s.key) && (!needle || norm(s.label).includes(needle) || norm(s.key).includes(needle)));
+        if (sitems.length) {
+          lst.appendChild(el('div', { class: 'tag-tree-head', style: { marginTop: '6px' } }, 'Chart structure'));
+          for (const s of sitems) lst.appendChild(row(s.key, s.label, s.note, 'tag-pick-tag'));
+        }
         if (!items.length && !lst.querySelector('.tag-pick-all')) lst.appendChild(el('div', { class: 'muted small', style: { padding: '6px' } }, list.length ? 'Nothing else to add.' : 'No tags have been read from the project yet.'));
       };
       q.addEventListener('input', draw);
@@ -596,7 +714,7 @@
   /* The swatch of a resolved look: its colour, and a hint of brackets / border when the text is styled. */
   function swatchStyle(res) {
     const st = { background: res.hide ? 'transparent' : (res.hl || res.tile || res.showBar ? res.bg : rgba(res.bg, 0.35)), borderStyle: res.hide ? 'dashed' : 'solid' };
-    if (!res.hide && res.box) { st.borderColor = res.ink; st.borderStyle = res.bs || 'solid'; }
+    if (!res.hide && res.box) { st.borderColor = res.bc || res.ink; st.borderStyle = res.bs || 'solid'; }
     if (!res.hide && res.tile && res.tc) st.background = rgba(res.tc, 0.55);
     if (!res.hide && res.br) st.boxShadow = 'inset 0 0 0 2px ' + res.ink;
     return st;
@@ -656,7 +774,7 @@
     const host = el('div', { class: 'tag-rules', 'data-test': 'filters-dialog' });
     m.body.appendChild(host);
     const commit = async (list) => { try { await saveFilters(list); } catch (e) { FS.toast(e.message, 'error'); } draw(); };
-    const draw = () => {
+    const draw = () => redrawKeepingPlace(host, () => {
       host.innerHTML = '';
       const list = config.filters || [];
       list.forEach((f, i) => {
@@ -673,7 +791,7 @@
         host.appendChild(row);
       });
       if (!list.length) host.appendChild(el('div', { class: 'muted small' }, 'No filters yet.'));
-    };
+    });
     draw();
     m.body.appendChild(el('div', { class: 'btn-row', style: { justifyContent: 'space-between' } },
       el('button', { class: 'btn', 'data-test': 'filter-add', onclick: () => { const name = prompt('Name of the new visual filter', 'Grammatical relations'); if (name && name.trim()) commit((config.filters || []).concat([{ id: newId(), name: name.trim(), enabled: true, rules: [] }])); } }, '+ New filter'),
@@ -682,5 +800,5 @@
     return m;
   }
 
-  FS.tagstyles = Object.assign(T, { resolve, tagsIn, markersIn, columnsIn, scopesFor, matches, hasStyle, textStyled, rgba, ink, patchRule, save, saveFilters, examplePopover, dialog, filtersPopover, filtersDialog, filterOn, tagTree, renderTagTree });
+  FS.tagstyles = Object.assign(T, { resolve, tagsIn, markersIn, columnsIn, structureIn, scopesFor, matches, hasStyle, textStyled, rgba, ink, patchRule, save, saveFilters, examplePopover, dialog, filtersPopover, filtersDialog, filterOn, tagTree, renderTagTree });
 })();
