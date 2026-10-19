@@ -17,7 +17,21 @@ from pathlib import Path
 import sys
 
 
+def console_safe(*streams) -> None:
+    """A console that cannot encode a character (a Windows console in cp1252 meeting the "→" and
+    "…" of our messages) must never end a command (the VM's run of --doubled-morphs, 2026-10-20:
+    UnicodeEncodeError after the summary). Unencodable characters are replaced with "?"; the text
+    files we write are UTF-8 regardless."""
+    for stream in streams or (sys.stdout, sys.stderr):
+        try:
+            if stream is not None and getattr(stream, "errors", None) not in (None, "replace", "backslashreplace"):
+                stream.reconfigure(errors="replace")
+        except Exception:  # noqa: BLE001 — a stream that cannot be reconfigured is left as it is
+            pass
+
+
 def main(argv: list[str] | None = None) -> int:
+    console_safe()
     ap = argparse.ArgumentParser(prog="flex-scratchpad", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--notebook", help="notebook folder (markdown files)")
     ap.add_argument("--demo", action="store_true", help="use the built-in demo project")

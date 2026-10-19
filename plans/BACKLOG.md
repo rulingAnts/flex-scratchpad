@@ -480,6 +480,11 @@ were never morpheme-glossed, so nothing is lost: one bundle too many per word.
 - `flex-scratchpad --project NAME --doubled-morphs` (lcm `explain_doubled_bundles`, `model.doubled_bundles`)
   lists them with their uses; the fix is in FLEx's Word Analyses (or a FLExTools script that removes the
   duplicate bundles), never here.
+- DONE 2026-10-20 on fau-iya-flex by a FLExTools module (`RemoveDoubledMorphBundles.py`, kept in the session's
+  scratchpad): 5833 analyses checked, 174 bundles removed, `hodidi` / `bedidide` (genuinely repeated morphs)
+  skipped; a byte-verified copy of the project folder taken first. Lessons for the next FLExTools script:
+  `cache.ServiceLocator.GetService(IRepo)` (pythonnet cannot resolve `GetInstance<T>()`), and NO unit of work of
+  its own (FLExTools / the MCP runner hold a session-long one: "Nested tasks are not supported").
 - FlexText Editor side (to look into later, Seth: "a possible bug known issue"): its export writes every
   gloss language it holds (`w.gls` + the preserved other-language `gls` items) and no `<morphemes>`, which is
   correct .flextext — the importer is at fault. Options if it keeps hurting: a note in the editor's import
