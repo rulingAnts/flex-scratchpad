@@ -24,10 +24,12 @@ def test_identical_unlinked_bundles_are_found_and_linked_ones_are_not():
 
 def test_the_terminal_listing(capsys):
     print_doubled({"texts": ["Tosokai"], "wordformsChecked": 0, "analysesChecked": 3, "textsHit": {"Tosokai": 2},
-                   "analyses": [{"wordform": "budu", "bundles": ["budu", "budu"], "extra": 1,
+                   "analyses": [{"wordform": "budu", "bundles": ["budu", "budu"], "extra": 1, "looksLikeBaseline": True,
                                  "uses": [{"text": "Tosokai", "line": "11.1"}, {"text": "Tosokai", "line": "12.1"}]},
-                                {"wordform": "fa", "bundles": ["fa", "fa"], "extra": 1, "uses": []}]})
+                                {"wordform": "fa", "bundles": ["fa", "fa"], "extra": 1, "looksLikeBaseline": True, "uses": []},
+                                {"wordform": "hodidi", "bundles": ["=ho", "=di", "=di"], "extra": 1, "looksLikeBaseline": False, "uses": []}]})
     out = capsys.readouterr().out
-    assert "1 text(s) checked (3 analyses); 2 analyses repeat an unlinked morph bundle, used in 1 text(s)" in out
+    assert "1 text(s) checked (3 analyses); 3 analyses repeat an unlinked morph bundle, used in 1 text(s)" in out
     assert "- budu: [budu | budu]  1 extra  — Tosokai 11.1, Tosokai 12.1" in out
-    assert "- fa: [fa | fa]  1 extra  — not used in any text" in out
+    assert "- fa: [fa | fa]  1 extra  — not used in any text\n" in out
+    assert "- hodidi: [=ho | =di | =di]  1 extra  — not used in any text  ⚠ not the import's shape" in out

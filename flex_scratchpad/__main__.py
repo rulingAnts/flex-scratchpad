@@ -198,7 +198,8 @@ def print_doubled(report: dict, limit: int = 200) -> None:
     for r in rows[:limit]:
         uses = r.get("uses") or []
         where = ", ".join(f"{u['text']} {u['line']}" for u in uses[:4]) + (f" … (+{len(uses) - 4})" if len(uses) > 4 else "")
-        print(f"- {r['wordform']}: [{' | '.join(r['bundles'])}]  {r['extra']} extra" + (f"  — {where}" if where else "  — not used in any text"))
+        shape = "" if r.get("looksLikeBaseline") and r["extra"] + 1 == len(r["bundles"]) else "  ⚠ not the import's shape (a real analysis with a repeated morph): leave it"
+        print(f"- {r['wordform']}: [{' | '.join(r['bundles'])}]  {r['extra']} extra" + (f"  — {where}" if where else "  — not used in any text") + shape)
     if len(rows) > limit:
         print(f"  … {len(rows) - limit} more in the report")
 
