@@ -304,6 +304,16 @@
     return parts.map((s) => '‘' + s.free.trim() + '’' + (withLabels && parts.length > 1 ? ' (' + (s.label || s.n) + ')' : ''));
   }
   const rowsLabel = (rows, a, b) => (a === b ? rows[a].label : rows[a].label + '–' + rows[b].label);
+  /* Whether a marker chip is drawn: its rule may hide it; in a cell with NO WORDS it follows
+   * `emptymarkers=off` (the ⋯ menu's switch) unless its own rule says `empty` / `noempty`
+   * (Seth, 2026-10-19: "show or hide markers associated with empty cells"). A view setting only:
+   * a chart note's rule columns and the search read the chart itself, hidden or not. */
+  function markerShown(look, spec, cellHasWords) {
+    if (look.hide) return false;
+    if (cellHasWords) return true;
+    if (look.onEmpty != null) return look.onEmpty;
+    return !(spec && spec.extra && spec.extra.emptymarkers === 'off');
+  }
   function markerLook(chart, tag, spec) {
     if (FS.tagstyles && FS.tagstyles.resolve) {
       try { return FS.tagstyles.resolve(Object.assign({}, tag, { marker: true }), spec || null, Object.assign({}, FS.tagstyles.context(), { text: chart.text || '' })); } catch (e) { /* the palette below */ }
@@ -546,7 +556,8 @@
         let group = null;
         for (const part of slot.parts) {
           if (part.kind === 'moved') movedParts.push({ part, home: part.srcCol || slot.col });
-          const node = renderPart(part, row, part.srcCol || slot.col, obj, spec, opts, { lines, index, vern, anal, wordGroups, movedTargets, tbody, showTextTags });
+          const cellHasWords = slot.parts.some((q) => q.kind === 'words' && (q.srcCol || slot.col).n === (part.srcCol || slot.col).n);
+          const node = renderPart(part, row, part.srcCol || slot.col, obj, spec, opts, { lines, index, vern, anal, wordGroups, movedTargets, tbody, showTextTags, cellHasWords });
           if (!(flat && part.srcCol)) { td.appendChild(node); continue; }
           const key = flatUnitKey(part.srcCol, obj, spec);
           if (!group || group.key !== key) { if (group) group.finish(); group = flatWrap(part, obj, spec, key); td.appendChild(group.wrap); }
@@ -764,8 +775,12 @@
     // inside a group's box each column's parts are followed by that column's own small label
     let lastCol = null;
     const colLabel = () => { if (asGroup && labelsOn && lastCol) body.appendChild(el('sub', { class: 'cflat-lab cflat-sublab' }, lastCol.abbr || lastCol.name)); };
-    const add = (node, p) => { if (asGroup && lastCol && p.srcCol && p.srcCol.n !== lastCol.n) colLabel(); lastCol = p.srcCol || lastCol; body.appendChild(node); if (p.kind === 'words') wrap.classList.add('cflat-words'); };
-    const finish = () => { colLabel(); lastCol = null; };
+    // a box whose every chip is hidden draws nothing at all — no tile, border or label (Seth,
+    // 2026-10-19: "if whatever chips were in that cell are invisible, then the cell border, tile
+    // or whatever shouldn't draw")
+    let shown = false;
+    const add = (node, p) => { if (asGroup && lastCol && p.srcCol && p.srcCol.n !== lastCol.n) colLabel(); lastCol = p.srcCol || lastCol; body.appendChild(node); if (p.kind === 'words') wrap.classList.add('cflat-words'); if (!node.classList.contains('hidden')) shown = true; };
+    const finish = () => { colLabel(); lastCol = null; if (!shown) wrap.classList.add('cflat-void'); };
     if (look) {
       const bg = look.tile ? (look.tc || look.bg) : look.hl ? look.bg : '';
       if (bg) wrap.style.background = rgba(bg, look.tile ? 0.45 : 0.6);
@@ -853,6 +868,7 @@
       if (!t) return el('span', { class: 'ctag missing', title: 'A chart marker whose list item is missing' }, '?');
       const look = markerLook(obj, t, spec);
       if (look.hide) return el('span', { class: 'ctag hidden', dataset: { marker: t.name }, title: t.name + ' (hidden by ' + (look.hideVia ? look.hideVia.label : 'a rule') + ')' });
+      if (!markerShown(look, spec, ctx.cellHasWords !== false)) return el('span', { class: 'ctag hidden', dataset: { marker: t.name, empty: '' }, title: t.name + ' (in a cell with no words; hidden by ' + (look.emptyVia ? look.emptyVia.label : 'this chart’s settings') + ')' });
       const st = { background: look.bg, color: look.fg };
       if (look.b) st.fontWeight = '800';
       if (look.i) st.fontStyle = 'italic';
@@ -971,9 +987,12 @@
       pop.appendChild(el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Layout'), vsel));
       const ecb = el('input', { type: 'checkbox', checked: x.empty === 'off', 'data-test': 'chart-hide-empty' });
       ecb.addEventListener('change', () => { if (ecb.checked) x.empty = 'off'; else delete x.empty; change(); });
+      const mcb = el('input', { type: 'checkbox', checked: x.emptymarkers !== 'off', 'data-test': 'chart-empty-markers' });
+      mcb.addEventListener('change', () => { if (mcb.checked) delete x.emptymarkers; else x.emptymarkers = 'off'; change(); });
       const lcb = el('input', { type: 'checkbox', checked: x.collab !== 'off' });
       lcb.addEventListener('change', () => { if (lcb.checked) delete x.collab; else x.collab = 'off'; change(); });
       pop.appendChild(el('div', { class: 'row' }, el('label', { title: 'Leave out the columns with nothing in these rows' }, ecb, ' Hide empty columns'), isFlat(spec) ? el('label', { title: 'The column’s abbreviation under each word group' }, lcb, ' Column labels') : null));
+      pop.appendChild(el('div', { class: 'row' }, el('label', { title: 'Chart markers in a cell that holds no words (a marker’s own rule in ⚑ can say otherwise)' }, mcb, ' Markers in cells with no words')));
       const zl = el('span', { class: 'zoom-val', 'data-test': 'chart-zoom' }, zoomOf(spec) + '%');
       pop.appendChild(el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Zoom'),
         el('button', { class: 'tog', 'data-test': 'chart-zoom-out', title: 'Smaller', onclick: () => { zl.textContent = setZoom(spec, zoomOf(spec) - ZOOM_STEP) + '%'; change(); } }, '\u2212'),
@@ -1107,5 +1126,5 @@
       el('div', { class: 'btn-row' }, el('button', { class: 'btn', 'data-test': 'pivot-copy', onclick: () => { FS.copyText(tsv); FS.toast('Copied as TSV'); } }, 'Copy as TSV'), el('button', { class: 'btn primary', onclick: () => m.close() }, 'Done')));
   }
 
-  FS.chart = { renderChart, visibleColumns, selectedColumns, flatten, isFlat, zoomOf, setZoom, playGroups, columnLook, pseudoLook, headerRows, layoutRow, rowSegs, freeRuns, lineStarts, colWidths, setColWidths, freeText, chartGrid, chartTsv, markerLook, pivot, pivotDialog, LINE_NAMES, FREE_NAMES };
+  FS.chart = { renderChart, visibleColumns, selectedColumns, flatten, isFlat, zoomOf, setZoom, playGroups, columnLook, pseudoLook, markerShown, headerRows, layoutRow, rowSegs, freeRuns, lineStarts, colWidths, setColWidths, freeText, chartGrid, chartTsv, markerLook, pivot, pivotDialog, LINE_NAMES, FREE_NAMES };
 })();

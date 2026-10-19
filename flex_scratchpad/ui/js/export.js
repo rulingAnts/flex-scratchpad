@@ -179,7 +179,7 @@
           if (p.kind === 'words') words.push(...partWords(p, row, slot.col));
           else if (p.kind === 'moved') { const t = wg.get(p.target); marks.push({ text: (p.preposed ? '\u2039\u2039' : '\u203a\u203a') + (t ? t.row.label : ''), color: '#7a3e9d', b: true }); }
           else if (p.kind === 'clause') marks.push({ text: '[' + ((p.labels || []).length > 1 ? p.labels[0] + '\u2013' + p.labels[p.labels.length - 1] : (p.labels || ['?'])[0]) + ']', color: '#1f4f8f', b: true });
-          else if (p.kind === 'tag') { const look = C.markerLook(obj, p.tag || {}, spec); if (look.hide) continue; marks.push({ text: ' ' + ((p.tag && (p.tag.abbr || p.tag.name)) || '?') + ' ', hl: look.bg, color: look.fg, size: 8, b: true }); }
+          else if (p.kind === 'tag') { const look = C.markerLook(obj, p.tag || {}, spec); if (look.hide || (C.markerShown && !C.markerShown(look, spec, slot.parts.some((q) => q.kind === 'words' && (q.srcCol || slot.col).n === (p.srcCol || slot.col).n)))) continue; marks.push({ text: ' ' + ((p.tag && (p.tag.abbr || p.tag.name)) || '?') + ' ', hl: look.bg, color: look.fg, size: 8, b: true }); }
         }
         const hl = cellSt.find((s) => s.style === 'hl');
         // the plain content too (the Excel export's data sheet, searches over the file)

@@ -70,6 +70,22 @@ test('rules: terms, operators, outputs and styles', () => {
   assert.equal(run('gloss:"river" → r', '2c'), 'r');
   assert.equal(run('label:"3b"', '3b'), '✓');                           // no → : a tick
   assert.equal(run('(marker:new or marker:giv) and not clause:speech → x', '2c'), 'x');
+  // REGEX, WORD FIELDS PER WRITING SYSTEM AND COLUMN SCOPES (Seth, 2026-10-19: "regex for text in a column
+  // on any interlinear word field/writing system (or any combination to query)")
+  assert.equal(run('txt:/^ka-/ → pre', '1a'), 'pre');                               // the word (and its morpheme forms)
+  assert.equal(run('txt:/^KA-/i → pre', '1a'), 'pre');                              // flags
+  assert.equal(run('txt:/^uwa/ → x', '1a'), null);                                  // anchored: neither the word nor a morpheme starts with uwa
+  assert.equal(run('gls:/sleep/ and pos:v → v', '1a'), 'v');                       // pos: the word category, exactly
+  assert.equal(run('form:/^-mo$/ → suffix', '1a'), 'suffix');                       // a morpheme form on its own
+  assert.equal(run('mgls:/pst/i → past', '1a'), 'past');                            // a morpheme gloss
+  assert.equal(run('col:Subject[txt:/^kabir$/i] → K', '1a'), 'K');                  // the words of ONE column
+  assert.equal(run('col:Subject[txt:/^kabir$/i] → K', '1b'), null);                 // (Haŋa is the subject of 1b)
+  assert.equal(run('col:Verb[gls:/sleep/] and not col:Subject[txt:/kabir/i] → other', '3a'), 'other');
+  assert.equal(run('col:/^Post/[marker:*]', '2c'), null);                           // a column by pattern; markers are not words
+  assert.equal(run('free:/river/i → r', '2c'), 'r');                                // the free translation of the line
+  assert.equal(run('label:/^2/ → two', '2b'), 'two');
+  assert.throws(() => N.parseRule('txt:/(/ → x'), /Bad pattern/);
+  assert.throws(() => N.parseRule('col:Subject[txt:/a/ → x'), /“]” is missing/);
   // a list column's value is a term too
   const vals = new Map([[N.anchorOf(c.rows[0].guid), { Status: 'new' }]]);
   const cols = [{ name: 'Status', kind: 'list', settings: 'Information status' }];

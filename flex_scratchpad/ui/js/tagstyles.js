@@ -173,14 +173,15 @@
     const c = Object.assign({}, ctx || T.context());
     if (spec && spec.guid && !c.text) c.text = spec.guid;       // the example's source text is a scope of its own
     const scopes = scopesFor(c, spec ? R.tagRules(spec) : null, override);
-    const out = { hide: false, bg: '', fg: '', b: false, i: false, u: false, label: true, br: '', hl: false, tile: false, box: false, c: '', bar: null, bs: '', bw: 0, tc: '', bc: '', row: false, ms: '', ml: '', styledBy: '', hideVia: null, styleVia: null };
+    const out = { hide: false, bg: '', fg: '', b: false, i: false, u: false, label: true, br: '', hl: false, tile: false, box: false, c: '', bar: null, bs: '', bw: 0, tc: '', bc: '', row: false, ms: '', ml: '', styledBy: '', hideVia: null, styleVia: null, onEmpty: null, emptyVia: null };
     for (const sc of scopes) {
       for (const r of rulesIn(sc.rules, tag)) {
         if (!out.hideVia && r.hide != null) { out.hide = !!r.hide; out.hideVia = sc; }
+        if (!out.emptyVia && r.empty != null) { out.onEmpty = !!r.empty; out.emptyVia = sc; }   // a marker in a cell with no words
         // the border's line style / thickness and the tile's own colour ride with the style (Seth, 2026-10-18)
         if (!out.styleVia && hasStyle(r)) Object.assign(out, { bg: r.bg || '', fg: r.fg || '', b: !!r.b, i: !!r.i, u: !!r.u, label: r.label !== false, br: BRACKETS[r.br] ? r.br : '', hl: !!r.hl, tile: !!r.tile, box: !!r.box, c: r.c || '', bar: r.bar == null ? null : !!r.bar, bs: BORDER_STYLES.includes(r.bs) ? r.bs : '', bw: r.bw >= 1 && r.bw <= 6 ? Math.round(r.bw) : 0, tc: r.tc || '', bc: r.bc || '', row: !!r.row, ms: r.ms || '', ml: r.ml || '', styledBy: norm(r.tag), styleVia: sc });
       }
-      if (out.hideVia && out.styleVia) break;
+      if (out.hideVia && out.styleVia && out.emptyVia) break;
     }
     out.showBar = out.bar != null ? out.bar : !textStyled(out);
     if (!out.styleVia) {
@@ -384,6 +385,12 @@
       const c = el('input', { type: 'color', value: r.c || '#1a1d21', title: 'Colour of the row’s words' });
       c.addEventListener('change', () => set({ c: c.value }));
       box.appendChild(el('span', { class: 'tag-ctl', title: 'Colour of the words' }, 'text', c, r.c ? el('button', { class: 'tog', title: 'Back to the usual word colour', onclick: () => set({ c: undefined }) }, 'auto') : null));
+      // in a cell with no words (Seth, 2026-10-19: "show or hide markers associated with empty
+      // cells … configure this for specific markers"): the chart's own setting, or this marker's
+      const em = el('select', { 'data-test': 'tag-empty', title: 'This marker in a cell that holds no words' });
+      for (const [v, l] of [['', 'in an empty cell: as the chart says'], ['show', 'in an empty cell: shown'], ['hide', 'in an empty cell: hidden']]) em.appendChild(el('option', { value: v, selected: (r.empty === true ? 'show' : r.empty === false ? 'hide' : '') === v }, l));
+      em.addEventListener('change', () => set({ empty: em.value === '' ? undefined : em.value === 'show' }));
+      box.appendChild(em);
       return box;
     }
     if (!o.structure) box.appendChild(el('button', { class: 'tog' + (r.label === false ? '' : ' on'), title: 'Show the tag’s abbreviation (off: a thin bar only)', onclick: () => set({ label: r.label === false ? undefined : false }) }, 'label'));

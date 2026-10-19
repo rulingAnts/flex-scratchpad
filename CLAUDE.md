@@ -722,11 +722,34 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   select. RULES (`parseRule` / `evalExpr` / `applyRule`, `rowCtx` builds what a row offers): cases
   split on `;`, each `<expr> → <text> [styles]` (no → gives ✓), first match wins; terms marker:Name
   (name, abbr or any group name; `*` = any), col:Name (name, Group/Name, abbr, cN, guid), clause:…,
-  moved / moved:preposed|postposed, clauseref, endsent, endpara, depstart, depend, words:"…",
-  gloss:"…", label:"…", and `<ListColumn>:value` / `:*`; and / or / not / ( ); styles `row` or
-  `cell` (default), hl, hl#rrggbb, b, i, u, c#rrggbb — a `row` case styles the whole `tr`
-  (`opts.rowDecor` in chart.js). The dialog (`columnDialog`) tests a rule live against the chart
-  (rows per case). DRAWN by `FS.chart.renderChart` through `opts.extraCols` (`th.th-x` with the
+  moved / moved:preposed|postposed, clauseref, endsent, endpara, depstart, depend, the WORD FIELDS
+  (Seth, 2026-10-19: "regex for text in a column on any interlinear word field/writing system (or
+  any combination to query)"; `FIELDS` / `fieldValues`): `txt:` (= `words:` of old: the word and
+  its morpheme forms), `gls:` (= `gloss:`: the word gloss and the morpheme glosses), `pos:` (exact),
+  `form:`, `mgls:`, `cf:`, `lex:` (any form), `free:` (the free translation of the line the row's
+  words come from — `rowCtx` collects the row's segments), `label:"…"`, and `<ListColumn>:value` /
+  `:*`; a VALUE may be a pattern `/re/i` (one token however many `;` `(` `/` it holds — the
+  tokenizer takes `key:/…/flags` first; tested on the text as written, NFC, `matchVal`; plain
+  values still match the normalised substring), a FIELD may name a writing system `gls@fr:` (read
+  from the word's `glsAlts` & co. — present only when the chart carries alternatives; the chart
+  reader hands out the default writing systems until asked for more, so the builder offers the
+  systems it finds, `chartWritingSystems`), and a term may be scoped to ONE column
+  `col:Subject[txt:/^ka-/ and not gls:/x/]` (`{op: 'in'}`: the inner expression sees that column's
+  cells only; `col:/^Post/[…]` by pattern); and / or / not / ( ); styles `row` or `cell` (default),
+  hl, hl#rrggbb, b, i, u, c#rrggbb — a `row` case styles the whole `tr` (`opts.rowDecor` in
+  chart.js). A rule reads the CHART, never the drawing (Seth, 2026-10-19: "the absence or presence
+  of a marker in the DATA SOURCE, regardless of whether it's visible or invisible"): a marker
+  hidden by a visual filter or the empty-cell switch still counts. The dialog (`columnDialog`)
+  tests a rule live against the chart (rows per case). THE BUILDER (Seth, 2026-10-19: "a UI for
+  building formulas rather than just a query language"): `ruleBuilder(host, opts)` — Builder / Text
+  tabs (`cn-rule-mode`; a new rule opens in the builder, an existing one in Text); each CASE a list
+  of conditions joined by all / any (`rb-what`: marker, column, clause type, moved text, row flag,
+  the word fields, row label, a list column; `rb-how`: is / any / contains / matches pattern; the
+  value from the chart's markers / columns or typed; `rb-ws` a writing system; `rb-incol` "in
+  <column>" = the `col:X[…]` scope), the text shown (`rb-out`) and the style (scope, highlight, B I
+  U, text colour); it WRITES the rule text (`casesText` / `condText`) on every change, and READS one
+  back (`casesFrom`: a flat and / or of terms, `not` terms and `col:X[term]` scopes; anything
+  cleverer is left to the Text tab with a note). `tests/js/chartnote.test.js` pins the terms. DRAWN by `FS.chart.renderChart` through `opts.extraCols` (`th.th-x` with the
   column's ⋯: rename / settings, move, remove with Undo; `td.xcell` — notes: click → textarea, Enter
   saves; list: click → select; rule: the text, styled) after the FLEx columns and before Free /
   Notes; `opts.onObject` hands the owner the fetched chart (the header, the rule preview).
@@ -749,7 +772,19 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   strips the prefix. A rule's `row` flag (`row` in `tags=`; `controls({marker: true})` shows
   "whole row" + a text colour and hides the text-only controls) styles the WHOLE `tr` the marker
   is in (`.marker-row`, `data-marker-row`, the colour at 0.45 alpha), else the chip; `hide`
-  drops the chip (`.ctag.hidden`). The chart's ⚑ N button → `examplePopover(…, {markers: true})`
+  drops the chip (`.ctag.hidden`). MARKERS IN CELLS WITH NO WORDS (Seth, 2026-10-19: "show or
+  hide markers associated with empty cells (and … configure this for specific markers)"): the ⋯
+  menu's "Markers in cells with no words" writes `emptymarkers=off` (a VIEW setting in `spec.extra`,
+  round-tripped like any key); a marker rule's `empty` / `noempty` (`empty: true|false` in the rule,
+  `resolve` → `look.onEmpty` / `emptyVia`, the marker controls' "in an empty cell" select,
+  `tag-empty`; `_clean_tag_rules` keeps it) overrides the switch for that marker; `chart.markerShown
+  (look, spec, cellHasWords)` decides, the chip becomes `.ctag.hidden[data-empty]`, the export
+  model follows (`export.js chartBlock`). A cell "has words" when a word-group part of the SAME
+  column (its `srcCol` in the one-column view) sits in it. The chart's search and rule columns are
+  untouched by it. A ONE-COLUMN BOX THAT HOLDS NOTHING VISIBLE DRAWS NOTHING (Seth, 2026-10-19:
+  "if whatever chips were in that cell are invisible, then the cell border, tile or whatever
+  shouldn't draw"): `flatWrap` counts the chips it was given that are not `.hidden` and marks the
+  wrapper `.cflat-void` (display none) when there are none. The chart's ⚑ N button → `examplePopover(…, {markers: true})`
   (the same scope select: this chart / note / folder / tab / the TEXT / the notebook / a filter);
   `addTagPicker` lists the Chart Markers under their own heading (`marker:*`, groups, leaves);
   the scope dialog shows marker rules as their own rows after the tags. SEARCH

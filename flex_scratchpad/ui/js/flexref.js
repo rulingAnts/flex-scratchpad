@@ -434,7 +434,7 @@
   // `row` (Seth, 2026-10-18): a chart MARKER's rule styles the whole row the marker is in (`marker%3ATopic:row+bg#fde68a`)
   // moved text (Seth, 2026-10-19): ms = whose look a moved word group wears (from = the column it
   // came from, to = the column it sits in, own = the rule's), ml = its label (from / to / off)
-  const TAG_TOKEN = /^(off|on|b|i|u|row|nolabel|label|hl|tile|box|bar|nobar|br(sq|rd|cu|an|db|ce|fl|bar)|bs(solid|dashed|dotted|double)|bw[1-6]|bg#[0-9a-f]{6}|fg#[0-9a-f]{6}|c#[0-9a-f]{6}|tc#[0-9a-f]{6}|bc#[0-9a-f]{6}|ms(from|to|own)|ml(from|to|off))$/;
+  const TAG_TOKEN = /^(off|on|b|i|u|row|nolabel|label|hl|tile|box|bar|nobar|empty|noempty|br(sq|rd|cu|an|db|ce|fl|bar)|bs(solid|dashed|dotted|double)|bw[1-6]|bg#[0-9a-f]{6}|fg#[0-9a-f]{6}|c#[0-9a-f]{6}|tc#[0-9a-f]{6}|bc#[0-9a-f]{6}|ms(from|to|own)|ml(from|to|off))$/;
   const encodeTagKey = (t) => String(t).replace(/%/g, '%25').replace(/_/g, '%5F').replace(/,/g, '%2C').replace(/:/g, '%3A').replace(/\+/g, '%2B').replace(/ /g, '_');
   const decodeTagKey = (k) => String(k).replace(/_/g, ' ').replace(/%([0-9A-Fa-f]{2})/g, (m, h) => String.fromCharCode(parseInt(h, 16)));
   function parseTagRules(val) {
@@ -447,6 +447,7 @@
         const t = tok.trim().replace(/%23/gi, '#').toLowerCase();
         if (!TAG_TOKEN.test(t)) continue;
         if (t === 'off') r.hide = true; else if (t === 'on') r.hide = false;
+        else if (t === 'empty') r.empty = true; else if (t === 'noempty') r.empty = false;
         else if (t === 'nolabel') r.label = false; else if (t === 'label') r.label = true;
         else if (t.startsWith('bg#')) r.bg = t.slice(2); else if (t.startsWith('fg#')) r.fg = t.slice(2); else if (t.startsWith('c#')) r.c = t.slice(1);
         else if (t.startsWith('tc#')) r.tc = t.slice(2); else if (t.startsWith('bc#')) r.bc = t.slice(2);
@@ -464,6 +465,7 @@
     return (rules || []).map((r) => {
       const toks = [];
       if (r.hide === true) toks.push('off'); else if (r.hide === false) toks.push('on');
+      if (r.empty === true) toks.push('empty'); else if (r.empty === false) toks.push('noempty');
       if (r.bg) toks.push('bg' + String(r.bg).toLowerCase()); if (r.fg) toks.push('fg' + String(r.fg).toLowerCase());
       if (r.c) toks.push('c' + String(r.c).toLowerCase());
       for (const k of ['b', 'i', 'u', 'row', 'hl', 'tile', 'box']) if (r[k]) toks.push(k);

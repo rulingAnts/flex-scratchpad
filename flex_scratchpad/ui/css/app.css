@@ -1003,6 +1003,12 @@ table.md-table td.drop-target, table.md-table th.drop-target { outline: 2px soli
 .cn-col-dlg .modal-body .row { margin: 6px 0; }
 .cn-settings textarea { font-size: 13px; }
 .cn-preview { margin-top: 4px; }
+.cn-case { border: 1px solid var(--border-soft); border-radius: 8px; padding: 6px 10px; margin: 6px 0; background: var(--panel); }
+.cn-case .cn-case-head b { font-size: 12.5px; }
+.cn-cond { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; margin: 3px 0 3px 14px; }
+.cn-cond input[type=text] { min-width: 140px; }
+.cn-style { flex-wrap: wrap; gap: 4px 8px; }
+.cn-builder .seg-btn, .cn-settings .seg { margin-bottom: 6px; }
 .cn-list { border-top: 1px solid var(--border-soft); padding: 8px 0; }
 .note-card .kind-badge.chart { background: color-mix(in srgb, var(--pos) 15%, var(--bg)); color: var(--pos); }
 .tchart .ctag.hidden { display: none; }
@@ -1055,6 +1061,7 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 .tchart .chart-play-para, .tchart .chart-play-sent { color: var(--accent); }
 /* the one-column view (view=flat): every part of a row in one cell, word groups labelled with their columns */
 .chart-obj.flat .tchart td.ccell { white-space: normal; }
+.cflat-g.cflat-void { display: none; }
 .cflat-g { display: inline-block; vertical-align: top; margin: 1px 6px 3px 0; padding: 1px 3px; border-radius: 4px; }
 .cflat-g .cflat-body { display: inline-flex; align-items: flex-start; gap: 4px; vertical-align: top; }
 .cflat-g .cflat-body .cwords { display: inline-flex; }

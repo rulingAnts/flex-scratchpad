@@ -977,6 +977,8 @@ class Api:
             out = {"tag": str(r["tag"]).strip()[:120], "enabled": r.get("enabled", True) is not False}
             if r.get("hide") is not None:
                 out["hide"] = bool(r["hide"])
+            if r.get("empty") is not None:        # a chart marker in a cell with no words (Seth, 2026-10-19)
+                out["empty"] = bool(r["empty"])
             for k in ("bg", "fg", "c", "tc", "bc"):
                 v = str(r.get(k) or "")
                 if re.fullmatch(r"#[0-9a-fA-F]{6}", v):

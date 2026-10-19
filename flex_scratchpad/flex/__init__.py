@@ -1239,9 +1239,16 @@ def _chart_index_rows(chart: dict) -> list[dict]:
 
 
 # `-key:value` excludes; a bare `-mo` is the text "-mo" (a suffix), never a negation
-_QTOKEN = re.compile(r'(-(?=[A-Za-z]+:))?(?:([A-Za-z]+):)?("([^"]*)"|\S+)')
+# a value may be a regular expression, `/pattern/flags` (Seth, 2026-10-19: "support regex for text")
+_QTOKEN = re.compile(r'(-(?=[A-Za-z]+:))?(?:([A-Za-z]+):)?("([^"]*)"|/((?:\\.|[^/\\])*)/([a-z]*)|\S+)')
 ROW_KEYS = ("marker", "clause", "chart", "text", "template", "row", "label", "note", "notes", "moved", "clauseref", "endsent", "endpara")
-CELL_KEYS = ("col", "column", "lex", "gloss", "word", "words", "pos", "form", "morph")
+CELL_KEYS = ("col", "column", "lex", "gloss", "word", "words", "pos", "form", "morph", "txt", "gls", "mgls", "cf")
+
+
+def _rx_hit(t: dict, xs) -> bool:
+    """A regex term against the values as written (NFC), not the normalised text."""
+    rx = t["rx"]
+    return any(rx.search(_ud.normalize("NFC", x or "")) for x in xs)
 
 
 def _parse_chart_query(q: str) -> list[dict]:
@@ -1249,13 +1256,19 @@ def _parse_chart_query(q: str) -> list[dict]:
     from ..notebook import normalize
     out = []
     for m in _QTOKEN.finditer(q or ""):
-        neg, key, raw, quoted = m.group(1), (m.group(2) or "").lower(), m.group(3), m.group(4)
+        neg, key, raw, quoted, pat, flags = m.group(1), (m.group(2) or "").lower(), m.group(3), m.group(4), m.group(5), m.group(6)
         val = quoted if quoted is not None else raw
         if key and key not in ROW_KEYS + CELL_KEYS:        # not a key we know: the whole token is a word
-            val, key, neg = m.group(0), "", None
+            val, key, neg, pat = m.group(0), "", None, None
         if not key and val.lower() in ("moved", "clauseref", "endsent", "endpara"):   # bare row flags
             key, val = val.lower(), ""
-        out.append({"neg": bool(neg), "key": key, "val": normalize(val, True), "raw": val})
+        rx = None
+        if pat is not None:
+            try:
+                rx = re.compile(pat, (re.I if "i" in (flags or "") else 0) | (re.M if "m" in (flags or "") else 0) | (re.S if "s" in (flags or "") else 0))
+            except re.error:
+                rx = None                                      # an unfinished pattern matches as plain text
+        out.append({"neg": bool(neg), "key": key, "val": normalize(val, True), "raw": val, "rx": rx})
     return out
 
 
@@ -1263,8 +1276,10 @@ def _cell_matches(c: dict, t: dict) -> bool:
     from ..notebook import normalize
     v = t["val"]
     k = t["key"]
-    has = lambda xs: any(v and v in normalize(x, True) for x in xs)  # noqa: E731
+    has = (lambda xs: _rx_hit(t, xs)) if t.get("rx") else (lambda xs: any(v and v in normalize(x, True) for x in xs))  # noqa: E731
     if k in ("col", "column"):
+        if t.get("rx"):
+            return _rx_hit(t, [c["col"], c["abbr"], c["path"]])
         if not v:
             return False
         if re.fullmatch(r"c\d+", v):
@@ -1273,20 +1288,29 @@ def _cell_matches(c: dict, t: dict) -> bool:
             or normalize(c["path"], True).endswith("/" + v) or any(normalize(p, True) == v for p in c["path"].split("/")[:-1])
     if k == "lex":
         return has(c["words"]) or has(c["forms"]) or has(c["cfs"])
-    if k == "gloss":
+    if k in ("gloss", "gls"):
         return has(c["glosses"]) or has(c["mgls"])
-    if k in ("word", "words"):
+    if k in ("word", "words", "txt"):
         return has(c["words"])
+    if k == "mgls":
+        return has(c["mgls"])
+    if k == "cf":
+        return has(c["cfs"])
     if k in ("form", "morph"):
         return has(c["forms"]) or has(c["cfs"])
     if k == "pos":
-        return any(normalize(x, True) == v for x in c["pos"])
+        return _rx_hit(t, c["pos"]) if t.get("rx") else any(normalize(x, True) == v for x in c["pos"])
     return has(c["words"]) or has(c["glosses"]) or has(c["forms"]) or has(c["cfs"]) or has(c["mgls"])   # a bare word
 
 
 def _row_term(r: dict, t: dict) -> bool:
     from ..notebook import normalize
     v, k = t["val"], t["key"]
+    if t.get("rx"):
+        if k == "marker":
+            return _rx_hit(t, r["markers"])
+        if k in ("chart", "text", "template", "note", "notes", "row", "label"):
+            return _rx_hit(t, [{"chart": r["chartName"], "text": r["title"], "template": r["template"], "note": r["notes"], "notes": r["notes"], "row": r["label"], "label": r["label"]}[k]])
     if k == "marker":
         return bool(r["markers"]) if v == "*" else any(normalize(m, True) == v for m in r["markers"])
     if k == "clause":

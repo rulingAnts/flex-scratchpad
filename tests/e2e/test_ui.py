@@ -4568,8 +4568,36 @@ def test_a_chart_note_with_custom_columns(app):
     page.locator("[data-test=cn-add-col]").click()
     page.fill("[data-test=cn-col-name]", "Role")
     page.select_option("[data-test=cn-col-kind]", "rule")
-    page.wait_for_selector("[data-test=cn-rule]")
+    page.wait_for_selector("[data-test=cn-builder]")
+    # THE BUILDER (Seth, 2026-10-19: "a UI for building formulas rather than just a query language"): a new
+    # rule opens in it; conditions are picked from the chart's markers and columns and it writes the text
+    assert page.locator("[data-test=cn-rule-mode] .seg-btn.on").inner_text() == "Builder"
+    page.locator("[data-test=rb-add-cond]").click()
+    page.select_option("[data-test=rb-cond] [data-test=rb-what]", "marker")
+    page.select_option("[data-test=rb-cond] [data-test=rb-val]", "New")
+    page.fill("[data-test=rb-out]", "N")
+    page.select_option("[data-test=rb-scope]", "row")
+    page.locator("[data-test=rb-hl]").check()
+    page.wait_for_function("() => document.querySelector('[data-test=cn-rule]').value === 'marker:New → N [row hl]'")
+    # a second case: the words of ONE column against a pattern, in a chosen writing system when the chart has one
+    page.locator("[data-test=rb-add-case]").click()
+    page.locator("[data-test=rb-case]").nth(1).locator("[data-test=rb-add-cond]").click()
+    cond2 = page.locator("[data-test=rb-case]").nth(1).locator("[data-test=rb-cond]")
+    cond2.locator("[data-test=rb-what]").select_option("txt")
+    cond2.locator("[data-test=rb-how]").select_option("regex")
+    cond2.locator("[data-test=rb-val]").fill("^kabir$")
+    cond2.locator("[data-test=rb-incol]").select_option("Subject")
+    page.locator("[data-test=rb-case]").nth(1).locator("[data-test=rb-out]").fill("K")
+    page.wait_for_function("() => document.querySelector('[data-test=cn-rule]').value === 'marker:New → N [row hl]; col:Subject[txt:/^kabir$/] → K'")
+    page.wait_for_function("() => (document.querySelector('.cn-preview') || {}).textContent.includes('“K”: 2 rows')")
+    # the text tab shows the same rule; typing there is read back into the builder
+    page.locator("[data-test=cn-rule-text]").click()
+    assert page.locator("[data-test=cn-rule]").input_value() == "marker:New → N [row hl]; col:Subject[txt:/^kabir$/] → K"
     page.fill("[data-test=cn-rule]", "marker:new → N [row hl#fde68a]; Status:given → G; col:Subject → S")
+    page.locator("[data-test=cn-rule-builder]").click()
+    page.wait_for_function("() => document.querySelectorAll('[data-test=rb-case]').length === 3")
+    assert page.locator("[data-test=rb-case]").nth(1).locator("[data-test=rb-what]").input_value() == "list"
+    assert page.locator("[data-test=cn-rule]").input_value() == "marker:new → N [row hl#fde68a]; Status:given → G; col:Subject → S"
     page.wait_for_function("() => (document.querySelector('.cn-preview') || {}).textContent.includes('row')")
     page.locator("[data-test=cn-col-save]").click()
     page.wait_for_function("() => document.querySelectorAll('#chartnote th.th-x').length === 3")
@@ -4725,6 +4753,26 @@ def test_chart_options_one_column_hide_empty_zoom_and_the_boundary_under_the_fre
     g = page.locator("#editor .chart-obj.flat tr.crow[data-label='1a'] .cflat-g")
     assert g.evaluate_all("els => els.map((e) => e.title)") == ["Nucleus › Subject", "Nucleus › Verb", "Postnuclear › Inner"]
     assert g.nth(2).locator(".ctag").count() == 1 and g.nth(2).locator(".cflat-lab").inner_text() == "Post-I"
+    # MARKERS IN CELLS WITH NO WORDS (Seth, 2026-10-19): the ⋯ switch hides them (`emptymarkers=off`), and a
+    # one-column box whose every chip is hidden draws nothing — no tile, border or label
+    flat = page.locator("#editor .chart-obj.flat")
+    flat.locator("[data-test=chart-menu]").click()
+    page.locator("[data-test=chart-empty-markers]").uncheck()
+    page.wait_for_function("() => document.querySelectorAll('#editor .chart-obj.flat .ctag.hidden[data-empty]').length === 1")
+    page.keyboard.press("Escape")
+    assert "emptymarkers=off" in src(), src()
+    assert flat.locator("tr.crow[data-label='1a'] .cflat-g.cflat-void").count() == 1
+    assert flat.locator("tr.crow[data-label='1a'] .cflat-g.cflat-void").evaluate("(e) => getComputedStyle(e).display") == "none"
+    assert flat.locator("tr.crow[data-label='1a'] .cflat-g:not(.cflat-void)").count() == 2
+    # a marker's own rule overrides the chart's switch: New shown in an empty cell
+    flat.locator("[data-test=marker-btn]").click()
+    page.wait_for_selector("[data-test=tag-popover] .tagrow[data-tag='New']")
+    page.locator("[data-test=tag-popover] .tagrow[data-tag='New'] [data-test=tag-style]").click()
+    page.locator("[data-test=tag-popover] [data-test=tag-empty]").select_option("show")
+    page.wait_for_function("() => document.querySelectorAll('#editor .chart-obj.flat .ctag:not(.hidden)').length === 1")
+    page.keyboard.press("Escape")
+    assert flat.locator("tr.crow[data-label='1a'] .cflat-g.cflat-void").count() == 0
+    page.wait_for_function("() => window.__fsEditor.getMarkdown().includes('marker%3ANew:empty')")
     assert not errors
 
 

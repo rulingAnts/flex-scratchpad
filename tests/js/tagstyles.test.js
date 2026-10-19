@@ -97,7 +97,10 @@ test('text styles round-trip through `tags=`: brackets, marker, tile, border, th
   assert.strictEqual(v, 'Subject:hl+brsq,Verb:box+bsdashed+bw3+bc#1d4ed8+bar,Object:c#b45309+b+tile+tc#fde68a+nobar,group%3ADiscourse:bran,filter%3Af1:off');
   assert.deepStrictEqual(plain(R.parseTagRules(v)), rules);
   assert.deepStrictEqual(plain(R.parseTagRules('Subject:brxx+purple+bswavy+bw9')), []);
-  assert.deepStrictEqual(plain(R.parseTagRules('Verb:box+bc%23ff0000')), [{ tag: 'Verb', box: true, bc: '#ff0000' }]);   // a hand-encoded # is forgiven          // unknown brackets / tokens / line styles / widths are dropped
+  assert.deepStrictEqual(plain(R.parseTagRules('Verb:box+bc%23ff0000')), [{ tag: 'Verb', box: true, bc: '#ff0000' }]);   // a hand-encoded # is forgiven
+  // a chart marker in a cell with no words: shown / hidden whatever the chart's own switch says (Seth, 2026-10-19)
+  assert.strictEqual(R.serializeTagRules([{ tag: 'marker:New', empty: true }, { tag: 'marker:Given', empty: false, row: true }]), 'marker%3ANew:empty,marker%3AGiven:noempty+row');
+  assert.deepStrictEqual(plain(R.parseTagRules('marker%3ANew:empty,marker%3AGiven:noempty+row')), [{ tag: 'marker:New', empty: true }, { tag: 'marker:Given', empty: false, row: true }]);          // unknown brackets / tokens / line styles / widths are dropped
   const VERB = { guid: 'v', name: 'Verb', abbr: 'V' };
   T.setList([VERB]);
   T.setConfig({ project: { Kalu: [{ tag: 'Verb', box: true, bs: 'dotted', bw: 4, tile: true, tc: '#abcdef' }] }, tab: {}, folder: {}, filters: [] });

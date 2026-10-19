@@ -187,6 +187,16 @@ def test_chart_search_by_words_columns_markers_and_more(tmp_path):
     assert labels(api.chart_search('"ka-sila"')) == ["1b", "2b", "2"] and labels(api.chart_search("row:2b")) == ["2b"]
     assert labels(api.chart_search("chart:story text:dog template:default")) and labels(api.chart_search("chart:nothing")) == []
     assert [r["label"] for r in api.chart_search("")] == ["1a", "1b", "2a", "2b", "2c", "3a", "3b", "1", "2"]   # everything (the Topic-Comment chart's two rows last)
+    # regular expressions as values (Seth, 2026-10-19), on the text as written; `i` ignores case
+    assert labels(api.chart_search("word:/^ka-/")) == ["1a", "1b", "2b", "2c", "3a", "1", "2"]
+    assert labels(api.chart_search("word:/^KA-/i")) == labels(api.chart_search("word:/^ka-/"))
+    assert labels(api.chart_search("word:/^KA-/")) == []
+    assert labels(api.chart_search("col:Subject txt:/^kabir$/i")) == ["1a", "2c", "3b"]
+    assert labels(api.chart_search("col:/^Post/ gloss:/river/")) == ["2c"]
+    assert labels(api.chart_search("marker:/^(new|giv)/i")) == ["1a", "2c"]
+    assert labels(api.chart_search("mgls:/pst/i")) == ["1a", "1b", "3a", "1", "2"]           # a morpheme gloss
+    assert labels(api.chart_search("label:/^2/")) == ["2a", "2b", "2c", "2"]
+    assert labels(api.chart_search("word:/(/")) == labels(api.chart_search('"word:/(/"')) == []   # an unfinished pattern is plain text, never an error
     # the profile: where kabir sits
     p = api.chart_profile("kabir")
     assert p["total"] == 4 and p["templates"][0]["name"] == "Default" and p["templates"][1]["name"] == "Topic-Comment"
