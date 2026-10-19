@@ -14,6 +14,7 @@ directions, and the plain-text form of an object for the notebook's search index
 """
 from __future__ import annotations
 
+import json
 import re
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
@@ -648,3 +649,24 @@ def chart_searchable_text(obj: dict) -> str:
                 if nm:
                     parts += [nm, "⚐" + nm.replace(" ", "_")]
     return " ".join(p for p in parts if p)
+
+
+# -- doubled morph bundles (Seth, 2026-10-19) --------------------------------------------------
+# FieldWorks' interlinear importer (BIRDInterlinearImporter.UpgradeToWordGloss) gives a glossed
+# word with no <morphemes> block ONE morph bundle holding the word's form — once PER GLOSS
+# LANGUAGE, on the same analysis. A word glossed in English and Indonesian comes out with two
+# identical, sense-less bundles ("budu budu", "*** ***"). `doubled_bundles` finds them in a list of
+# bundle records as `lcm.explain_doubled_bundles` reads them.
+def doubled_bundles(bundles: list[dict]) -> list[list[int]]:
+    """Groups (lists of bundle indexes, each ≥ 2 long) of bundles that are identical and linked to
+    nothing: the same `forms` (writing system → form), and no `sense`, `msa` or `morph`."""
+    groups: dict[str, list[int]] = {}
+    for i, b in enumerate(bundles):
+        if b.get("sense") or b.get("msa") or b.get("morph"):
+            continue
+        forms = b.get("forms") or {}
+        if not any(v for v in forms.values()):
+            continue
+        key = json.dumps(sorted(forms.items()), ensure_ascii=False)
+        groups.setdefault(key, []).append(i)
+    return [g for g in groups.values() if len(g) >= 2]

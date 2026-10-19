@@ -467,3 +467,20 @@ playable from the chip/card, and snapshots the record into the cache like a FLEx
 still reads when the database is elsewhere. Open questions for Seth before building: which
 columns matter by default, how the suffix list is configured (per database or per notebook), and
 whether a range of records (a word list) is one embed or many.
+
+
+## Known issue elsewhere: FieldWorks doubles the morph bundle of a two-language-glossed word on import (Seth, 2026-10-19)
+
+Seen on texts imported from FlexText Editor (`Tosokai`: every word; `Wahuka Arsen incident`: a few): the
+Morphemes line shows the word twice (`budu budu`) with `*** ***` under it. Not the editor's data and not
+this app (read-only): FieldWorks' `BIRDInterlinearImporter.UpgradeToWordGloss` creates "a single morpheme
+for the word" when the word has no `<morphemes>` block — INSIDE its loop over the word's `gls` items, so a
+word glossed in English and Indonesian gets two identical, sense-less bundles on one analysis. Such texts
+were never morpheme-glossed, so nothing is lost: one bundle too many per word.
+- `flex-scratchpad --project NAME --doubled-morphs` (lcm `explain_doubled_bundles`, `model.doubled_bundles`)
+  lists them with their uses; the fix is in FLEx's Word Analyses (or a FLExTools script that removes the
+  duplicate bundles), never here.
+- FlexText Editor side (to look into later, Seth: "a possible bug known issue"): its export writes every
+  gloss language it holds (`w.gls` + the preserved other-language `gls` items) and no `<morphemes>`, which is
+  correct .flextext — the importer is at fault. Options if it keeps hurting: a note in the editor's import
+  guide, or an FLEx issue (sillsdev/FieldWorks) pointing at the loop.

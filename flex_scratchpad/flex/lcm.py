@@ -1008,6 +1008,78 @@ class FlexiconBackend:
         except BaseException as e:
             raise _friendly(e, self.project_name)
 
+    def explain_doubled_bundles(self, with_uses: bool = True) -> dict:
+        """Every wordform analysis whose morph bundles repeat the same unlinked form (Seth,
+        2026-10-19: "budu budu" with "*** ***" under it — FieldWorks' importer makes one bundle per
+        gloss LANGUAGE for a word with no <morphemes>), with the texts and lines that use each
+        analysis. Read-only; for `flex-scratchpad --doubled-morphs`."""
+        def go():
+            self._need()
+            p = self.project
+            rows: list[dict] = []
+            by_analysis: dict[str, dict] = {}
+            n_wf = 0
+            for wf in _t(lambda: list(p.Wordforms.GetAll()), []):
+                n_wf += 1
+                if n_wf % 500 == 0:
+                    self.progress(f"Checking wordforms… {n_wf}")
+                wf = self._c(wf)
+                for an in _t(lambda: list(p.WfiAnalyses.GetAll(wf)), []):
+                    an = self._c(an)
+                    bundles = []
+                    for b in _t(lambda: list(p.WfiMorphBundles.GetAll(an)), []):
+                        b = self._c(b)
+                        bundles.append({
+                            "guid": _guid(b),
+                            "forms": self._ws_alternatives(_t(lambda: b.Form, None)) or {},
+                            "sense": _guid(_t(lambda: b.SenseRA, None)),
+                            "msa": _guid(_t(lambda: b.MsaRA, None)),
+                            "morph": _guid(_t(lambda: b.MorphRA, None)),
+                        })
+                    if len(bundles) < 2:
+                        continue
+                    groups = model.doubled_bundles(bundles)
+                    if not groups:
+                        continue
+                    form = self._vern_text(_t(lambda: wf.Form, None))
+                    row = {
+                        "wordform": form, "wordformGuid": _guid(wf), "analysis": _guid(an),
+                        "bundles": [self._vern_text(_t(lambda: b.Form, None)) for b in
+                                    _t(lambda: list(p.WfiMorphBundles.GetAll(an)), [])],
+                        "bundleGuids": [b["guid"] for b in bundles],
+                        "duplicates": [[bundles[i]["guid"] for i in g] for g in groups],
+                        "extra": sum(len(g) - 1 for g in groups),
+                        "looksLikeBaseline": all(any(v == form for v in bundles[i]["forms"].values()) for g in groups for i in g),
+                        "uses": [],
+                    }
+                    rows.append(row)
+                    by_analysis[row["analysis"]] = row
+            self.progress("")
+            texts_hit: dict[str, int] = {}
+            if with_uses and rows:
+                texts = self.list_texts()
+                for ti, t in enumerate(texts):
+                    self.progress(f"Checking texts… {ti + 1}/{len(texts)}")
+                    text = self._owning_text(self._c(p.Object(t["guid"])))
+                    if text is None:
+                        continue
+                    for pi, para in enumerate(_t(lambda: list(p.Paragraphs.GetAll(text)), [])):
+                        for si, seg in enumerate(_t(lambda: list(p.Segments.GetAll(para)), [])):
+                            for tok in _t(lambda: list(p.Segments.GetAnalyses(seg)), []):
+                                an = _t(lambda: self._c(tok).Analysis, None)
+                                g = _guid(an) if an is not None else ""
+                                row = by_analysis.get(g)
+                                if row is None:
+                                    continue
+                                row["uses"].append({"text": t["title"], "textGuid": t["guid"], "line": f"{pi + 1}.{si + 1}"})
+                                texts_hit[t["title"]] = texts_hit.get(t["title"], 0) + 1
+                self.progress("")
+            return {"wordformsChecked": n_wf, "analyses": rows, "textsHit": texts_hit}
+        try:
+            return self.worker.call(go, timeout=OPEN_TIMEOUT * 4)
+        except BaseException as e:
+            raise _friendly(e, self.project_name)
+
     def explain_tags(self, which: str = "", max_texts: int = 3, max_tags: int = 12) -> dict:
         """What the project's text markup tags look like RAW, for `flex-scratchpad --dump-tags`:
         the list (each item's name through every accessor, its colours as stored) and, for the

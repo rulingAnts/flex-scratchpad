@@ -34,6 +34,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--locate", metavar="SOURCE", help="explain where pasted FLEx rows land: SOURCE is 'clip' (the clipboard, Windows) or a text file; writes a JSON report (--out) and exits")
     ap.add_argument("--dump-tags", nargs="?", const="", metavar="TEXT", help="write what the project's text markup tags look like raw (the list, and the tags of the first texts that have any, or of TEXT) to a JSON report (--out) and exit")
     ap.add_argument("--dump-charts", nargs="?", const="", metavar="TEXT", help="write what the project's text charts look like raw (every chart, the Chart Markers list, and the rows of one chart as read: the first with rows, or the one whose text title, template or GUID holds every word of TEXT, e.g. \"Siakai SVC\") to a JSON report (--out) and exit")
+    ap.add_argument("--doubled-morphs", action="store_true", help="list every wordform analysis whose Morphemes line repeats the same unlinked form (\"budu budu\", \"*** ***\" — what FieldWorks' import makes of a word glossed in two languages with no morphemes), with the texts and lines using it; writes a JSON report (--out) and exits. Read-only: fix them in FLEx's Word Analyses")
     ap.add_argument("--out", default=None, help="report file for --locate (flex-scratchpad-locate.json), --dump-tags (flex-scratchpad-tags.json) or --dump-charts (flex-scratchpad-charts.json)")
     ap.add_argument("--backup", action="store_true", help="back the notebook up to the place set in Settings (what closing the app starts), then exit (0 = backed up)")
     ap.add_argument("--register-links", action="store_true", help="register flexscratchpad:// links for this user (Windows) and exit")
@@ -62,6 +63,8 @@ def main(argv: list[str] | None = None) -> int:
         return dump(args.project, args.dump, args.seg)
     if args.locate:
         return locate_report(args.project, args.locate, args.out or "flex-scratchpad-locate.json", demo=args.demo)
+    if args.doubled_morphs:
+        return doubled_report(args.project, args.out or "flex-scratchpad-doubled.json")
     if args.dump_tags is not None:
         return tags_report(args.project, args.dump_tags, args.out or "flex-scratchpad-tags.json")
     if args.dump_charts is not None:
@@ -151,6 +154,51 @@ def tags_report(project: str | None, which: str, out: str) -> int:
         return 2
     finally:
         be.close()
+
+
+def doubled_report(project: str | None, out: str) -> int:
+    """Every analysis with repeated unlinked morph bundles (FlexiconBackend.explain_doubled_bundles)
+    to a JSON file, and a readable list on the terminal: wordform, its bundles, where it is used."""
+    import json
+    from pathlib import Path
+    from . import __version__, build_id
+    from .flex.lcm import FlexError, FlexiconBackend
+    be = FlexiconBackend(progress=lambda m: print(m, file=sys.stderr) if m else None)
+    try:
+        if not project:
+            names = be.list_projects()
+            if len(names) != 1:
+                print("Several projects; pass --project NAME. Found: " + ", ".join(names), file=sys.stderr)
+                return 2
+            project = names[0]
+        be.open(project)
+        report = {"app": f"FLEx Scratchpad {__version__} (build {build_id()})", "project": project}
+        report.update(be.explain_doubled_bundles())
+        Path(out).write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
+        print_doubled(report)
+        print(f"→ {out}")
+        return 0
+    except FlexError as e:
+        print(e.message, file=sys.stderr)
+        if e.detail:
+            print(e.detail, file=sys.stderr)
+        return 2
+    finally:
+        be.close()
+
+
+def print_doubled(report: dict, limit: int = 200) -> None:
+    rows = report.get("analyses") or []
+    print(f"{report.get('wordformsChecked', 0)} wordforms checked; {len(rows)} analyses repeat an unlinked morph bundle"
+          + (f", used in {len(report.get('textsHit') or {})} text(s)" if rows else ""))
+    for title, n in sorted((report.get("textsHit") or {}).items(), key=lambda kv: -kv[1]):
+        print(f"  {n:5d} word(s) in {title}")
+    for r in rows[:limit]:
+        uses = r.get("uses") or []
+        where = ", ".join(f"{u['text']} {u['line']}" for u in uses[:4]) + (f" … (+{len(uses) - 4})" if len(uses) > 4 else "")
+        print(f"- {r['wordform']}: [{' | '.join(r['bundles'])}]  {r['extra']} extra" + (f"  — {where}" if where else "  — not used in any text"))
+    if len(rows) > limit:
+        print(f"  … {len(rows) - limit} more in the report")
 
 
 def charts_report(project: str | None, which: str, out: str, demo: bool = False) -> int:
