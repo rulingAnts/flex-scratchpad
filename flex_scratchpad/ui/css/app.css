@@ -1073,6 +1073,8 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 .tchart .al-grid { display: grid; grid-template-columns: var(--al-l, max-content) var(--al-a, max-content) minmax(0, 1fr); column-gap: 8px; align-items: start; }
 .tchart .al-l { justify-self: end; text-align: right; min-width: 0; }
 .tchart .al-a { justify-self: center; text-align: center; min-width: 0; }
+.tchart.al-left .al-a { justify-self: start; text-align: left; }
+.tchart.al-right .al-a { justify-self: end; text-align: right; }
 .tchart .al-r { justify-self: start; min-width: 0; }
 .cflat-g { display: inline-block; vertical-align: top; margin: 1px 6px 3px 0; padding: 1px 3px; border-radius: 4px; }
 .cflat-g .cflat-body { display: inline-flex; align-items: flex-start; gap: 4px; vertical-align: top; }

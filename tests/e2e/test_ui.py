@@ -5081,6 +5081,20 @@ def test_the_groups_view_and_lining_up_on_a_column(app):
     assert "Kabir" in r1a.locator(".al-l").inner_text() and "nuwa" in r1a.locator(".al-a").inner_text()
     # a row without the column flows as before
     assert page.locator("#editor .chart-obj tr.crow[data-label='2a'] .al-grid").count() == 0
+    # the left edges instead of the centres (Seth, 2026-10-19: "left edge, right edge, or center")
+    page.locator("#editor .chart-obj [data-test=chart-menu]").click()
+    page.select_option("[data-test=chart-align-edge]", "left")
+    page.wait_for_selector("#editor .chart-obj table.tchart.al-left")
+    page.keyboard.press("Escape")
+    assert "alignat=left" in src()
+    page.wait_for_function("() => /px$/.test(document.querySelector('#editor .chart-obj table.tchart').style.getPropertyValue('--al-a'))")
+    lefts = page.evaluate("() => [...document.querySelectorAll(\"#editor .chart-obj tr.crow .al-a\")].filter((a) => a.textContent.trim()).map((a) => Math.round(a.getBoundingClientRect().left))")
+    assert len(lefts) >= 4 and max(lefts) - min(lefts) <= 1, lefts
+    page.locator("#editor .chart-obj [data-test=chart-menu]").click()
+    page.select_option("[data-test=chart-align-edge]", "center")
+    page.wait_for_function("() => !window.__fsEditor.getMarkdown().includes('alignat=')")
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(200)
     # MERGED CELLS (Seth, 2026-10-19: "it could be either"): 3b's group is owned by Subject and merged into Verb, so
     # in the one-column view it is labelled S+V, wears Verb's brackets round Subject's box, and lines up on Verb
     w3b = page.locator("#editor .chart-obj tr.crow[data-label='3b'] .cflat-outer")

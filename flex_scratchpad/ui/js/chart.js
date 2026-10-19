@@ -136,6 +136,9 @@
     if (!sel || !isFlat(spec)) return new Set();
     return new Set(selectedColumns({ extra: { cols: sel } }, full).map((c) => c.n));
   }
+  /* Which edge of the lined-up column meets the axis (Seth, 2026-10-19: "line up the left edge,
+   * right edge, or center of that column"): `alignat=left|center|right`, centre when unset. */
+  const alignEdge = (spec) => { const v = spec && spec.extra && spec.extra.alignat; return v === 'left' || v === 'right' ? v : 'center'; };
   function alignFlat(table) {
     const cells = [...table.querySelectorAll('.al-grid')];
     if (!cells.length) return;
@@ -697,7 +700,7 @@
     table.appendChild(tbody);
     box.appendChild(el('div', { class: 'chart-scroll' }, table));
     requestAnimationFrame(() => { if (box.isConnected) placeFrozen(table, colKeys, colEls, frozen); });
-    if (alignSet.size) requestAnimationFrame(() => { if (box.isConnected) alignFlat(table); });
+    if (alignSet.size) { table.classList.add('al-' + alignEdge(spec)); requestAnimationFrame(() => { if (box.isConnected) alignFlat(table); }); }
     // SENTENCE / PARAGRAPH BOUNDARIES as visual-filter targets (Seth, 2026-10-19: "custom style sentence
     // boundaries and paragraph boundaries"): the line under an end-sent / end-para row (or the free
     // translation row that carries it) takes the rule's style, thickness and colour, or goes away
@@ -1151,7 +1154,9 @@
           cb.addEventListener('change', () => { if (cb.checked) on.add(c.n); else on.delete(c.n); writeAlign(); });
           abox.appendChild(el('label', { class: 'chart-col', title: 'Line up this column’s text across the rows: centred on one axis, the rest of the row to its left and right' }, cb, ' ', (c.path || []).concat([c.name]).join(' › ')));
         }
-        pop.appendChild(el('div', { class: 'row', style: { alignItems: 'flex-start' } }, el('span', { class: 'lbl', title: 'The text of these columns lines up across the rows (a run of neighbouring columns as one block)' }, 'Line up on'), abox));
+        const esel = el('select', { 'data-test': 'chart-align-edge', title: 'Which edge of the lined-up text meets the shared axis', onchange: (e) => { if (e.target.value === 'center') delete x.alignat; else x.alignat = e.target.value; change(); } },
+          el('option', { value: 'center', selected: alignEdge(spec) === 'center' }, 'centred on the axis'), el('option', { value: 'left', selected: alignEdge(spec) === 'left' }, 'left edges on the axis'), el('option', { value: 'right', selected: alignEdge(spec) === 'right' }, 'right edges on the axis'));
+        pop.appendChild(el('div', { class: 'row', style: { alignItems: 'flex-start' } }, el('span', { class: 'lbl', title: 'The text of these columns lines up across the rows (a run of neighbouring columns as one block)' }, 'Line up on'), el('div', {}, abox, el('div', { class: 'row' }, esel))));
       }
       // columns
       const cols = allCols;
@@ -1281,5 +1286,5 @@
       el('div', { class: 'btn-row' }, el('button', { class: 'btn', 'data-test': 'pivot-copy', onclick: () => { FS.copyText(tsv); FS.toast('Copied as TSV'); } }, 'Copy as TSV'), el('button', { class: 'btn primary', onclick: () => m.close() }, 'Done')));
   }
 
-  FS.chart = { renderChart, visibleColumns, selectedColumns, flatten, isFlat, isGroups, viewOf, alignedColumns, mergeMode, mergedNeighbour, partColumns, zoomOf, setZoom, playGroups, columnLook, pseudoLook, markerShown, headerRows, layoutRow, rowSegs, freeRuns, lineStarts, colWidths, setColWidths, freeText, chartGrid, chartTsv, markerLook, pivot, pivotDialog, LINE_NAMES, FREE_NAMES };
+  FS.chart = { renderChart, visibleColumns, selectedColumns, flatten, isFlat, isGroups, viewOf, alignedColumns, alignEdge, mergeMode, mergedNeighbour, partColumns, zoomOf, setZoom, playGroups, columnLook, pseudoLook, markerShown, headerRows, layoutRow, rowSegs, freeRuns, lineStarts, colWidths, setColWidths, freeText, chartGrid, chartTsv, markerLook, pivot, pivotDialog, LINE_NAMES, FREE_NAMES };
 })();

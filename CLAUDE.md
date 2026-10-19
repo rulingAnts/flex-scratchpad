@@ -655,7 +655,11 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   goes right (one axis per row). `alignFlat(table)` measures after the draw (`--al-l` / `--al-a` set
   to max-content, the widest left and anchor across the rows taken, the left capped at 45 % of the
   cell) and sets the two custom properties on the table — a ResizeObserver re-measures on the next
-  frame, writing only on change. A row without the column flows as before. Not in the exports.
+  frame, writing only on change. Which EDGE meets the axis (Seth, 2026-10-19: "line up the left edge,
+  right edge, or center of that column"): `alignat=left|center|right` (`alignEdge`, centre when
+  unset; the select under the "Line up on" boxes, `chart-align-edge`) puts `al-left` / `al-right` /
+  `al-center` on the table and the CSS justifies `.al-a` accordingly. A row without the column flows
+  as before. Not in the exports.
   MERGED CELLS (Seth, 2026-10-19, agreed after the question was put to him: "I merge columns when
   I'm unsure which column it is because it could be either"): a part merged with its empty
   neighbour (FLEx's MergesAfter / MergesBefore, on word groups and markers alike) belongs to BOTH
