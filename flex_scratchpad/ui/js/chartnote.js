@@ -236,25 +236,30 @@
   }
   const norm = (s) => (FS.normalize ? FS.normalize(String(s || ''), true) : String(s || '').toLowerCase());
   /* What a rule sees of one row. */
-  function rowCtx(row, chart, values, columns) {
+  function rowCtx(row, chart, values, columns, opts) {
     const cols = (chart.template && chart.template.columns) || [];
     const byN = new Map(cols.map((c) => [c.n, c]));
+    // a MERGED cell counts for both columns unless the chart says owner only (Seth, 2026-10-19: "it could be either")
+    const ownerOnly = !!(opts && opts.mergeOwner);
+    const colsOf = (c, col) => { if (ownerOnly || !FS.chart || !FS.chart.mergedNeighbour) return [col]; const nb = FS.chart.mergedNeighbour(c, cols); return nb ? [col, nb] : [col]; };
+    const keysOf = (cc) => { const keys = new Set(); for (const col of cc) for (const k of [col.name, col.abbr, 'c' + col.n, (col.path || []).concat([col.name]).join('/'), col.guid].concat(col.path || [])) if (k) keys.add(norm(k)); return keys; };
+    const rawOf = (cc) => cc.flatMap((col) => [col.name, col.abbr, (col.path || []).concat([col.name]).join('/')].concat(col.path || [])).filter(Boolean);
     const ctx = { markers: new Set(), cols: new Set(), clause: row.clause || 'normal', moved: new Set(), flags: new Set(), wl: [], cells: [], free: [], label: row.label || '', lists: {}, markerItems: [] };
     const segs = new Set();
     for (const c of row.cells || []) {
       const col = byN.get(c.colN);
       if (c.kind === 'words' && col) {
-        const keys = new Set();
-        for (const k of [col.name, col.abbr, 'c' + col.n, (col.path || []).concat([col.name]).join('/'), col.guid]) if (k) { ctx.cols.add(norm(k)); keys.add(norm(k)); }
-        for (const p of col.path || []) keys.add(norm(p));
+        const cc = colsOf(c, col);
+        const keys = keysOf(cc);
+        for (const k of keys) ctx.cols.add(k);
         const words = (c.words || []).filter((w) => !w.punct);
         ctx.wl.push(...words);
-        ctx.cells.push({ keys, words, col, raw: [col.name, col.abbr, (col.path || []).concat([col.name]).join('/')].concat(col.path || []).filter(Boolean) });
+        ctx.cells.push({ keys, words, col, raw: rawOf(cc) });
         for (let n = c.seg || 0; n && n <= (c.segTo || c.seg); n++) segs.add(n);
       } else if (c.kind === 'tag' && c.tag) {
         ctx.markers.add(norm(c.tag.name)); ctx.markers.add(norm(c.tag.abbr)); for (const p of c.tag.path || []) ctx.markers.add(norm(p)); ctx.markerItems.push(c.tag);
         // a marker cell is a cell too, so col:X[marker:Y] finds a marker IN that column
-        if (col) { const keys = new Set(); for (const k of [col.name, col.abbr, 'c' + col.n, (col.path || []).concat([col.name]).join('/'), col.guid].concat(col.path || [])) if (k) keys.add(norm(k)); ctx.cells.push({ keys, words: [], tags: [c.tag], col, raw: [col.name, col.abbr, (col.path || []).concat([col.name]).join('/')].concat(col.path || []).filter(Boolean) }); }
+        if (col) { const cc = colsOf(c, col); ctx.cells.push({ keys: keysOf(cc), words: [], tags: [c.tag], col, raw: rawOf(cc) }); }
       }
       else if (c.kind === 'moved') ctx.moved.add(c.preposed ? 'preposed' : 'postposed');
       else if (c.kind === 'clause') ctx.flags.add('clauseref');
@@ -647,6 +652,8 @@
     markdown() { return serialize(this.st); }
     changed() { if (this.opts.onChange) this.opts.onChange(this.markdown()); }
     guid() { return this.st.spec ? this.st.spec.guid : (this.opts.chartGuid ? this.opts.chartGuid() : ''); }
+    /* What the rules see of merged cells: the chart's `merge=` choice. */
+    ctxOpts() { return { mergeOwner: !!(this.st.spec && FS.chart && FS.chart.mergeMode && FS.chart.mergeMode(this.st.spec) === 'owner') }; }
     /* What the other exports read: the view as one block (the custom columns are not exported yet). */
     /* What the exporter sees (Seth, 2026-10-18: "pretty exports for chart-type notes"): the view
      * embed with the custom columns and the rule / marker row styles attached (`extras`, read by
@@ -659,7 +666,7 @@
     }
     exportExtras() {
       const self = this;
-      const ruleAnswer = (col, row, chart) => { const r = self.cases(col); if (r.error) return null; return applyRule(r.cases, rowCtx(row, chart, self.st.values, self.st.columns)); };
+      const ruleAnswer = (col, row, chart) => { const r = self.cases(col); if (r.error) return null; return applyRule(r.cases, rowCtx(row, chart, self.st.values, self.st.columns, self.ctxOpts())); };
       return {
         cols: this.st.columns.map((c) => ({ name: c.name, kind: c.kind, side: c.side === 'left' ? 'left' : 'right', frozen: !!c.frozen })),
         cell(i, row, chart) {
@@ -763,7 +770,7 @@
       if (col.kind === 'rule') {
         const r = this.cases(col);
         if (r.error) return el('span', { class: 'xerr small', title: r.error }, '⚠');
-        const ans = applyRule(r.cases, rowCtx(row, chart, this.st.values, this.st.columns));
+        const ans = applyRule(r.cases, rowCtx(row, chart, this.st.values, this.st.columns, this.ctxOpts()));
         const node = el('span', { class: 'xrule', dataset: { col: col.name } });
         if (ans) {
           // the row's markers as chips, in the look their rules give them (Seth, 2026-10-19: "show chips … for specific markers")
@@ -826,7 +833,7 @@
         if (col.kind !== 'rule') continue;
         const r = this.cases(col);
         if (r.error) continue;
-        const ans = applyRule(r.cases, rowCtx(row, this.obj, this.st.values, this.st.columns));
+        const ans = applyRule(r.cases, rowCtx(row, this.obj, this.st.values, this.st.columns, this.ctxOpts()));
         if (ans && ans.style.scope === 'row') Object.assign(out.style, styleOf(ans.style));
         // `join`: no line between this row and the one above, and the case's row style covers both
         // (Seth, 2026-10-19: a ^ShdArg row continues the previous row's clause — "remove the border
@@ -900,7 +907,7 @@
               if (!self.obj) { preview.textContent = cases.length + ' case' + (cases.length === 1 ? '' : 's') + '.'; err.textContent = ''; return; }
               const counts = cases.map(() => 0);
               let none = 0;
-              for (const row of self.obj.rows || []) { const ctx = rowCtx(row, self.obj, self.st.values, self.st.columns); const i = cases.findIndex((c) => evalExpr(c.expr, ctx)); if (i >= 0) counts[i]++; else none++; }
+              for (const row of self.obj.rows || []) { const ctx = rowCtx(row, self.obj, self.st.values, self.st.columns, self.ctxOpts()); const i = cases.findIndex((c) => evalExpr(c.expr, ctx)); if (i >= 0) counts[i]++; else none++; }
               preview.textContent = cases.map((c, i) => '“' + (c.out || '') + '”: ' + counts[i] + ' row' + (counts[i] === 1 ? '' : 's')).join(' · ') + (none ? ' · no case: ' + none : '');
               err.textContent = '';
             } catch (e) { err.textContent = e.message; preview.textContent = ''; }

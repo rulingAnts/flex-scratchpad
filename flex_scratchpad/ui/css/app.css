@@ -940,8 +940,8 @@ table.md-table td.drop-target, table.md-table th.drop-target { outline: 2px soli
 .tchart td.ccell { min-width: 3em; cursor: default; }
 .tchart td.ccell.empty { background: transparent; }
 .tchart td.ccell.st-hl { background: var(--hl); }
-.tchart tr.end-sent > th, .tchart tr.end-sent > td { border-bottom: 2px solid var(--border); }
-.tchart tr.end-para > th, .tchart tr.end-para > td { border-bottom: 3px double var(--text); }
+.tchart tr.end-sent > th, .tchart tr.end-sent > td { border-bottom: var(--bnd-s, 2px solid var(--border)); }
+.tchart tr.end-para > th, .tchart tr.end-para > td { border-bottom: var(--bnd-p, 3px double var(--text)); }
 .tchart tr.cl-dependent th.rlab { font-style: italic; }
 .tchart tr.cl-dependent th.rlab::before { content: "↳ "; color: var(--faint); }
 .tchart tr.cl-speech th.rlab::before { content: "“ "; color: var(--faint); }
@@ -1068,6 +1068,8 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 /* the one-column view (view=flat): every part of a row in one cell, word groups labelled with their columns */
 .chart-obj.flat .tchart td.ccell { white-space: normal; }
 .cflat-g.cflat-void { display: none; }
+.tchart td.cmerged .cmerge-in { border-radius: 4px; padding: 1px 3px; }
+.tchart .cflat-outer { padding: 2px 3px; }
 .tchart .al-grid { display: grid; grid-template-columns: var(--al-l, max-content) var(--al-a, max-content) minmax(0, 1fr); column-gap: 8px; align-items: start; }
 .tchart .al-l { justify-self: end; text-align: right; min-width: 0; }
 .tchart .al-a { justify-self: center; text-align: center; min-width: 0; }

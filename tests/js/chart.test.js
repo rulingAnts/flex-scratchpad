@@ -149,7 +149,7 @@ test('the pivot counts rows by marker and column', () => {
   assert.equal(by['clause:speech'].total, 1);
   assert.equal(by['moved:preposed'].counts[0], 1);
   assert.equal(by['clauseref'].total, 1);
-  assert.deepEqual(p.totals, [1, 1, 5, 5, 1, 1, 0]);   // 3b's words sit in Subject (merged into Verb)
+  assert.deepEqual(p.totals, [1, 1, 5, 6, 1, 1, 0]);   // 3b's words sit in Subject AND Verb (merged: it could be either)
   assert.equal(p.rowCount, 7);
   const narrow = C.pivot(c, R.parse('{{flex:chart ' + G + ' cols=Nucleus}}'));
   assert.equal(narrow.columns.length, 3);
@@ -186,6 +186,27 @@ test('hide empty columns, the one-column view, zoom, and the sentence / paragrap
   assert.deepEqual([...C.alignedColumns(R.parse('{{flex:chart ' + G + ' view=flat align=Verb,Object}}'), c)], [4, 5]);
   assert.deepEqual([...C.alignedColumns(R.parse('{{flex:chart ' + G + ' view=groups align=c4}}'), c)], [4]);
   assert.equal(C.alignedColumns(R.parse('{{flex:chart ' + G + ' align=Verb}}'), c).size, 0);
+  // MERGED CELLS belong to both columns (Seth, 2026-10-19: "it could be either"): 3b's group is owned by Subject
+  // (3) and merged into Verb (4); `merge=owner` keeps it to the owner; the flat views keep the flags under srcMerge*
+  const all = c.template.columns;
+  const m3b = c.rows.find((r) => r.label === '3b').cells[0];
+  assert.equal(C.mergedNeighbour(m3b, all).n, 4);
+  assert.deepEqual(C.partColumns(m3b, all, R.parse('{{flex:chart ' + G + '}}')).map((x) => x.n), [3, 4]);
+  assert.deepEqual(C.partColumns(m3b, all, R.parse('{{flex:chart ' + G + ' merge=owner}}')).map((x) => x.n), [3]);
+  assert.deepEqual(C.partColumns(m3b, all, R.parse('{{flex:chart ' + G + ' merge=lookowner}}'), true).map((x) => x.n), [3]);
+  assert.deepEqual(C.partColumns(m3b, all, R.parse('{{flex:chart ' + G + ' merge=lookowner}}')).map((x) => x.n), [3, 4]);
+  assert.equal(C.mergeMode(R.parse('{{flex:chart ' + G + ' merge=odd}}')), 'both');
+  const f3b = C.flatten(c, R.parse('{{flex:chart ' + G + ' view=flat}}')).rows.find((r) => r.label === '3b').cells[0];
+  assert.ok(f3b.srcMergeAfter && !f3b.mergeAfter && C.mergedNeighbour(f3b, all).n === 4);
+  // the layout spans into the TEMPLATE neighbour only: with Verb hidden the merge does not swallow Object
+  const row3b = c.rows.find((r) => r.label === '3b');
+  assert.deepEqual(C.layoutRow(row3b, all, all).map((s) => [s.col.n, s.span]).filter((x) => x[1] > 1), [[3, 2]]);
+  const noVerb = all.filter((x) => x.n !== 4);
+  assert.deepEqual(C.layoutRow(row3b, noVerb, all).map((s) => [s.col.n, s.span]).filter((x) => x[1] > 1), []);
+  // hidden empty columns: the merged-into column counts as used
+  const onlyMerged = Object.assign({}, c, { rows: [row3b] });
+  assert.ok(C.visibleColumns(R.parse('{{flex:chart ' + G + ' empty=off}}'), onlyMerged).map((x) => x.n).includes(4));
+  assert.ok(!C.visibleColumns(R.parse('{{flex:chart ' + G + ' empty=off merge=owner}}'), onlyMerged).map((x) => x.n).includes(4));
   // the grid copy labels each word group with its column
   const grid = C.chartGrid(R.parse('{{flex:chart ' + G + ' view=flat rows=2 lines=txt}}'), Object.assign({}, c, { rows: c.rows.slice(1, 2) }));
   assert.ok(grid[grid.length - 1][1].includes('‹Pre-O›') && grid[grid.length - 1][1].includes('‹V›'), grid[grid.length - 1][1]);

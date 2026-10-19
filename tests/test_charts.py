@@ -173,7 +173,12 @@ def test_chart_search_by_words_columns_markers_and_more(tmp_path):
     labels = lambda rows: [r["label"] for r in rows]  # noqa: E731
     assert labels(api.chart_search("kabir")) == ["1a", "2c", "3b", "1"]      # row 1 of the second (Topic-Comment) chart too
     assert labels(api.chart_search("col:Subject lex:kabir")) == ["1a", "2c", "3b"]
-    assert labels(api.chart_search("col:Verb kabir")) == []
+    # a MERGED cell counts for both columns (Seth, 2026-10-19: "it could be either"): 3b's "Kabir lo" is owned
+    # by Subject and merged into Verb, so it is found under Verb too — flagged as a mirror of the owner
+    assert labels(api.chart_search("col:Verb kabir")) == ["3b"]
+    mirror = [c for c in api.chart_search("col:Verb kabir")[0]["cells"] if c.get("mirror")]
+    assert len(mirror) == 1 and mirror[0]["col"] == "Verb" and mirror[0]["mergedInto"] == 3 and mirror[0]["words"] == ["Kabir", "lo"]
+    assert labels(api.chart_search("col:Verb -word:kabir")) == ["1b", "2b", "3a"]      # a negative looks at every cell of the row (a bare -kabir is the suffix "-kabir")
     hit = api.chart_search("col:Verb -mo")[0]
     assert hit["label"] == "1a" and hit["hits"] == [4]
     assert labels(api.chart_search("marker:new")) == ["1a"] and labels(api.chart_search("marker:Reference")) == ["1a", "2c"]
@@ -199,9 +204,9 @@ def test_chart_search_by_words_columns_markers_and_more(tmp_path):
     assert labels(api.chart_search("word:/(/")) == labels(api.chart_search('"word:/(/"')) == []   # an unfinished pattern is plain text, never an error
     # the profile: where kabir sits
     p = api.chart_profile("kabir")
-    assert p["total"] == 4 and p["templates"][0]["name"] == "Default" and p["templates"][1]["name"] == "Topic-Comment"
+    assert p["total"] == 5 and p["templates"][0]["name"] == "Default" and p["templates"][1]["name"] == "Topic-Comment"
     cols = {c["name"]: c["count"] for c in p["templates"][0]["columns"]}
-    assert cols == {"Subject": 3}
+    assert cols == {"Subject": 3, "Verb": 1}                            # 3b's merged cell sits under Verb as well
     assert [r["label"] for r in p["templates"][0]["columns"][0]["rows"]] == ["1a", "2c", "3b"]
     assert {c["name"]: c["count"] for c in p["templates"][1]["columns"]} == {"Topic": 1}
     p2 = api.chart_profile("sleep")        # a gloss: ka-nuwa-mo, ka-nuwa, ka-nuwa-mo (and once in the Topic-Comment chart)

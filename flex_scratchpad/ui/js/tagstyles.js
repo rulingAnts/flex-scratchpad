@@ -122,7 +122,7 @@
     return k === norm(tag.name) || (!!tag.abbr && k === norm(tag.abbr)) || (!!tag.guid && k === norm(tag.guid));
   };
   const rank = (r) => { const k = norm(r.tag).replace(/^(marker|column|moved):/, ''); return k === '*' ? 2 : k.startsWith('group:') ? 1 : 0; };
-  const PSEUDO_RE = /^(clause:(dependent|speech|song)|clauseref|moved:(\*|preposed|postposed))$/;
+  const PSEUDO_RE = /^(clause:(dependent|speech|song)|clauseref|moved:(\*|preposed|postposed)|boundary:(sentence|paragraph))$/;
   /* The chart's structure as styleable items (Seth, 2026-10-19: "visual filter styling … for
    * subordinate clauses (and sub clause marker) and speech and song clauses … clauses marked as
    * pre-posed from or postposed from"). `skind` picks the controls: row (the whole row), chip (the
@@ -135,6 +135,9 @@
     { key: 'moved:*', label: 'Moved text (any)', note: 'word groups charted away from their column', skind: 'moved' },
     { key: 'moved:preposed', label: 'Preposed text', note: 'word groups moved forward (‹‹)', skind: 'moved' },
     { key: 'moved:postposed', label: 'Postposed text', note: 'word groups moved back (››)', skind: 'moved' },
+    // the lines FLEx's "last row in sentence / paragraph" boxes draw (Seth, 2026-10-19)
+    { key: 'boundary:sentence', label: 'Sentence boundaries', note: 'the line under a row marked as the last of its sentence', skind: 'line' },
+    { key: 'boundary:paragraph', label: 'Paragraph boundaries', note: 'the line under a row marked as the last of its paragraph', skind: 'line' },
   ];
   const structureItem = (s) => ({ guid: s.key, name: s.key, abbr: '', group: 'Chart structure', path: ['Chart structure'], pseudo: true, skind: s.skind, label: s.label, note: s.note, fore: '', back: '' });
   T.structure = () => STRUCTURE.map(structureItem);
@@ -142,9 +145,11 @@
   /* The structure items this chart has, with counts (rows of each clause type, [2a] markers,
    * moved word groups by direction); `moved:*` counts both. */
   function structureIn(obj) {
-    const n = { 'clause:dependent': 0, 'clause:speech': 0, 'clause:song': 0, clauseref: 0, 'moved:preposed': 0, 'moved:postposed': 0 };
+    const n = { 'clause:dependent': 0, 'clause:speech': 0, 'clause:song': 0, clauseref: 0, 'moved:preposed': 0, 'moved:postposed': 0, 'boundary:sentence': 0, 'boundary:paragraph': 0 };
     for (const r of obj.rows || []) {
       if (r.clause && n['clause:' + r.clause] != null) n['clause:' + r.clause]++;
+      if (r.endSent) n['boundary:sentence']++;
+      if (r.endPara) n['boundary:paragraph']++;
       for (const c of r.cells || []) { if (c.kind === 'clause') n.clauseref++; else if (c.kind === 'moved') n[c.preposed ? 'moved:preposed' : 'moved:postposed']++; }
     }
     n['moved:*'] = n['moved:preposed'] + n['moved:postposed'];
@@ -350,6 +355,18 @@
       for (const [v, l] of [['', o.inheritLabel || 'as inherited'], ['show', 'shown'], ['hide', 'hidden']]) sel.appendChild(el('option', { value: v, selected: cur === v }, l));
       sel.addEventListener('change', () => set({ hide: sel.value === '' ? undefined : sel.value === 'hide' }));
       box.appendChild(sel);
+    }
+    if (o.structure === 'line') {                       // a sentence / paragraph boundary: the line itself
+      const bs = el('select', { 'data-test': 'tag-bs', title: 'Line style of the boundary' });
+      for (const v of BORDER_STYLES) bs.appendChild(el('option', { value: v, selected: (r.bs || (o.defaultStyle || 'solid')) === v }, v));
+      bs.addEventListener('change', () => set({ bs: bs.value }));
+      const bw = el('select', { 'data-test': 'tag-bw', title: 'Thickness of the boundary' });
+      for (const v of [1, 2, 3, 4, 6]) bw.appendChild(el('option', { value: String(v), selected: (r.bw || 2) === v }, v + ' px'));
+      bw.addEventListener('change', () => set({ bw: +bw.value }));
+      const bc = el('input', { type: 'color', value: r.bc || '#1a1d21', 'data-test': 'tag-bc', title: 'Colour of the boundary' });
+      bc.addEventListener('change', () => set({ bc: bc.value }));
+      box.appendChild(el('span', { class: 'tag-ctl' }, bs, bw, bc, r.bs || r.bw || r.bc ? el('button', { class: 'tog', title: 'Back to the usual line', onclick: () => set({ bs: undefined, bw: undefined, bc: undefined }) }, 'auto') : null));
+      return box;
     }
     for (const c of ['', ...PALETTE]) box.appendChild(el('button', { class: 'sw' + ((r.bg || '') === c ? ' on' : ''), 'data-test': c ? 'tag-bg' : 'tag-nobg', style: c ? { background: c } : { background: 'repeating-linear-gradient(45deg, #fff 0 4px, #ccc 4px 8px)' }, title: c || 'no colour of its own (inherit)', onclick: () => set({ bg: c || undefined }) }));
     const custom = el('input', { type: 'color', value: r.bg || '#ffd6a5', title: 'Any colour' });

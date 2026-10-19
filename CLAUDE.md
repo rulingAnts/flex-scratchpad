@@ -656,6 +656,26 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   to max-content, the widest left and anchor across the rows taken, the left capped at 45 % of the
   cell) and sets the two custom properties on the table — a ResizeObserver re-measures on the next
   frame, writing only on change. A row without the column flows as before. Not in the exports.
+  MERGED CELLS (Seth, 2026-10-19, agreed after the question was put to him: "I merge columns when
+  I'm unsure which column it is because it could be either"): a part merged with its empty
+  neighbour (FLEx's MergesAfter / MergesBefore, on word groups and markers alike) belongs to BOTH
+  columns. `mergeMode(spec)` = `both` (default) | `owner` | `lookowner` (`merge=` in the embed, the
+  ⋯ menu's "Merged cells" select); `mergedNeighbour(part, allCols)` = the TEMPLATE neighbour (flat
+  views keep the flags as `srcMergeAfter` / `srcMergeBefore` and clear the real ones, so a group cell
+  never spans into the next); `partColumns(part, allCols, spec, forLook)` = [owner, neighbour]. DATA:
+  `visibleColumns`'s empty check counts the neighbour as used; `layoutRow(row, cols, allCols)` spans
+  only into the template neighbour (with a hidden column between, no span — it once swallowed
+  whatever showed next); the line-up and `cellHasWords` use `partColumns`; the pivot counts both;
+  `chartnote.rowCtx(…, {mergeOwner})` gives a merged cell both columns' keys (`ctxOpts()` on the
+  note); Python `merged_neighbour` adds a MIRROR cell record (`mirror`, `mergedInto`) under the
+  neighbour in `_chart_index_rows`, so `col:Verb kabir` finds 3b and the profile counts it under both
+  (the picker's row text skips mirrors), and `_chart_spans` emits a second span (`merged: true`), so
+  an example's chart-column tags name both. LOOK: the owner's look round the contents, the
+  neighbour's round that when it has a written rule and is not already the same group unit — in the
+  columns view `td.cmerged` wears the neighbour's look and `.cmerge-in` the owner's; in the flat views
+  `flatWrap` labels the part `S+V` and wraps `.cflat-outer` (tint / border / brackets / colour of the
+  neighbour) round the owner's `.cflat-g`; `unitOf(i, span)` closes a group unit after the span. The
+  Python search always counts both (it cannot see an embed's choice). Exports: the owner's look.
   COLUMN STYLES (Seth, 2026-10-18: "apply specific styles to specific columns … and configure them
   myself"): the chart's ⚑ popover lists its template COLUMNS after the markers and the text's tags
   (`tagstyles.columnsIn(obj)` — tag items with `column: true`, `opts.fullChart` so the one-column
@@ -686,8 +706,13 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   (the moved WORD GROUP: the full text controls plus `ms` = whose look it wears — its own, the
   column it came FROM, the column it sits IN — and `ml` = its label: ‹‹ / ›› + the home column's
   abbreviation (default), the current column's, or none; `msfrom` / `mlto` in `tags=`,
-  `_clean_tag_rules` takes both); a fourth namespace in `matches` (`PSEUDO_RE`; `moved:*` covers
-  both directions, ranked broad), `structureIn(obj)` lists those present with counts, the ⚑ popover
+  `_clean_tag_rules` takes both), and `boundary:sentence` / `boundary:paragraph` (Seth, 2026-10-19:
+  "custom style sentence boundaries and paragraph boundaries … last row in sentence, last row in
+  paragraph checkboxes in FLEx"; `skind` line: the controls are the line's style, thickness and
+  colour only, plus shown / hidden; the renderer sets `--bnd-s` / `--bnd-p` on every `tr.end-sent` /
+  `tr.end-para` — the free row that carries the boundary too — from the resolved look, `.bnd-styled`,
+  or the ordinary cell border when hidden, `.bnd-off`; the CSS reads the variables); a fourth
+  namespace in `matches` (`PSEUDO_RE`; `moved:*` covers both directions, ranked broad), `structureIn(obj)` lists those present with counts, the ⚑ popover
   shows them under "Chart structure", `addTagPicker` offers all seven, `T.structureItem(key)` /
   `chart.pseudoLook` resolve one. chart.js: a clause row gets `.clause-styled` with the look; a
   [2a] chip its colours or `.hidden`; a moved-text marker (which sits in the column the words came

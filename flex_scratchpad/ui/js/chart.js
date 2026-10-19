@@ -60,7 +60,8 @@
     const cols = selectedColumns(spec, chart);
     if (!(spec.extra && spec.extra.empty === 'off')) return cols;
     const used = new Set();
-    for (const r of chart.rows || []) for (const c of r.cells || []) used.add(c.colN);
+    const all = (chart.template && chart.template.columns) || [];
+    for (const r of chart.rows || []) for (const c of r.cells || []) { used.add(c.colN); const nb = mergeMode(spec) === 'owner' ? null : mergedNeighbour(c, all); if (nb) used.add(nb.n); }
     const out = cols.filter((c) => used.has(c.n));
     return out.length ? out : cols;
   }
@@ -72,6 +73,33 @@
    * column kept as `srcCol` for the styles and the labels; the renderer, the grid / TSV copy and
    * the exports all take it. */
   const FLAT_COL = { n: 0, name: 'Text', abbr: 'Text', path: [], guid: 'flat' };
+  /* MERGED CELLS (Seth, 2026-10-19: "I merge columns when I'm unsure which column it is because it
+   * could be either"): a part merged with its empty neighbour (FLEx's MergesAfter / MergesBefore)
+   * belongs to BOTH columns by default — for the DATA (a search, a rule's col:, hidden empty columns,
+   * the line-up all match either column) and for the LOOK (the owner's look round the contents, the
+   * neighbour's round that when it has a rule of its own, so the drawing says "either"). The user's
+   * choice, `merge=`: `both` (default), `owner` (owner column only, data and look), `lookowner`
+   * (both for data, the owner's look only). The Python search always counts both. */
+  const mergeMode = (spec) => { const v = spec && spec.extra && spec.extra.merge; return v === 'owner' || v === 'lookowner' ? v : 'both'; };
+  const mergesAfter = (p) => !!(p && (p.srcMergeAfter != null ? p.srcMergeAfter : p.mergeAfter));
+  const mergesBefore = (p) => !!(p && (p.srcMergeBefore != null ? p.srcMergeBefore : p.mergeBefore));
+  /* The template column a merged part extends into, or null. */
+  function mergedNeighbour(part, allCols) {
+    if (!part || !(mergesAfter(part) || mergesBefore(part))) return null;
+    const n = part.srcCol ? part.srcCol.n : part.colN;
+    const i = (allCols || []).findIndex((c) => c.n === n);
+    if (i < 0) return null;
+    return mergesAfter(part) ? allCols[i + 1] || null : allCols[i - 1] || null;
+  }
+  /* The columns a part counts for: the owner, and the merged neighbour unless `merge=` says not. */
+  function partColumns(part, allCols, spec, forLook) {
+    const owner = part.srcCol || (allCols || []).find((c) => c.n === part.colN) || null;
+    const mode = mergeMode(spec);
+    if (!owner) return [];
+    if (mode === 'owner' || (forLook && mode === 'lookowner')) return [owner];
+    const nb = mergedNeighbour(part, allCols);
+    return nb ? [owner, nb] : [owner];
+  }
   const viewOf = (spec) => { const v = spec.extra && spec.extra.view; return v === 'flat' || v === 'groups' ? v : 'cols'; };
   const isFlat = (spec) => viewOf(spec) !== 'cols';
   const isGroups = (spec) => viewOf(spec) === 'groups';
@@ -91,11 +119,11 @@
     const groupN = new Map();
     if (grouped) for (const c of cols) { const g = groupNameOf(c); if (!groupN.has(g)) { groupN.set(g, 1000 + groups.length); groups.push({ n: 1000 + groups.length, name: g, abbr: g, path: [], guid: 'group:' + g, group: true }); } }
     const rows = (obj.rows || []).map((r) => {
-      const parts = (r.cells || []).filter((c) => order.has(c.colN)).map((c, i) => Object.assign({}, c, { srcCol: byN.get(c.colN), colN: grouped ? groupN.get(groupNameOf(byN.get(c.colN))) : 0, mergeAfter: false, mergeBefore: false, _i: i }));
+      const parts = (r.cells || []).filter((c) => order.has(c.colN)).map((c, i) => Object.assign({}, c, { srcCol: byN.get(c.colN), colN: grouped ? groupN.get(groupNameOf(byN.get(c.colN))) : 0, srcMergeAfter: !!c.mergeAfter, srcMergeBefore: !!c.mergeBefore, mergeAfter: false, mergeBefore: false, _i: i }));
       parts.sort((a, b) => (order.get(a.srcCol.n) - order.get(b.srcCol.n)) || (a._i - b._i));
       return Object.assign({}, r, { cells: parts });
     });
-    return Object.assign({}, obj, { flat: true, grouped, template: Object.assign({}, obj.template || {}, { columns: grouped ? groups : [FLAT_COL] }), rows });
+    return Object.assign({}, obj, { flat: true, grouped, template: Object.assign({}, obj.template || {}, { columns: grouped ? groups : [FLAT_COL], srcColumns: (obj.template && obj.template.columns) || [] }), rows });
   }
   /* LINE UP ON A COLUMN (Seth, 2026-10-19: in the one-column view "align elements from one or more
    * specific columns so that they do line up … center arrange/align … other elements just adjacent
@@ -156,9 +184,11 @@
   /* One row's cells laid over the visible columns: [{col, span, parts}] — a cell that merges
    * after takes the empty columns to its right, one that merges before the empty ones to its
    * left (what FLEx's MergesAfter / MergesBefore mean). */
-  function layoutRow(row, cols) {
+  function layoutRow(row, cols, allCols) {
     const byCol = new Map();
     for (const c of row.cells || []) { if (!byCol.has(c.colN)) byCol.set(c.colN, []); byCol.get(c.colN).push(c); }
+    // with hidden columns a merge may only span into the TEMPLATE neighbour (Seth, 2026-10-19), never whatever shows next
+    const adjacent = (a, b) => { if (!allCols || !allCols.length) return true; const i = allCols.findIndex((c) => c.n === a.n); return i >= 0 && !!allCols[i + 1] && allCols[i + 1].n === b.n; };
     const out = [];
     let i = 0;
     while (i < cols.length) {
@@ -166,8 +196,8 @@
       const parts = byCol.get(col.n) || [];
       let span = 1;
       // FLEx merges a cell with its ONE neighbour (MergesAfter / MergesBefore), when that is empty
-      if (parts.some((p) => p.mergeAfter) && i + 1 < cols.length && !(byCol.get(cols[i + 1].n) || []).length) span++;
-      if (parts.some((p) => p.mergeBefore) && out.length && !out[out.length - 1].parts.length) { out.pop(); span++; }
+      if (parts.some((p) => p.mergeAfter) && i + 1 < cols.length && !(byCol.get(cols[i + 1].n) || []).length && adjacent(col, cols[i + 1])) span++;
+      if (parts.some((p) => p.mergeBefore) && out.length && !out[out.length - 1].parts.length && out[out.length - 1].span === 1 && adjacent(out[out.length - 1].col, col)) { out.pop(); span++; }
       out.push({ col, span, parts });
       i += span;
     }
@@ -410,12 +440,13 @@
     // heading wears it, and in each row the run of its cells is one box (`unitOf` → first / mid / last)
     const groupLooks = new Map();            // norm(group name) → the GROUP's own look (one colour for the whole unit)
     for (const c of cols) { const lk = colLooks.get(c.n), g = lk && groupOfLook(lk); if (g && !groupLooks.has(g)) groupLooks.set(g, groupLook(g, c, obj, spec) || lk); }
-    const unitOf = (i) => {
+    const unitOf = (i, span) => {
       const lk = colLooks.get(cols[i].n), g = lk && groupOfLook(lk);
       if (!g) return null;
       const same = (j) => j >= 0 && j < cols.length && groupOfLook(colLooks.get(cols[j].n) || {}) === g;
-      return { group: g, first: !same(i - 1), last: !same(i + 1) };
+      return { group: g, first: !same(i - 1), last: !same(i + (span || 1)) };
     };
+    const allCols = (full.template && full.template.columns) || [];
     const lines = R.chartLines(spec);
     const free = R.freeMode(spec);
     const headers = !(spec.extra && spec.extra.headers === 'off');
@@ -602,25 +633,34 @@
       if (opts.editable) lab.addEventListener('click', (e) => stylePopover(e.currentTarget, spec, { row: row.n }, opts, 'row ' + row.label));
       tr.appendChild(frz(lab, 'lab'));
       for (const xc of xL) tr.appendChild(frz(el('td', { class: 'xcell xcell-' + xc.kind + ' xcell-left', dataset: { x: xc.key, row: row.n } }, xc.cell(row, obj)), 'x' + xc.xi));
-      for (const slot of layoutRow(row, cols)) {
+      for (const slot of layoutRow(row, cols, flat ? null : allCols)) {
         const cellStyles = R.chartStylesFor(index, row.n, slot.col.n, 0, '');
         const segsHere = [...new Set(slot.parts.filter((p) => p.kind === 'words' && p.seg).flatMap((p) => { const a = []; for (let n = p.seg; n <= (p.segTo || p.seg); n++) a.push(n); return a; }))];
         const td = el('td', { class: 'ccell' + (slot.parts.length ? '' : ' empty'), colspan: slot.span > 1 ? slot.span : null, dataset: { row: row.n, col: slot.col.n, segs: segsHere.length ? segsHere.join(' ') : null } });
-        const unit = colLooks.has(slot.col.n) ? unitOf(cols.indexOf(slot.col)) : null;
-        if (colLooks.has(slot.col.n)) applyColumnLook(td, unit ? groupLooks.get(unit.group) : colLooks.get(slot.col.n), false, unit);
+        const unit = colLooks.has(slot.col.n) ? unitOf(cols.indexOf(slot.col), slot.span) : null;
+        // a MERGED cell (Seth, 2026-10-19): the neighbour's look round the owner's, when it has a rule of its own
+        const mergedPart = slot.span > 1 ? slot.parts.find((p) => mergesAfter(p) || mergesBefore(p)) : null;
+        const nbCol = mergedPart ? partColumns(mergedPart, allCols, spec, true)[1] : null;
+        const nbLook = nbCol && colLooks.has(nbCol.n) && colLooks.get(nbCol.n).styled && (!unit || groupOfLook(colLooks.get(nbCol.n)) !== unit.group) ? colLooks.get(nbCol.n) : null;
+        let content = td;
+        if (nbLook) { applyColumnLook(td, nbLook, false, null); td.classList.add('cmerged'); content = el('div', { class: 'cmerge-in' }); td.appendChild(content); if (colLooks.has(slot.col.n)) applyColumnLook(content, unit ? groupLooks.get(unit.group) : colLooks.get(slot.col.n), false, null); }
+        else if (colLooks.has(slot.col.n)) applyColumnLook(td, unit ? groupLooks.get(unit.group) : colLooks.get(slot.col.n), false, unit);
         applyCellStyles(td, cellStyles);        // the user's own cell styles win over the column's
         // the one-column view boxes the parts of ONE chart cell together (Seth, 2026-10-18: a
         // marker "should be inside the same border as the cell they apply to"); the cells of a
         // header group styled as a group share ONE box (Seth, 2026-10-19)
         let group = null;
         // lining up on a column (Seth, 2026-10-19): left of the axis, the aligned run, the rest
-        const aligning = flat && alignSet.size && slot.parts.some((p) => p.srcCol && alignSet.has(p.srcCol.n));
+        const onAligned = (p) => partColumns(p, allCols, spec).some((c) => alignSet.has(c.n));
+        const aligning = flat && alignSet.size && slot.parts.some((p) => p.srcCol && onAligned(p));
         let grid = null, zone = 'l', zones = null;
-        if (aligning) { zones = { l: el('span', { class: 'al-l' }), a: el('span', { class: 'al-a' }), r: el('span', { class: 'al-r' }) }; grid = el('div', { class: 'al-grid' }, zones.l, zones.a, zones.r); td.appendChild(grid); }
-        const into = (p) => { if (!aligning) return td; const on = !!(p.srcCol && alignSet.has(p.srcCol.n)); if (zone === 'l' && on) zone = 'a'; else if (zone === 'a' && !on) zone = 'r'; return zones[zone]; };
+        if (aligning) { zones = { l: el('span', { class: 'al-l' }), a: el('span', { class: 'al-a' }), r: el('span', { class: 'al-r' }) }; grid = el('div', { class: 'al-grid' }, zones.l, zones.a, zones.r); content.appendChild(grid); }
+        const into = (p) => { if (!aligning) return content; const on = !!(p.srcCol && onAligned(p)); if (zone === 'l' && on) zone = 'a'; else if (zone === 'a' && !on) zone = 'r'; return zones[zone]; };
+        const colsOf = (p) => partColumns(p.srcCol ? p : Object.assign({}, p, { srcCol: slot.col }), allCols, spec).map((c) => c.n);
         for (const part of slot.parts) {
           if (part.kind === 'moved') movedParts.push({ part, home: part.srcCol || slot.col });
-          const cellHasWords = slot.parts.some((q) => q.kind === 'words' && (q.srcCol || slot.col).n === (part.srcCol || slot.col).n);
+          const mine = colsOf(part);
+          const cellHasWords = slot.parts.some((q) => q.kind === 'words' && colsOf(q).some((n) => mine.includes(n)));
           const node = renderPart(part, row, part.srcCol || slot.col, obj, spec, opts, { lines, index, vern, anal, wordGroups, movedTargets, tbody, showTextTags, cellHasWords });
           const host = into(part);
           if (!(flat && part.srcCol)) { host.appendChild(node); continue; }
@@ -658,6 +698,18 @@
     box.appendChild(el('div', { class: 'chart-scroll' }, table));
     requestAnimationFrame(() => { if (box.isConnected) placeFrozen(table, colKeys, colEls, frozen); });
     if (alignSet.size) requestAnimationFrame(() => { if (box.isConnected) alignFlat(table); });
+    // SENTENCE / PARAGRAPH BOUNDARIES as visual-filter targets (Seth, 2026-10-19: "custom style sentence
+    // boundaries and paragraph boundaries"): the line under an end-sent / end-para row (or the free
+    // translation row that carries it) takes the rule's style, thickness and colour, or goes away
+    for (const [kind, cls, v] of [['boundary:sentence', 'end-sent', '--bnd-s'], ['boundary:paragraph', 'end-para', '--bnd-p']]) {
+      const lk = pseudoLook(kind, obj, spec);
+      if (!lk || (!lk.styled && !lk.hide)) continue;
+      for (const tr of tbody.querySelectorAll('tr.' + cls)) {
+        if (lk.hide) { tr.style.setProperty(v, '1px solid var(--border-soft)'); tr.classList.add('bnd-off'); continue; }
+        tr.style.setProperty(v, (lk.bw || (cls === 'end-para' ? 3 : 2)) + 'px ' + (lk.bs || (cls === 'end-para' ? 'double' : 'solid')) + ' ' + (lk.bc || lk.bg || 'currentColor'));
+        tr.classList.add('bnd-styled');
+      }
+    }
     if (headers && !opts.inCell) requestAnimationFrame(() => { if (box.isConnected) wireStickyHead(box, table); });
     if (free === 'tip') box.appendChild(el('div', { class: 'chart-tip muted small', 'data-test': 'chart-tip' }, 'Click a cell to see its free translation here.'));
     if (opts.context) box.classList.add('context');
@@ -825,6 +877,8 @@
   function flatWrap(part, obj, spec, key) {
     const col = part.srcCol;
     const asGroup = !!(key && key.startsWith('g:'));
+    const bothCols = partColumns(part, (obj.template && obj.template.srcColumns) || [], spec, true);
+    const nb = bothCols[1] || null;
     const look = asGroup ? (groupLook(key.slice(2), col, obj, spec) || columnLook(col, obj, spec)) : columnLook(col, obj, spec);
     const groupName = asGroup ? ((col.path || []).find((p) => normKey(p) === key.slice(2)) || key.slice(2)) : '';
     const path = asGroup ? (col.path || []).slice(0, (col.path || []).findIndex((p) => normKey(p) === key.slice(2)) + 1) : (col.path || []).concat([col.name]);
@@ -837,7 +891,7 @@
     wrap.appendChild(body);
     if (br) wrap.appendChild(el('span', { class: 'cflat-br' }, br[1]));
     const labelsOn = !(spec.extra && spec.extra.collab === 'off') && !(look && look.label === false);
-    const label = labelsOn ? el('sub', { class: 'cflat-lab' }, asGroup ? groupName : (col.abbr || col.name)) : null;
+    const label = labelsOn ? el('sub', { class: 'cflat-lab' }, asGroup ? groupName : (col.abbr || col.name) + (nb ? '+' + (nb.abbr || nb.name) : '')) : null;
     if (label) wrap.appendChild(label);
     // inside a group's box each column's parts are followed by that column's own small label
     let lastCol = null;
@@ -857,7 +911,21 @@
       if (look.i) wrap.style.fontStyle = 'italic';
       if (look.u) wrap.style.textDecoration = 'underline';
     }
-    return { wrap, add, finish, key };
+    // a merged part: the neighbour column's look round the owner's (Seth, 2026-10-19: "it could be either")
+    const nbLook = nb && !asGroup ? columnLook(nb, obj, spec) : null;
+    let outer = null;
+    if (nbLook && nbLook.styled) {
+      outer = el('span', { class: 'cflat-g cflat-outer', dataset: { col: nb.n }, title: (nb.path || []).concat([nb.name]).join(' \u203a ') + ' (merged)' }, wrap);
+      const bg = nbLook.tile ? (nbLook.tc || nbLook.bg) : nbLook.hl ? nbLook.bg : '';
+      if (bg) outer.style.background = rgba(bg, nbLook.tile ? 0.3 : 0.45);
+      if (nbLook.box) { outer.style.border = (nbLook.bw || 2) + 'px ' + (nbLook.bs || 'solid') + ' ' + (nbLook.bc || nbLook.bg || 'currentColor'); outer.style.borderRadius = '5px'; }
+      if (nbLook.c) outer.style.color = nbLook.c;
+      const B2 = FS.tagstyles && FS.tagstyles.BRACKETS;
+      const br2 = nbLook.br && B2 && B2[nbLook.br];
+      if (br2) { outer.insertBefore(el('span', { class: 'cflat-br' }, br2[0]), wrap); outer.appendChild(el('span', { class: 'cflat-br' }, br2[1])); }
+    }
+    const finish2 = () => { finish(); if (outer && wrap.classList.contains('cflat-void')) outer.classList.add('cflat-void'); };
+    return { wrap: outer || wrap, add, finish: finish2, key };
   }
 
   function applyCellStyles(td, styles) {
@@ -1060,6 +1128,12 @@
       lcb.addEventListener('change', () => { if (lcb.checked) delete x.collab; else x.collab = 'off'; change(); });
       pop.appendChild(el('div', { class: 'row' }, el('label', { title: 'Leave out the columns with nothing in these rows' }, ecb, ' Hide empty columns'), isFlat(spec) ? el('label', { title: 'The column’s abbreviation under each word group' }, lcb, ' Column labels') : null));
       pop.appendChild(el('div', { class: 'row' }, el('label', { title: 'Chart markers in a cell that holds no words (a marker’s own rule in ⚑ can say otherwise)' }, mcb, ' Markers in cells with no words')));
+      // merged cells (Seth, 2026-10-19: "it could be either" column)
+      const msel = el('select', { 'data-test': 'chart-merge-select', title: 'A cell merged with its empty neighbour could belong to either column', onchange: (e) => { if (e.target.value === 'both') delete x.merge; else x.merge = e.target.value; change(); } },
+        el('option', { value: 'both', selected: mergeMode(spec) === 'both' }, 'both columns: searches, rules and the line-up match either; the neighbour’s look round the owner’s'),
+        el('option', { value: 'lookowner', selected: mergeMode(spec) === 'lookowner' }, 'both for searches and rules; drawn with the owner column’s look only'),
+        el('option', { value: 'owner', selected: mergeMode(spec) === 'owner' }, 'the owner column only'));
+      pop.appendChild(el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Merged cells'), msel));
       const zl = el('span', { class: 'zoom-val', 'data-test': 'chart-zoom' }, zoomOf(spec) + '%');
       pop.appendChild(el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Zoom'),
         el('button', { class: 'tog', 'data-test': 'chart-zoom-out', title: 'Smaller', onclick: () => { zl.textContent = setZoom(spec, zoomOf(spec) - ZOOM_STEP) + '%'; change(); } }, '\u2212'),
@@ -1162,7 +1236,7 @@
     const runs = freeRuns(obj.rows || []);
     (obj.rows || []).forEach((row, ri) => {
       const cells = [row.label];
-      for (const slot of layoutRow(row, cols)) { cells.push(slot.parts.map(partText).filter(Boolean).join(' ')); for (let i = 1; i < slot.span; i++) cells.push(''); }
+      for (const slot of layoutRow(row, cols, obj.flat ? null : ((obj.template && obj.template.columns) || []))) { cells.push(slot.parts.map(partText).filter(Boolean).join(' ')); for (let i = 1; i < slot.span; i++) cells.push(''); }
       if (free !== 'off') { const run = runs.find((r) => r.from === ri); cells.push(run ? freeText(obj, run.segs, true).join(' ') : ''); }
       if (notesOn) cells.push(row.notes || '');
       out.push(cells);
@@ -1188,7 +1262,8 @@
       }
       if (r.clause && r.clause !== 'normal') addKey('clause:' + r.clause, r.clause + ' clause', r.n);
     }
-    const hasWords = (r, colN) => (r.cells || []).some((c) => c.kind === 'words' && c.colN === colN && (c.words || []).some((w) => !w.punct));
+    const allC = (obj.template && obj.template.columns) || [];
+    const hasWords = (r, colN) => (r.cells || []).some((c) => c.kind === 'words' && partColumns(c, allC, spec).some((k) => k.n === colN) && (c.words || []).some((w) => !w.punct));
     const out = { columns: cols.map((c) => (c.path || []).concat([c.name]).join(' \u203a ')), lines: [], totals: cols.map((c) => rows.filter((r) => hasWords(r, c.n)).length), rowCount: rows.length };
     for (const [k, v] of keys) out.lines.push({ key: k, label: v.label, counts: cols.map((c) => rows.filter((r) => v.rows.has(r.n) && hasWords(r, c.n)).length), total: v.rows.size });
     return out;
@@ -1206,5 +1281,5 @@
       el('div', { class: 'btn-row' }, el('button', { class: 'btn', 'data-test': 'pivot-copy', onclick: () => { FS.copyText(tsv); FS.toast('Copied as TSV'); } }, 'Copy as TSV'), el('button', { class: 'btn primary', onclick: () => m.close() }, 'Done')));
   }
 
-  FS.chart = { renderChart, visibleColumns, selectedColumns, flatten, isFlat, isGroups, viewOf, alignedColumns, zoomOf, setZoom, playGroups, columnLook, pseudoLook, markerShown, headerRows, layoutRow, rowSegs, freeRuns, lineStarts, colWidths, setColWidths, freeText, chartGrid, chartTsv, markerLook, pivot, pivotDialog, LINE_NAMES, FREE_NAMES };
+  FS.chart = { renderChart, visibleColumns, selectedColumns, flatten, isFlat, isGroups, viewOf, alignedColumns, mergeMode, mergedNeighbour, partColumns, zoomOf, setZoom, playGroups, columnLook, pseudoLook, markerShown, headerRows, layoutRow, rowSegs, freeRuns, lineStarts, colWidths, setColWidths, freeText, chartGrid, chartTsv, markerLook, pivot, pivotDialog, LINE_NAMES, FREE_NAMES };
 })();

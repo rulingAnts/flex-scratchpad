@@ -171,7 +171,7 @@
     };
     const runs = freeRunsOf(obj.rows || []);
     const rows = (obj.rows || []).map((row, ri) => {
-      const cells = C.layoutRow(row, cols).map((slot) => {
+      const cells = C.layoutRow(row, cols, obj.flat ? null : ((obj.template && obj.template.columns) || [])).map((slot) => {
         const cellSt = R.chartStylesFor(index, row.n, slot.col.n, 0, '');
         const words = [];
         const marks = [];

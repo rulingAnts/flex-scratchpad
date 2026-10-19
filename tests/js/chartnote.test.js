@@ -87,6 +87,10 @@ test('rules: terms, operators, outputs and styles', () => {
   assert.equal(run('label:/^2/ → two', '2b'), 'two');
   assert.throws(() => N.parseRule('txt:/(/ → x'), /Bad pattern/);
   assert.throws(() => N.parseRule('col:Subject[txt:/a/ → x'), /“]” is missing/);
+  // a MERGED cell matches either column in a rule (3b: Subject merged into Verb) unless the chart says owner only
+  assert.equal(run('col:Verb[txt:/kabir/i] → v', '3b'), 'v');
+  assert.equal(run('col:Verb → v', '3b'), 'v');
+  assert.equal(N.applyRule(N.parseRule('col:Verb → v'), N.rowCtx(c.rows.find((r) => r.label === '3b'), c, new Map(), [], { mergeOwner: true })), null);
   // a list column's value is a term too
   const vals = new Map([[N.anchorOf(c.rows[0].guid), { Status: 'new' }]]);
   const cols = [{ name: 'Status', kind: 'list', settings: 'Information status' }];

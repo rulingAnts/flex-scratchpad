@@ -5081,6 +5081,29 @@ def test_the_groups_view_and_lining_up_on_a_column(app):
     assert "Kabir" in r1a.locator(".al-l").inner_text() and "nuwa" in r1a.locator(".al-a").inner_text()
     # a row without the column flows as before
     assert page.locator("#editor .chart-obj tr.crow[data-label='2a'] .al-grid").count() == 0
+    # MERGED CELLS (Seth, 2026-10-19: "it could be either"): 3b's group is owned by Subject and merged into Verb, so
+    # in the one-column view it is labelled S+V, wears Verb's brackets round Subject's box, and lines up on Verb
+    w3b = page.locator("#editor .chart-obj tr.crow[data-label='3b'] .cflat-outer")
+    assert w3b.count() == 1 and w3b.locator(".cflat-lab").inner_text() == "S+V" and w3b.locator(".cflat-br").all_inner_texts() == ["[", "]"]
+    assert page.locator("#editor .chart-obj tr.crow[data-label='3b'] .al-a .cflat-outer").count() == 1
+    # the chart's ⋯ menu offers the choice; owner only drops the second label and the outer look
+    page.locator("#editor .chart-obj [data-test=chart-menu]").click()
+    page.select_option("[data-test=chart-merge-select]", "owner")
+    page.wait_for_function("() => document.querySelector(\"#editor .chart-obj tr.crow[data-label='3b'] .cflat-lab\").textContent === 'S'")
+    page.keyboard.press("Escape")
+    assert "merge=owner" in src() and page.locator("#editor .chart-obj tr.crow[data-label='3b'] .cflat-outer").count() == 0
+    assert page.locator("#editor .chart-obj tr.crow[data-label='3b'] .al-grid").count() == 0        # Subject alone is not lined up
+    # back in the columns view the merged cell spans both and takes Verb's look as the outer layer
+    page.locator("#editor .chart-obj [data-test=chart-menu]").click()
+    page.select_option("[data-test=chart-merge-select]", "both")
+    page.wait_for_function("() => !window.__fsEditor.getMarkdown().includes('merge=')")
+    page.keyboard.press("Escape")                                                  # the menu stays open after a select
+    page.wait_for_timeout(200)
+    page.locator("#editor .chart-obj [data-test=chart-menu]").click()
+    page.select_option("[data-test=chart-view-select]", "cols")
+    page.wait_for_function("() => !document.querySelector('#editor .chart-obj.flat')")
+    td = page.locator("#editor .chart-obj tr.crow[data-label='3b'] td.ccell[data-col='3']")
+    assert td.get_attribute("colspan") == "2" and td.evaluate("(e) => e.classList.contains('cmerged')") and td.locator(".cmerge-in").count() == 1
     assert not errors
 
 
@@ -5154,4 +5177,16 @@ def test_chart_structure_and_header_groups_as_visual_filters(app):
     assert page.locator(".popover .tagrow[data-tag='Object'] [data-test=tag-toggle]").is_checked()
     page.keyboard.press("Escape")
     assert page.locator("#editor .chart-obj.flat .moved-lab").inner_text() == "‹‹ Pre-O"
+    # SENTENCE / PARAGRAPH BOUNDARIES (Seth, 2026-10-19): the lines FLEx's last-row boxes draw take a style of their own
+    page.evaluate("async () => { const c = await window.pywebview.api.set_tag_styles('project', FS.tagstyles.context().project, [{tag: 'boundary:paragraph', bs: 'dashed', bw: 4, bc: '#1d4ed8'}, {tag: 'boundary:sentence', hide: true}]); FS.tagstyles.setConfig(c); FS.emit('tagstyles'); }")
+    page.wait_for_selector("#editor .chart-obj tr.end-para.bnd-styled")
+    para = page.locator("#editor .chart-obj tr.end-para").first.locator("td").first
+    assert para.evaluate("(e) => [getComputedStyle(e).borderBottomStyle, getComputedStyle(e).borderBottomWidth, getComputedStyle(e).borderBottomColor]") == ["dashed", "4px", "rgb(29, 78, 216)"]
+    sent = page.locator("#editor .chart-obj tr.end-sent:not(.end-para)").first
+    assert sent.evaluate("(e) => e.classList.contains('bnd-off')") and sent.locator("td").first.evaluate("(e) => getComputedStyle(e).borderBottomWidth") == "1px"
+    page.locator("#editor .chart-obj [data-test=marker-btn]").first.click()
+    page.wait_for_selector("[data-test=tag-popover] .tagrow[data-tag='boundary:paragraph']")
+    page.locator("[data-test=tag-popover] .tagrow[data-tag='boundary:paragraph'] [data-test=tag-style]").click()
+    assert page.locator("[data-test=tag-popover] .tag-style-box [data-test=tag-bs]").count() == 1 and page.locator("[data-test=tag-popover] .tag-style-box [data-test=tag-bg]").count() == 0
+    page.keyboard.press("Escape")
     assert not errors

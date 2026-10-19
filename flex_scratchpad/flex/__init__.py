@@ -998,15 +998,21 @@ class FlexService:
                     snap = None
             if not snap:
                 continue
-            cols = {c["n"]: c for c in (snap.get("template") or {}).get("columns") or []}
+            columns = (snap.get("template") or {}).get("columns") or []
+            cols = {c["n"]: c for c in columns}
             for r in snap.get("rows") or []:
                 for c in r.get("cells") or []:
                     if c.get("kind") != "words" or not c.get("seg"):
                         continue
                     col = cols.get(c.get("colN")) or {}
-                    out.append({"chart": snap.get("guid", ""), "chartName": snap.get("name", ""), "template": (snap.get("template") or {}).get("name", ""),
-                                "row": r.get("label", ""), "column": {"guid": col.get("guid", ""), "name": col.get("name", ""), "abbr": col.get("abbr", ""), "path": list(col.get("path") or [])},
-                                "from": dict(c.get("from") or {"seg": c.get("seg"), "w": 0}), "to": dict(c.get("to") or {"seg": c.get("segTo"), "w": 0})})
+                    span_cols = [col]
+                    nb = merged_neighbour(c, columns)
+                    if nb:            # a merged cell: a span for the neighbour column too (it could be either)
+                        span_cols.append(nb)
+                    for k, sc in enumerate(span_cols):
+                        out.append({"chart": snap.get("guid", ""), "chartName": snap.get("name", ""), "template": (snap.get("template") or {}).get("name", ""),
+                                    "row": r.get("label", ""), "column": {"guid": sc.get("guid", ""), "name": sc.get("name", ""), "abbr": sc.get("abbr", ""), "path": list(sc.get("path") or [])},
+                                    "merged": bool(k), "from": dict(c.get("from") or {"seg": c.get("seg"), "w": 0}), "to": dict(c.get("to") or {"seg": c.get("segTo"), "w": 0})})
         return out
 
     def chart_rows(self, refresh: bool = False) -> list[dict]:
@@ -1203,8 +1209,23 @@ class FlexService:
 
 # --------------------------------------------------------------------------- chart search helpers
 
+def merged_neighbour(cell: dict, columns: list[dict]) -> dict | None:
+    """The template column a merged cell part extends into (FLEx's MergesAfter / MergesBefore), or
+    None. A merged cell belongs to BOTH columns in every search (Seth, 2026-10-19: "I merge columns
+    when I'm unsure which column it is because it could be either")."""
+    if not (cell.get("mergeAfter") or cell.get("mergeBefore")):
+        return None
+    ns = [c.get("n") for c in columns]
+    if cell.get("colN") not in ns:
+        return None
+    i = ns.index(cell.get("colN"))
+    j = i + 1 if cell.get("mergeAfter") else i - 1
+    return columns[j] if 0 <= j < len(columns) else None
+
+
 def _chart_index_rows(chart: dict) -> list[dict]:
-    cols = {c["n"]: c for c in (chart.get("template") or {}).get("columns") or []}
+    columns = (chart.get("template") or {}).get("columns") or []
+    cols = {c["n"]: c for c in columns}
     out = []
     for r in chart.get("rows") or []:
         cells, markers, moved = [], [], []
@@ -1215,12 +1236,17 @@ def _chart_index_rows(chart: dict) -> list[dict]:
                 col = cols.get(c.get("colN")) or {}
                 words = [w for w in c.get("words") or [] if not w.get("punct")]
                 morphs = [m for w in words for m in w.get("morphs") or []]
-                cells.append({"colN": c.get("colN") or 0, "col": col.get("name", ""), "abbr": col.get("abbr", ""),
-                              "path": "/".join((col.get("path") or []) + [col.get("name", "")]),
-                              "words": [w.get("txt", "") for w in words], "glosses": [w.get("gls", "") for w in words],
-                              "forms": [m.get("form", "") for m in morphs], "cfs": [m.get("cf", "") for m in morphs if m.get("cf")],
-                              "mgls": [m.get("gls", "") for m in morphs], "pos": [w.get("pos", "") for w in words if w.get("pos")],
-                              "seg": c.get("seg"), "segTo": c.get("segTo")})
+                rec = {"colN": c.get("colN") or 0, "col": col.get("name", ""), "abbr": col.get("abbr", ""),
+                       "path": "/".join((col.get("path") or []) + [col.get("name", "")]),
+                       "words": [w.get("txt", "") for w in words], "glosses": [w.get("gls", "") for w in words],
+                       "forms": [m.get("form", "") for m in morphs], "cfs": [m.get("cf", "") for m in morphs if m.get("cf")],
+                       "mgls": [m.get("gls", "") for m in morphs], "pos": [w.get("pos", "") for w in words if w.get("pos")],
+                       "seg": c.get("seg"), "segTo": c.get("segTo")}
+                cells.append(rec)
+                nb = merged_neighbour(c, columns)
+                if nb:    # a MIRROR record under the merged-into column: the words match either column
+                    cells.append(dict(rec, colN=nb.get("n") or 0, col=nb.get("name", ""), abbr=nb.get("abbr", ""),
+                                      path="/".join((nb.get("path") or []) + [nb.get("name", "")]), mirror=True, mergedInto=c.get("colN") or 0))
             elif k == "tag" and c.get("tag"):
                 t = c["tag"]
                 markers.append(t.get("name") or t.get("abbr") or "")
