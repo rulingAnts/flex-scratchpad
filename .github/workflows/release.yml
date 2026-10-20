@@ -11,6 +11,9 @@
 # (Seth, 2026-10-20: "every time we push a release (or pre-release), we should also commit and push
 # to main"): the `main` job fast-forwards main to the released commit — after a pushed tag, after a
 # manual release, and on a manual run with neither `tag` nor `promote`, which does only that.
+# REMOVE OLD PRE-RELEASES (Seth, 2026-10-20, after 0.1.0: "take the old pre-releases down"): `remove` = the tags whose
+# releases to delete, space-separated; only a release marked pre-release or tagged with a pre-release suffix
+# (v0.1.0-beta.2) is taken, a plain version such as v0.1.0 is refused, and the git tags stay.
 # Public repository, standard runners (windows-latest, ubuntu-latest): free. No schedule.
 name: Release
 
@@ -32,6 +35,10 @@ on:
         description: "Instead: mark this EXISTING release's tag as a full release and the latest; builds nothing"
         required: false
         default: ""
+      remove:
+        description: "Instead: delete these pre-releases (tags, space-separated, e.g. v0.1.0-beta.1); a plain version like v0.1.0 is refused; the git tags stay"
+        required: false
+        default: ""
       main:
         description: "Also fast-forward main to this commit (Seth, 2026-10-20: every release also lands on main). With neither tag nor promote: only that"
         type: boolean
@@ -50,9 +57,28 @@ jobs:
       - name: Mark the release as final and the latest
         run: gh release edit "${{ inputs.promote }}" --repo "$GITHUB_REPOSITORY" --prerelease=false --latest
 
+  remove:
+    if: ${{ inputs.remove != '' }}
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAGS: ${{ inputs.remove }}
+    steps:
+      - name: Delete the pre-releases named
+        run: |
+          # a pre-release is one MARKED so, or one whose tag carries a pre-release suffix (v0.1.0-beta.2 was
+          # promoted to a full release once, and is still a beta); a plain version such as v0.1.0 is refused
+          for t in $TAGS; do
+            pre=$(gh release view "$t" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq .isPrerelease 2>/dev/null || echo missing)
+            if [ "$pre" = "missing" ]; then echo "$t: no such release, nothing to do"; continue; fi
+            case "$t" in v*-*) suffix=yes;; *) suffix=no;; esac
+            if [ "$pre" != "true" ] && [ "$suffix" != "yes" ]; then echo "::error::$t is a full release with a plain version: refused" >&2; exit 1; fi
+            gh release delete "$t" --repo "$GITHUB_REPOSITORY" --yes && echo "deleted the release $t (its tag stays)"
+          done
+
   version:
     # a pushed tag, or a manual run with a tag; a bare manual run (neither tag nor promote) only syncs main
-    if: ${{ !inputs.promote && !(github.event_name == 'workflow_dispatch' && inputs.tag == '') }}
+    if: ${{ !inputs.promote && !inputs.remove && !(github.event_name == 'workflow_dispatch' && inputs.tag == '') }}
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.v.outputs.version }}
@@ -104,7 +130,7 @@ jobs:
   main:
     # every release also lands on main; a bare manual run (no tag, no promote) does only this
     needs: [version, package, publish]
-    if: ${{ always() && inputs.main != false && inputs.promote == '' && (needs.publish.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.tag == '')) }}
+    if: ${{ always() && inputs.main != false && inputs.promote == '' && inputs.remove == '' && (needs.publish.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.tag == '')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

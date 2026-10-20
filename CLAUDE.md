@@ -1402,7 +1402,9 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   `build_id()` reads the `BUILD_ID` the spec stamps (a frozen build has no .py files to hash).
   Unsigned: SmartScreen says so. RUN BY HAND (2026-10-20): Actions › Release › Run workflow — `tag` makes and
   releases that tag at the chosen branch's head (`final` for a full release), `promote` marks an existing release
-  final and latest; a cloud session can push its branch but neither a tag nor a release edit, nor main. EVERY
+  final and latest, `remove` deletes old pre-releases (Seth, 2026-10-20, after 0.1.0: "take the old pre-releases down" —
+  beta.1 to beta.3 went; a release marked pre-release or tagged `v…-suffix` only, never a plain `v0.1.0`; the git tags
+  stay); a cloud session can push its branch but neither a tag nor a release edit, nor main. EVERY
   RELEASE ALSO LANDS ON MAIN (Seth, 2026-10-20: "every time we push a release (or pre-release), we should also
   commit and push to main"): the workflow's `main` job fast-forwards main to the released commit (a bare manual
   run with neither input does only that) by fast-forward, else by a merge commit (Seth merges pull requests of this
