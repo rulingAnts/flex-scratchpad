@@ -1357,11 +1357,17 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   components, `assets/media.js` verbatim): hero with the loop video, three steps with stills,
   features, install, a pre-release band. `assets/release.js` moves every download link and the
   version to the newest release that has BOTH files (`tests/js/site-release.test.js`). The video
-  and stills are filmed from the REAL UI by `tools/record_demo.py`; the "what you can do" table's ✓ cells carry
-  `data-stills` (Seth, 2026-10-20: "mouseover generated screenshots for each feature with a checkbox") and
-  `assets/media.js` shows those pictures in a hover / focus / tap card (`#claim-card`) when they are on the
-  manifest — `tools/shoot_claims.py` photographs them (the chart in its three views, the styled example, the
-  collection, the concordance dialog, the exports menu…) from the demo through the e2e bridge (demo project — an invented
+  and stills are filmed from the REAL UI by `tools/record_demo.py`; THE HERO IS A CAROUSEL (Seth, 2026-10-20: first
+  "mouseover generated screenshots for each feature", then "what I'd rather have is just one scrolling carousel of
+  screenshots and the video all where the video is now, auto scrolling and also easy for people to navigate … each
+  feature … as a caption underneath that also changes"): `#hero-carousel` (`.car-view` > `.car-track` of
+  `.car-slide`s, each a `.media-slot` with `data-caption`; the loop video first, `data-hold` 16 s, then one 16:9
+  still per feature, 6 s each) with ‹ › buttons, dots, ← → Home End, a swipe, a `.car-caption` band under the
+  picture and a `n / N` count; `assets/media.js` drops a still slide whose file is not on the manifest, pauses while
+  the pointer or focus is on it or the tab is hidden, and never auto-advances under reduced motion; the video plays
+  only on its own slide. `tools/shoot_claims.py` photographs the stills (`claim-*.webp`, 1280×720) from the demo
+  through the e2e bridge: the chart in its three views, the styled example, the collection, the concordance
+  dialog, the exports menu… (demo project — an invented
   language, never a community's data — through the e2e bridge, a drawn cursor and captions,
   Chromium's screencast, ffmpeg): re-run it after a UI change and look at the result.
 - GitHub Actions: public repo, standard runners only, Windows build is `workflow_dispatch`. Never

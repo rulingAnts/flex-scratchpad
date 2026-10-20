@@ -173,7 +173,7 @@ body.resizing * { pointer-events: none; }
 #editor::after { content: ""; display: block; height: 50vh; }
 .note-foot { padding: 6px 28px; color: var(--faint); font-size: 11.5px; border-top: 1px solid var(--border-soft); display: flex; gap: 14px; }
 .note-foot .spacer { flex: 1; }
-#editor-pane.no-note #editor, #editor-pane.no-note .note-head, #editor-pane.no-note .toolbar, #editor-pane.no-note .note-foot { display: none; }
+#editor-pane.no-note #editor, #editor-pane.no-note #collection, #editor-pane.no-note #chartnote, #editor-pane.no-note .note-head, #editor-pane.no-note .toolbar, #editor-pane.no-note .note-foot { display: none; }   /* a deleted collection or chart note used to stay drawn under the placeholder (Seth, 2026-10-20) */
 .no-note-msg { display: none; }
 #editor-pane.no-note .no-note-msg { display: grid; place-items: center; flex: 1; color: var(--muted); text-align: center; }
 .no-note-msg .big { font-size: 40px; opacity: 0.4; }
