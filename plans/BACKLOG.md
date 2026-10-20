@@ -507,6 +507,31 @@ columns matter by default, how the suffix list is configured (per database or pe
 whether a range of records (a word list) is one embed or many.
 
 
+## Known issue: one short example keeps slipping off its lines (Seth, 2026-10-20 — "to look into later, not to fix now")
+
+> *"sometimes shorter examples continuously misalign with their original source and require
+> re-pointing every time I visit them."* — *"One example in particular."*
+
+Not reproduced here yet. What to collect when it is looked at, from that one example:
+
+1. Its embed source before and after a visit (⋯ → Edit source): does it carry `at=` anchors, and
+   do they change? What does the "lines changed in FLEx" message under it say (`obj.track.change`:
+   moved / reshaped / found / lost, and `how`)?
+2. The text's ledger, `ledger-<text guid>.json` in the snapshot folder
+   (`<notebook>/.scratchpad/flex-cache/<project>/`), and `flex-scratchpad --project NAME --dump "TITLE"
+   --seg <its numbers>` for the lines it should show.
+
+Where to look first (`flex/tracking.py`): a SHORT line is the weak case of every fallback — when
+its anchors are not in the index (a re-imported text, a rebuilt paragraph, an embed written with
+`seg=` only), `track()` falls back to finding it by TEXT with `difflib` at `FIND_MIN` 0.6 "nearest
+the old place", and a line of two or three words clears 0.6 against several other lines; each visit
+then re-finds it, possibly somewhere else, and rewrites `seg=` / `at=` (so it "needs re-pointing
+every time"). Likely fixes: require a higher ratio for short lines (or an exact word match), prefer
+the old numbers when the text at them is a near match, and never rewrite the embed from a text
+match alone without saying so — and stop re-finding once the user has re-pointed it (the new
+anchors must be written and then win). Also check `blankSeg` / `is_blank_segment`: an empty FLEx
+segment counted by one side and not the other shifts every `seg=` after it by one.
+
 ## Known issue elsewhere: FieldWorks doubles the morph bundle of a two-language-glossed word on import (Seth, 2026-10-19)
 
 Seen on texts imported from FlexText Editor (`Tosokai`: every word; `Wahuka Arsen incident`: a few): the
