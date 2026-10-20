@@ -253,8 +253,8 @@ footer { margin-top: 64px; border-top: 1px solid var(--slate-200); background: #
 .kbd { font: 600 0.8rem var(--mono); background: var(--slate-100); border: 1px solid var(--slate-200); border-bottom-width: 2px; border-radius: 5px; padding: 0 5px; }
 .hero .ver { font-variant-numeric: tabular-nums; }
 
-/* The claims under the hero text and the comparison table (Seth, 2026-10-20: "show and explain
-   right up front what it can do that you can't do with just FLEx or with just a word document"). */
+/* The comparison table (Seth, 2026-10-20: "show and explain right up front what it can do that you
+   can't do with just FLEx or with just a word document"). */
 .compare-wrap { overflow-x: auto; background: #fff; border: 1px solid var(--slate-200); border-radius: var(--r-lg); box-shadow: 0 1px 2px rgba(15,23,42,0.04); }
 .compare { width: 100%; border-collapse: collapse; font-size: 0.92rem; min-width: 720px; }
 .compare th, .compare td { padding: 12px 14px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--slate-200); }
