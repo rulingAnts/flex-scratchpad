@@ -1354,8 +1354,10 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   run with neither input does only that) by fast-forward, else by a merge commit (Seth merges pull requests of this
   branch into main, so main carries merge commits the branch lacks); a conflict stops it and says to merge by hand.
 - THE SITE is `docs/` (GitHub Pages from `/docs`), in LingTeX Tools' pattern (its tokens and
-  components, `assets/media.js` verbatim): hero with the loop video, three steps with stills,
-  features, install, a pre-release band. `assets/release.js` moves every download link and the
+  components, `assets/media.js` verbatim): a BRIEF hero (Seth, 2026-10-20: "make the intro text a LOT briefer so that the
+  scrolling carousel is immediately visible on page load" — the kicker, the title, ONE sentence and three buttons, no
+  claim pills or link row; the carousel's top sits at ~440px on a 768px-tall screen), the carousel, three steps with
+  stills, features, install, a pre-release band. `assets/release.js` moves every download link and the
   version to the newest release that has BOTH files (`tests/js/site-release.test.js`). The video
   and stills are filmed from the REAL UI by `tools/record_demo.py`; THE HERO IS A CAROUSEL (Seth, 2026-10-20: first
   "mouseover generated screenshots for each feature", then "what I'd rather have is just one scrolling carousel of
@@ -1385,6 +1387,16 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   (or a picture nobody shows), when an in-page link has no target, when a section or sub-heading is missing from the
   contents, or when the home page stops linking to `guide/`. The README's how-to table and the guide say the same
   things: change both.
+  IT DESCRIBES THE CURRENT RELEASE (Seth, 2026-10-20: "have the documentation match the most recent full release …
+  you can have documentation for features on the pre-release, but have them flagged as such"): the guide names the
+  release it describes (0.1.0-beta.2, the GitHub release NOT marked pre-release) in its head and legend; anything only
+  in the pre-release wears `<span class="rel rel-pre">beta.3</span>`, anything finished but in no download yet
+  `<span class="rel rel-next">next</span>` (on a heading when the whole part is new, on the sentence or table row
+  otherwise, and in both contents lists for a whole section); the test checks the legend, the flag classes and that
+  sections 8–10 are flagged in the body and the contents. WHEN A RELEASE IS PROMOTED OR CUT: move the flags — a
+  promoted beta.3 drops every `beta.3` flag and renames the legend; a new pre-release turns `next` into its number.
+  What was in beta.2 was settled by `git show 0d84fd2:<file>` (no tagstyles.js / chart.js / log.py / xlsx, pptx,
+  pdf writers; no Ctrl+K, nested lists, gap bar, sticky headings, promote/demote, rule collections, flexcopy).
 - GitHub Actions: public repo, standard runners only, Windows build is `workflow_dispatch`. Never
   add a schedule, a larger runner, LFS or a release step without Seth's say-so.
 - This is Seth's suite: see `flextext-editor/CLAUDE.md` for the house rules on writing about
