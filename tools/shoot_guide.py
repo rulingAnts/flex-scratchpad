@@ -74,17 +74,7 @@ The past tense suffix *-mo* follows the verb stem, as in (1). The **stem** is un
 
 Questions end in the particle *ba*.
 
-## 3.3 Counts
-
-```chart
-type: bar
-title: Past-tense verbs per text
-labels: The dog and the river, The hunt, Songs
-series: with -mo = 9, 4, 2
-series: without = 3, 6, 5
-```
-
-## 3.4 Files
+## 3.3 Files
 
 The wordlist from the trip: {{{{file attachments/wordlist.xlsx "Wordlist, October"}}}}
 
@@ -391,6 +381,7 @@ def main(argv: list[str]) -> int:
         step("markdown", s_markdown)
 
         def s_markers_hidden():
+            open_note("Chapter 3")
             page.locator("#btn-markers").click()
             page.wait_for_timeout(400)
             shot("markers-hidden", box=union(page.locator("#editor .blk").nth(0), page.locator("#editor .blk").nth(4)), pad=10)
@@ -399,6 +390,7 @@ def main(argv: list[str]) -> int:
         step("markers-hidden", s_markers_hidden)
 
         def s_heading_menu():
+            open_note("Chapter 3")
             page.locator("#editor .blk-body").nth(1).click()
             page.locator("[data-test=tb-heading]").dispatch_event("mousedown")
             pop = popover()
@@ -407,16 +399,21 @@ def main(argv: list[str]) -> int:
         step("heading-menu", s_heading_menu)
 
         def s_folding():
+            open_note("Chapter 3")
             scroll_to("#editor .blk-h:has-text('3.2 Questions')", "center")
-            page.locator("#editor .blk-h", has_text="3.1 Past tense").locator("[data-test=fold]").click()
-            page.wait_for_timeout(500)
-            scroll_to("#editor .blk-h:has-text('3.1 Past tense')", "center")
-            shot("folding", box=union(page.locator("#editor .blk-h", has_text="3 Verbs"), page.locator("#editor .blk-h", has_text="3.3 Counts")), pad=10)
-            page.locator("#editor .blk-h", has_text="3.1 Past tense").locator("[data-test=fold]").click()
-            page.wait_for_timeout(400)
+            fold = page.locator("#editor .blk-h", has_text="3.1 Past tense").locator("[data-test=fold]")
+            fold.click()
+            try:
+                page.wait_for_timeout(500)
+                scroll_to("#editor .blk-h:has-text('3.1 Past tense')", "center")
+                shot("folding", box=union(page.locator("#editor .blk-h", has_text="3 Verbs"), page.locator("#editor .blk-h", has_text="3.3 Files")), pad=10)
+            finally:
+                fold.click()                       # never leave the section closed: every later picture needs it
+                page.wait_for_timeout(400)
         step("folding", s_folding)
 
         def s_sticky():
+            open_note("Chapter 3")
             scroll_to("#editor .blk-h:has-text('3.1.1')", "start")
             page.locator("#editor").evaluate("(e) => { e.scrollTop += 40; }")
             page.wait_for_timeout(500)
@@ -424,11 +421,13 @@ def main(argv: list[str]) -> int:
         step("sticky-headings", s_sticky)
 
         def s_lists():
+            open_note("Chapter 3")
             scroll_to("#editor .blk-list", "center")
             shot("lists", box=union(page.locator("#editor .blk-list").first, page.locator("#editor .blk-list").nth(1)), pad=12)
         step("lists", s_lists)
 
         def s_gap_bar():
+            open_note("Chapter 3")
             blocks = page.locator("#editor .blk")
             a = page.locator("#editor .blk-quote").first
             a.evaluate("(e) => e.scrollIntoView({ block: 'center' })")
@@ -446,6 +445,7 @@ def main(argv: list[str]) -> int:
         step("gap-bar", s_gap_bar)
 
         def s_block_menu():
+            open_note("Chapter 3")
             q = page.locator("#editor .blk-quote").first
             q.evaluate("(e) => e.scrollIntoView({ block: 'center' })")
             q.hover()
@@ -456,6 +456,7 @@ def main(argv: list[str]) -> int:
         step("block-menu", s_block_menu)
 
         def s_table():
+            open_note("Chapter 3")
             t = page.locator("#editor table.md-table").first
             t.evaluate("(e) => e.scrollIntoView({ block: 'center' })")
             page.wait_for_timeout(300)
@@ -465,6 +466,7 @@ def main(argv: list[str]) -> int:
         step("table", s_table)
 
         def s_table_menu():
+            open_note("Chapter 3")
             t = page.locator("#editor table.md-table").first
             t.locator("td").last.click()
             page.wait_for_timeout(300)
@@ -476,6 +478,7 @@ def main(argv: list[str]) -> int:
         step("table-cell-menu", s_table_menu)
 
         def s_link_pill():
+            open_note("Chapter 3")
             page.evaluate("() => { const b = [...document.querySelectorAll('#editor .blk-body')].find((x) => x.textContent.includes('FieldWorks notes')); b.scrollIntoView({ block: 'center' }); FS.editor.setCaret(b, b.textContent.indexOf('FieldWorks notes') + 3); b.focus(); }")
             page.wait_for_selector("[data-test=link-pill]:not([hidden])", timeout=3000)
             page.wait_for_timeout(300)
@@ -488,12 +491,9 @@ def main(argv: list[str]) -> int:
             esc()
         step("link-pill", s_link_pill)
 
-        def s_chart_block():
-            scroll_to("#editor .chart-block, #editor canvas", "center")
-            shot("chart-block", page.locator("#editor .blk").filter(has=page.locator("canvas")).first, pad=12)
-        step("chart-block", s_chart_block)
 
         def s_files():
+            open_note("Chapter 3")
             scroll_to("[data-test=file-card]", "center")
             shot("attachments", box=union(page.locator("#editor .blk").filter(has=page.locator(".md-embed[data-icon]")).last, page.locator("[data-test=file-card]").first, pad=12), pad=12)
         step("attachments", s_files)

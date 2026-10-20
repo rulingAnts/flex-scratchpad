@@ -1156,7 +1156,6 @@
       item('Attach a file…', () => attachFiles(false));
       item('Link to a file…', () => attachFiles(true));
       item('Table', () => S.editor.insertMarkdown(FS.tables.template(3, 3), true));
-      item('Chart', () => S.editor.insertMarkdown(FS.charts.template(), true));
       item('Checklist', () => S.editor.insertMarkdown('- [ ] ', false));
       item('Heading', () => S.editor.insertMarkdown('## ', false));
       item('Quote', () => S.editor.insertMarkdown('> ', false));
@@ -1179,7 +1178,6 @@
       case 'indent': return ed.indentActive(1) || FS.toast('Put the caret in a list item first');
       case 'outdent': return ed.indentActive(-1) || FS.toast('Put the caret in a list item first');
       case 'table': return ed.insertMarkdown(FS.tables.template(3, 3), true);
-      case 'chart': return ed.insertMarkdown(FS.charts.template(), true);
       case 'hr': return ed.insertMarkdown('---', true);
     }
   }
@@ -1770,7 +1768,7 @@
   FS.welcomeNote = () => [
     '# Welcome to FLEx Scratchpad',
     '',
-    'A notebook for FieldWorks: tabs, folders, tags, tables and charts, with **live FLEx objects** inside your notes.',
+    'A notebook for FieldWorks: tabs, folders, tags, tables and FieldWorks text charts, with **live FLEx objects** inside your notes.',
     '',
     '## Getting FLEx objects into a note',
     '- Press **Ctrl+Shift+L** (or the *FLEx object* button) to search the lexicon or the texts and insert an entry or a range of interlinear segments.',
@@ -1782,7 +1780,6 @@
     '- Markdown, shown with its markers kept faint: **bold**, *italic*, ==highlight==, `code`, [[another note]], `#tags`.',
     '- `- [ ]` makes a checklist; `# ` a heading; `> ` a quote; `---` a divider. Type `/` on an empty line for a menu.',
     '- Tables: cells accept line breaks and FLEx examples; use the *Column ▾ / Row ▾ / Table ▾* buttons for styling.',
-    '- Charts: a ```chart block with labels and series (double-click the chart to edit it).',
     '',
     '- [ ] Connect a FieldWorks project in Settings (the ⚙ button, or the FLEx pill at the bottom left)',
     '- [ ] Make a tab for each project or topic',

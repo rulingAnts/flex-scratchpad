@@ -86,3 +86,20 @@ h2 .rel, h3 .rel { top: -3px; }
   .guide table.ref td code, .guide code { white-space: normal; overflow-wrap: anywhere; }
   .guide table.ref td:first-child { white-space: normal; }
 }
+
+/* the version flags are links; the "next" install steps are a dialog */
+.guide .rel, .legend .rel { cursor: pointer; }
+.linkish { background: none; border: 0; padding: 0; font: inherit; color: var(--blue-700); text-decoration: underline; cursor: pointer; }
+#get-next { margin: auto; max-height: calc(100vh - 32px); overflow: auto; max-width: 720px; width: calc(100% - 32px); border: 1px solid var(--slate-200); border-radius: var(--r-lg); padding: 0; box-shadow: 0 30px 60px -20px rgba(2,6,23,.45); color: var(--slate-800); }
+#get-next::backdrop { background: rgba(15,23,42,.45); }
+#get-next .dlg-head { position: sticky; top: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--slate-200); background: #fff; }
+#get-next .dlg-head h2 { font-size: 1.15rem; margin: 0; }
+#get-next .dlg-close { border: 1px solid var(--slate-300); background: #fff; border-radius: 8px; width: 32px; height: 32px; cursor: pointer; font-size: 1rem; }
+#get-next .dlg-body { padding: 14px 18px 18px; font-size: 0.94rem; }
+#get-next .dlg-body h3 { font-size: 1rem; margin: 16px 0 6px; }
+#get-next .dlg-body p { margin: 0 0 10px; color: var(--slate-700); }
+#get-next .small { font-size: 0.86rem; color: var(--slate-500); }
+.cmd { display: flex; gap: 8px; align-items: stretch; margin: 6px 0 12px; }
+.cmd code { flex: 1; display: block; background: var(--slate-900); color: #e2e8f0; padding: 10px 12px; border-radius: 8px; font: 0.82rem/1.45 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.cmd .copy { border: 1px solid var(--slate-300); background: #fff; border-radius: 8px; padding: 0 12px; cursor: pointer; font: 600 0.85rem var(--font); }
+.cmd .copy:hover { background: var(--slate-50); }

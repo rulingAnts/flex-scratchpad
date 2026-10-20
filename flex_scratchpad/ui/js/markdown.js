@@ -46,7 +46,7 @@
         let j = i + 1;
         while (j < lines.length && !(new RegExp('^\\s{0,3}' + (fence === '`' ? '`{3,}' : '~{3,}') + '\\s*$')).test(lines[j])) j++;
         const lang = (m[2] || '').toLowerCase();
-        push(lang === 'chart' ? 'chart' : 'code', i, Math.min(lines.length, j + 1), { lang });
+        push('code', i, Math.min(lines.length, j + 1), { lang });
         i = j + 1;
         continue;
       }
@@ -321,7 +321,7 @@
         start = pre.len;
       }
       if (blockType === 'h') { const lvl = (RE.heading.exec(line) || [null, '#'])[1].length; for (let i = start; i < line.length; i++) out.marks[i].add('md-h md-h' + lvl); }
-      if (blockType === 'code' || blockType === 'chart') {
+      if (blockType === 'code') {
         if (RE.fence.test(line) && (li === 0 || li === lines.length - 1)) for (let i = 0; i < line.length; i++) out.marks[i].add('mk');
       } else {
         markInline(line.slice(start), out, start);

@@ -70,7 +70,7 @@ flex_scratchpad/
   docx_writer.py xlsx_writer.py pptx_writer.py  Word / Excel / PowerPoint from the page's export model, stdlib only
   pdf_print.py  a PDF written by WebView2 itself on Windows (the print dialog elsewhere)
   ui/index.html, ui/css/app.css, ui/js/
-    util.js api.js(+mock) flexref.js markdown.js interlinear.js files.js backup.js charts.js tables.js editor.js picker.js
+    util.js api.js(+mock) flexref.js markdown.js interlinear.js files.js backup.js tables.js editor.js picker.js
     export.js collection.js (example collections) flexcopy.js (the readable copies in the file)
     tagstyles.js (FLEx text markup tags: scoped styles, the ⚑ popover, the editors) app.js
     chart.js (FieldWorks text charts: the table, markers, free translations, the style popover)
@@ -112,6 +112,9 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
 
 ## Editor invariants (ui/js/editor.js, markdown.js)
 
+- NO BAR / LINE / PIE CHARTS (Seth, 2026-10-20: "there's really no reason our notes app needs bar charts. That's a red herring
+  … I only meant the text charts … and also tables"): `charts.js` and the ```chart block type are gone; a ```chart fence is an
+  ordinary code block. "Chart" in this repo means a FieldWorks TEXT CHART. Pictures made elsewhere are attached as files.
 - An embed on a line of its own is a `flex` block (expanded, or a chip with `collapsed`). An
   embed INSIDE a line of text is an inline chip: `decorate()` emits it as a
   `contenteditable=false` `.md-embed` span whose text is still the raw `{{flex …}}`, the chip is
@@ -1247,6 +1250,10 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   poller and FLEx and waits ≤5 s for an Api call still writing; `__main__` then ends the GUI
   process with `app.exit_now` (`os._exit`), never through the interpreter's shutdown. Anything
   that must reach disk is written synchronously before that — never put it in an atexit handler.
+- WHERE A silfw:// LINK LANDS (Seth, 2026-10-20: "silfw:// links unfortunately do not yet successfully target individual
+  lines (or even paragraphs) within a text. So far a text, a lexical item yes, a paragraph or line no. I'm not sure about
+  senses"): every link we build for an example, a chip, a readable copy or an export opens the TEXT at its start, so the docs
+  never promise a link to a line; the FLEx line number travels beside it. The guide's `#flex-links` note says so.
 - `flexscratchpad://note/<id>` (`links.py`): registered per user (HKCU) at start on Windows; a
   second instance hands the URL to the running one through `open-request.txt` in the local data
   folder (polled; no sockets) and exits; one instance is kept by a lock file. The second start
@@ -1393,6 +1400,13 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   (or a picture nobody shows), when an in-page link has no target, when a section or sub-heading is missing from the
   contents, or when the home page stops linking to `guide/`. The README's how-to table and the guide say the same
   things: change both.
+  HOW TO GET EACH VERSION (Seth, 2026-10-20: "how to get each of them (links). 'Next' requires pip install … a link to the
+  latest Python installer, and a pip install command that would work with that version"): the legend links the release and
+  the pre-release, and `#get-next` is a `<dialog>` (also opened by any `.rel-next` flag; a `.rel-pre` flag goes to the
+  pre-release page) with Python 3.13 (the newest the pinned pythonnet range supports; `requires-python >=3.10`), and
+  copy buttons for `py -3.13 -m pip install "flex-scratchpad[flex] @ <main.zip>"` — GitHub's archive of main, so no Git —
+  `py -3.13 -m flex_scratchpad`, and the `--force-reinstall --no-deps` update. Checked: that zip form installs the package
+  with its ui/ into a clean venv. Change the Python version there when pythonnet's range moves.
   IT DESCRIBES THE CURRENT RELEASE (Seth, 2026-10-20: "have the documentation match the most recent full release …
   you can have documentation for features on the pre-release, but have them flagged as such"): the guide names the
   release it describes (0.1.0-beta.2, the GitHub release NOT marked pre-release) in its head and legend; anything only

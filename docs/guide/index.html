@@ -39,13 +39,32 @@
       <a href="https://github.com/rulingAnts/flex-scratchpad/issues">Report an issue</a>
     </div>
     <div class="legend" id="legend">
-      <p><b>Which version this describes.</b> This guide describes FLEx Scratchpad <b>0.1.0-beta.2</b>, the current release. Two kinds of flag mark what is newer:</p>
+      <p><b>Which version this describes.</b> This guide describes FLEx Scratchpad <b>0.1.0-beta.2</b>, the current release. Two kinds of flag mark what is newer, and each version is a download of its own:</p>
       <ul>
-        <li><span class="rel rel-pre">beta.3</span> is in the <a href="https://github.com/rulingAnts/flex-scratchpad/releases/tag/v0.1.0-beta.3">pre-release 0.1.0-beta.3</a> and not in beta.2. Sections 8 to 10 (text charts, chart notes, searching the charts) and most of section 5 (text markup tags and visual filters) are pre-release in full.</li>
-        <li><span class="rel rel-next">next</span> is finished and tested but not in any download yet; it will be in the next pre-release.</li>
+        <li><b>Unmarked</b>: in the current release, <b>0.1.0-beta.2</b>. Get it from the <a href="../#install">Install section of the home page</a> (the installer or the portable zip), or from <a data-dl="notes" href="https://github.com/rulingAnts/flex-scratchpad/releases/tag/v0.1.0-beta.2">its release page</a>.</li>
+        <li><span class="rel rel-pre">beta.3</span> is in the <b>pre-release 0.1.0-beta.3</b> and not in beta.2. Sections 8 to 10 (text charts, chart notes, searching the charts) and most of section 5 (text markup tags and visual filters) are pre-release in full. Get it from <a href="https://github.com/rulingAnts/flex-scratchpad/releases/tag/v0.1.0-beta.3">its release page</a> (<a href="https://github.com/rulingAnts/flex-scratchpad/releases/download/v0.1.0-beta.3/FLEx-Scratchpad-Setup-0.1.0-beta.3.exe">installer</a> · <a href="https://github.com/rulingAnts/flex-scratchpad/releases/download/v0.1.0-beta.3/FLEx-Scratchpad-0.1.0-beta.3-windows-portable.zip">portable zip</a>). It installs over the current release and keeps your notebooks.</li>
+        <li><span class="rel rel-next">next</span> is finished and tested but not in any download yet; it will be in the next pre-release. To try it now, install it with Python: <button type="button" class="linkish" data-open="get-next">how to install the development version</button>.</li>
       </ul>
-      <p>Anything unmarked is in beta.2. The pictures were taken from the development version, so a menu in a picture can show an item your copy does not have yet.</p>
+      <p>The pictures were taken from the development version, so a menu in a picture can show an item your copy does not have yet. A flag in the text can be clicked: <span class="rel rel-pre">beta.3</span> goes to the pre-release, <span class="rel rel-next">next</span> to the install steps.</p>
     </div>
+    <dialog id="get-next" aria-labelledby="get-next-title">
+      <div class="dlg-head"><h2 id="get-next-title">Install the development version</h2><button type="button" class="dlg-close" data-close aria-label="Close">✕</button></div>
+      <div class="dlg-body">
+        <p>The development version is what the <span class="rel rel-next">next</span> flags describe: finished and tested, not yet in a download. It runs from Python on Windows, beside FieldWorks 9, and uses the same notebooks as the installed program. Use the installed program for your everyday work if you prefer; this is for trying what is coming.</p>
+        <h3>1. Install Python 3.13</h3>
+        <p>FLEx Scratchpad needs 64-bit Python <b>3.10 to 3.13</b> (the part that reads FieldWorks is not built for 3.14 yet). From <a href="https://www.python.org/downloads/windows/" target="_blank" rel="noopener">python.org's Windows downloads</a>, choose the newest <b>Python 3.13</b> release and its <b>Windows installer (64-bit)</b>, run it, and keep the default options. It also installs the <code>py</code> launcher the commands below use, which picks the right Python even when you have several.</p>
+        <h3>2. Install FLEx Scratchpad</h3>
+        <p>Open <b>Command Prompt</b> (Start, type <kbd>cmd</kbd>, Enter), paste this line, and press Enter:</p>
+        <div class="cmd"><code>py -3.13 -m pip install "flex-scratchpad[flex] @ https://github.com/rulingAnts/flex-scratchpad/archive/refs/heads/main.zip"</code><button type="button" class="copy" data-copy="py -3.13 -m pip install &quot;flex-scratchpad[flex] @ https://github.com/rulingAnts/flex-scratchpad/archive/refs/heads/main.zip&quot;">Copy</button></div>
+        <h3>3. Start it</h3>
+        <div class="cmd"><code>py -3.13 -m flex_scratchpad</code><button type="button" class="copy" data-copy="py -3.13 -m flex_scratchpad">Copy</button></div>
+        <p>Close the installed FLEx Scratchpad first: only one copy runs at a time. To see what it does while it runs, add <code>-v</code> at the end; that is the text to send with a report.</p>
+        <h3>Later: update to the newest development version</h3>
+        <p>The version number does not change between updates, so reinstall over the copy you have:</p>
+        <div class="cmd"><code>py -3.13 -m pip install --force-reinstall --no-deps "flex-scratchpad[flex] @ https://github.com/rulingAnts/flex-scratchpad/archive/refs/heads/main.zip"</code><button type="button" class="copy" data-copy="py -3.13 -m pip install --force-reinstall --no-deps &quot;flex-scratchpad[flex] @ https://github.com/rulingAnts/flex-scratchpad/archive/refs/heads/main.zip&quot;">Copy</button></div>
+        <p class="small">To go back, uninstall it with <code>py -3.13 -m pip uninstall flex-scratchpad</code>; the installed program and your notebooks are not touched.</p>
+      </div>
+    </dialog>
   </header>
 
   <details class="toc-mobile">
@@ -78,7 +97,7 @@
       <li><a href="#notebook">The notebook</a>
         <ol><li><a href="#nb-tabs">Tabs, folders, tags</a></li><li><a href="#nb-notes">Notes and the list</a></li><li><a href="#nb-search">Search</a></li><li><a href="#nb-rail">The left pane <span class="rel rel-pre">beta.3</span></a></li></ol></li>
       <li><a href="#writing">Writing</a>
-        <ol><li><a href="#wr-markdown">Markdown, markers shown or hidden</a></li><li><a href="#wr-headings">Headings that fold and stick</a></li><li><a href="#wr-lists">Lists, checklists, quotes</a></li><li><a href="#wr-blocks">Blocks: the bar, the menu, moving</a></li><li><a href="#wr-tables">Tables</a></li><li><a href="#wr-links">Links <span class="rel rel-pre">beta.3</span></a></li><li><a href="#wr-charts">Charts of your own</a></li><li><a href="#wr-files">Attached files</a></li><li><a href="#wr-undo">Undo, saving, scripts</a></li></ol></li>
+        <ol><li><a href="#wr-markdown">Markdown, markers shown or hidden</a></li><li><a href="#wr-headings">Headings that fold and stick</a></li><li><a href="#wr-lists">Lists, checklists, quotes</a></li><li><a href="#wr-blocks">Blocks: the bar, the menu, moving</a></li><li><a href="#wr-tables">Tables</a></li><li><a href="#wr-links">Links <span class="rel rel-pre">beta.3</span></a></li><li><a href="#wr-files">Attached files</a></li><li><a href="#wr-undo">Undo, saving, scripts</a></li></ol></li>
       <li><a href="#examples">Examples from FLEx</a>
         <ol><li><a href="#ex-paste">Paste lines copied in FLEx</a></li><li><a href="#ex-picker">The FLEx object dialog</a></li><li><a href="#ex-link">Paste a FLEx hyperlink</a></li><li><a href="#ex-shows">What an example shows</a></li><li><a href="#ex-chips">Chips, inline and collapsed</a></li><li><a href="#ex-entries">Entries</a></li><li><a href="#ex-live">Live, refreshed, and staying on its lines</a></li></ol></li>
       <li><a href="#styling">Styling and visual filters</a>
@@ -174,7 +193,7 @@
   <!-- ============================================================ 3 -->
   <section id="writing">
     <h2><span class="num">3</span>Writing</h2>
-    <p class="intro">A note is Markdown, written in a block editor that shows the markup faintly or hides it, with headings that fold, tables, links, simple charts, attached files, and the FLEx objects of the next sections.</p>
+    <p class="intro">A note is Markdown, written in a block editor that shows the markup faintly or hides it, with headings that fold, tables, links, attached files, and the FLEx objects of the next sections.</p>
 
     <h3 id="wr-markdown">Markdown, markers shown or hidden</h3>
     <div class="shots">
@@ -222,10 +241,6 @@
     </div>
     <p><kbd>Ctrl+K</kbd> makes the selected text a link, filling the address from the clipboard when one is there, or links to <span class="ui">another note in this notebook</span> as <code>[[Note title]]</code>. <kbd>Ctrl+click</kbd> follows at once, and <code>[[Note title]]</code> links work in beta.2 too; the dialog and the strip are new in beta.3. A FLEx hyperlink (<code>silfw://…</code>) opens the object in FieldWorks; every example and entry carries one (↗).</p>
 
-    <h3 id="wr-charts">Charts of your own</h3>
-    <figure class="shot half"><img src="../media/guide/chart-block.webp" loading="lazy" alt="A bar chart drawn from a few lines of data in the note"><figcaption>A bar chart from a <code>chart</code> block.</figcaption></figure>
-    <p>Not text charts, but the ordinary kind: the <span class="ui">Chart</span> button makes a bar, stacked, line, pie or donut chart from a few lines of data in the note (<code>type</code>, <code>title</code>, <code>labels</code>, <code>series: name = 1, 2, 3</code>), edited in a form or as text, drawn by the program and exported with the note.</p>
-
     <h3 id="wr-files">Attached files</h3>
     <figure class="shot"><img src="../media/guide/attachments.webp" loading="lazy" alt="A file chip in a sentence and a picture shown in the note from an attached file"><figcaption>A file chip in the text and a picture previewed in the note.</figcaption></figure>
     <p>Drop a file into a note, or use <span class="ui">📎 Attach</span>: the file is copied into the notebook's <code>attachments</code> folder (the ▾ next to the button, or <kbd>Alt</kbd> while dropping, links to the file where it is instead). A chip opens the file in its own program with a click; a picture or a video shows in the note; a web page, such as a FlexText Audio Segmenter listening page, previews inside the note with <span class="ui">Open in browser</span>. A pasted screenshot becomes a picture in the note. Exports write the chip as a link to the file.</p>
@@ -257,11 +272,11 @@
 
     <h3 id="ex-link">Paste a FLEx hyperlink</h3>
     <figure class="shot half"><img src="../media/guide/paste-link.webp" loading="lazy" alt="The dialog after pasting a FLEx hyperlink: the entry it names, Insert rendered or Insert link"><figcaption>A link copied in FieldWorks.</figcaption></figure>
-    <p>In FieldWorks, <em>Edit › Copy Location as Hyperlink</em> puts a <code>silfw://</code> link to the current record on the clipboard. Pasted into a note, it is resolved: an entry, a sense, a text, a paragraph or a line; you choose <span class="ui">Insert rendered</span> or <span class="ui">Insert link</span>. The link must name the open project.</p>
+    <p>In FieldWorks, <em>Edit › Copy Location as Hyperlink</em> puts a <code>silfw://</code> link to the current record on the clipboard. Pasted into a note, it is resolved to what it names, an entry, a sense or a text; you choose <span class="ui">Insert rendered</span> or <span class="ui">Insert link</span>. The link must name the open project.</p>
 
     <h3 id="ex-shows">What an example shows</h3>
     <figure class="shot"><img src="../media/guide/example.webp" loading="lazy" alt="A numbered example of two lines with a label, a highlighted word, a bold morpheme and an underlined word, the free translations, and the tag bars under the words"><figcaption>A two-line example, numbered (1), labelled, with a highlight, a bold morpheme, an underline, and the FLEx text markup tags under the words <span class="rel rel-pre" title="In the pre-release 0.1.0-beta.3; not in 0.1.0-beta.2, the current release">beta.3</span>.</figcaption></figure>
-    <p>Each line shows the lines you choose, FLEx's own line number, the free (and literal) translation and notes. The header has the text's title with the link into FLEx (↗), ↻ to re-read the lines after an edit in FieldWorks, ⚑ for the tags, ⤡ to collapse it, and <span class="ui">⋯</span>:</p>
+    <p>Each line shows the lines you choose, FLEx's own line number, the free (and literal) translation and notes. The header has the text's title with the link into FLEx (↗, which opens the text: <a href="#flex-links">see below</a>), ↻ to re-read the lines after an edit in FieldWorks, ⚑ for the tags, ⤡ to collapse it, and <span class="ui">⋯</span>:</p>
     <figure class="shot half"><img src="../media/guide/example-menu.webp" loading="lazy" alt="The example's menu: label, lines, writing systems, numbering, indent, range, add to a collection, show as a text chart, duplicate, remove"><figcaption>The ⋯ menu of an example.</figcaption></figure>
     <ul>
       <li><b>Lines</b>: Word, Morphemes, Morph glosses, Lex. entries, Word gloss, Category, Free, Literal, Notes, the FLEx text markup tags <span class="rel rel-pre" title="In the pre-release 0.1.0-beta.3; not in 0.1.0-beta.2, the current release">beta.3</span>, and <em>Chart columns</em> <span class="rel rel-pre" title="In the pre-release 0.1.0-beta.3; not in 0.1.0-beta.2, the current release">beta.3</span> (see <a href="#ch-join">below</a>); each in a chosen writing system when the project has several.</li>
@@ -271,6 +286,8 @@
       <li><b>Add to an example collection…</b>, <b>Show these lines as a text chart…</b> <span class="rel rel-next" title="Finished and tested, not in any download yet; in the next pre-release">next</span>, <b>Duplicate</b>, <b>Edit source</b>, <b>Remove</b>.</li>
     </ul>
     <p>A line that is empty in FLEx (a stray Shift+Enter) is left out; punctuation alone is not empty. Morph glosses wear the morph type's hyphens and equals signs.</p>
+
+    <div class="note" id="flex-links"><b>Where a link into FLEx lands.</b> FieldWorks' <code>silfw://</code> links open a <b>text</b> or a <b>lexical entry</b>, but not yet a particular paragraph or line inside a text, and a sense may open its entry rather than the sense itself. So ↗ on an example, a chip, the readable copy in a file or a link in an export opens the example's text in FLEx, at its start; the FLEx line numbers shown with the example say where to look.</div>
 
     <h3 id="ex-chips">Chips, inline and collapsed</h3>
     <div class="shots">
@@ -374,6 +391,7 @@
 
     <h3 id="co-flextext">Export as a FLEx text</h3>
     <figure class="shot half"><img src="../media/guide/flextext-export.webp" loading="lazy" alt="The FLEx text export dialog: the title, the number of examples, the source note option, the audio choice and the audio folder"><figcaption><span class="ui">Export as FLEx text…</span> at the top of a collection.</figcaption></figure>
+    <p><b>Why you would want this.</b> FieldWorks works on one text at a time. A collection exported as a FLEx text makes the examples you chose, from many texts, into <em>one new text</em> you import into FLEx: every serial-verb sentence in your corpus, say, or every clause with a particular particle, side by side as one text you can gloss, tag, chart or concord on its own, without touching the texts they came from. With its audio, it also opens in the FlexText Audio Segmenter to check or cut.</p>
     <p>Only a collection exports a <code>.flextext</code>: one paragraph per example, one phrase per line, every writing-system alternative, the word identities kept so FieldWorks reuses the analyses on import, a <em>Source</em> note per line naming the text and line it came from. Examples from texts in different baseline writing systems become one file each. The <span class="ui">Audio</span> choice: <b>one audio file for the text</b> (the default: every example's recording in order with a click between examples, named like the .flextext and saved beside it, which the FlexText Audio Segmenter pairs with it by name), <b>one small file per line</b>, the original recordings and offsets, or none; or into a folder you choose, such as the project's <code>LinkedFiles\AudioVisual</code>, which FLEx finds on import. The file is a new text with new identities: importing it cannot touch the texts its examples came from, and the program refuses to write a file FieldWorks' importer would stumble on.</p>
   </section>
 
@@ -531,8 +549,8 @@
     </div>
 
     <h3 id="xp-word">Word, in LingTeX-Word styles <span class="rel rel-pre" title="In the pre-release 0.1.0-beta.3; not in 0.1.0-beta.2, the current release">beta.3</span></h3>
-    <figure class="shot"><img src="../media/guide/export-word.webp" loading="lazy" alt="The Word export rendered: the heading, the prose, a numbered interlinear example as a borderless table with the tiers aligned, the grammatical glosses in small capitals, the free translation in quotes with a link to the line"><figcaption>The Word export, rendered by LibreOffice: a LingTeX-Word interlinear table.</figcaption></figure>
-    <p>Every expanded example is written as a <a href="https://github.com/rulingAnts/LingTeX-Tools" target="_blank" rel="noopener">LingTeX-Word</a> interlinear table: the add-in's own table and tier styles (<em>LingTeX Interlinear</em>, <em>Vernacular</em>, <em>Morphemes</em>, <em>Gloss</em>, <em>Word Gloss</em>, <em>Category</em>), grammatical glosses set in small capitals, Word's own (1) numbering with a., b. for several lines, the free translation in quotes with a link to the line in FLEx. A document with the add-in installed re-wraps them. Your highlights, bold, underline and colours stay.</p>
+    <figure class="shot"><img src="../media/guide/export-word.webp" loading="lazy" alt="The Word export rendered: the heading, the prose, a numbered interlinear example as a borderless table with the tiers aligned, the grammatical glosses in small capitals, the free translation in quotes, then the text title and line number as a link into FLEx"><figcaption>The Word export, rendered by LibreOffice: a LingTeX-Word interlinear table.</figcaption></figure>
+    <p>Every expanded example is written as a <a href="https://github.com/rulingAnts/LingTeX-Tools" target="_blank" rel="noopener">LingTeX-Word</a> interlinear table: the add-in's own table and tier styles (<em>LingTeX Interlinear</em>, <em>Vernacular</em>, <em>Morphemes</em>, <em>Gloss</em>, <em>Word Gloss</em>, <em>Category</em>), grammatical glosses set in small capitals, Word's own (1) numbering with a., b. for several lines, the free translation in quotes followed by the text's title and FLEx line number as a link that opens the text in FLEx. A document with the add-in installed re-wraps them. Your highlights, bold, underline and colours stay.</p>
     <figure class="shot"><img src="../media/guide/export-excel.webp" loading="lazy" alt="The Excel export's Note sheet rendered: the blocks in order, an example as rows per line with the words across"><figcaption>The Excel export, rendered by LibreOffice <span class="rel rel-pre" title="In the pre-release 0.1.0-beta.3; not in 0.1.0-beta.2, the current release">beta.3</span>.</figcaption></figure>
 
     <h3 id="xp-audio">Audio in the web page and slideshow <span class="rel rel-pre" title="In the pre-release 0.1.0-beta.3; not in 0.1.0-beta.2, the current release">beta.3</span></h3>
@@ -689,6 +707,30 @@
 </footer>
 
 <script src="../assets/release.js"></script>
+<script>
+// The "next" install steps, the copy buttons, and the version flags as links (Seth, 2026-10-20: "include in the
+// documentation (where it discusses the different version chips) how to get each of them (links)").
+(function () {
+  var dlg = document.getElementById('get-next');
+  function open() { if (dlg && dlg.showModal) dlg.showModal(); else if (dlg) dlg.setAttribute('open', ''); }
+  document.addEventListener('click', function (e) {
+    var t = e.target;
+    if (t.closest('[data-open="get-next"]') || t.closest('.rel-next')) { e.preventDefault(); open(); return; }
+    if (t.closest('.rel-pre') && !t.closest('#legend li')) { location.href = 'https://github.com/rulingAnts/flex-scratchpad/releases/tag/v0.1.0-beta.3'; return; }
+    if (t.closest('[data-close]') && dlg) { dlg.close(); return; }
+    var c = t.closest('button.copy');
+    if (c) {
+      var text = c.getAttribute('data-copy');
+      var done = function () { c.textContent = 'Copied'; setTimeout(function () { c.textContent = 'Copy'; }, 1600); };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, function () { fallback(text); done(); });
+      else { fallback(text); done(); }
+    }
+  });
+  function fallback(text) { var ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); } catch (x) {} ta.remove(); }
+  if (dlg) dlg.addEventListener('click', function (e) { if (e.target === dlg) dlg.close(); });    // a click on the backdrop
+  if (location.hash === '#get-next') open();
+})();
+</script>
 <script>
 // The contents: the section (and sub-heading) the reader is at is marked, and its sub-headings shown.
 (function () {

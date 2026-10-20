@@ -6,7 +6,7 @@
 ┌─────────────────────────── pywebview window (WebView2 on Windows) ───────────────────────────┐
 │  file:///…/flex_scratchpad/ui/index.html                                                      │
 │  app.js (shell) · editor.js (blocks) · interlinear.js (FLEx rendering, styling, audio)        │
-│  tables.js · charts.js · picker.js · markdown.js · flexref.js · api.js                        │
+│  tables.js · picker.js · markdown.js · flexref.js · api.js                        │
 │                 window.pywebview.api.<method>(...)  →  Promise                                │
 └──────────────────────────────────────────┬───────────────────────────────────────────────────┘
                                            │ js_api (JSON; one Python thread per call)
@@ -109,7 +109,6 @@ small, named extension in a form a plain Markdown reader survives.** The current
 | table styling, widths, frozen panes | a `{table: …}` line after the table | a stray `{…}` line |
 | merged cells | `span R.C: RxC` in that line; covered cells left empty | the grid, with gaps |
 | line breaks in a cell | `<br>` (GFM already allows it) | a line break |
-| charts | a ```chart fence | a code block |
 
 Why not HTML storage: the editor's one invariant is that a block's `textContent` **is** the
 source (decoration only wraps characters), which is what makes typing, undo, search, cloud
