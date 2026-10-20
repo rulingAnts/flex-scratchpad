@@ -50,10 +50,29 @@
 </section>
 
 <div class="hero-media">
-  <figure class="media-slot" data-video="media/scratchpad-loop.mp4" data-webm="media/scratchpad-loop.webm" data-poster="media/scratchpad-loop.jpg"
-          data-label="FLEx Scratchpad in use: lines copied in FLEx are pasted into a note and become an interlinear example from the project; a word is highlighted, a section is folded away, and the note's examples are collected and exported as a FLEx text">
-    <div class="placeholder" aria-hidden="true"><img src="media/scratchpad-loop.jpg" alt=""></div>
-  </figure>
+  <div class="carousel" id="hero-carousel" tabindex="0" aria-roledescription="carousel" aria-label="What FLEx Scratchpad adds, in pictures">
+    <div class="car-view">
+    <div class="car-track">
+      <figure class="car-slide" data-caption="Lines copied in FLEx become a live example in a note: styled, folded, collected, exported back as a FLEx text"><div class="media-slot" data-video="media/scratchpad-loop.mp4" data-webm="media/scratchpad-loop.webm" data-poster="media/scratchpad-loop.jpg" data-hold="16000"
+              data-label="FLEx Scratchpad in use: lines copied in FLEx are pasted into a note and become an interlinear example from the project; a word is highlighted, a section is folded away, and the note's examples are collected and exported as a FLEx text"><div class="placeholder" aria-hidden="true"><img src="media/scratchpad-loop.jpg" alt=""></div></div></figure>
+      <figure class="car-slide still" data-caption="A live example from your project, numbered in your prose — never a pasted copy that goes stale"><div class="media-slot" data-img="media/claim-example.webp" data-label="A live example from your project, numbered in your prose — never a pasted copy that goes stale"></div></figure>
+      <figure class="car-slide still" data-caption="Highlight, bold, underline or bracket a word with a click; the styling stays with the note"><div class="media-slot" data-img="media/claim-style.webp" data-label="Highlight, bold, underline or bracket a word with a click; the styling stays with the note"></div></figure>
+      <figure class="car-slide still" data-caption="Write around your data: headings, checklists, and tables with examples inside the cells"><div class="media-slot" data-img="media/claim-notes.webp" data-label="Write around your data: headings, checklists, and tables with examples inside the cells"></div></figure>
+      <figure class="car-slide still" data-caption="Collections by rule — every line tagged Topic — that pick up their new lines later"><div class="media-slot" data-img="media/claim-collect.webp" data-label="Collections by rule — every line tagged Topic — that pick up their new lines later"></div></figure>
+      <figure class="car-slide still" data-caption="A FLEx concordance export becomes a numbered set of live examples"><div class="media-slot" data-img="media/claim-concordance.webp" data-label="A FLEx concordance export becomes a numbered set of live examples"></div></figure>
+      <figure class="car-slide still" data-caption="A text chart in a document, with your own columns, visual filters and playback"><div class="media-slot" data-img="media/claim-chart-columns.webp" data-label="A text chart in a document, with your own columns, visual filters and playback"></div></figure>
+      <figure class="car-slide still" data-caption="The same chart as one column, each part labelled with its column"><div class="media-slot" data-img="media/claim-chart-flat.webp" data-label="The same chart as one column, each part labelled with its column"></div></figure>
+      <figure class="car-slide still" data-caption="…or by header group, styled by rules on columns and markers"><div class="media-slot" data-img="media/claim-chart-groups.webp" data-label="…or by header group, styled by rules on columns and markers"></div></figure>
+      <figure class="car-slide still" data-caption="Ask which column kabir sits in, across every chart of the project"><div class="media-slot" data-img="media/claim-chart-search.webp" data-label="Ask which column kabir sits in, across every chart of the project"></div></figure>
+      <figure class="car-slide still" data-caption="Hear exactly this line: ▶ plays its stretch of the recording and lights it"><div class="media-slot" data-img="media/claim-audio.webp" data-label="Hear exactly this line: ▶ plays its stretch of the recording and lights it"></div></figure>
+      <figure class="car-slide still" data-caption="Out the door: Word in LingTeX styles, Excel, PDF, slides, PowerPoint, a FLEx text"><div class="media-slot" data-img="media/claim-export.webp" data-label="Out the door: Word in LingTeX styles, Excel, PDF, slides, PowerPoint, a FLEx text"></div></figure>
+    </div>
+    <button type="button" class="car-btn prev" aria-label="Previous picture">&#8249;</button>
+    <button type="button" class="car-btn next" aria-label="Next picture">&#8250;</button>
+    <div class="car-dots" role="tablist" aria-label="Pictures"></div>
+    </div>
+    <p class="car-caption" aria-live="polite"></p>
+  </div>
 </div>
 
 <section class="section" id="why">
@@ -68,56 +87,56 @@
         <tr>
           <th scope="row">Write around your data: headings, lists, tables, folders, tags, drafts</th>
           <td class="no">Notes fields on records; no documents</td>
-          <td class="yes has-stills" data-stills="claim-notes" data-caption="A note: headings, a styled example, a table with examples in its cells, a checklist" tabindex="0">Yes</td>
+          <td class="yes">Yes</td>
           <td class="yes">Yes: Markdown notes in tabs and folders, with your data inside them</td>
         </tr>
         <tr>
           <th scope="row">Quote an interlinear example that follows your analysis</th>
           <td class="part">Only in the Notes field in the text itself, difficult to organize or find later</td>
           <td class="no">A pasted copy, stale the moment you re-gloss</td>
-          <td class="yes has-stills" data-stills="claim-example" data-caption="An example read from the project, numbered, with its free translation" tabindex="0">Live: read from the project when shown; ↻ after an edit; stays on its lines when you split, merge or delete lines in FLEx</td>
+          <td class="yes">Live: read from the project when shown; ↻ after an edit; stays on its lines when you split, merge or delete lines in FLEx</td>
         </tr>
         <tr>
           <th scope="row">Highlight a morpheme, bracket a phrase, colour a word in an example</th>
           <td class="no">No</td>
           <td class="part">By hand, and lost on every re-paste</td>
-          <td class="yes has-stills" data-stills="claim-style" data-caption="Click a word: highlight, bold, underline, colour, brackets — kept in the note" tabindex="0">A click; kept with the note; carried into every export</td>
+          <td class="yes">A click; kept with the note; carried into every export</td>
         </tr>
         <tr>
           <th scope="row">Gather every example of a construction across your texts</th>
           <td class="part">A filter, while the window is open</td>
           <td class="no">Copy and paste, one by one</td>
-          <td class="yes has-stills" data-stills="claim-collect" data-caption="A collection made by rule: every line tagged, in text order" tabindex="0">Collections, by hand or by rule (“every line tagged Topic”, “every chart row with <em>kabir</em> in the Subject column”); “Find new lines” later</td>
+          <td class="yes">Collections, by hand or by rule (“every line tagged Topic”, “every chart row with <em>kabir</em> in the Subject column”); “Find new lines” later</td>
         </tr>
         <tr>
           <th scope="row">Turn a concordance search into a set of examples</th>
           <td class="part">A list of references and a CSV export</td>
           <td class="no">Retype or paste each one</td>
-          <td class="yes has-stills" data-stills="claim-concordance" data-caption="FLEx’s concordance export placed in the project, row by row" tabindex="0">Open FLEx’s concordance export: every line it lists becomes a live, numbered example in a collection</td>
+          <td class="yes">Open FLEx’s concordance export: every line it lists becomes a live, numbered example in a collection</td>
         </tr>
         <tr>
           <th scope="row">Work with a text chart in a document</th>
           <td class="part">One chart at a time, in its own tool</td>
           <td class="no">A screenshot</td>
-          <td class="yes has-stills" data-stills="claim-chart-columns,claim-chart-flat,claim-chart-groups" data-caption="The same chart as columns · one column · header groups" tabindex="0">The live chart or a range of its rows, your own columns beside it, visual filters by column, marker and clause type, three layouts</td>
+          <td class="yes">The live chart or a range of its rows, your own columns beside it, visual filters by column, marker and clause type, three layouts</td>
         </tr>
         <tr>
           <th scope="row">Ask “which column does <em>kabir</em> sit in?” across every chart</th>
           <td class="no">No search over charts</td>
           <td class="no">—</td>
-          <td class="yes has-stills" data-stills="claim-chart-search" data-caption="The chart search: col:Subject lex:kabir across every chart" tabindex="0">One search box over every chart of the project, by word, gloss, lexeme, marker, column and clause type; a column profile per lexeme</td>
+          <td class="yes">One search box over every chart of the project, by word, gloss, lexeme, marker, column and clause type; a column profile per lexeme</td>
         </tr>
         <tr>
           <th scope="row">Hear exactly this example</th>
           <td class="part">The text's recording, from its player</td>
           <td class="no">No</td>
-          <td class="yes has-stills" data-stills="claim-audio" data-caption="▶ on a line plays its stretch of the recording and lights it" tabindex="0">▶ on each line of a time-aligned text; clips kept with the notebook; players ride along in the web page and slideshow exports</td>
+          <td class="yes">▶ on each line of a time-aligned text; clips kept with the notebook; players ride along in the web page and slideshow exports</td>
         </tr>
         <tr>
           <th scope="row">Publish: Word, Excel, PDF, slides, a FLEx text</th>
           <td class="part">FLEx's own exports of a text</td>
           <td class="part">Word, by hand</td>
-          <td class="yes has-stills" data-stills="claim-export" data-caption="The note menu: Markdown, web page, Word, Excel, PDF, slideshow, PowerPoint" tabindex="0">Word in LingTeX-Word styles, Excel with one row per chart row, PDF, a slideshow and PowerPoint, and a collection as a <code>.flextext</code> with its examples' audio stitched together. The pretty exports are a work in progress: they improve with every release, and some layouts still need a hand afterwards</td>
+          <td class="yes">Word in LingTeX-Word styles, Excel with one row per chart row, PDF, a slideshow and PowerPoint, and a collection as a <code>.flextext</code> with its examples' audio stitched together. The pretty exports are a work in progress: they improve with every release, and some layouts still need a hand afterwards</td>
         </tr>
         <tr>
           <th scope="row">Read it without the program, in ten years</th>
@@ -134,8 +153,6 @@
       </tbody>
     </table>
   </div>
-  <p class="compare-hint">Rest the pointer on a ✓ (or tab to it) to see that feature in the program. Every picture is the real program on its built-in sample language.</p>
-  <div class="claim-card" id="claim-card" hidden aria-live="polite"></div>
 </section>
 
 <section class="section" id="how">

@@ -65,7 +65,7 @@ def chromium_path():
     return p if Path(p).exists() else None
 
 
-def crop(png: bytes, box: dict, ratio: float = 1.6, width: int = 1200) -> "Image":
+def crop(png: bytes, box: dict, ratio: float = 16 / 9, width: int = 1280) -> "Image":
     from PIL import Image
     im = Image.open(BytesIO(png)).convert("RGB")
     k = SCALE
@@ -100,7 +100,7 @@ def main() -> int:
         page.goto((UI / "index.html").as_uri())
         page.locator("#tabs .tab-item").first.wait_for()
 
-        def still(name, focus=None, pane="#editor-pane", ratio=1.6, top=False):
+        def still(name, focus=None, pane="#editor-pane", ratio=16 / 9, top=False):
             """The pane, cropped to `ratio`, centred on `focus` (or starting at its top with `top`)."""
             page.mouse.move(2, 2)
             page.wait_for_timeout(250)
@@ -119,7 +119,7 @@ def main() -> int:
         page.wait_for_timeout(600)
         page.locator("#editor table.md-table").evaluate("(e) => e.scrollIntoView({ block: 'center' })")
         page.wait_for_timeout(400)
-        still("claim-notes", page.locator("#editor .text-obj").first, ratio=1.3, top=True)
+        still("claim-notes", page.locator("#editor .text-obj").first, ratio=16 / 9, top=True)
         page.locator("#editor .text-obj").first.evaluate("(e) => e.scrollIntoView({ block: 'start' })")
         page.wait_for_timeout(300)
         still("claim-example", page.locator("#editor .text-obj").first)
@@ -150,19 +150,19 @@ def main() -> int:
         page.locator(".note-card", has_text="Story chart").click()
         page.locator("#chartnote .tchart tr.crow").first.wait_for()
         page.wait_for_timeout(600)
-        still("claim-chart-columns", page.locator("#chartnote .tchart"), pane="#chartnote", ratio=1.5, top=True)
+        still("claim-chart-columns", page.locator("#chartnote .tchart"), pane="#chartnote", ratio=16 / 9, top=True)
         page.locator("#chartnote [data-test=chart-view]").click()
         page.wait_for_timeout(700)
-        still("claim-chart-flat", page.locator("#chartnote .tchart"), pane="#chartnote", ratio=1.5, top=True)
+        still("claim-chart-flat", page.locator("#chartnote .tchart"), pane="#chartnote", ratio=16 / 9, top=True)
         page.locator("#chartnote [data-test=chart-view-groups]").click()
         page.wait_for_timeout(700)
-        still("claim-chart-groups", page.locator("#chartnote .tchart"), pane="#chartnote", ratio=1.5, top=True)
+        still("claim-chart-groups", page.locator("#chartnote .tchart"), pane="#chartnote", ratio=16 / 9, top=True)
         # the chart search
         page.evaluate("() => FS.searchCharts()")   # the toolbar button is hidden while a chart note is open
         page.locator(".modal input[type=text]").first.wait_for()
         page.locator(".modal input[type=text]").first.fill("col:Subject lex:kabir")
         page.wait_for_timeout(900)
-        still("claim-chart-search", page.locator(".modal"), pane=".modal", ratio=1.5)
+        still("claim-chart-search", page.locator(".modal"), pane=".modal", ratio=16 / 9)
         page.keyboard.press("Escape")
         # the concordance import
         page.locator("#btn-new-menu").click()
@@ -170,7 +170,7 @@ def main() -> int:
         page.locator("[data-test=conc-text]").fill(CONCORDANCE)
         page.wait_for_function("() => /placed/.test(document.querySelector('[data-test=conc-count]').textContent)")
         page.wait_for_timeout(300)
-        still("claim-concordance", page.locator(".modal"), pane=".modal", ratio=1.5)
+        still("claim-concordance", page.locator(".modal"), pane=".modal", ratio=16 / 9)
         page.keyboard.press("Escape")
         browser.close()
     files = []

@@ -20,6 +20,7 @@
             .then(function (r) { return r.ok ? r.json() : {}; })
             .then(function (j) { return (j && j.files) || []; })
             .catch(function () { return []; });
+    window.__fsMediaFiles = available;   // the carousel below reads the same list
 
     // A slot's file is available when its name is on the list.
     function exists(url) {
@@ -72,64 +73,80 @@
     });
 })();
 
-// "What you can do": a ✓ cell with data-stills shows those pictures in a card while the pointer
-// rests on it (or it has the keyboard focus; a tap toggles it). Only stills on the manifest are
-// shown, so a row whose picture is not made yet has no card at all.
+// The hero carousel: the loop video and one picture per feature (Seth, 2026-10-20: "one scrolling
+// carousel of screenshots and the video all where the video is now, auto scrolling and also easy for
+// people to navigate"). Slides whose picture is not on the manifest are dropped. It advances on its
+// own — the video slide for data-hold ms, a picture for 6 s — but not while the pointer or the
+// keyboard focus is on it, not while the tab is hidden, and not at all for visitors who ask for
+// reduced motion; arrows, dots, ← →, Home / End and a swipe move it by hand.
 (function () {
-    var card = document.getElementById('claim-card');
-    if (!card) return;
-    var meta = document.querySelector('meta[name="media-manifest"]');
-    var base = meta ? meta.getAttribute('content').replace(/available\.json$/, '') : 'media/';
-    var listed = (!meta || !window.fetch || location.protocol === 'file:')
-        ? Promise.resolve([])
-        : fetch(meta.getAttribute('content'), { cache: 'no-cache' })
-            .then(function (r) { return r.ok ? r.json() : {}; })
-            .then(function (j) { return (j && j.files) || []; })
-            .catch(function () { return []; });
-    var VIEW = { 'claim-chart-columns': 'Columns', 'claim-chart-flat': 'One column', 'claim-chart-groups': 'Header groups' };
-    var cells = Array.prototype.slice.call(document.querySelectorAll('.compare td.has-stills'));
-    var open = null;
-    listed.then(function (files) {
-        cells.forEach(function (td) {
-            var names = (td.getAttribute('data-stills') || '').split(',').filter(function (n) { return files.indexOf(n + '.webp') !== -1; });
-            if (!names.length) return;
-            td.classList.add('has-pic');
-            function show() {
-                if (open === td) return;
-                open = td;
-                card.innerHTML = '';
-                var pics = document.createElement('div');
-                pics.className = 'pics' + (names.length > 1 ? ' three' : '');
-                names.forEach(function (n) {
-                    var f = document.createElement('figure');
-                    var i = new Image(); i.src = base + n + '.webp'; i.alt = td.getAttribute('data-caption') || ''; i.decoding = 'async';
-                    f.appendChild(i);
-                    if (VIEW[n]) { var fc = document.createElement('figcaption'); fc.textContent = VIEW[n]; f.appendChild(fc); }
-                    pics.appendChild(f);
-                });
-                card.appendChild(pics);
-                var cap = document.createElement('div'); cap.className = 'cap'; cap.textContent = td.getAttribute('data-caption') || '';
-                card.appendChild(cap);
-                card.hidden = false;
-                place(td);
-            }
-            function place(el) {
-                var r = el.getBoundingClientRect();
-                var cw = card.offsetWidth, ch = card.offsetHeight;
-                var left = Math.min(Math.max(12, r.left), window.innerWidth - cw - 12);
-                var top = r.bottom + 8;
-                if (top + ch > window.innerHeight - 12) top = Math.max(12, r.top - ch - 8);
-                card.style.left = left + 'px';
-                card.style.top = top + 'px';
-            }
-            function hide() { if (open !== td) return; open = null; card.hidden = true; }
-            td.addEventListener('mouseenter', show);
-            td.addEventListener('mouseleave', hide);
-            td.addEventListener('focus', show);
-            td.addEventListener('blur', hide);
-            td.addEventListener('click', function () { if (open === td) hide(); else show(); });
+    var car = document.getElementById('hero-carousel');
+    if (!car) return;
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var track = car.querySelector('.car-track');
+    var dots = car.querySelector('.car-dots');
+    var files = window.__fsMediaFiles || Promise.resolve([]);
+    files.then(function (list) {
+        Array.prototype.slice.call(track.querySelectorAll('.car-slide.still')).forEach(function (sl) {
+            var slot = sl.querySelector('.media-slot');
+            var img = (slot && slot.getAttribute('data-img')) || '';
+            if (list.indexOf(img.split('/').pop()) === -1) sl.parentNode.removeChild(sl);
         });
+        var slides = Array.prototype.slice.call(track.children);
+        if (slides.length < 2) { car.querySelectorAll('.car-btn, .car-dots').forEach(function (b) { b.hidden = true; }); return; }
+        var caption = car.querySelector('.car-caption');
+        var count = document.createElement('span'); count.className = 'car-count'; car.appendChild(count);
+        var i = 0, timer = null, hold = false;
+        slides.forEach(function (sl, k) {
+            var d = document.createElement('button'); d.type = 'button'; d.className = 'car-dot'; d.setAttribute('role', 'tab');
+            d.setAttribute('aria-label', 'Picture ' + (k + 1) + ' of ' + slides.length);
+            d.addEventListener('click', function () { go(k, true); });
+            dots.appendChild(d);
+        });
+        function videoOf(sl) { return sl.querySelector('video'); }
+        function go(n, byHand) {
+            i = (n + slides.length) % slides.length;
+            track.style.transform = 'translateX(-' + (i * 100) + '%)';
+            Array.prototype.forEach.call(dots.children, function (d, k) { d.setAttribute('aria-selected', k === i ? 'true' : 'false'); });
+            slides.forEach(function (sl, k) {
+                sl.setAttribute('aria-hidden', k === i ? 'false' : 'true');
+                var v = videoOf(sl);
+                if (!v) return;
+                if (k === i) { if (!reduce) { var p = v.play(); if (p && p.catch) p.catch(function () {}); } }
+                else v.pause();
+            });
+            if (caption) caption.textContent = slides[i].getAttribute('data-caption') || '';
+            count.textContent = (i + 1) + ' / ' + slides.length;
+            schedule(byHand);
+        }
+        function schedule(byHand) {
+            if (timer) { clearTimeout(timer); timer = null; }
+            if (reduce || hold || document.hidden) return;
+            var ms = +(slides[i].getAttribute('data-hold') || 6000);
+            if (byHand) ms = Math.max(ms, 9000);                 // a visitor who chose a picture gets to look at it
+            timer = setTimeout(function () { go(i + 1); }, ms);
+        }
+        car.querySelector('.car-btn.prev').addEventListener('click', function () { go(i - 1, true); });
+        car.querySelector('.car-btn.next').addEventListener('click', function () { go(i + 1, true); });
+        car.addEventListener('keydown', function (e) {
+            if (e.key === 'ArrowRight') { e.preventDefault(); go(i + 1, true); }
+            else if (e.key === 'ArrowLeft') { e.preventDefault(); go(i - 1, true); }
+            else if (e.key === 'Home') { e.preventDefault(); go(0, true); }
+            else if (e.key === 'End') { e.preventDefault(); go(slides.length - 1, true); }
+        });
+        function pause() { hold = true; schedule(); }
+        function resume() { hold = false; schedule(); }
+        car.addEventListener('mouseenter', pause); car.addEventListener('mouseleave', resume);
+        car.addEventListener('focusin', pause); car.addEventListener('focusout', function (e) { if (!car.contains(e.relatedTarget)) resume(); });
+        document.addEventListener('visibilitychange', function () { schedule(); });
+        var x0 = null;
+        car.addEventListener('touchstart', function (e) { x0 = e.touches[0].clientX; hold = true; }, { passive: true });
+        car.addEventListener('touchend', function (e) {
+            hold = false;
+            if (x0 == null) { schedule(); return; }
+            var dx = e.changedTouches[0].clientX - x0; x0 = null;
+            if (dx < -40) go(i + 1, true); else if (dx > 40) go(i - 1, true); else schedule();
+        }, { passive: true });
+        go(0);
     });
-    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && open) { open = null; card.hidden = true; } });
-    window.addEventListener('scroll', function () { if (open) { open = null; card.hidden = true; } }, { passive: true });
 })();

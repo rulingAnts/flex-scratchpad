@@ -5514,3 +5514,19 @@ def test_selected_lines_and_rows_copy_and_paste_as_a_new_example(app):
     page.evaluate("() => { window.__copied = null; document.activeElement && document.activeElement.blur(); }")
     page.keyboard.press("Control+c")
     assert page.evaluate("window.__copied") == copied
+
+
+def test_deleting_the_open_collection_leaves_nothing_under_the_placeholder(app):
+    """Seth, 2026-10-20 (a screenshot): after deleting the open collection, "Select a note…" showed
+    with the collection still drawn under it. A collection and a chart note hide with the editor."""
+    h, page, errors = app
+    page.locator("#btn-new-menu").click()
+    page.locator("[data-test=new-collection]").click()
+    page.wait_for_selector("#collection")
+    assert page.locator("#collection").is_visible()
+    page.once("dialog", lambda d: d.accept())
+    page.locator(".note-card").first.click(button="right")
+    page.locator(".popover .menu-item", has_text="Delete (to trash)").click()
+    page.wait_for_selector("#editor-pane.no-note")
+    assert page.locator(".no-note-msg").is_visible()
+    assert not page.locator("#collection").is_visible() and not page.locator("#chartnote").is_visible() and not page.locator("#editor").is_visible()
