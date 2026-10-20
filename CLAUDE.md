@@ -1343,7 +1343,11 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   components, `assets/media.js` verbatim): hero with the loop video, three steps with stills,
   features, install, a pre-release band. `assets/release.js` moves every download link and the
   version to the newest release that has BOTH files (`tests/js/site-release.test.js`). The video
-  and stills are filmed from the REAL UI by `tools/record_demo.py` (demo project — an invented
+  and stills are filmed from the REAL UI by `tools/record_demo.py`; the "what you can do" table's ✓ cells carry
+  `data-stills` (Seth, 2026-10-20: "mouseover generated screenshots for each feature with a checkbox") and
+  `assets/media.js` shows those pictures in a hover / focus / tap card (`#claim-card`) when they are on the
+  manifest — `tools/shoot_claims.py` photographs them (the chart in its three views, the styled example, the
+  collection, the concordance dialog, the exports menu…) from the demo through the e2e bridge (demo project — an invented
   language, never a community's data — through the e2e bridge, a drawn cursor and captions,
   Chromium's screencast, ffmpeg): re-run it after a UI change and look at the result.
 - GitHub Actions: public repo, standard runners only, Windows build is `workflow_dispatch`. Never

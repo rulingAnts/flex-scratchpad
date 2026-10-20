@@ -27,7 +27,7 @@ from flex_scratchpad.flex.demo import T_STORY  # noqa: E402
 
 OUT = ROOT / "docs" / "media"
 UI = ROOT / "flex_scratchpad" / "ui"
-W, H, SCALE = 1280, 800, 1.5
+W, H, SCALE = 1280, 900, 1.5
 CHART = "d15c0000-0000-4000-8000-00000000c001"
 NOTE = f"""# 3 Verbs
 
@@ -100,14 +100,16 @@ def main() -> int:
         page.goto((UI / "index.html").as_uri())
         page.locator("#tabs .tab-item").first.wait_for()
 
-        def still(name, focus=None, pane="#editor-pane", ratio=1.6):
+        def still(name, focus=None, pane="#editor-pane", ratio=1.6, top=False):
+            """The pane, cropped to `ratio`, centred on `focus` (or starting at its top with `top`)."""
             page.mouse.move(2, 2)
             page.wait_for_timeout(250)
             box = page.locator(pane).bounding_box()
             if focus is not None:
                 fb = focus.bounding_box()
                 if fb:
-                    box = dict(box, cy=fb["y"] + fb["height"] / 2)
+                    hh = min(box["height"], box["width"] / ratio)
+                    box = dict(box, cy=(fb["y"] - 8 + hh / 2) if top else fb["y"] + fb["height"] / 2)
             stills[name] = crop(page.screenshot(type="png"), box, ratio)
 
         # the note: prose, a styled example, a table with examples in its cells, a checklist
@@ -115,13 +117,17 @@ def main() -> int:
         page.locator("#editor .text-obj .segment").first.wait_for()
         page.locator("#editor table.md-table .text-obj .segment").first.wait_for()
         page.wait_for_timeout(600)
-        still("claim-notes", page.locator("#editor table.md-table"))
+        page.locator("#editor table.md-table").evaluate("(e) => e.scrollIntoView({ block: 'center' })")
+        page.wait_for_timeout(400)
+        still("claim-notes", page.locator("#editor .text-obj").first, ratio=1.3, top=True)
+        page.locator("#editor .text-obj").first.evaluate("(e) => e.scrollIntoView({ block: 'start' })")
+        page.wait_for_timeout(300)
         still("claim-example", page.locator("#editor .text-obj").first)
         # the word popover: highlight / bold / underline / brackets
         page.locator("#editor .text-obj").first.locator(".word-cell").nth(1).locator(".il-txt").click()
         page.locator(".popover").wait_for()
         page.wait_for_timeout(300)
-        still("claim-style", page.locator("#editor .text-obj").first)
+        still("claim-style", page.locator(".popover"))
         page.keyboard.press("Escape")
         # audio: the ▶ and the player
         page.locator("#editor .text-obj").first.locator(".seg-play").first.click()
@@ -144,15 +150,15 @@ def main() -> int:
         page.locator(".note-card", has_text="Story chart").click()
         page.locator("#chartnote .tchart tr.crow").first.wait_for()
         page.wait_for_timeout(600)
-        still("claim-chart-columns", page.locator("#chartnote .tchart"), pane="#chartnote", ratio=1.5)
+        still("claim-chart-columns", page.locator("#chartnote .tchart"), pane="#chartnote", ratio=1.5, top=True)
         page.locator("#chartnote [data-test=chart-view]").click()
         page.wait_for_timeout(700)
-        still("claim-chart-flat", page.locator("#chartnote .tchart"), pane="#chartnote", ratio=1.5)
+        still("claim-chart-flat", page.locator("#chartnote .tchart"), pane="#chartnote", ratio=1.5, top=True)
         page.locator("#chartnote [data-test=chart-view-groups]").click()
         page.wait_for_timeout(700)
-        still("claim-chart-groups", page.locator("#chartnote .tchart"), pane="#chartnote", ratio=1.5)
+        still("claim-chart-groups", page.locator("#chartnote .tchart"), pane="#chartnote", ratio=1.5, top=True)
         # the chart search
-        page.locator("#btn-chart-search").click()
+        page.evaluate("() => FS.searchCharts()")   # the toolbar button is hidden while a chart note is open
         page.locator(".modal input[type=text]").first.wait_for()
         page.locator(".modal input[type=text]").first.fill("col:Subject lex:kabir")
         page.wait_for_timeout(900)

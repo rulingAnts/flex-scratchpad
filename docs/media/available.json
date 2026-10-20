@@ -1,6 +1,17 @@
 {
   "_about": "Files in this folder that the site's pages may show (docs/assets/media.js). Made by tools/record_demo.py.",
   "files": [
+    "claim-audio.webp",
+    "claim-chart-columns.webp",
+    "claim-chart-flat.webp",
+    "claim-chart-groups.webp",
+    "claim-chart-search.webp",
+    "claim-collect.webp",
+    "claim-concordance.webp",
+    "claim-example.webp",
+    "claim-export.webp",
+    "claim-notes.webp",
+    "claim-style.webp",
     "scratchpad-loop.jpg",
     "scratchpad-loop.mp4",
     "scratchpad-loop.webm",
