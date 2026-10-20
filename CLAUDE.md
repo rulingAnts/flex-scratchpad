@@ -1308,7 +1308,8 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   final and latest; a cloud session can push its branch but neither a tag nor a release edit, nor main. EVERY
   RELEASE ALSO LANDS ON MAIN (Seth, 2026-10-20: "every time we push a release (or pre-release), we should also
   commit and push to main"): the workflow's `main` job fast-forwards main to the released commit (a bare manual
-  run with neither input does only that); it refuses when main holds commits the branch lacks — merge first.
+  run with neither input does only that) by fast-forward, else by a merge commit (Seth merges pull requests of this
+  branch into main, so main carries merge commits the branch lacks); a conflict stops it and says to merge by hand.
 - THE SITE is `docs/` (GitHub Pages from `/docs`), in LingTeX Tools' pattern (its tokens and
   components, `assets/media.js` verbatim): hero with the loop video, three steps with stills,
   features, install, a pre-release band. `assets/release.js` moves every download link and the
