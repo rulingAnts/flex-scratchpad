@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#1e40af">
+<meta name="description" content="The FLEx Scratchpad user guide: everything the program does, section by section, with pictures of the real program — notes, examples read live from FieldWorks, styling, text markup tags and visual filters, audio, collections, text charts and chart notes, chart search, exports, backup, settings and shortcuts.">
+<title>FLEx Scratchpad · User guide</title>
+<link rel="icon" type="image/png" href="../assets/icon-32.png">
+<link rel="stylesheet" href="../assets/site.css">
+<link rel="stylesheet" href="../assets/guide.css">
+</head>
+<body>
+
+<nav class="site-nav">
+  <a class="nav-brand" href="../"><img src="../assets/icon-small.svg" alt=""> FLEx Scratchpad</a>
+  <div class="nav-links">
+    <a href="../#why">Why</a>
+    <a href="../#how">How it works</a>
+    <a href="../#charts">Charts</a>
+    <a href="../#features">Features</a>
+    <a class="active" href="./">User guide</a>
+    <a href="../#install">Install</a>
+    <a data-dl="notes" href="https://github.com/rulingAnts/flex-scratchpad/releases/tag/v0.1.0-beta.2">Release notes</a>
+    <a class="nav-gh" href="https://github.com/rulingAnts/flex-scratchpad" target="_blank" rel="noopener">GitHub</a>
+  </div>
+</nav>
+
+<main>
+<div class="guide-wrap">
+  <header class="guide-head" id="top">
+    <h1>User guide</h1>
+    <p class="lead">Everything FLEx Scratchpad does, in the order you will meet it: the notebook, writing, examples read live from your FieldWorks project, styling and visual filters, audio, collections, text charts and chart notes, searching the charts, exports, backup, and the settings and shortcuts. Every picture is the real program showing its built-in demo project, an invented language.</p>
+    <div class="meta">
+      <span>For version <span data-dl="version">0.1.0-beta.2</span>, a pre-release</span>
+      <a href="../#install">Install</a>
+      <a href="https://github.com/rulingAnts/flex-scratchpad#readme">The README has the same material as a single page</a>
+      <a href="https://github.com/rulingAnts/flex-scratchpad/issues">Report an issue</a>
+    </div>
+  </header>
+
+  <details class="toc-mobile">
+    <summary>Contents</summary>
+    <ol>
+      <li><a href="#start">Getting started</a></li>
+      <li><a href="#notebook">The notebook: tabs, folders, tags, search</a></li>
+      <li><a href="#writing">Writing: Markdown, headings, blocks, tables, links, files</a></li>
+      <li><a href="#examples">Examples from FLEx</a></li>
+      <li><a href="#styling">Styling, text markup tags and visual filters</a></li>
+      <li><a href="#audio">Hearing an example</a></li>
+      <li><a href="#collections">Example collections</a></li>
+      <li><a href="#charts">Text charts</a></li>
+      <li><a href="#chartnotes">Chart notes and custom columns</a></li>
+      <li><a href="#chartsearch">Searching the charts</a></li>
+      <li><a href="#exports">Exports</a></li>
+      <li><a href="#backup">Backup and storage</a></li>
+      <li><a href="#settings">Settings and keyboard shortcuts</a></li>
+      <li><a href="#files">Your notes are files</a></li>
+      <li><a href="#trouble">When something goes wrong</a></li>
+    </ol>
+  </details>
+
+  <nav class="toc" aria-label="Contents">
+    <h2>Contents</h2>
+    <ol>
+      <li><a href="#start">Getting started</a>
+        <ol><li><a href="#start-project">Pick your project</a></li><li><a href="#start-window">The window</a></li><li><a href="#start-readonly">Read-only, offline, no server</a></li></ol></li>
+      <li><a href="#notebook">The notebook</a>
+        <ol><li><a href="#nb-tabs">Tabs, folders, tags</a></li><li><a href="#nb-notes">Notes and the list</a></li><li><a href="#nb-search">Search</a></li><li><a href="#nb-rail">The left pane</a></li></ol></li>
+      <li><a href="#writing">Writing</a>
+        <ol><li><a href="#wr-markdown">Markdown, markers shown or hidden</a></li><li><a href="#wr-headings">Headings that fold and stick</a></li><li><a href="#wr-lists">Lists, checklists, quotes</a></li><li><a href="#wr-blocks">Blocks: the bar, the menu, moving</a></li><li><a href="#wr-tables">Tables</a></li><li><a href="#wr-links">Links</a></li><li><a href="#wr-charts">Charts of your own</a></li><li><a href="#wr-files">Attached files</a></li><li><a href="#wr-undo">Undo, saving, scripts</a></li></ol></li>
+      <li><a href="#examples">Examples from FLEx</a>
+        <ol><li><a href="#ex-paste">Paste lines copied in FLEx</a></li><li><a href="#ex-picker">The FLEx object dialog</a></li><li><a href="#ex-link">Paste a FLEx hyperlink</a></li><li><a href="#ex-shows">What an example shows</a></li><li><a href="#ex-chips">Chips, inline and collapsed</a></li><li><a href="#ex-entries">Entries</a></li><li><a href="#ex-live">Live, refreshed, and staying on its lines</a></li></ol></li>
+      <li><a href="#styling">Styling and visual filters</a>
+        <ol><li><a href="#st-words">Words, morphemes, letters</a></li><li><a href="#st-tags">FLEx text markup tags</a></li><li><a href="#st-scopes">Where a style applies</a></li><li><a href="#st-filters">Visual filters</a></li><li><a href="#st-find">Finding notes by tag</a></li></ol></li>
+      <li><a href="#audio">Hearing an example</a></li>
+      <li><a href="#collections">Example collections</a>
+        <ol><li><a href="#co-make">Making one</a></li><li><a href="#co-sort">Groups, notes, chips, selections</a></li><li><a href="#co-rule">Collections by rule</a></li><li><a href="#co-conc">From a FLEx concordance export</a></li><li><a href="#co-texts">Which texts a note uses</a></li><li><a href="#co-flextext">Export as a FLEx text</a></li></ol></li>
+      <li><a href="#charts">Text charts</a>
+        <ol><li><a href="#ch-insert">A chart in a note</a></li><li><a href="#ch-menu">The chart's menu</a></li><li><a href="#ch-style">Styling by click</a></li><li><a href="#ch-flag">⚑ Markers, columns, structure</a></li><li><a href="#ch-views">Three layouts</a></li><li><a href="#ch-fit">Widths, zoom, hidden and frozen columns</a></li><li><a href="#ch-merged">Merged cells</a></li><li><a href="#ch-play">Playback</a></li><li><a href="#ch-rows">Copying rows, converting, pivoting</a></li><li><a href="#ch-join">Charts and examples, joined up</a></li></ol></li>
+      <li><a href="#chartnotes">Chart notes</a>
+        <ol><li><a href="#cn-columns">Your own columns</a></li><li><a href="#cn-rules">Rule columns and the builder</a></li><li><a href="#cn-lang">The rule language</a></li></ol></li>
+      <li><a href="#chartsearch">Searching the charts</a>
+        <ol><li><a href="#cs-query">The query</a></li><li><a href="#cs-profile">Column profile and collections</a></li></ol></li>
+      <li><a href="#exports">Exports</a>
+        <ol><li><a href="#xp-formats">The formats</a></li><li><a href="#xp-word">Word, in LingTeX-Word styles</a></li><li><a href="#xp-audio">Audio in the web page and slideshow</a></li></ol></li>
+      <li><a href="#backup">Backup and storage</a></li>
+      <li><a href="#settings">Settings and shortcuts</a>
+        <ol><li><a href="#se-settings">Settings</a></li><li><a href="#se-keys">Keyboard shortcuts</a></li></ol></li>
+      <li><a href="#files">Your notes are files</a></li>
+      <li><a href="#trouble">When something goes wrong</a></li>
+    </ol>
+  </nav>
+
+  <div class="guide">
+
+  <!-- ============================================================ 1 -->
+  <section id="start">
+    <h2><span class="num">1</span>Getting started</h2>
+    <p class="intro">FLEx Scratchpad is a notebook for Windows that reads your FieldWorks project. You write in it as in any notes program; the interlinear examples, lexical entries and text charts in your notes are read from the project when they are shown, and the program can never change the project.</p>
+
+    <h3 id="start-project">Pick your project</h3>
+    <p>Install it from the <a href="../#install">download on the home page</a> (an installer or a portable zip; both are the same program) and start it. Open <span class="ui">Settings</span> (the ⚙ button, or <kbd>Ctrl+,</kbd>) and choose the <span class="ui">FLEx project</span>: the list shows the projects FieldWorks has on this computer. The project is opened for reading only. FieldWorks may be open on the same project at the same time; if it refuses to share, the status pill at the top right says so and what to do (in FLEx: <em>Project Properties › Sharing › Share project contents with programs on this computer</em>).</p>
+    <figure class="shot"><img src="../media/guide/settings.webp" loading="lazy" alt="The Settings dialog: the notebook folder, the FLEx project, options, and the links to the tag styles, visual filters and backup"><figcaption>Settings: where the notes live, which project to read, and the doors to tag styles, visual filters and backup.</figcaption></figure>
+    <p>Two other sources exist for when there is no FieldWorks on the computer: a <code>.flextext</code> file exported from FLEx (texts only), and the built-in <span class="ui">demo</span> project, an invented language used for the pictures in this guide and for trying things out.</p>
+    <p>The <span class="ui">notebook</span> is a folder of your choosing (by default <em>Documents\FLEx Scratchpad</em>). Everything you write goes there and nowhere else; see <a href="#files">Your notes are files</a>.</p>
+
+    <h3 id="start-window">The window</h3>
+    <figure class="shot"><img src="../media/guide/window.webp" loading="lazy" alt="The whole window: the left pane with tabs, folders, tags and FLEx tags; the note list; and the open note with a numbered interlinear example, a table and a checklist"><figcaption>Left to right: the rail (tabs, folders, tags, FLEx tags), the note list, and the note.</figcaption></figure>
+    <ul>
+      <li><b>The rail</b> on the left: your tabs, the folders of the current tab, the tags, and the FLEx text markup tags the tab's notes use. Each part folds with a click on its heading; the dividers drag. <kbd>Ctrl+\</kbd> hides and shows the left panes.</li>
+      <li><b>The note list</b> for the current tab, folder, tag or search, with an excerpt of each note.</li>
+      <li><b>The note</b>: its title, its tags, the toolbar, and the text. Notes save by themselves a moment after you stop typing; the state is shown next to the title.</li>
+      <li><b>The status pill</b> at the top right names the FLEx project, says when it is being read, and shows what the program is doing when that takes a moment.</li>
+    </ul>
+    <p>A new notebook opens with a <em>Welcome</em> note that is a short tour you can delete.</p>
+
+    <h3 id="start-readonly">Read-only, offline, no server</h3>
+    <p>The program asks FieldWorks for read-only access, every time. It has no code path that writes to a project, and its own test suite fails if one appears. Its exports are new files that you import yourself. It never needs the internet, and it runs no server of any kind (not even on this computer), which matters on a field laptop with cautious anti-malware software.</p>
+  </section>
+
+  <!-- ============================================================ 2 -->
+  <section id="notebook">
+    <h2><span class="num">2</span>The notebook</h2>
+
+    <h3 id="nb-tabs">Tabs, folders, tags</h3>
+    <figure class="shot half"><img src="../media/guide/rail.webp" loading="lazy" alt="The rail: tabs with colours, a folder tree with a subfolder, the tags, and the FLEx tags of the tab"><figcaption>The rail: tabs, folders (nested), tags, and the FLEx text markup tags used in this tab.</figcaption></figure>
+    <ul>
+      <li><b>Tabs</b> are the top level: the <span class="ui">+</span> next to <em>Tabs</em> makes one, right-click a tab to rename it, give it a colour, reorder or delete it. Each tab is a folder in the notebook.</li>
+      <li><b>Folders</b> live inside a tab and nest as deep as you like: <span class="ui">+</span> next to <em>Folders</em>, right-click for rename and delete. A folder lists only its own notes; tick <span class="ui">Show notes in subfolders</span> under the list's title to see everything below it, each note with its subfolder.</li>
+      <li><b>Tags</b> are notebook-wide, with colours: <span class="ui">+ tag</span> on a note, or type <code>#tag</code> anywhere in the text, which counts too. Click a tag in the rail to list the notes carrying it (a tag looks through the whole tab).</li>
+    </ul>
+    <figure class="shot half"><img src="../media/guide/tab-menu.webp" loading="lazy" alt="The right-click menu of a tab: rename, colour, move, delete"><figcaption>Right-click a tab or a folder.</figcaption></figure>
+
+    <h3 id="nb-notes">Notes and the list</h3>
+    <p><kbd>Ctrl+N</kbd> makes a note in the current folder; <span class="ui">+ New ▾</span> offers the other kinds: an <a href="#collections">example collection</a>, a collection from tagged lines, from a concordance export, and a <a href="#chartnotes">chart note</a>.</p>
+    <figure class="shot half"><img src="../media/guide/new-menu.webp" loading="lazy" alt="The + New menu: new note, new example collection, new collection from tagged lines, new collection from a FLEx concordance export, new chart note"><figcaption>The kinds of note.</figcaption></figure>
+    <ul>
+      <li><b>Rename</b> with <kbd>F2</kbd> or by editing the title. <b>Pin</b> a note to keep it at the top of its list.</li>
+      <li><b>Move</b> a note by dragging it onto a tab or a folder in the rail, or <span class="ui">⋯ → Move to…</span>. <b>Duplicate</b> from the same menu.</li>
+      <li><b>Delete</b> sends the note to the notebook's trash, which keeps everything until you empty it in <a href="#backup">Backup &amp; storage</a>. Nothing is ever destroyed by a click.</li>
+      <li><b>Sort</b> the list by date or title with the ⇅ button over it.</li>
+    </ul>
+
+    <h3 id="nb-search">Search</h3>
+    <figure class="shot"><img src="../media/guide/search.webp" loading="lazy" alt="The search box with kabir typed: the note list shows the notes whose examples contain that vernacular word, with highlighted snippets"><figcaption>A vernacular word finds the notes whose examples contain it, through the examples' snapshots.</figcaption></figure>
+    <p>The box at the top of the rail (<kbd>Ctrl+Shift+F</kbd>) searches the whole notebook: titles, text, tags, and the <em>content of the FLEx objects a note quotes</em>, so a vernacular word, a gloss or a free translation finds the notes that cite it. Diacritics are ignored unless you turn that off in Settings. The syntax:</p>
+    <table class="ref">
+      <tr><th>Type</th><th>Finds</th></tr>
+      <tr><td><code>kabir river</code></td><td>notes with both words, anywhere</td></tr>
+      <tr><td><code>"the dog slept"</code></td><td>the exact phrase</td></tr>
+      <tr><td><code>tag:fieldwork</code>, <code>tab:Grammar</code></td><td>notes with that tag, in that tab</td></tr>
+      <tr><td><code>tagged:Topic</code></td><td>notes whose examples carry that FLEx text markup tag</td></tr>
+      <tr><td><code>marker:Topic</code></td><td>notes whose charts carry that chart marker</td></tr>
+    </table>
+    <p><kbd>Ctrl+F</kbd> finds inside the open note, with next and previous; a hit inside a folded section opens it.</p>
+
+    <h3 id="nb-rail">The left pane</h3>
+    <p>The rail's four parts (Tabs, Folders, Tags, FLEx tags) never crowd one another out: a click on a heading folds that part, the divider between two open parts drags, a double-click on a divider resets them, and a heading always stays in view, so nothing is ever out of reach. The rail and the note list can also be dragged narrower or wider.</p>
+  </section>
+
+  <!-- ============================================================ 3 -->
+  <section id="writing">
+    <h2><span class="num">3</span>Writing</h2>
+    <p class="intro">A note is Markdown, written in a block editor that shows the markup faintly or hides it, with headings that fold, tables, links, simple charts, attached files, and the FLEx objects of the next sections.</p>
+
+    <h3 id="wr-markdown">Markdown, markers shown or hidden</h3>
+    <div class="shots">
+      <figure class="shot"><img src="../media/guide/markdown.webp" loading="lazy" alt="A note with the markup shown faintly: a heading, bold and italic markers, a wiki link, a tag"><figcaption>Markers shown: faint, so you see what you typed.</figcaption></figure>
+      <figure class="shot"><img src="../media/guide/markers-hidden.webp" loading="lazy" alt="The same note with the markup hidden: only the formatting shows"><figcaption>Markers hidden (<span class="ui">**</span> on the toolbar, or Settings).</figcaption></figure>
+    </div>
+    <p>Type <code>**bold**</code>, <code>*italic*</code>, <code>==highlight==</code>, <code>~~strike~~</code>, <code>`code`</code>, <code>#tag</code>, <code>[[Another note]]</code>, or use the toolbar and the shortcuts (<kbd>Ctrl+B</kbd>, <kbd>Ctrl+I</kbd>, <kbd>Ctrl+Shift+H</kbd>, <kbd>Ctrl+Shift+X</kbd>, <kbd>Ctrl+E</kbd>). With markers hidden, only the markup at the caret shows, so you can still edit it; the caret never lands inside a hidden heading or list prefix, and a new heading or list item starts to the right of its markup.</p>
+
+    <h3 id="wr-headings">Headings that fold and stick</h3>
+    <p><code>#</code> to <code>######</code>, or the toolbar's <span class="ui">H ▾</span> (<kbd>Ctrl+Alt+1</kbd> … <kbd>6</kbd>; <kbd>Ctrl+Alt+0</kbd> is plain text). The same menu promotes or demotes every heading of the note, or of the selected blocks, one level (<kbd>Ctrl+Alt+[</kbd> / <kbd>]</kbd>), keeping their distances; it refuses when that would merge two levels.</p>
+    <figure class="shot half"><img src="../media/guide/heading-menu.webp" loading="lazy" alt="The H menu: heading levels 1 to 6, plain text, promote and demote all headings, collapse and expand all"><figcaption>The heading menu.</figcaption></figure>
+    <div class="shots">
+      <figure class="shot"><img src="../media/guide/folding.webp" loading="lazy" alt="A closed heading in the margin with the count of hidden blocks under it"><figcaption>▾ in the margin folds a section; the file remembers it.</figcaption></figure>
+      <figure class="shot"><img src="../media/guide/sticky-headings.webp" loading="lazy" alt="The headings above the part of the note in view, held at the top of the editor"><figcaption>The headings that apply to what you are reading stay at the top.</figcaption></figure>
+    </div>
+    <p>A closed heading hides everything up to the next heading of its level or higher and moves with its section; <span class="ui">Collapse all</span> / <span class="ui">Expand all</span> are in the menu. The <b>sticky headings</b> strip shows the outline chain above the viewport; its ▾ folds that section in place and takes you to the heading. Switch it off in the H ▾ menu or Settings.</p>
+
+    <h3 id="wr-lists">Lists, checklists, quotes</h3>
+    <figure class="shot half"><img src="../media/guide/lists.webp" loading="lazy" alt="A bulleted list with an inline example chip, a checklist with one item ticked, and a nested numbered list"><figcaption>Bullets, a checklist, a numbered list with a nested item.</figcaption></figure>
+    <p><code>- </code>, <code>1. </code>, <code>- [ ] </code> and <code>&gt; </code> start a bullet, a numbered item, a checkbox and a quote (<kbd>Ctrl+Shift+8</kbd> / <kbd>7</kbd> / <kbd>9</kbd>). <kbd>Enter</kbd> continues the list, <kbd>Enter</kbd> on an empty item leaves it. <kbd>Tab</kbd> / <kbd>Shift+Tab</kbd> (or <kbd>Ctrl+]</kbd> / <kbd>[</kbd>, or the toolbar's ⇥ ⇤) nest an item up to four levels, each with its own bullet; nested numbers show as letters and roman numerals. Numbers are computed: type <code>1.</code> to start over, or a larger number to start there, and the block menu has <span class="ui">Start numbering at…</span>. Click a checkbox to tick it.</p>
+
+    <h3 id="wr-blocks">Blocks: the bar, the menu, moving</h3>
+    <p>A note is a column of blocks (paragraphs, headings, lists, tables, examples…). Between any two of them is a gap:</p>
+    <figure class="shot"><img src="../media/guide/gap-bar.webp" loading="lazy" alt="The bar between two blocks: + Paragraph, + Example, + Table, + More, − Above, − Below"><figcaption>Rest the pointer in a gap for a moment and the bar appears.</figcaption></figure>
+    <ul>
+      <li><b>The bar between blocks</b> inserts a paragraph, an example, a table or more at that spot, and removes the block above or below. A − button asks twice (<em>Remove?</em>) and the message after a removal has <span class="ui">Undo</span>. It only appears once the pointer has rested in the gap, and Settings can turn it off.</li>
+      <li><b>The block menu</b> (⋮ beside a block, or right-click a block that is not running text) has <span class="ui">Insert a new block</span> above or below: paragraph, heading, list, checklist, quote, table, FLEx example, divider; plus move, duplicate, delete, and the heading levels and numbering for the block it belongs to. Typing <kbd>/</kbd> on an empty line opens the same insert menu.</li>
+    </ul>
+    <figure class="shot half"><img src="../media/guide/block-menu.webp" loading="lazy" alt="The block menu: insert a new block of each kind, above or below"><figcaption>The ⋮ menu of a block.</figcaption></figure>
+    <ul>
+      <li><b>Select across blocks</b> by dragging out of a block, <kbd>Shift+click</kbd>, or <kbd>Shift+↑</kbd> / <kbd>↓</kbd>; <kbd>Ctrl+A</kbd> twice takes the whole note. Cut, copy, paste, delete and typing act on the selection.</li>
+      <li><b>Move blocks</b> with <kbd>Alt+Shift+↑</kbd> / <kbd>↓</kbd>, or drag the ⋮ handle (with a selection, every selected block goes; <kbd>Ctrl</kbd> copies). A closed heading moves with its section. <kbd>Ctrl+D</kbd> duplicates.</li>
+    </ul>
+
+    <h3 id="wr-tables">Tables</h3>
+    <figure class="shot"><img src="../media/guide/table.webp" loading="lazy" alt="A table with interlinear examples in its cells and the bar under it: Column, Row, Table menus and the add buttons"><figcaption>A table with examples in its cells. The bar appears once you click into the table.</figcaption></figure>
+    <p>The <span class="ui">Table</span> button inserts one; a grid pasted from Excel or Word becomes a table too, merged cells included. Click a cell to edit it: <kbd>Tab</kbd> moves on (a new row at the end), <kbd>Enter</kbd> goes down, <kbd>Shift+Enter</kbd> breaks a line inside the cell, <kbd>Alt+↑</kbd> / <kbd>↓</kbd> move between rows. The bar under the table has <span class="ui">Column ▾</span>, <span class="ui">Row ▾</span> and <span class="ui">Table ▾</span> (alignment, bold, width, background and text colour, wrap, striped rows, borders, header row and column, the vernacular font, freeze panes, an indent) and the add buttons; deletions ask twice and leave an Undo.</p>
+    <figure class="shot half"><img src="../media/guide/table-cell-menu.webp" loading="lazy" alt="The right-click menu of a table cell: merge, split, copy, paste, insert rows and columns, delete"><figcaption>Right-click a cell.</figcaption></figure>
+    <p>Drag across cells to select a range, click a row or column handle for a whole one; the context menu merges and splits cells, copies and pastes rows, columns and cells (also as TSV for a spreadsheet), and inserts or deletes. A table's style line is saved after it in the file, so a table is still a plain Markdown table anywhere else. An example in a cell is drawn in full when the cell says <code>expanded</code>, else as a chip that previews on hover.</p>
+
+    <h3 id="wr-links">Links</h3>
+    <div class="shots">
+      <figure class="shot"><img src="../media/guide/link-pill.webp" loading="lazy" alt="The strip under a link when the caret is in it: the address, Follow, Edit, Copy, Unlink"><figcaption>Put the caret in a link: Follow · Edit · Copy · Unlink.</figcaption></figure>
+      <figure class="shot"><img src="../media/guide/link-dialog.webp" loading="lazy" alt="The link dialog: text, address, or another note in this notebook"><figcaption><kbd>Ctrl+K</kbd> or the 🔗 button.</figcaption></figure>
+    </div>
+    <p><kbd>Ctrl+K</kbd> makes the selected text a link, filling the address from the clipboard when one is there, or links to <span class="ui">another note in this notebook</span> as <code>[[Note title]]</code>. <kbd>Ctrl+click</kbd> follows at once. A FLEx hyperlink (<code>silfw://…</code>) opens the object in FieldWorks; every example and entry carries one (↗).</p>
+
+    <h3 id="wr-charts">Charts of your own</h3>
+    <figure class="shot half"><img src="../media/guide/chart-block.webp" loading="lazy" alt="A bar chart drawn from a few lines of data in the note"><figcaption>A bar chart from a <code>chart</code> block.</figcaption></figure>
+    <p>Not text charts, but the ordinary kind: the <span class="ui">Chart</span> button makes a bar, stacked, line, pie or donut chart from a few lines of data in the note (<code>type</code>, <code>title</code>, <code>labels</code>, <code>series: name = 1, 2, 3</code>), edited in a form or as text, drawn by the program and exported with the note.</p>
+
+    <h3 id="wr-files">Attached files</h3>
+    <figure class="shot"><img src="../media/guide/attachments.webp" loading="lazy" alt="A file chip in a sentence and a picture shown in the note from an attached file"><figcaption>A file chip in the text and a picture previewed in the note.</figcaption></figure>
+    <p>Drop a file into a note, or use <span class="ui">📎 Attach</span>: the file is copied into the notebook's <code>attachments</code> folder (the ▾ next to the button, or <kbd>Alt</kbd> while dropping, links to the file where it is instead). A chip opens the file in its own program with a click; a picture or a video shows in the note; a web page, such as a FlexText Audio Segmenter listening page, previews inside the note with <span class="ui">Open in browser</span>. A pasted screenshot becomes a picture in the note. Exports write the chip as a link to the file.</p>
+
+    <h3 id="wr-undo">Undo, saving, scripts</h3>
+    <p><kbd>Ctrl+Z</kbd> / <kbd>Ctrl+Y</kbd> undo and redo, including table operations, block moves and styling of examples; the toolbar has the same. Notes save by themselves; <kbd>Ctrl+S</kbd> saves now. If a note's file changed on disk (another program, a sync folder) the note says so and offers to reload it. Text is Unicode throughout: right-to-left text lays out right to left, each writing system is drawn in its FLEx font, and character ranges count letters with their combining marks as one.</p>
+  </section>
+
+  <!-- ============================================================ 4 -->
+  <section id="examples">
+    <h2><span class="num">4</span>Examples from FLEx</h2>
+    <p class="intro">An interlinear example in a note is a reference to a text and its lines; the words, morphemes, glosses and translation are read from the project when the note is shown. There are three ways to put one in, and none of them involves typing an identifier.</p>
+
+    <h3 id="ex-paste">Paste lines copied in FLEx</h3>
+    <div class="shots">
+      <figure class="shot"><img src="../media/guide/paste-located.webp" loading="lazy" alt="The dialog after pasting FLEx rows: the text and line found, with Insert rendered and Insert as text"><figcaption>Pasted rows are located in the project.</figcaption></figure>
+      <figure class="shot"><img src="../media/guide/pasted-example.webp" loading="lazy" alt="The example drawn in the note after the paste"><figcaption>…and become a live example.</figcaption></figure>
+    </div>
+    <p>In FieldWorks, select interlinear lines in the Gloss or Print view, copy, and paste into the note. The program reads the rows (Word, Morphemes, Lex. Gloss, Free…), finds the lines in the open project (by the baseline, else by the morphemes or glosses, and by FLEx's own line numbers when the copy carries them), and shows what it found before inserting. A range that FLEx copied with gaps still lands on its lines. While it looks, a small spinner by the caret offers <span class="ui">Paste as text</span> instead. Ordinary text pastes as text.</p>
+
+    <h3 id="ex-picker">The FLEx object dialog</h3>
+    <p><kbd>Ctrl+Shift+L</kbd>, or the toolbar's <span class="ui">FLEx object</span>, opens the dialog with four views:</p>
+    <figure class="shot"><img src="../media/guide/picker-texts.webp" loading="lazy" alt="The FLEx object dialog, Texts view: the list of texts, the text's lines with the first and third selected, Insert segments"><figcaption><b>Texts</b>: pick a text, click the first and the last line, <span class="ui">Insert segments</span>. <span class="ui">Find segment by text…</span> jumps to a phrase.</figcaption></figure>
+    <div class="shots">
+      <figure class="shot"><img src="../media/guide/picker-lexicon.webp" loading="lazy" alt="The Lexicon view: a search for kab, the entry kabir with its senses in the preview"><figcaption><b>Lexicon</b>: headword, citation form or gloss; <span class="ui">Insert rendered</span> or <span class="ui">Insert link</span>.</figcaption></figure>
+      <figure class="shot"><img src="../media/guide/picker-tags.webp" loading="lazy" alt="The FLEx tags view: the project's text markup tags as a tree, and every place the chosen tag is used"><figcaption><b>FLEx tags</b>: every place a text markup tag is used; insert one, all, or collect them.</figcaption></figure>
+    </div>
+    <p>The fourth view, <b>Text charts</b>, is described under <a href="#charts">Text charts</a> and <a href="#chartsearch">Searching the charts</a>. The dialog inserts into the block you were in, or into the table cell you were editing; when there is text before the caret, the object goes in as an inline chip.</p>
+
+    <h3 id="ex-link">Paste a FLEx hyperlink</h3>
+    <figure class="shot half"><img src="../media/guide/paste-link.webp" loading="lazy" alt="The dialog after pasting a FLEx hyperlink: the entry it names, Insert rendered or Insert link"><figcaption>A link copied in FieldWorks.</figcaption></figure>
+    <p>In FieldWorks, <em>Edit › Copy Location as Hyperlink</em> puts a <code>silfw://</code> link to the current record on the clipboard. Pasted into a note, it is resolved: an entry, a sense, a text, a paragraph or a line; you choose <span class="ui">Insert rendered</span> or <span class="ui">Insert link</span>. The link must name the open project.</p>
+
+    <h3 id="ex-shows">What an example shows</h3>
+    <figure class="shot"><img src="../media/guide/example.webp" loading="lazy" alt="A numbered example of two lines with a label, a highlighted word, a bold morpheme and an underlined word, the free translations, and the tag bars under the words"><figcaption>A two-line example, numbered (1), labelled, with a highlight, a bold morpheme, an underline, and the FLEx text markup tags under the words.</figcaption></figure>
+    <p>Each line shows the lines you choose, FLEx's own line number, the free (and literal) translation and notes. The header has the text's title with the link into FLEx (↗), ↻ to re-read the lines after an edit in FieldWorks, ⚑ for the tags, ⤡ to collapse it, and <span class="ui">⋯</span>:</p>
+    <figure class="shot half"><img src="../media/guide/example-menu.webp" loading="lazy" alt="The example's menu: label, lines, writing systems, numbering, indent, range, add to a collection, show as a text chart, duplicate, remove"><figcaption>The ⋯ menu of an example.</figcaption></figure>
+    <ul>
+      <li><b>Lines</b>: Word, Morphemes, Morph glosses, Lex. entries, Word gloss, Category, Free, Literal, Notes, the FLEx text markup tags, and <em>Chart columns</em> (see <a href="#ch-join">below</a>); each in a chosen writing system when the project has several.</li>
+      <li><b>Range</b>: the lines shown, which you can widen or narrow after the fact.</li>
+      <li><b>Numbering and indent</b>: <span class="ui">Numbered example</span> gives it (1), (2)… through the note, renumbered as you edit; the indent steps it in like a list level (<kbd>Tab</kbd> on the example).</li>
+      <li><b>Label</b>: a short name shown on the example and used in links and exports.</li>
+      <li><b>Add to an example collection…</b>, <b>Show these lines as a text chart…</b>, <b>Duplicate</b>, <b>Edit source</b>, <b>Remove</b>.</li>
+    </ul>
+    <p>A line that is empty in FLEx (a stray Shift+Enter) is left out; punctuation alone is not empty. Morph glosses wear the morph type's hyphens and equals signs.</p>
+
+    <h3 id="ex-chips">Chips, inline and collapsed</h3>
+    <div class="shots">
+      <figure class="shot"><img src="../media/guide/chips.webp" loading="lazy" alt="An example as a chip inside a sentence, with its preview open above it"><figcaption>An inline chip in a sentence; hover or click for the preview.</figcaption></figure>
+      <figure class="shot"><img src="../media/guide/collapsed-chip.webp" loading="lazy" alt="A collapsed example on a line of its own, under a table with examples in its cells"><figcaption>A collapsed example (⤡) on its own line.</figcaption></figure>
+    </div>
+    <p>An object inside a sentence is a chip: the text's abbreviation and line numbers, or the entry's headword. It previews on hover, pins open on a click (with <span class="ui">Expand in note</span>, styling and the collection button), deletes whole with <kbd>Backspace</kbd>, and drags like any object. An example on its own line collapses to a chip with ⤡ and expands with ⤢. In exports a chip is a link into FLEx.</p>
+    <p><b>Drag any object</b> by its ⠿ handle: into a sentence (it becomes inline), into a table cell, or between blocks. <kbd>Ctrl</kbd> while dropping copies instead of moving.</p>
+
+    <h3 id="ex-entries">Entries</h3>
+    <figure class="shot half"><img src="../media/guide/entry-card.webp" loading="lazy" alt="An entry card: the headword -mo, its morph type, category, senses with glosses and definitions, and the link into FLEx"><figcaption>A lexical entry as a card; its ⋯ chooses the fields and senses shown.</figcaption></figure>
+    <p>An entry shows its headword, lexeme and citation forms, morph type, homograph number, category, and its senses with glosses, definitions, examples, sub-senses, notes and semantic domains; the ⋯ menu picks which. <span class="ui">▦ In charts</span> on the card shows which chart columns the lexeme sits in (<a href="#cs-profile">column profile</a>). An inline entry is a chip with the headword.</p>
+
+    <h3 id="ex-live">Live, refreshed, and staying on its lines</h3>
+    <ul>
+      <li><b>Live</b>: an example is read from the project when the note is shown. What FieldWorks saved after the project was opened shows after ↻ on the example (which re-reads the project from disk) or <span class="ui">Refresh all</span> on the toolbar.</li>
+      <li><b>Snapshots</b>: every object fetched is also kept in the notebook, so the note still reads when FLEx is closed or the project is elsewhere; the example then says <em>snapshot</em>.</li>
+      <li><b>It stays on its lines</b>: when you split, merge or delete lines in FLEx, the example keeps showing the lines it was made from and its highlights stay on the same words; it says what happened. A line that is gone is shown from the snapshot with a warning, never replaced by whatever line now has its number.</li>
+      <li><b>Readable without the program</b>: the file also carries a plain-text copy of every object after it, with a link into FLEx (<a href="#files">Your notes are files</a>).</li>
+      <li><b>Copy some lines</b>: click a line's number (<kbd>Shift+click</kbd> for a range) and the bar that appears copies those lines as tab-separated rows with their own reference on the first line; pasted into another note they become a new example of just those lines, pasted into a sheet they are the rows.</li>
+    </ul>
+  </section>
+
+  <!-- ============================================================ 5 -->
+  <section id="styling">
+    <h2><span class="num">5</span>Styling, text markup tags and visual filters</h2>
+
+    <h3 id="st-words">Words, morphemes, letters</h3>
+    <figure class="shot"><img src="../media/guide/word-popover.webp" loading="lazy" alt="The popover after clicking a word: highlight colours, bold, underline, italic, strike, colour, characters, match text"><figcaption>Click a word.</figcaption></figure>
+    <p>Click a word in an example: <span class="ui">Highlight</span> (in a chosen colour), <span class="ui">Bold</span>, <span class="ui">Underline</span>, <span class="ui">Italic</span>, <span class="ui">Strike</span>, <span class="ui">Colour</span>. <kbd>Shift+click</kbd> another word for a range. <span class="ui">Characters</span> styles part of a word (letters count with their marks); <span class="ui">Match text</span> styles every word, morpheme or gloss that matches, on the line you choose. Drag across the words of a free or literal translation, let go, and pick a style for that stretch; a plain click styles the whole line. The styling is written into the example's reference in the file and carried into every export.</p>
+
+    <h3 id="st-tags">FLEx text markup tags</h3>
+    <p>Tags placed in FieldWorks' <em>Text Tagging</em> view (items of the project's Text Markup Tags list, placed over words) are read with the text and drawn in every example that shows those words. By default a tag is a small bar under its words with its abbreviation, in FLEx's own colour when it has one; tags that overlap stack.</p>
+    <figure class="shot"><img src="../media/guide/tag-popover.webp" loading="lazy" alt="The ⚑ popover of an example: the tags on it as a tree, each with a swatch, where its look comes from, a show/hide box and a Style menu, and the scope select"><figcaption>⚑ on an example lists its tags: show or hide each, style it, and say where the change applies.</figcaption></figure>
+    <figure class="shot"><img src="../media/guide/tag-styled.webp" loading="lazy" alt="The same example with the tags drawn on the text: square brackets round the subject, angle brackets round the object, a dashed border round the verb, a tinted tile under the topic"><figcaption>The same tags styled on the text: brackets, a border, a tile.</figcaption></figure>
+    <p>A tag's <span class="ui">Style ▾</span> offers, besides the bar: brackets round the tagged words (<code>[ ]</code>, <code>⟨ ⟩</code>, <code>⌈ ⌉</code>, <code>{ }</code>, <code>( )</code> and more), a marker over the word line, a tinted <em>tile</em> behind the words and their lines, a <em>border</em> round them (its line style, thickness and colour), a text colour, bold, italic, underline, and the bar on or off; or the tag hidden altogether. When the text has a chart, the ⚑ popover also lists the chart's columns, so an example can show which column its words sit in.</p>
+
+    <h3 id="st-scopes">Where a style applies</h3>
+    <p>Every change in the ⚑ popover goes to the scope its <span class="ui">Changes apply to</span> select names: <b>this example</b> (written into the example itself), <b>this note</b>, <b>each folder</b> the note is in, <b>the tab</b>, <b>the text</b> (wherever lines of that text appear), <b>the whole notebook</b>, or <b>a visual filter</b>. The most specific wins, and <em>shown / hidden</em> is settled apart from the <em>look</em>, so "hide here" keeps the colours chosen further out. The same choices are in a tab's and a folder's right-click menu (<span class="ui">FLEx tag styles…</span>), in Settings for the whole notebook, and in the note menu for the selected examples.</p>
+    <figure class="shot"><img src="../media/guide/tag-styles-dialog.webp" loading="lazy" alt="The tag styles dialog for a scope: the rules present, each with its controls, and + Add a tag"><figcaption>A scope's rules. It starts empty: a tag you have not added is untouched at that scope.</figcaption></figure>
+
+    <h3 id="st-filters">Visual filters</h3>
+    <div class="shots">
+      <figure class="shot"><img src="../media/guide/filters-popover.webp" loading="lazy" alt="The ⚑ Filters popover: each visual filter with a switch for this note and for everywhere"><figcaption>⚑ Filters on the toolbar: on or off for this note, or everywhere.</figcaption></figure>
+      <figure class="shot"><img src="../media/guide/filters-dialog.webp" loading="lazy" alt="The visual filters dialog: the filters in order with rename, rules and remove"><figcaption>Set up visual filters… names, orders and edits them.</figcaption></figure>
+    </div>
+    <p>A <b>visual filter</b> is a named set of tag styles (and chart marker, column and structure styles) that you switch on and off as one, like a highlighting filter in Logos: <em>Argument structure</em> with brackets round subjects and objects, <em>Discourse</em> with tiles under topics. They are ordered, and a scope can switch one on or off for itself: the toolbar's <span class="ui">⚑ Filters</span> does it for the open note or for everywhere. A filter's rules are edited in the same dialog as a scope's, and a filter only affects the tags you added to it.</p>
+
+    <h3 id="st-find">Finding notes by tag</h3>
+    <figure class="shot"><img src="../media/guide/tag-focus.webp" loading="lazy" alt="A FLEx tag chosen in the rail: the list shows the notes whose examples carry it, and in the open note the examples carrying it are marked while the others are dimmed, with a count bar above"><figcaption>Click a tag under <em>FLEx tags</em> in the rail.</figcaption></figure>
+    <p>The rail's <span class="ui">FLEx tags</span> lists the text markup tags the tab's notes use. Click one: the list shows only the notes whose examples carry it, and in the open note those examples are marked, the others dimmed, with a bar to step through them. The search box does the same with <code>tagged:Topic</code>, and the FLEx object dialog's <em>FLEx tags</em> view lists every place in the project a tag is used.</p>
+  </section>
+
+  <!-- ============================================================ 6 -->
+  <section id="audio">
+    <h2><span class="num">6</span>Hearing an example</h2>
+    <figure class="shot"><img src="../media/guide/audio.webp" loading="lazy" alt="An example playing: ▶ on each line, the playing line lit, and the transport strip with pause, loop and the position"><figcaption>▶ on a line plays that line from the text's recording; the playing line is lit.</figcaption></figure>
+    <p>When a text in FLEx is time-aligned (its lines have begin and end times and a media file), each line of an example has ▶, a range has <span class="ui">Play 1–3</span>, and a transport strip offers pause, loop and scrubbing. The playing line is lit and the note scrolls to it unless you are scrolling yourself; the player stays at the bottom of the view while the example runs on below it. Whenever something plays and its player is not on screen, a <b>Now playing</b> bar at the bottom of the window has pause, stop and the position; <kbd>Esc</kbd> stops.</p>
+    <p>The first time a line plays, its stretch of the recording is cut and kept in the notebook, so it still plays when the recording is somewhere else. When a text's media file cannot be found, the example says so with <span class="ui">Browse…</span>; the file you pick is remembered for that text and its folder for the others. Charts play too (<a href="#ch-play">Playback</a>), and the web page and slideshow exports carry the players (<a href="#xp-audio">Audio in the exports</a>).</p>
+  </section>
+
+  <!-- ============================================================ 7 -->
+  <section id="collections">
+    <h2><span class="num">7</span>Example collections</h2>
+    <p class="intro">A collection is a note that is only examples, numbered in order, sorted into groups, each with a note of its own, and the one kind of note that exports as a FLEx text.</p>
+
+    <h3 id="co-make">Making one</h3>
+    <figure class="shot"><img src="../media/guide/collection.webp" loading="lazy" alt="An example collection: a header with the count and buttons, two groups, numbered examples with a note under one, and a chart row as a card"><figcaption>A collection: groups, numbered examples, a note on an example, a chart row.</figcaption></figure>
+    <ul>
+      <li><span class="ui">+ New ▾ → New example collection</span> (<kbd>Ctrl+Shift+N</kbd>): an empty collection. Paste FLEx rows into its paste box, use <span class="ui">Add from FLEx…</span>, or choose <span class="ui">Add to an example collection…</span> on any example in any note (its ⋯, or <span class="ui">＋ Collection</span> on a chip's preview).</li>
+      <li>In an ordinary note, <span class="ui">⋯ → Collect the examples into a new collection…</span> copies its examples into one: the examples in the highlighted part of the note if you selected some, else all of them.</li>
+      <li>Chart rows found by the <a href="#chartsearch">chart search</a> can be collected too; they appear as cards, and the FLEx text export leaves them out.</li>
+    </ul>
+
+    <h3 id="co-sort">Groups, notes, chips, selections</h3>
+    <figure class="shot"><img src="../media/guide/collection-selection.webp" loading="lazy" alt="Two examples ticked in a collection and the selection bar in the header: move up and down, move into a group, cut, copy, paste, duplicate, tag styles, texts used, remove"><figcaption>Tick examples (or groups) and the bar in the header acts on all of them.</figcaption></figure>
+    <ul>
+      <li><b>Groups</b> (<span class="ui">＋ Group…</span>) are labelled headings with levels (⇤ ⇥), collapsible (▸ / ▾, <span class="ui">Collapse all</span>), renamed by double-click; drag examples onto them or use ↑ ↓. Numbering runs straight through the groups, which only organise the view and are not exported.</li>
+      <li><b>A note on an example</b> (✎) is exported: FieldWorks shows it as a note on the example's first line.</li>
+      <li><b>Chips</b>: ⤡ collapses an example to a chip in the collection too; <span class="ui">Examples as chips / in full</span> in the header does all of them. Collapsed examples still export.</li>
+      <li><b>Several at once</b>: a checkbox per example and group (<kbd>Shift</kbd> for a range, <kbd>Ctrl+A</kbd> for all); the bar moves them (<kbd>Alt+Shift+↑</kbd> / <kbd>↓</kbd>), moves them into a group, cuts, copies and pastes them (<kbd>Ctrl+X</kbd> / <kbd>C</kbd> / <kbd>V</kbd>, into a note or another collection), duplicates (<kbd>Ctrl+D</kbd>), sets their tag styles, lists their texts, and removes them (with Undo). Dragging a ticked card moves them all.</li>
+      <li><span class="ui">↻</span> in the header re-reads every example from the project.</li>
+    </ul>
+
+    <h3 id="co-rule">Collections by rule</h3>
+    <div class="shots">
+      <figure class="shot"><img src="../media/guide/rule-dialog.webp" loading="lazy" alt="The dialog for a collection from tagged lines: the tag tree with checkboxes, a box per group for all of its tags, the live count and preview, the title"><figcaption><span class="ui">New collection from tagged lines…</span></figcaption></figure>
+      <figure class="shot"><img src="../media/guide/rule-collection.webp" loading="lazy" alt="A rule collection: the rule bar under the header names the tags, with Find new lines and Edit rule"><figcaption>The rule stays with the collection: <span class="ui">⟳ Find new lines</span> later.</figcaption></figure>
+    </div>
+    <p>Tick FLEx text markup tags (a group's box takes every tag under it; a select ticks a visual filter's tags in one go) and every line in the project carrying one becomes an example, in text order, one example per line however many tags it has. The rule is saved in the collection: <span class="ui">⟳ Find new lines</span> appends the matches not in it yet and selects them (a line you removed comes back; keep it in a group instead), <span class="ui">Edit rule…</span> changes the tags. A rule can also be a <a href="#cs-profile">chart search</a>: <span class="ui">⟳ Find new rows</span> then.</p>
+
+    <h3 id="co-conc">From a FLEx concordance export</h3>
+    <figure class="shot"><img src="../media/guide/concordance.webp" loading="lazy" alt="The concordance dialog: the file's rows, each placed (text and line found) or not, the count, the title and the note option"><figcaption>Each row of FLEx's export placed in the project before anything is made.</figcaption></figure>
+    <p>In FieldWorks run a concordance or complex concordance, then <em>File › Export Concordance Results…</em>, which writes a CSV of <code>Ref,Occurrence</code> rows. Here, <span class="ui">+ New ▾ → New collection from a FLEx concordance export…</span>, open that file (or paste its contents into the box). Each row is placed: the text by its abbreviation or title in any writing system, the line by FLEx's number, the baseline checked against the occurrence. Every line found becomes an example, once, in the file's order; the rows that could not be placed are listed in a paragraph at the end of the collection, never dropped silently. <span class="ui">Keep each row's reference as the example's note</span> keeps the Ref and how often the line was hit.</p>
+
+    <h3 id="co-texts">Which texts a note uses</h3>
+    <figure class="shot half"><img src="../media/guide/texts-used.webp" loading="lazy" alt="The texts used dialog: one row per source text with its example and link counts and a FLEx link, Copy list and Copy with FLEx links"><figcaption><span class="ui">Texts used…</span> in the note, folder and tab menus.</figcaption></figure>
+    <p>One row per source text, with how many examples and links draw on it, the notes it appears in, and its link into FLEx; for a note, the highlighted part of a note, a folder with its subfolders, a whole tab, or a collection's selection. <span class="ui">Copy list</span> and <span class="ui">Copy with FLEx links</span> put it on the clipboard as a Markdown list.</p>
+
+    <h3 id="co-flextext">Export as a FLEx text</h3>
+    <figure class="shot half"><img src="../media/guide/flextext-export.webp" loading="lazy" alt="The FLEx text export dialog: the title, the number of examples, the source note option, the audio choice and the audio folder"><figcaption><span class="ui">Export as FLEx text…</span> at the top of a collection.</figcaption></figure>
+    <p>Only a collection exports a <code>.flextext</code>: one paragraph per example, one phrase per line, every writing-system alternative, the word identities kept so FieldWorks reuses the analyses on import, a <em>Source</em> note per line naming the text and line it came from. Examples from texts in different baseline writing systems become one file each. The <span class="ui">Audio</span> choice: <b>one audio file for the text</b> (the default: every example's recording in order with a click between examples, named like the .flextext and saved beside it, which the FlexText Audio Segmenter pairs with it by name), <b>one small file per line</b>, the original recordings and offsets, or none; or into a folder you choose, such as the project's <code>LinkedFiles\AudioVisual</code>, which FLEx finds on import. The file is a new text with new identities: importing it cannot touch the texts its examples came from, and the program refuses to write a file FieldWorks' importer would stumble on.</p>
+  </section>
+
+  <!-- ============================================================ 8 -->
+  <section id="charts">
+    <h2><span class="num">8</span>Text charts</h2>
+    <p class="intro">FieldWorks' constituent charts, as living objects in a note: the whole chart or a range of its rows, with the column headings, the free translations spliced in, styling by click and by rule, three layouts, playback, and a search over every chart of the project.</p>
+
+    <h3 id="ch-insert">A chart in a note</h3>
+    <figure class="shot"><img src="../media/guide/chart.webp" loading="lazy" alt="A text chart in a note: the header groups and columns, row labels with play buttons, word groups with their glosses, moved-text and clause markers, marker chips, and a free translation row after each line's rows"><figcaption>Rows 1a–2c of the demo's chart: the headings, the row labels with ▶, the cells, and a translation row after each line's rows.</figcaption></figure>
+    <p><kbd>Ctrl+Shift+L</kbd> → <span class="ui">Text charts</span>: pick a chart (a text has one per template it was ever opened with; those with rows are listed first and empty ones say so), click the first and last row, <span class="ui">Insert rows</span>, or <span class="ui">Whole chart</span>. The column headings always come along. A chart has no name of its own in FieldWorks, so it goes by its template. Rows are addressed by their identity, not their number, so a chart re-numbered in FLEx keeps the same rows here.</p>
+
+    <h3 id="ch-menu">The chart's menu</h3>
+    <figure class="shot"><img src="../media/guide/chart-menu.webp" loading="lazy" alt="The chart options menu: label, rows, lines, free translations, headings, notes, layout, merged cells, marker chips, zoom, the columns per group, line up on, copy as TSV, exports, change the chart, show as an example, edit source, duplicate, remove"><figcaption>⋯ on a chart.</figcaption></figure>
+    <ul>
+      <li><b>Lines</b> in a cell: Words, Word gloss (the default), Morphemes, Morph glosses, Category, and the text's <em>FLEx tags</em> as chips.</li>
+      <li><b>Free translations</b>: a row after the last row holding a line's words (naming the rows it covers), a Free column, a tip for the clicked cell, or off. <b>Headings</b> on or off (for a continuation), the row <b>Notes</b> column on or off.</li>
+      <li><b>Columns</b>: a box per column under its header group; <span class="ui">Hide empty columns</span> drops the ones with nothing in the rows shown; a heading's popover has <span class="ui">Hide this column</span>.</li>
+      <li><b>Layout</b>, <b>Merged cells</b>, <b>Marker chips</b>, <b>Markers in cells with no words</b>, <b>Zoom</b>, <b>Line up on</b>: below.</li>
+      <li><b>Copy as TSV</b>, <b>Export as FLEx chart XML / JSON</b>, <b>Pivot</b>, <b>Change the chart…</b>, <b>Show these lines as an interlinear example</b>, <b>Open as a chart note…</b>, <b>Edit source</b>, <b>Duplicate</b>, <b>Remove</b>.</li>
+    </ul>
+
+    <h3 id="ch-style">Styling by click</h3>
+    <figure class="shot"><img src="../media/guide/chart-style-popover.webp" loading="lazy" alt="The popover after clicking a word in a chart: style this word, the cell, the row or the column; highlight, bold, underline, italic, strike, colour"><figcaption>Click a word, a cell, a row label or a column heading.</figcaption></figure>
+    <p>The same highlight, bold, underline, italic, strike and colour as on an example, for this word, the cell, the whole row or the whole column. A column heading's popover also has <span class="ui">Hide this column</span> and <span class="ui">Style this column everywhere… (⚑)</span>; a row label's has <span class="ui">Select this row</span>.</p>
+
+    <h3 id="ch-flag">⚑ Markers, columns, structure</h3>
+    <figure class="shot"><img src="../media/guide/chart-flag.webp" loading="lazy" alt="The ⚑ popover of a chart: an explanation line, the scope select, the chart markers as a tree with show/hide boxes and Style menus, the header groups and columns, the chart structure items, the text's tags"><figcaption>⚑ on a chart: everything in it that can be shown, hidden or styled, and where the change applies.</figcaption></figure>
+    <p>The popover is in three parts, each with the same show/hide box and <span class="ui">Style ▾</span>, and the same scopes as a tag (this chart, the note, each folder, the tab, the text, the whole notebook, a visual filter):</p>
+    <ul>
+      <li><b>Chart markers</b> (the project's Chart Markers list, as its tree): a chip's colour, bold, hidden, or <em>whole row</em>, which colours every row the marker is in. <span class="ui">In an empty cell</span> decides per marker whether it shows in a cell with no words, overriding the menu's switch for all of them.</li>
+      <li><b>Columns and header groups</b>: a tint, a border, a text colour, bold / italic / underline for a column's cells and heading (brackets and the rest too in the one-column layouts and on examples); a header group (<em>All of Nucleus</em>) is styled as one box across its columns. A column whose rule says <em>hidden</em> leaves the table.</li>
+      <li><b>Chart structure</b>: dependent, speech and song clauses (the whole row), the <code>[2a]</code> clause markers, <b>moved text</b> (preposed or postposed word groups: a tint, border, brackets or colour; the look of the column it came from or sits in; a label such as <em>‹‹ Subj</em>), the <b>sentence and paragraph boundaries</b> FLEx marks (their line style, thickness and colour, or hidden), and <b>merged cells</b> (any, by side, or by column).</li>
+    </ul>
+    <p>A group heading's box switches everything under it on, off, or back to the mix it had. All of these are the same rules a <a href="#st-filters">visual filter</a> holds, so one filter can bracket the subjects on your examples and tint the Subject column of your charts.</p>
+
+    <h3 id="ch-views">Three layouts</h3>
+    <div class="shots">
+      <figure class="shot"><img src="../media/guide/chart-flat.webp" loading="lazy" alt="The one-column layout: each row in one cell, every word group labelled with its column's abbreviation"><figcaption><b>One column</b> (▤): each row in one cell, every part labelled with its column.</figcaption></figure>
+      <figure class="shot"><img src="../media/guide/chart-groups.webp" loading="lazy" alt="The groups layout: one cell per header group, the sub-columns' words inside each, labelled"><figcaption><b>Groups</b> (▥): one cell per header group, the sub-columns' words inside it.</figcaption></figure>
+    </div>
+    <p>▦ <b>Columns</b> is the chart as FieldWorks draws it. In the two flat layouts the column rules do the work the columns did: a visual filter by column or marker styles each part (brackets, tiles, borders, colours), the parts of one FLEx cell share one box, and <span class="ui">Line up on</span> centres (or left- or right-aligns) the parts of chosen columns or header groups on one axis across the rows, the rest flowing beside them. <span class="ui">Marker chips</span> go beside the words, on a line of their own under them, or on their own line no wider than the words, so chips never widen a column. The copies and exports follow the layout.</p>
+
+    <h3 id="ch-fit">Widths, zoom, hidden and frozen columns</h3>
+    <ul>
+      <li><b>Column widths</b>: drag the right edge of a heading; a wide chart scrolls sideways under its headings, which stay put, as does the row-label column with the ▶s. Double-click the edge, or <span class="ui">Reset column widths</span>, to let it size itself. Widths are kept in the note.</li>
+      <li><b>Sticky headings</b>: the header rows stay at the top of the pane while the chart's rows scroll past.</li>
+      <li><b>Zoom</b> (50–200 %) makes a chart larger or smaller on its own.</li>
+      <li><b>Hidden columns</b> come back from the menu's column boxes; <b>Hide empty columns</b> drops the empty ones for the rows shown.</li>
+    </ul>
+
+    <h3 id="ch-merged">Merged cells</h3>
+    <p>A cell FieldWorks merged with its empty neighbour ("it could be either column") counts for <b>both columns</b> by default: searches, rule columns, the column profile and <em>Line up on</em> match either, it is drawn with the owner column's look round the words and the neighbour's round that, and in the flat layouts it is labelled <code>S+V</code>. The menu's <span class="ui">Merged cells</span> chooses otherwise: both named with the owner's look only, the owner's look and name, or the owner column alone for everything. The ⚑ popover styles merged cells as a thing of their own: any, merged to the right or left, or merged from a given column.</p>
+
+    <h3 id="ch-play">Playback</h3>
+    <p>▶ beside the first row of each time-aligned line plays that line from the text's recording and lights the cells holding its words; ▶ in the <code>#</code> corner plays every line shown; ▶§ plays a whole sentence (the rows 4a, 4b, 4c) and ▶¶ a whole paragraph. The web page and slideshow exports do the same.</p>
+
+    <h3 id="ch-rows">Copying rows, converting, pivoting</h3>
+    <figure class="shot"><img src="../media/guide/chart-rows-selected.webp" loading="lazy" alt="Two rows of a chart selected by their labels, and the bar above the chart with the count, Copy and Clear"><figcaption><kbd>Ctrl+click</kbd> row labels to select rows; the bar copies them.</figcaption></figure>
+    <p><b>Copy rows</b>: <kbd>Ctrl+click</kbd> (or <kbd>Shift+click</kbd> for a range) on a row's label; the bar copies the rows as tab-separated text with the header rows and, on the first line, the rows' own reference, so pasting into another note makes a chart object of just those rows and pasting into a sheet gives the rows.</p>
+    <div class="shots">
+      <figure class="shot"><img src="../media/guide/chart-to-example.webp" loading="lazy" alt="The lines of the chart's rows shown as an interlinear example, with its menu open on Show these lines as a text chart"><figcaption>A chart as an example, and back.</figcaption></figure>
+      <figure class="shot"><img src="../media/guide/chart-chooser.webp" loading="lazy" alt="The chart chooser: a text's charts with their templates and row counts"><figcaption>When a text has several charts, you choose.</figcaption></figure>
+    </div>
+    <p><b>Convert</b>: a chart's <span class="ui">Show these lines as an interlinear example</span> shows every line of the text its rows touch, first to last; an example's <span class="ui">Show these lines as a text chart…</span> shows the text's chart at every row holding words of those lines (asking which chart when the text has several). Both are inclusive; trim the range afterwards. <span class="ui">Change the chart…</span> retargets a chart object or a chart note to another chart.</p>
+    <figure class="shot half"><img src="../media/guide/pivot.webp" loading="lazy" alt="The pivot dialog: a row per marker, clause type and moved text, a column per template column, each cell counting rows"><figcaption><span class="ui">Pivot: markers × columns…</span></figcaption></figure>
+    <p><b>Pivot</b>: a row per marker, clause type, moved text and clause marker, a column per visible template column, each cell counting the rows that carry the marker with words in that column; <span class="ui">Copy as TSV</span>.</p>
+
+    <h3 id="ch-join">Charts and examples, joined up</h3>
+    <p>An interlinear example's ⋯ → <span class="ui">Chart columns</span> draws, like tags, which chart columns its words sit in (in all the text's charts), and the same <code>column:</code> rules style them. A chart's ⋯ → <span class="ui">FLEx tags</span> draws the text's markup tags as chips in its cells, in the look their scopes give them. An entry card's <span class="ui">▦ In charts</span> opens the column profile for its lexeme.</p>
+  </section>
+
+  <!-- ============================================================ 9 -->
+  <section id="chartnotes">
+    <h2><span class="num">9</span>Chart notes</h2>
+    <p class="intro">A chart note is a note that is one text chart, with columns of your own beside it: a choice list shared by the whole notebook, free notes, or a rule that fills each row from its markers, columns and words. <span class="ui">+ New ▾ → New chart note…</span>, or a chart's ⋯ → <span class="ui">Open as a chart note…</span>, which carries its view settings over.</p>
+    <figure class="shot"><img src="../media/guide/chartnote.webp" loading="lazy" alt="A chart note: the chart with three custom columns after its FLEx columns, Status (a list), Comment (notes) and Role (a rule), rows tinted by the rule"><figcaption>A chart note with a list column, a notes column and a rule column; the rule tints the rows with a <em>New</em> marker.</figcaption></figure>
+
+    <h3 id="cn-columns">Your own columns</h3>
+    <figure class="shot"><img src="../media/guide/chartnote-list-cell.webp" loading="lazy" alt="A list column's cell opened: a select with the list's options and Add an option"><figcaption>A list cell: pick an option; an open list takes new ones.</figcaption></figure>
+    <ul>
+      <li><b>List</b>: a choice per row from a list that is shared by every chart note in the notebook (<em>Information status: new, given, contrast</em>); an <em>open</em> list offers <span class="ui">+ Add an option…</span> in the cell.</li>
+      <li><b>Notes</b>: free text per row; click the cell, <kbd>Enter</kbd> saves.</li>
+      <li><b>Rule</b>: computed from the chart, never typed; see below.</li>
+    </ul>
+    <p>A column's ⋯ in its heading renames it, edits its settings, moves it, removes it (with Undo), and places it <b>left or right</b> of the FLEx columns and <b>frozen</b> (it stays put while the chart scrolls sideways). Values are keyed to the row's identity, so renumbering in FLEx never moves them. The columns and values are two Markdown tables in the note's file, so the notebook search finds them and the file reads anywhere. The custom columns ride along in the Word, Excel, PDF and slide exports. A chart note's <span class="ui">Pivot…</span> and its whole ⚑ / ⋯ apparatus are the chart's.</p>
+
+    <h3 id="cn-rules">Rule columns and the builder</h3>
+    <figure class="shot"><img src="../media/guide/column-dialog.webp" loading="lazy" alt="The column dialog for a rule column: the Builder tab with a case, its condition (marker is New), the text to show, the style (whole row, highlight), and the live count of rows per case"><figcaption>The builder writes the rule for you and tests it against the chart as you go.</figcaption></figure>
+    <p>A rule is a list of <em>cases</em>; the first case that fits a row decides what the cell shows and how the cell or the row is styled. The <span class="ui">Builder</span> tab makes a case from lists: each condition picks <em>what</em> (a marker, a column, a clause type, moved text, a row flag, a word field such as the word, gloss, category, lexeme or free translation, the row label, or one of the note's list columns), <em>how</em> (is, any, contains, matches pattern), the value from the chart's own markers and columns, a writing system, and <span class="ui">in &lt;column&gt;</span> to look in one column only; conditions join with <em>all</em> or <em>any</em>. The <em>Show</em> row sets the text (or the row's markers as chips), and the style: the cell or the whole row, a highlight, bold / italic / underline, a text colour, the text as a chip, or <em>join with the row above</em>. The <span class="ui">Text</span> tab shows the same rule as text and takes anything the builder cannot say.</p>
+
+    <h3 id="cn-lang">The rule language</h3>
+    <p>What the builder writes, and what is saved in the file: <code>condition → text [styles]</code>, cases separated by <code>;</code>.</p>
+    <table class="ref wrap">
+      <tr><th>Part</th><th>Forms</th></tr>
+      <tr><td>Terms</td><td><code>marker:Name</code> (name, abbreviation or group; <code>*</code> any) · <code>col:Name</code> (the column holds words; name, Group/Name, abbreviation, <code>c3</code>) · <code>clause:dependent</code> / <code>speech</code> / <code>song</code> · <code>moved</code>, <code>moved:preposed</code>, <code>moved:postposed</code> · <code>clauseref</code> · <code>endsent</code> <code>endpara</code> <code>depstart</code> <code>depend</code> · <code>label:"2a"</code> · a list column of the note: <code>Status:new</code>, <code>Status:*</code></td></tr>
+      <tr><td>Word fields</td><td><code>txt:</code> (the word and its morpheme forms) · <code>gls:</code> (word and morpheme glosses) · <code>form:</code> <code>mgls:</code> <code>pos:</code> <code>cf:</code> <code>lex:</code> · <code>free:</code> (the free translation of the row's line). A plain value is "contains"; <code>txt:/^ka-/i</code> is a JavaScript regular expression.</td></tr>
+      <tr><td>One writing system</td><td><code>gls@fr:…</code>, when the chart carries that system's alternatives</td></tr>
+      <tr><td>One column only</td><td><code>col:Subject[txt:/^ka-/ and not gls:/x/]</code>: the inner condition sees that column's words and markers only; <code>col:/^Post/[…]</code> by pattern</td></tr>
+      <tr><td>Combining</td><td><code>and</code>, <code>or</code>, <code>not</code>, <code>( )</code></td></tr>
+      <tr><td>Outputs</td><td>text · <code>@markers</code> (the row's markers as chips) · <code>@markers:Name</code> · <code>@markers:/pattern/</code>; no <code>→</code> gives ✓</td></tr>
+      <tr><td>Styles</td><td><code>row</code> or <code>cell</code> · <code>hl</code>, <code>hl#rrggbb</code> · <code>b</code> <code>i</code> <code>u</code> · <code>c#rrggbb</code> · <code>chip</code> · <code>join</code> (no line between the row and the one above)</td></tr>
+    </table>
+    <p>A rule reads the chart's data, not the drawing: a marker hidden by a visual filter still counts. For example, rows whose argument is shared with the row above, in a project with a <code>^ShdArg…</code> marker: <code>marker:/^ShdArg/ → @markers:/^ShdArg/ [row join hl#fde68a]</code>.</p>
+  </section>
+
+  <!-- ============================================================ 10 -->
+  <section id="chartsearch">
+    <h2><span class="num">10</span>Searching the charts</h2>
+    <p class="intro">Which column does <em>kabir</em> sit in, and how often? Which rows carry a Topic marker in a speech clause? One search box over every chart of the project.</p>
+    <figure class="shot"><img src="../media/guide/chart-search.webp" loading="lazy" alt="The Text charts view of the FLEx object dialog with col:Subject lex:kabir typed: the matching rows listed under their charts, Insert all, Column profile, Collect into a new collection"><figcaption>The toolbar's <span class="ui">▦ Search charts</span> (<kbd>Ctrl+Shift+K</kbd>), or the FLEx object dialog's <em>Text charts</em> view.</figcaption></figure>
+    <p>Type a search and the matching rows are listed under their charts: click one to insert the chart at that row, <span class="ui">Insert all</span> for every one, <span class="ui">Collect into a new collection…</span> for a collection that finds new rows later. In a chart note or a collection the picked rows go into a new note.</p>
+
+    <h3 id="cs-query">The query</h3>
+    <figure class="shot"><img src="../media/guide/search-builder.webp" loading="lazy" alt="The search builder: in column, a list of conditions with what, how and value, the query shown as text, the live row count"><figcaption><span class="ui">☰ Build a search…</span> writes the query from lists and counts the rows live.</figcaption></figure>
+    <p>Terms are joined with <em>and</em>; <code>-term</code> excludes. Any value may be a pattern between slashes (<code>word:/^ka-/i</code>); these run in Python, so they are Python regular expressions (the tab's footer links to regex101 set to that flavour).</p>
+    <table class="ref wrap">
+      <tr><th>Term</th><th>Matches</th></tr>
+      <tr><td><code>kabir</code>, <code>"ka-sila"</code></td><td>the row's words, glosses, morpheme forms, lexeme forms or notes</td></tr>
+      <tr><td><code>word:</code> <code>gloss:</code> <code>form:</code> <code>mgls:</code> <code>cf:</code> <code>lex:</code> <code>pos:</code></td><td>one word field (<code>lex:</code> any form of the lexeme; <code>pos:</code> exact)</td></tr>
+      <tr><td><code>col:Subject</code></td><td>a column by name, Group/Name, abbreviation or <code>c3</code>; the word terms then look only in that column's cells, and the hits name the column</td></tr>
+      <tr><td><code>marker:Topic</code>, <code>marker:Reference</code>, <code>marker:*</code></td><td>a chart marker, any marker of a group, any marker</td></tr>
+      <tr><td><code>clause:dependent</code> (<code>speech</code>, <code>song</code>, <code>normal</code>) · <code>moved</code>, <code>moved:preposed</code> · <code>clauseref</code> <code>endsent</code> <code>endpara</code></td><td>the row's structure</td></tr>
+      <tr><td><code>chart:</code> <code>text:</code> <code>template:</code> <code>row:2a</code> <code>note:</code></td><td>the chart, its text, its template, a row label, the row's notes</td></tr>
+    </table>
+
+    <h3 id="cs-profile">Column profile and collections</h3>
+    <figure class="shot"><img src="../media/guide/column-profile.webp" loading="lazy" alt="The column profile for kabir: per template, a bar per column with the count of cells holding it, and the rows under each count"><figcaption><span class="ui">Column profile…</span>: where a lexical item sits, per template and column.</figcaption></figure>
+    <p>When the query has <code>lex:</code> or <code>word:</code>, <span class="ui">Column profile…</span> counts the cells holding the item per template and column, with the rows under each count and <span class="ui">Collect…</span>. The entry card's <span class="ui">▦ In charts</span> opens it for the entry. A <b>chart collection</b> is a collection whose rule is a chart search; <span class="ui">⟳ Find new rows</span> appends the rows that are new.</p>
+  </section>
+
+  <!-- ============================================================ 11 -->
+  <section id="exports">
+    <h2><span class="num">11</span>Exports</h2>
+    <figure class="shot half"><img src="../media/guide/export-menu.webp" loading="lazy" alt="The note menu: Markdown, web page, Word, Excel, PDF, slideshow, PowerPoint"><figcaption>The note's ⋯ menu.</figcaption></figure>
+    <div class="wip">The pretty exports are a work in progress: they improve with every release, and some layouts still need a hand afterwards. If something comes out wrong, <a href="https://github.com/rulingAnts/flex-scratchpad/issues">tell us</a> with the note that produced it.</div>
+
+    <h3 id="xp-formats">The formats</h3>
+    <table class="ref wrap">
+      <tr><th>Format</th><th>What you get</th></tr>
+      <tr><td>Markdown</td><td>The note's file as it is, with the readable copies of its objects and the attached files beside it. <span class="ui">Copy markdown</span> puts it on the clipboard.</td></tr>
+      <tr><td>Web page</td><td>One self-contained HTML file: a header, the note, examples and charts drawn as in the program, the styling kept; printable (landscape when it holds a chart). With the recordings embedded as players if you say so.</td></tr>
+      <tr><td>Word</td><td>A .docx: headings 1–6, lists, tables, examples as LingTeX-Word tables (below), charts on landscape pages with their custom columns and row colours, pictures, chips and collapsed examples as links into FLEx.</td></tr>
+      <tr><td>Excel</td><td>A sheet <em>Note</em> with the blocks in order, a sheet per chart (the table as drawn, merged header groups, word and gloss in each cell) followed by <em>Chart rows</em> with one flat row per chart row (label, clause type, flags, each column's words and glosses, markers, moved text, custom columns, free translation, notes: what Excel filters and pivots), and <em>Examples</em> with one row per interlinear line.</td></tr>
+      <tr><td>PDF</td><td>Saved straight away on Windows; elsewhere the print dialog's <em>Save as PDF</em>. Charts land on landscape pages with the header rows repeated.</td></tr>
+      <tr><td>Slideshow</td><td>One web page: a title slide, a slide per heading, example, chart, table, entry and picture, running text continuing on "(cont.)" slides; arrow keys, <kbd>T</kbd> for contents, <kbd>F</kbd> full screen, <kbd>P</kbd> print; the players ride along.</td></tr>
+      <tr><td>PowerPoint</td><td>A .pptx of the same slides: a title slide, a heading bar per slide, examples as tables, charts filling the slide; no audio (the slideshow carries it).</td></tr>
+      <tr><td>FLEx text</td><td>A collection as a <code>.flextext</code> with its audio (<a href="#co-flextext">above</a>).</td></tr>
+      <tr><td>Chart XML / JSON</td><td>One chart in FieldWorks' own discourse-chart XML shape (with identities added), or as data, from the chart's ⋯.</td></tr>
+      <tr><td>TSV</td><td>An example's lines, a chart's rows, a pivot, table cells: on the clipboard for a spreadsheet.</td></tr>
+    </table>
+    <div class="shots">
+      <figure class="shot"><img src="../media/guide/export-web.webp" loading="lazy" alt="The exported web page: a header with the title, folder, project and date, then the note with its example and table"><figcaption>The web page export.</figcaption></figure>
+      <figure class="shot"><img src="../media/guide/export-slides.webp" loading="lazy" alt="A slide of the slideshow export: the example on a slide of its own, titled by its section"><figcaption>The slideshow: one slide per example.</figcaption></figure>
+    </div>
+
+    <h3 id="xp-word">Word, in LingTeX-Word styles</h3>
+    <figure class="shot"><img src="../media/guide/export-word.webp" loading="lazy" alt="The Word export rendered: the heading, the prose, a numbered interlinear example as a borderless table with the tiers aligned, the grammatical glosses in small capitals, the free translation in quotes with a link to the line"><figcaption>The Word export, rendered by LibreOffice: a LingTeX-Word interlinear table.</figcaption></figure>
+    <p>Every expanded example is written as a <a href="https://github.com/rulingAnts/LingTeX-Tools" target="_blank" rel="noopener">LingTeX-Word</a> interlinear table: the add-in's own table and tier styles (<em>LingTeX Interlinear</em>, <em>Vernacular</em>, <em>Morphemes</em>, <em>Gloss</em>, <em>Word Gloss</em>, <em>Category</em>), grammatical glosses set in small capitals, Word's own (1) numbering with a., b. for several lines, the free translation in quotes with a link to the line in FLEx. A document with the add-in installed re-wraps them. Your highlights, bold, underline and colours stay.</p>
+    <figure class="shot"><img src="../media/guide/export-excel.webp" loading="lazy" alt="The Excel export's Note sheet rendered: the blocks in order, an example as rows per line with the words across"><figcaption>The Excel export, rendered by LibreOffice.</figcaption></figure>
+
+    <h3 id="xp-audio">Audio in the web page and slideshow</h3>
+    <p>When the note has time-aligned examples or charts, the export asks whether to <b>embed the recordings</b>: one clip per object, compressed (about 300 KB a minute), inside the page. Each line then has ▶, an example and a chart their own, the playing line or cells are lit, and a bar at the bottom pauses, stops and seeks. An object whose recording is not there exports without a player.</p>
+  </section>
+
+  <!-- ============================================================ 12 -->
+  <section id="backup">
+    <h2><span class="num">12</span>Backup and storage</h2>
+    <figure class="shot"><img src="../media/guide/backup.webp" loading="lazy" alt="The Backup &amp; storage dialog: a folder or S3 destination, encryption, back up on close, keep old versions, Back up now with its progress bar, the storage breakdown and cleanup"><figcaption>Settings › <span class="ui">Backup &amp; storage…</span>, also the ☁ line under the project pill.</figcaption></figure>
+    <ul>
+      <li><b>Where</b>: a folder, with the program guessing your OneDrive, Google Drive, Dropbox, iCloud or Box folder (<em>FLEx Scratchpad backup/&lt;notebook&gt;</em> inside it), or <b>S3-compatible</b> storage through the bundled rclone, with the keys kept in Windows' Credential Manager, never in a file. <b>Encryption</b> is optional and off by default.</li>
+      <li><b>When</b>: <span class="ui">Back up now</span>, and <span class="ui">on close</span> when something changed; the window then shows the progress and lets you close without waiting.</li>
+      <li><b>Versions</b>: a mirror of the notebook plus a dated folder per backup holding what that backup replaced or removed; <span class="ui">keep old versions N days</span> prunes them, and <span class="ui">Restore…</span> brings a version back.</li>
+      <li><b>Storage</b>: how much the notes, attached files, pictures, FLEx snapshots, cached clips and the trash take; cleanup moves unused attachments to the trash, clears the cached clips, and <span class="ui">Empty the trash</span> is the one real deletion, asked first. Snapshots are never offered for cleanup: they keep notes readable without FLEx.</li>
+    </ul>
+    <p>Beside the backup, the whole notebook can be exported and imported as a zip, and the notebook folder itself is plain files you can copy, sync or put under version control.</p>
+  </section>
+
+  <!-- ============================================================ 13 -->
+  <section id="settings">
+    <h2><span class="num">13</span>Settings and shortcuts</h2>
+
+    <h3 id="se-settings">Settings</h3>
+    <p>⚙ or <kbd>Ctrl+,</kbd>: the <b>notebook folder</b>, the <b>FLEx project</b> (or a .flextext file, or the demo), <b>diacritics-insensitive search</b>, the <b>bar between blocks</b>, <b>sticky headings</b>, <b>markers hidden</b>, the <b>FLEx text markup tag styles</b> for the whole notebook, <b>visual filters</b>, <b>Backup &amp; storage</b>, the keyboard shortcuts, and the program's version and build. The window remembers its size and place.</p>
+
+    <h3 id="se-keys">Keyboard shortcuts</h3>
+    <figure class="shot half"><img src="../media/guide/shortcuts.webp" loading="lazy" alt="The keyboard shortcuts dialog"><figcaption><kbd>Ctrl+/</kbd> lists them in the program. On a Mac, Cmd stands in for Ctrl.</figcaption></figure>
+    <div class="cols2">
+    <table class="ref">
+      <tr><th colspan="2">Notes</th></tr>
+      <tr><td><kbd>Ctrl+N</kbd></td><td>New note</td></tr>
+      <tr><td><kbd>Ctrl+Shift+N</kbd></td><td>New example collection</td></tr>
+      <tr><td><kbd>Ctrl+S</kbd></td><td>Save now (notes save by themselves)</td></tr>
+      <tr><td><kbd>F2</kbd></td><td>Rename the note</td></tr>
+      <tr><td><kbd>Ctrl+Shift+F</kbd></td><td>Search the notebook</td></tr>
+      <tr><td><kbd>Ctrl+F</kbd></td><td>Find in the note (Enter / Shift+Enter: next / previous)</td></tr>
+      <tr><td><kbd>Ctrl+,</kbd></td><td>Settings</td></tr>
+      <tr><td><kbd>Ctrl+\</kbd></td><td>Show / hide the left panes</td></tr>
+      <tr><td><kbd>Ctrl+/</kbd></td><td>The shortcut list</td></tr>
+      <tr><th colspan="2">Text</th></tr>
+      <tr><td><kbd>Ctrl+B</kbd> / <kbd>I</kbd> / <kbd>E</kbd></td><td>Bold / italic / inline code</td></tr>
+      <tr><td><kbd>Ctrl+Shift+X</kbd> / <kbd>H</kbd></td><td>Strikethrough / highlight</td></tr>
+      <tr><td><kbd>Ctrl+K</kbd></td><td>Insert or edit a link</td></tr>
+      <tr><td><kbd>Ctrl+Z</kbd> / <kbd>Ctrl+Y</kbd></td><td>Undo / redo (Ctrl+Shift+Z too)</td></tr>
+      <tr><td><kbd>Ctrl+A</kbd></td><td>Select the block; again: the whole note</td></tr>
+      <tr><td><kbd>Ctrl+click</kbd></td><td>Follow a link</td></tr>
+    </table>
+    <table class="ref">
+      <tr><th colspan="2">Blocks</th></tr>
+      <tr><td><kbd>Enter</kbd></td><td>New paragraph / list item</td></tr>
+      <tr><td><kbd>Shift+Enter</kbd></td><td>Line break inside the block</td></tr>
+      <tr><td><kbd>Ctrl+Enter</kbd> / <kbd>Ctrl+Shift+Enter</kbd></td><td>New paragraph below / above the block</td></tr>
+      <tr><td><kbd>Ctrl+D</kbd></td><td>Duplicate the block or the selected blocks</td></tr>
+      <tr><td><kbd>Alt+Shift+↑</kbd> / <kbd>↓</kbd></td><td>Move the block or the selected blocks</td></tr>
+      <tr><td><kbd>Shift+click</kbd>, <kbd>Shift+↑</kbd> / <kbd>↓</kbd></td><td>Select across blocks</td></tr>
+      <tr><td><kbd>/</kbd></td><td>The insert menu, on an empty line</td></tr>
+      <tr><td><kbd>Esc</kbd></td><td>Leave the block / clear the selection</td></tr>
+      <tr><th colspan="2">Headings and lists</th></tr>
+      <tr><td><kbd>Ctrl+Alt+1</kbd> … <kbd>6</kbd></td><td>Heading 1 … 6</td></tr>
+      <tr><td><kbd>Ctrl+Alt+0</kbd></td><td>Plain text (no heading, list or quote)</td></tr>
+      <tr><td><kbd>Ctrl+Alt+[</kbd> / <kbd>]</kbd></td><td>Promote / demote every heading (note or selection)</td></tr>
+      <tr><td><kbd>Ctrl+Shift+8</kbd> / <kbd>7</kbd> / <kbd>9</kbd></td><td>Bulleted list / numbered list / checklist</td></tr>
+      <tr><td><kbd>Tab</kbd> / <kbd>Shift+Tab</kbd></td><td>List item in / out (also Ctrl+] / Ctrl+[)</td></tr>
+      <tr><th colspan="2">FLEx and tables</th></tr>
+      <tr><td><kbd>Ctrl+Shift+L</kbd></td><td>Insert a FLEx object</td></tr>
+      <tr><td><kbd>Ctrl+Shift+K</kbd></td><td>Search the text charts</td></tr>
+      <tr><td><kbd>Ctrl+V</kbd></td><td>Paste FLEx rows or a FLEx link as an example; a grid as a table</td></tr>
+      <tr><td><kbd>Tab</kbd> (in a table)</td><td>Next cell; at the end, a new row</td></tr>
+      <tr><td><kbd>Alt+↑</kbd> / <kbd>↓</kbd> (in a cell)</td><td>The cell above / below</td></tr>
+      <tr><td><kbd>Esc</kbd> (while playing)</td><td>Stop playback</td></tr>
+    </table>
+    </div>
+  </section>
+
+  <!-- ============================================================ 14 -->
+  <section id="files">
+    <h2><span class="num">14</span>Your notes are files</h2>
+    <p>The notebook is a folder: a folder per tab, a folder per folder, and a Markdown file per note with a few lines of front matter (its id, title, tags, dates). <code>notebook.json</code> holds the tabs, tags, project and styles; <code>attachments/</code> the attached files; <code>.scratchpad/</code> the snapshots, cached clips and the trash. Everything is UTF-8 and keeps its Unicode, filenames included, so a Tamil or Arabic title is a readable filename.</p>
+    <p>A FLEx object in a note is a short reference, written and read only by the program:</p>
+<pre><code>{{flex:text 9b1c2d3e-… seg=1-2 ex hl=1.2 b=morph:"-mo" u=2.3 "past tense"}}
+{{flex:entry 6a5f3a2e-…}}
+{{flex:chart d15c0000-… rows=2-5 cols=Nucleus,Postnuclear/Inner free=row hl=r2 "label"}}
+{{file attachments/wordlist.xlsx "Wordlist, October"}}</code></pre>
+    <p>and after every such reference the file carries <b>a plain-text copy</b> that the program never shows: a link line with the text's title and FLEx line numbers (a <code>silfw://</code> link that opens FLEx), and the lines of the example as a plain fenced block, each word a column, so a note is readable, searchable and diffable in any editor or on GitHub, in ten years, without the program or FieldWorks. The copy is refreshed whenever the example changes. Folded headings carry <code>{collapsed}</code>; a table's styling is a line after it; a collection is a note whose body is one example per paragraph with <code>## Group</code> headings and <code>&gt; </code> notes; a chart note's custom columns and values are two Markdown tables. The Markdown export and <span class="ui">Copy markdown</span> keep all of it; the other exports draw from it.</p>
+  </section>
+
+  <!-- ============================================================ 15 -->
+  <section id="trouble">
+    <h2><span class="num">15</span>When something goes wrong</h2>
+    <table class="ref wrap">
+      <tr><th>What you see</th><th>What to do</th></tr>
+      <tr><td>The window says <em>Waiting for the app…</em></td><td>The page is open but the program behind it has not answered yet; it waits, reloads itself twice, and never shows the sample data in place of your notebook. Your notes are on disk and untouched. If it stays, start the program from a terminal with <code>flex-scratchpad -v</code> and send the log.</td></tr>
+      <tr><td>The project cannot be opened</td><td>The status pill says why: FieldWorks has it open without sharing (turn sharing on in FLEx's Project Properties), the project needs opening in FLEx once after an upgrade, or the FieldWorks libraries were not found. Until then the notes show their snapshots.</td></tr>
+      <tr><td>A paste lands on the wrong line, or nowhere</td><td>Copy with the Word line showing. For a report: <code>flex-scratchpad --project NAME --locate clip</code> with the rows still copied writes <code>flex-scratchpad-locate.json</code>, which shows what the program read and what the project holds there.</td></tr>
+      <tr><td>A line of an example looks wrong (a morpheme twice, a missing gloss)</td><td><code>flex-scratchpad --project NAME --dump "TEXT TITLE" --seg 11.1</code> prints that line exactly as the project returns it. A word shown twice in the Morphemes line (<code>budu budu</code>) is FieldWorks' own import of a word glossed in two languages with no morphemes; <code>--doubled-morphs</code> lists every such analysis, and the fix is in FLEx's Word Analyses.</td></tr>
+      <tr><td>Tags or a chart look wrong</td><td><code>--dump-tags</code> and <code>--dump-charts [TEXT]</code> write what the project returns, to attach to an issue.</td></tr>
+      <tr><td>Anything else</td><td>Run <code>flex-scratchpad -v</code> from a terminal: every call the page makes, every FLEx read and every file written, with times, and the same goes to <code>%LOCALAPPDATA%\FLEx Scratchpad\log\flex-scratchpad.log</code> for the installed program. Nothing in the log is ever a secret. <code>--devtools</code> (or F12 in the program) opens the browser developer tools. <code>FLEx Scratchpad.exe --selftest report.json</code> checks the installation and writes a report to attach.</td></tr>
+    </table>
+    <p>Please <a href="https://github.com/rulingAnts/flex-scratchpad/issues">report what you find</a>; the planned features are the issues labelled <em>planned</em>.</p>
+    <a class="back-top" href="#top">↑ Back to the top</a>
+  </section>
+
+  </div>
+</div>
+</main>
+
+<footer>
+  <div class="footer-links">
+    <a href="../">Home</a>
+    <a href="https://github.com/rulingAnts/flex-scratchpad/releases" target="_blank" rel="noopener">Releases</a>
+    <a href="https://github.com/rulingAnts/flex-scratchpad" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://github.com/rulingAnts/flex-scratchpad/issues" target="_blank" rel="noopener">Report an issue</a>
+    <a href="https://github.com/rulingAnts/LingTeX-Tools" target="_blank" rel="noopener">LingTeX Tools</a>
+  </div>
+  <div>FLEx Scratchpad — AGPL-3.0 &copy; Seth Johnston. FieldWorks and FLEx are SIL International's; this program is independent of them. The pictures show the program's built-in demo project, an invented language.</div>
+</footer>
+
+<script src="../assets/release.js"></script>
+<script>
+// The contents: the section (and sub-heading) the reader is at is marked, and its sub-headings shown.
+(function () {
+  var toc = document.querySelector('.toc');
+  if (!toc) return;
+  var links = Array.prototype.slice.call(toc.querySelectorAll('a'));
+  var byId = {};
+  links.forEach(function (a) { byId[a.getAttribute('href').slice(1)] = a; });
+  var targets = Array.prototype.slice.call(document.querySelectorAll('.guide section, .guide h3[id]'));
+  var current = null, queued = false;
+  function mark(id) {
+    if (!id || id === current) return;
+    current = id;
+    links.forEach(function (a) { a.classList.remove('active'); });
+    Array.prototype.forEach.call(toc.querySelectorAll('li.open'), function (li) { li.classList.remove('open'); });
+    var a = byId[id];
+    if (!a) return;
+    a.classList.add('active');
+    var li = a.parentNode;
+    while (li && li !== toc) { if (li.tagName === 'LI') li.classList.add('open'); li = li.parentNode; }
+    if (a.offsetTop < toc.scrollTop || a.offsetTop > toc.scrollTop + toc.clientHeight - 40) toc.scrollTop = Math.max(0, a.offsetTop - 80);
+  }
+  function update() {
+    queued = false;
+    var line = 96, best = targets[0];
+    for (var i = 0; i < targets.length; i++) { if (targets[i].getBoundingClientRect().top <= line) best = targets[i]; else break; }
+    if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 2) best = targets[targets.length - 1];
+    mark(best.id);
+  }
+  function onScroll() { if (!queued) { queued = true; requestAnimationFrame(update); } }
+  window.addEventListener('scroll', onScroll, { passive: true });
+  window.addEventListener('resize', onScroll);
+  update();
+})();
+</script>
+</body>
+</html>

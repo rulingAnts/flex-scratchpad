@@ -1370,6 +1370,21 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   dialog, the exports menu… (demo project — an invented
   language, never a community's data — through the e2e bridge, a drawn cursor and captions,
   Chromium's screencast, ffmpeg): re-run it after a UI change and look at the result.
+  THE USER GUIDE (Seth, 2026-10-20: "thorough documentation with screenshots, generated screenshots, for everything
+  you can do with this app and a clear sort of table of contents … in the user-facing website"): `docs/guide/index.html`
+  (+ `assets/guide.css`), fifteen numbered sections (getting started, the notebook, writing, examples, styling and
+  filters, audio, collections, charts, chart notes, chart search, exports, backup, settings and shortcuts, the files,
+  troubleshooting) with a sticky contents list (a `<details>` on a phone; an IntersectionObserver marks the section in
+  view and opens its sub-headings) and ~60 pictures in `docs/media/guide/*.webp`, plain `<img>`s (no manifest: they are
+  committed with the page). `tools/shoot_guide.py` makes them from the demo through the e2e bridge — it builds a
+  notebook (a chapter note with every block kind, a collection with groups and notes, a rule collection, a chart note
+  with list / notes / rule columns, attachments), photographs each view (`shot(name, target)` crops the element with
+  padding; popovers on their own, dialogs by `.modal`), renders the Word and Excel exports through LibreOffice and
+  pdftoppm, and prints the names that failed; `python tools/shoot_guide.py name…` re-shoots some. Re-run it after a UI
+  change and LOOK at the pictures. `tests/js/site-guide.test.js` fails when the page names a picture that is not there
+  (or a picture nobody shows), when an in-page link has no target, when a section or sub-heading is missing from the
+  contents, or when the home page stops linking to `guide/`. The README's how-to table and the guide say the same
+  things: change both.
 - GitHub Actions: public repo, standard runners only, Windows build is `workflow_dispatch`. Never
   add a schedule, a larger runner, LFS or a release step without Seth's say-so.
 - This is Seth's suite: see `flextext-editor/CLAUDE.md` for the house rules on writing about
