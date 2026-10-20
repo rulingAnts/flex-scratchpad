@@ -12,6 +12,7 @@ from pathlib import Path
 from . import APP_NAME
 from .api import Api
 from .config import AppConfig, local_data_dir
+from .log import LOG, banner
 
 UI_DIR = Path(__file__).parent / "ui"
 
@@ -73,7 +74,9 @@ def run(notebook_dir: str | None = None, demo: bool = False, debug: bool = False
               f"start again to run the installed build {build}.")
         return 0
 
+    banner()
     config = AppConfig()
+    LOG.info("config: %s", config.path)
     api = Api(config, notebook_dir=notebook_dir, demo=demo)
     size = config.data.get("window", {})
     width, height = _fit_to_screen(int(size.get("width", 1280)), int(size.get("height", 820)))
@@ -88,6 +91,7 @@ def run(notebook_dir: str | None = None, demo: bool = False, debug: bool = False
         text_select=True,
     )
     api._window = window
+    LOG.info("window created: %s (%dx%d, maximized)%s", ui_url(), width, height, "; developer tools ON (F12 or right-click → Inspect opens them in their own window)" if debug else "")
 
     state = {"maximized": True}
 
@@ -98,6 +102,7 @@ def run(notebook_dir: str | None = None, demo: bool = False, debug: bool = False
         state["maximized"] = False
 
     def on_closing():
+        LOG.info("window closing (backup running: %s)", api._backup.running if getattr(api, '_backup', None) else False)
         # The backup on close (Seth, 2026-10-17: a progress bar "when they exit" too): the window
         # stays open while it runs, the page showing its progress with "Close now, finish in the
         # background" and "Close without backing up"; then it closes itself. Skipped when nothing
@@ -150,6 +155,7 @@ def run(notebook_dir: str | None = None, demo: bool = False, debug: bool = False
             pass
 
     def on_loaded():
+        check_bridge(window, api)
         # A file dropped from Explorer: only pywebview's own drop handler learns its full path
         # (the page sees a name and bytes), which "link instead of copy" needs (Seth, 2026-10-17).
         try:
@@ -186,6 +192,28 @@ def run(notebook_dir: str | None = None, demo: bool = False, debug: bool = False
     return 0
 
 
+def check_bridge(window, api) -> bool:
+    """Right after pywebview says the page is loaded: did the page actually get the Api?
+    pywebview builds `window.pywebview.api` by walking the Api's attributes, and one attribute
+    that raises leaves the api EMPTY with only a line in pywebview's own logger — the page then
+    waits for an `init` that never comes (Seth, 2026-10-19: the newest wheel showed the page's
+    in-browser demo over his notebook; until that day the page fell back to the demo after 15 s).
+    So the log says what the page sees and, when the api is not there, what pywebview's walk
+    runs into (`bridge_check.report`). Returns True when the page has the Api."""
+    from .bridge_check import report
+    try:
+        kind = window.evaluate_js("typeof (window.pywebview && window.pywebview.api && window.pywebview.api.init)")
+    except Exception as e:  # noqa: BLE001 — the window may be gone already
+        LOG.warning("bridge check: could not ask the page (%s: %s)", type(e).__name__, e)
+        return False
+    if kind == "function":
+        LOG.info("bridge: the page has the Api (%s)", report(api))
+        return True
+    LOG.error("bridge: the page did NOT get the Api — window.pywebview.api.init is %s. pywebview's walk of the Api: %s. "
+              "The page shows \"Waiting for the app\" until it arrives; it never falls back to the demo.", kind, report(api))
+    return False
+
+
 def shut_down(api, watcher=None, wait: float = 5.0) -> None:
     """After the window is gone, before the process ends (Seth, 2026-10-17: closing the app
     printed "Unhandled Exception: Python.Runtime.InternalPythonnetException: Failed to create
@@ -195,6 +223,7 @@ def shut_down(api, watcher=None, wait: float = 5.0) -> None:
     already shutting pythonnet down, and the process dies on it. So: nothing is pushed to the
     page any more, the poller stops, FLEx is closed, an Api call still writing (the last autosave)
     may finish, and `exit_now` ends the process without that shutdown."""
+    LOG.info("shutting down")
     api._window = None                  # Api._emit is a no-op from here on
     if watcher is not None and getattr(watcher, "stop", None) is not None:
         watcher.stop.set()
@@ -231,6 +260,9 @@ def _start_backup_process(notebook: str) -> None:
     subprocess.Popen(args, creationflags=flags, close_fds=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
+CLOSE_GRACE = 3.0       # seconds a cancelled backup gets to stop before the window closes anyway
+
+
 def backup_then_close(api, destroy, start_process=None) -> str:
     """Back up while the window stays open, then close it (what closing the app does when a
     backup is due). The page shows the progress and answers through `Api.backup_close_choice`:
@@ -244,7 +276,25 @@ def backup_then_close(api, destroy, start_process=None) -> str:
             api._close_choice = None
             api._close_evt.clear()
             api._emit("backupClosing", {"state": "running"})
-            r = api._backup.run("close")
+            # The backup runs on its own thread so the user's answer is acted on AT ONCE (Seth,
+            # 2026-10-18: "Close now, finish in the background" did nothing while the backup was
+            # busy in a part of its work that could not be stopped). The choice cancels the run
+            # (Api.backup_close_choice); the run gets a moment to stop cleanly — the lock released,
+            # no half file left — and the window closes whether or not it has.
+            box: dict = {}
+
+            def _run():
+                try:
+                    box["r"] = api._backup.run("close")
+                except Exception as e:  # noqa: BLE001
+                    box["r"] = {"ok": False, "message": str(e)}
+            t = threading.Thread(target=_run, name="backup-on-close", daemon=True)
+            t.start()
+            while t.is_alive():
+                api._close_evt.wait(0.25)
+                if api._close_choice in ("background", "skip"):
+                    t.join(CLOSE_GRACE)
+                    break
             choice = api._close_choice
             if choice == "background":
                 start_process(notebook)
@@ -253,6 +303,7 @@ def backup_then_close(api, destroy, start_process=None) -> str:
             if choice == "skip":
                 how = "skipped"
                 break
+            r = box.get("r") or {}
             if r.get("ok") or r.get("busy"):
                 how = "ok"
                 break

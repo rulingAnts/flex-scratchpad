@@ -30,6 +30,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
+from .fsutil import replace_file
 
 REMOTE, CRYPT = "fsbackup", "fsbackupc"
 SECRETS = ("access_key_id", "secret_access_key", "crypt_password")
@@ -424,8 +425,8 @@ class Backup:
         self.lock_dir.mkdir(parents=True, exist_ok=True)
         lock = self.lock_dir / "backup.lock"
         try:
-            if lock.exists() and time.time() - lock.stat().st_mtime > 6 * 3600:
-                lock.unlink()                      # a backup that died long ago
+            if lock.exists() and (time.time() - lock.stat().st_mtime > 6 * 3600 or not _lock_holder_alive(lock)):
+                lock.unlink()                      # a backup that died long ago, or whose process is gone
             fd = os.open(lock, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
             os.write(fd, str(os.getpid()).encode())
             os.close(fd)
@@ -490,9 +491,12 @@ class Backup:
             self.running = False
             self.progress("")
             self._tick("done", force=True)
-        self.config.load()                  # another process (the backup on close) may have saved meanwhile
-        self.config.data.setdefault("backup", {}).update({"last": result})
-        self.config.save()
+        try:
+            self.config.load()              # another process (the backup on close) may have saved meanwhile
+            self.config.data.setdefault("backup", {}).update({"last": result})
+            self.config.save()
+        except OSError as e:                # the record is a convenience; the backup itself is done (Seth, 2026-10-19)
+            LOG.warning("backup: result not recorded in the config: %s", e)
         return result
 
     def _dest_join(self, root: str, sub: str) -> str:
@@ -643,6 +647,41 @@ def _plain_error(text: str) -> str:
     return t[-500:]
 
 
+def _lock_holder_alive(lock: Path) -> bool:
+    """Whether the process that wrote the lock (its pid) still runs. The window closed with
+    "finish in the background" may end before its own backup thread let go of the lock; the quiet
+    process that takes over must not wait six hours for that. Unreadable → assumed alive."""
+    try:
+        pid = int(lock.read_text(encoding="utf-8").strip() or "0")
+    except (OSError, ValueError):
+        return True
+    if pid <= 0:
+        return True
+    if pid == os.getpid():
+        return True
+    if sys.platform == "win32":
+        import ctypes
+        SYNCHRONIZE = 0x00100000
+        h = ctypes.windll.kernel32.OpenProcess(SYNCHRONIZE, False, pid)
+        if not h:
+            return False
+        try:
+            STILL_ACTIVE = 259
+            code = ctypes.c_ulong()
+            if ctypes.windll.kernel32.GetExitCodeProcess(h, ctypes.byref(code)):
+                return code.value == STILL_ACTIVE
+            return True
+        finally:
+            ctypes.windll.kernel32.CloseHandle(h)
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
 def _mirror_folder(src: Path, dest: Path, stamp: str, tick=None, cancelled=None) -> dict:
     """A plain folder backup without rclone: `dest/current` becomes a copy of `src`; a file that
     would be replaced or removed there is moved to `dest/versions/<stamp>/` first (nothing lost).
@@ -666,6 +705,10 @@ def _mirror_folder(src: Path, dest: Path, stamp: str, tick=None, cancelled=None)
     wanted: set[str] = set()
     plan: list[tuple[Path, Path, int]] = []
     for dirpath, dirnames, files in os.walk(src):
+        # the planning pass stats every file in the DESTINATION too — slow on a cloud-synced folder —
+        # so a stop (the close screen's "finish in the background") is answered here as well
+        if cancelled():
+            raise BackupCancelled("The backup was stopped.")
         rel_dir = Path(dirpath).relative_to(src)
         for fn in files:
             if SKIP.search(fn):
@@ -705,7 +748,7 @@ def _mirror_folder(src: Path, dest: Path, stamp: str, tick=None, cancelled=None)
                     if cancelled():
                         raise BackupCancelled("The backup was stopped.")
             shutil.copystat(s_file, tmp)
-            os.replace(tmp, d_file)
+            replace_file(tmp, d_file)
         except BaseException:
             try:
                 tmp.unlink()
@@ -716,6 +759,8 @@ def _mirror_folder(src: Path, dest: Path, stamp: str, tick=None, cancelled=None)
         tick("copying", done, total, i + 1, len(plan), s_file.name)
     # what is gone from the notebook is set aside, not deleted
     for dirpath, dirnames, files in os.walk(cur, topdown=False):
+        if cancelled():
+            raise BackupCancelled("The backup was stopped.")
         for fn in files:
             p = Path(dirpath) / fn
             if p.relative_to(cur).as_posix() not in wanted:

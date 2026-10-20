@@ -70,7 +70,7 @@
       }
       if (R.isEmbedLine(line)) {
         const spec = R.parse(line.trim());
-        if (spec && spec.kind === 'text') { cur = { t: 'ex', src: line.trim(), spec, note: '' }; items.push(cur); other = null; continue; }
+        if (spec && (spec.kind === 'text' || spec.kind === 'chart')) { cur = { t: 'ex', src: line.trim(), spec, note: '' }; items.push(cur); other = null; continue; }   // an example, or a chart row (Seth, 2026-10-18)
       }
       const q = /^>\s?(.*)$/.exec(line);
       if (q && cur) { cur.note += (cur.note ? '\n' : '') + q[1]; continue; }
@@ -118,7 +118,7 @@
     changed() { if (this.opts.onChange) this.opts.onChange(this.markdown()); }
     /* The examples the FLEx text export takes, in order, each with its note. */
     flextextItems() {
-      return this.examples().map((i) => ({ kind: 'text', guid: i.spec.guid, seg: i.spec.seg, at: i.spec.at, label: i.spec.label || '', note: (i.note || '').trim() }));
+      return this.examples().filter((i) => i.spec.kind === 'text').map((i) => ({ kind: 'text', guid: i.spec.guid, seg: i.spec.seg, at: i.spec.at, label: i.spec.label || '', note: (i.note || '').trim() }));   // chart rows are not FLEx text
     }
     /* What the other exports read: blocks as the editor would hold them — groups as headings,
      * examples numbered, notes as paragraphs under them. */
@@ -179,7 +179,7 @@
         const src = cleanEmbed(s);
         const spec = src && R.parse(src);
         if (!spec) { FS.toast('Only rendered examples go into a collection, not links.', 'warn'); continue; }
-        if (spec.kind !== 'text') { FS.toast('A collection holds interlinear examples only — that is a lexicon entry.', 'warn'); continue; }
+        if (spec.kind !== 'text' && spec.kind !== 'chart') { FS.toast('A collection holds interlinear examples and chart rows only — that is a lexicon entry.', 'warn'); continue; }
         fresh.push({ t: 'ex', src, spec, note: '' });
       }
       if (!fresh.length) return 0;
@@ -320,6 +320,17 @@
       FS.toast(moving.length + (moving.length === 1 ? ' item' : ' items') + ' moved into \u201c' + grp.label + '\u201d', 'ok');
     }
     selMarkdown() { return serialize(this.selectedItems()); }
+    /* Rewrite the selected examples' embeds (tag styles for several at once): fn(src) → src. */
+    mapSelected(fn) {
+      let n = 0;
+      for (const it of this.selectedItems()) {
+        if (it.t !== 'ex') continue;
+        const next = cleanEmbed(fn(it.src), true);
+        if (next && next !== it.src) { it.src = next; it.spec = R.parse(next); n++; }
+      }
+      if (n) { this.undo = null; this.changed(); this.render(); }
+      return n;
+    }
     copySel() {
       const md = this.selMarkdown();
       if (!md) return;
@@ -403,6 +414,7 @@
         FS.collClip ? el('button', { class: 'btn', 'data-test': 'coll-sel-paste', title: 'Paste after the selection (Ctrl+V)', onclick: () => this.pasteText(FS.collClip) }, 'Paste') : null,
         el('button', { class: 'btn', title: 'Duplicate (Ctrl+D)', onclick: () => this.duplicateSel() }, 'Duplicate'),
         this.opts.onTextsUsed ? el('button', { class: 'btn', 'data-test': 'coll-sel-texts', title: 'The FLEx texts the selected examples come from', onclick: () => this.opts.onTextsUsed(this.selMarkdown()) }, 'Texts used\u2026') : null,
+        this.opts.onTagStyles ? el('button', { class: 'btn', 'data-test': 'coll-sel-tags', title: 'How FLEx text markup tags look in the selected examples', onclick: () => this.opts.onTagStyles(this.selectedItems().filter((x) => x.t === 'ex').map((x) => x.src), (fn) => this.mapSelected(fn)) }, 'Tag styles\u2026') : null,
         el('button', { class: 'btn danger', 'data-test': 'coll-sel-delete', title: 'Remove (Delete)', onclick: () => this.deleteSel() }, 'Remove'),
         el('span', { class: 'spacer' }),
         el('button', { class: 'icon-btn', title: 'Clear the selection (Esc)', onclick: () => this.clearSel() }, '\u2715'));
@@ -412,6 +424,36 @@
       c.checked = this.sel.has(item);
       c.addEventListener('click', (e) => { e.preventDefault(); this.toggleSel(item, e.shiftKey); });
       return c;
+    }
+
+    /* A RULE COLLECTION (Seth, 2026-10-18: "a collection with ALL lines that match a specific
+     * rule … add new matches found in the database that aren't already in that collection"):
+     * the rule it was made from, "Find new lines" (the app asks Python for today's matches and
+     * appends the ones not here yet) and "Edit rule…". */
+    ruleBar() {
+      const rule = this.opts.rule ? this.opts.rule() : null;
+      if (!rule || (!(rule.tags || []).length && !rule.charts)) return null;
+      const label = (sel) => (/^group:/i.test(sel) ? 'all of ' + sel.slice(6) : sel === '*' ? 'every tag' : sel);
+      if (rule.charts) {
+        // a CHART rule: the rows a chart search matches (Seth, 2026-10-18)
+        return el('span', { class: 'coll-rule', 'data-test': 'coll-rule', title: 'This collection was made from every chart row matching this search' },
+          el('span', { class: 'coll-rule-tags' }, '\u25a6 ' + rule.charts),
+          el('button', { class: 'btn', 'data-test': 'coll-rule-update', title: 'Look through the charts again and add the matching rows that are not here yet', onclick: (e) => { e.currentTarget.disabled = true; this.opts.onRuleUpdate && this.opts.onRuleUpdate(); } }, '\u27f3 Find new rows'),
+          el('button', { class: 'btn', 'data-test': 'coll-rule-edit', title: 'Change the chart search', onclick: () => this.opts.onRuleEdit && this.opts.onRuleEdit() }, 'Edit rule\u2026'));
+      }
+      return el('span', { class: 'coll-rule', 'data-test': 'coll-rule', title: 'This collection was made from every line carrying one of these FLEx tags' + (rule.texts && rule.texts.length ? ' in ' + rule.texts.length + ' chosen text' + (rule.texts.length === 1 ? '' : 's') : '') },
+        el('span', { class: 'coll-rule-tags' }, '\u2691 ' + rule.tags.map(label).join(', ')),
+        el('button', { class: 'btn', 'data-test': 'coll-rule-update', title: 'Look through the project again and add the matching lines that are not here yet', onclick: (e) => { e.currentTarget.disabled = true; this.opts.onRuleUpdate && this.opts.onRuleUpdate(); } }, '\u27f3 Find new lines'),
+        el('button', { class: 'btn', 'data-test': 'coll-rule-edit', title: 'Change which tags the rule looks for', onclick: () => this.opts.onRuleEdit && this.opts.onRuleEdit() }, 'Edit rule\u2026'));
+    }
+    /* Select the examples whose source is one of `srcs` (the lines an update just added). */
+    selectBySrc(srcs) {
+      const want = new Set((srcs || []).map((x) => cleanEmbed(x)));
+      this.sel = new Set(this.items.filter((it) => it.t === 'ex' && want.has(cleanEmbed(it.src))));
+      this.lastSel = null;
+      this.render();
+      const first = this.list && this.list.querySelector('.coll-item.selected');
+      if (first) first.scrollIntoView({ block: 'center' });
     }
 
     /* -- drawing -------------------------------------------------------------------- */
@@ -432,6 +474,7 @@
         n ? (this.examples().some((x) => !(x.spec && x.spec.extra && x.spec.extra.collapsed))
           ? el('button', { class: 'btn', 'data-test': 'coll-ex-all', title: 'Show every example as a one-line chip (hover or click one to see it)', onclick: () => this.setExamplesCollapsed(true) }, '\u2921 Examples as chips')
           : el('button', { class: 'btn', 'data-test': 'coll-ex-all', title: 'Show every example in full', onclick: () => this.setExamplesCollapsed(false) }, '\u2922 Examples in full')) : null,
+        this.ruleBar(),
         el('button', { class: 'btn', 'data-test': 'coll-add-group', title: 'A labelled, collapsible block for sorting the examples (not exported)', onclick: () => this.askGroup() }, '➕ Group…'),
         el('button', { class: 'btn', 'data-test': 'coll-refresh', title: 'Take in what was changed in FieldWorks and reload every example', onclick: (e) => { e.currentTarget.disabled = true; this.opts.onRefreshAll && this.opts.onRefreshAll(); } }, '↻ Refresh all'),
         el('button', { class: 'btn', title: 'Find a text and its segments in the project', onclick: () => this.pick() }, '➕ Add from FLEx…'),
@@ -636,8 +679,8 @@
       box.addEventListener('drop', (e) => { const t = e.dataTransfer && e.dataTransfer.getData('text/plain'); if (t) { e.preventDefault(); take(t); } });
       return box;
     }
-    pick(at) {
-      FS.picker.open((md) => { const n = this.add(md, at); if (n) FS.toast('Example added', 'ok'); }, { mode: 'texts' });
+    pick(at, pickOpts) {
+      FS.picker.open((md) => { const n = this.add(md, at); if (n) FS.toast('Example added', 'ok'); }, Object.assign({ mode: 'texts' }, pickOpts || {}));
     }
   }
 

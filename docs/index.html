@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#1e40af">
-<meta name="description" content="FLEx Scratchpad is a notebook for FieldWorks: notes in tabs and folders that show live interlinear examples and lexical entries, read straight from your FLEx project. Windows.">
-<title>FLEx Scratchpad · A notebook for FieldWorks</title>
+<meta name="description" content="FLEx Scratchpad is the notebook between FieldWorks and your write-up: notes, tables and text charts with live interlinear examples read straight from your FLEx project, searchable, styled, exported, and never able to change the project. Windows.">
+<title>FLEx Scratchpad · The notebook between FieldWorks and your write-up</title>
 <link rel="icon" type="image/png" href="assets/icon-32.png">
 <meta name="media-manifest" content="media/available.json">
 <link rel="stylesheet" href="assets/site.css">
@@ -15,7 +15,9 @@
 <nav class="site-nav">
   <a class="nav-brand" href="./"><img src="assets/icon-small.svg" alt=""> FLEx Scratchpad</a>
   <div class="nav-links">
+    <a href="#why">Why</a>
     <a href="#how">How it works</a>
+    <a href="#charts">Charts</a>
     <a href="#read-only">Read-only</a>
     <a href="#features">Features</a>
     <a href="#install">Install</a>
@@ -27,8 +29,14 @@
 <main>
 <section class="hero">
   <div class="kicker"><span class="tag">Pre-release</span> FLEx Scratchpad <span class="ver" data-dl="version">0.1.0-beta.2</span></div>
-  <h1>A notebook for FieldWorks, with your examples alive in it</h1>
-  <p class="hero-sub">Write grammar notes, field notes and drafts in tabs and folders. Paste lines from FLEx and they become real interlinear examples, read straight from your project, so they show your current analysis. Mark them up, collect them, and send them back to FLEx as a text.</p>
+  <h1>The notebook between FieldWorks and your write-up</h1>
+  <p class="hero-sub">FLEx holds your analyses but gives you nowhere to think around them. Word holds your thinking, but every example you paste into it is dead the moment you re-gloss a word. FLEx Scratchpad is the notebook in between: write freely, and every example, entry and text chart in your notes is <strong>read live from your FLEx project</strong>, styled with a click, searched across the whole project, exported in the shapes you publish in, and never able to change a thing in FLEx.</p>
+  <ul class="claims" aria-label="In short">
+    <li>Live examples, not pasted copies</li>
+    <li>Text charts you can style, search and annotate</li>
+    <li>Collections that update themselves</li>
+    <li>Never writes to your project</li>
+  </ul>
   <div class="btn-row">
     <a class="btn btn-light" data-dl="exe" href="https://github.com/rulingAnts/flex-scratchpad/releases/download/v0.1.0-beta.2/FLEx-Scratchpad-Setup-0.1.0-beta.2.exe">⬇ Download for Windows</a>
     <a class="btn btn-glass" data-dl="zip" href="https://github.com/rulingAnts/flex-scratchpad/releases/download/v0.1.0-beta.2/FLEx-Scratchpad-0.1.0-beta.2-windows-portable.zip">Portable zip, no installer</a>
@@ -48,6 +56,80 @@
   </figure>
 </div>
 
+<section class="section" id="why">
+  <h2>Why not just FLEx, or just Word?</h2>
+  <p class="lead">Because each of them does half of the job. FieldWorks is where the data lives; a document is where the argument lives. Everything below is what happens when the two are in one place.</p>
+  <div class="compare-wrap">
+    <table class="compare">
+      <thead>
+        <tr><th scope="col">You want to…</th><th scope="col">FLEx alone</th><th scope="col">Word or a notes app</th><th scope="col">FLEx Scratchpad</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th scope="row">Write around your data: headings, lists, tables, folders, tags, drafts</th>
+          <td class="no">Notes fields on records; no documents</td>
+          <td class="yes">Yes</td>
+          <td class="yes">Yes: Markdown notes in tabs and folders, with your data inside them</td>
+        </tr>
+        <tr>
+          <th scope="row">Quote an interlinear example that follows your analysis</th>
+          <td class="part">Only inside the text itself</td>
+          <td class="no">A pasted copy, stale the moment you re-gloss</td>
+          <td class="yes">Live: read from the project when shown; ↻ after an edit; stays on its lines when you split, merge or delete lines in FLEx</td>
+        </tr>
+        <tr>
+          <th scope="row">Highlight a morpheme, bracket a phrase, colour a word in an example</th>
+          <td class="no">No</td>
+          <td class="part">By hand, and lost on every re-paste</td>
+          <td class="yes">A click; kept with the note; carried into every export</td>
+        </tr>
+        <tr>
+          <th scope="row">Gather every example of a construction across your texts</th>
+          <td class="part">A filter, while the window is open</td>
+          <td class="no">Copy and paste, one by one</td>
+          <td class="yes">Collections, by hand or by rule (“every line tagged Topic”, “every chart row with <em>kabir</em> in the Subject column”); “Find new lines” later</td>
+        </tr>
+        <tr>
+          <th scope="row">Work with a text chart in a document</th>
+          <td class="part">One chart at a time, in its own tool</td>
+          <td class="no">A screenshot</td>
+          <td class="yes">The live chart or a range of its rows, your own columns beside it, visual filters by column, marker and clause type, three layouts</td>
+        </tr>
+        <tr>
+          <th scope="row">Ask “which column does <em>kabir</em> sit in?” across every chart</th>
+          <td class="no">No search over charts</td>
+          <td class="no">—</td>
+          <td class="yes">One search box over every chart of the project, by word, gloss, lexeme, marker, column and clause type; a column profile per lexeme</td>
+        </tr>
+        <tr>
+          <th scope="row">Hear exactly this example</th>
+          <td class="part">The text's recording, from its player</td>
+          <td class="no">No</td>
+          <td class="yes">▶ on each line of a time-aligned text; clips kept with the notebook; players ride along in the web page and slideshow exports</td>
+        </tr>
+        <tr>
+          <th scope="row">Publish: Word, Excel, PDF, slides, a FLEx text</th>
+          <td class="part">FLEx's own exports of a text</td>
+          <td class="part">Word, by hand</td>
+          <td class="yes">Word in LingTeX-Word styles, Excel with one row per chart row, PDF, a slideshow and PowerPoint, and a collection as a <code>.flextext</code> with its examples' audio stitched together</td>
+        </tr>
+        <tr>
+          <th scope="row">Read it without the program, in ten years</th>
+          <td class="no">Needs FieldWorks</td>
+          <td class="part">Needs Word</td>
+          <td class="yes">Plain Markdown files; every example also saved in them as plain text with a link into FLEx</td>
+        </tr>
+        <tr>
+          <th scope="row">Keep the project safe while you work</th>
+          <td class="part">Every click edits the real data</td>
+          <td class="yes">Nothing can reach it</td>
+          <td class="yes">Read-only by construction: the program has no way to write to a project, and its tests fail if one appears</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
 <section class="section" id="how">
   <h2>From FLEx to your notes, and back</h2>
   <p class="lead">Everything an example shows comes from your FLEx project as it is now. Edit an analysis in FLEx, click ↻, and the example in your notes follows.</p>
@@ -59,7 +141,7 @@
       <div class="step-body">
         <span class="step-num">1</span>
         <h3>Paste from FLEx</h3>
-        <p>Copy interlinear lines in FLEx (the Gloss or Print view) and paste them into a note. FLEx Scratchpad finds the segment in your project and draws the example: words, morphemes, glosses, categories and the free translation. Or pick a text and its segments, or a lexical entry, from the <strong>FLEx object</strong> button.</p>
+        <p>Copy interlinear lines in FLEx (the Gloss or Print view) and paste them into a note. FLEx Scratchpad finds the segment in your project and draws the example: words, morphemes, glosses, categories and the free translation. Or pick a text and its segments, a lexical entry or a text chart from the <strong>FLEx object</strong> button, or paste a FLEx hyperlink.</p>
       </div>
     </div>
     <div class="step">
@@ -68,8 +150,8 @@
       </figure>
       <div class="step-body">
         <span class="step-num">2</span>
-        <h3>Mark it up</h3>
-        <p>Click a word to highlight, bold or underline it, a morpheme or a few letters, in any colour. Number your examples, put them in tables, write around them. Headings fold their sections away while you work on something else.</p>
+        <h3>Mark it up and write</h3>
+        <p>Click a word to highlight, bold or underline it, a morpheme or a few letters, in any colour. Number your examples, put them in tables, write around them, fold sections away. FLEx's text markup tags show on the examples, styled the way you choose, and a <strong>visual filter</strong> turns a set of such styles on or off for a note, a folder or the whole notebook, like a highlighting filter in Logos.</p>
       </div>
     </div>
     <div class="step">
@@ -78,9 +160,46 @@
       </figure>
       <div class="step-body">
         <span class="step-num">3</span>
-        <h3>Collect and export</h3>
-        <p>Gather the examples of a construction into an example collection, sort them into groups, add a note to each. Export it as a FLEx text with one recording of all its examples, a click between each, and analyse them together in FLEx, or cut and check them in the FlexText Audio Segmenter.</p>
+        <h3>Collect, export, hand it on</h3>
+        <p>Gather the examples of a construction into a collection, by hand or by rule, sort them into groups, add a note to each. Export the note as Word, Excel, PDF or a slideshow, or the collection as a FLEx text with one recording of all its examples and a click between each, to analyse them together in FLEx or cut and check them in the FlexText Audio Segmenter.</p>
       </div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="charts">
+  <h2>Text charts you can think in</h2>
+  <p class="lead">FieldWorks builds constituent charts and then leaves you alone with them: one chart at a time, no notes beside it, no styling by column or marker, and no way to search across charts. Here the chart is a living object in a note.</p>
+  <div class="features">
+    <div class="feature">
+      <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 4v16M15 4v16"/></svg></div>
+      <h3>A chart note, with your own columns</h3>
+      <p>One note is one chart. Add columns FLEx does not have: a choice list shared by the notebook, free notes, or a rule that fills each row from its markers, columns and words (“<em>ShdArg</em> in any column → join this row to the one above”). Values are keyed to the row, so they survive renumbering.</p>
+    </div>
+    <div class="feature">
+      <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v4H4zM4 12h10v4H4zM4 20h6"/></svg></div>
+      <h3>Visual filters</h3>
+      <p>Style a column, a header group, a chart marker, a dependent, speech or song clause, preposed or postposed text, a sentence or paragraph boundary: a tint, a border, brackets, a colour, bold, or hidden. Save a set as a named filter and switch it on for a note, a folder, a tab or the whole notebook. The same filters style the text markup tags on your interlinear examples.</p>
+    </div>
+    <div class="feature">
+      <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></div>
+      <h3>Search every chart in the project</h3>
+      <p>Which column does <em>kabir</em> sit in, and how often? Which rows carry a Topic marker in a speech clause? Type it, or build it from lists, and get the rows from every chart at once, with a profile per column. Insert the rows, or collect them into a collection that finds new rows later.</p>
+    </div>
+    <div class="feature">
+      <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg></div>
+      <h3>Three ways to read it</h3>
+      <p>All the columns; the header groups only, with the sub-columns styled inside each cell; or one column per row with the words lined up on a column you choose. Free translations spliced in where you want them, markers on their own line, zoom, frozen columns, and playback that lights the cells of the line being spoken.</p>
+    </div>
+    <div class="feature">
+      <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 21h14"/></svg></div>
+      <h3>Out the door</h3>
+      <p>A chart exports as a Word table on a landscape page, an Excel sheet plus one flat row per chart row to filter and pivot, a PDF, a slide, FieldWorks' own chart XML or JSON; your custom columns and row colours come along. A pivot counts rows by marker and column on the spot.</p>
+    </div>
+    <div class="feature">
+      <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg></div>
+      <h3>Charts and examples, joined up</h3>
+      <p>An interlinear example can show which chart columns its words sit in, drawn like tags, and a chart can show the text's markup tags in its cells. An entry card tells you which columns the lexeme is found in.</p>
     </div>
   </div>
 </section>
@@ -114,17 +233,27 @@
     <div class="feature">
       <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg></div>
       <h3>Live from your project</h3>
-      <p>Examples and entries are read from FLEx every time they are shown, so they always match your project as it is now.</p>
+      <p>Examples, entries and charts are read from FLEx every time they are shown, so they always match your project as it is now; a snapshot keeps them readable when FLEx is closed.</p>
+    </div>
+    <div class="feature">
+      <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg></div>
+      <h3>Examples that stay put</h3>
+      <p>Split, merge or delete lines in FLEx and each example keeps showing the lines it was made from, with its highlights on the same words. If a line is gone, the example says so and shows what it last saw, never some other line that now has its number.</p>
+    </div>
+    <div class="feature">
+      <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></div>
+      <h3>Search that knows the language</h3>
+      <p>Search the whole notebook by the vernacular words, glosses and tags of the examples in it, with or without diacritics; list which texts a note, a folder or a selection draws on; filter notes by the text markup tags their examples carry.</p>
     </div>
     <div class="feature">
       <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M8 13h8M8 17h5"/></svg></div>
       <h3>Your notes are files</h3>
-      <p>Every note is a Markdown file in an ordinary folder, readable without the program and easy to back up. Nothing is ever deleted: removed notes go to the notebook's trash.</p>
+      <p>Every note is a Markdown file in an ordinary folder, easy to back up, sync and version, and readable without the program: each example is also saved in it as plain text, with a link that opens it in FLEx. Nothing is ever deleted: removed notes go to the notebook's trash.</p>
     </div>
     <div class="feature">
       <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 4v16"/></svg></div>
-      <h3>Tables and charts</h3>
-      <p>Paradigm tables with merged cells and examples inside them, pasted from Excel or Word, and simple charts, all saved with the note.</p>
+      <h3>Tables and charts of your own</h3>
+      <p>Paradigm tables with merged cells and examples inside them, pasted from Excel or Word, and simple bar, line and pie charts, all saved with the note.</p>
     </div>
     <div class="feature">
       <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg></div>
@@ -132,9 +261,14 @@
       <p>When a text is time-aligned, each example plays its own stretch of the recording, lighting each line as it plays. Clips are cut and kept with the notebook, so they still play when the recording is somewhere else.</p>
     </div>
     <div class="feature">
+      <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V4h16v3M9 20h6M12 4v16"/></svg></div>
+      <h3>Word the way linguists set it</h3>
+      <p>Every example exports to Word as a LingTeX-Word interlinear table: tier styles, small-caps grammatical glosses, Word's own example numbering, the free translation in quotes and a link back to the line in FLEx. Collapsed examples and chips become links into FLEx.</p>
+    </div>
+    <div class="feature">
       <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 11-8.5 8.5a5 5 0 0 1-7-7L14 4a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-3-3L15 7"/></svg></div>
       <h3>Attach your files</h3>
-      <p>Drop a recording, a spreadsheet or a PDF into a note: it opens in its own program with a click. Pictures and videos show in the note, and web pages preview right there.</p>
+      <p>Drop a recording, a spreadsheet or a PDF into a note: it opens in its own program with a click. Pictures and videos show in the note, and web pages, such as a FlexText listening page, preview right there.</p>
     </div>
     <div class="feature">
       <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 1 0-1.4-8.8A6 6 0 0 0 4.5 12 3.5 3.5 0 0 0 6 19z"/><path d="M12 12v6M9.5 15.5 12 18l2.5-2.5"/></svg></div>
@@ -142,19 +276,19 @@
       <p>To your OneDrive, Google Drive or Dropbox folder, or to S3-compatible storage, encrypted if you like. Old versions are kept, it backs up when you close, and it shows what the space is used for.</p>
     </div>
     <div class="feature">
-      <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg></div>
-      <h3>Examples that stay put</h3>
-      <p>Split, merge or delete lines in FLEx and each example keeps showing the lines it was made from, with its highlights on the same words.</p>
-    </div>
-    <div class="feature">
       <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 21h14"/></svg></div>
-      <h3>Works offline</h3>
-      <p>Everything it needs comes in the download, including the audio tools. It never needs the internet and runs no server of any kind.</p>
+      <h3>Works offline, runs no server</h3>
+      <p>Everything it needs comes in the download, including the audio tools. It never needs the internet and starts no server of any kind, so it is at home on a field laptop and with cautious anti-malware software.</p>
     </div>
     <div class="feature">
       <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V4h16v3M9 20h6M12 4v16"/></svg></div>
       <h3>Every script</h3>
       <p>Unicode throughout, right-to-left text laid out right to left, each writing system in its own FLEx font, and search that can ignore diacritics.</p>
+    </div>
+    <div class="feature">
+      <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v16H4z"/><path d="M4 9h16M9 9v11"/></svg></div>
+      <h3>Honest about its data</h3>
+      <p>An example says when it is drawn from a snapshot rather than the live project, when its lines moved, and when a recording is missing. The log says what the program asked FLEx and what came back.</p>
     </div>
   </div>
 </section>

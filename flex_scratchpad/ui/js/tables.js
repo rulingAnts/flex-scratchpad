@@ -536,20 +536,26 @@
     tools.append(
       el('button', { title: 'Add a row below the current one', onclick: () => ops.insertRow(last().r + 1) }, '+ Row'),
       el('button', { title: 'Add a column after the current one', onclick: () => ops.insertCol(last().c + 1) }, '+ Column'),
-      el('button', { title: 'Delete the current / selected row(s)', onclick: () => ops.deleteRow(cur().r, last().r) }, '− Row'),
-      el('button', { title: 'Delete the current / selected column(s)', onclick: () => ops.deleteCol(cur().c, last().c) }, '− Column'),
-      el('button', { onclick: (e) => colPopover(e.currentTarget, t, cur().c, commit, widget) }, 'Column ▾'),
-      el('button', { onclick: (e) => rowPopover(e.currentTarget, t, cur().r, commit, widget) }, 'Row ▾'),
+      // the deletions live in the Row ▾ / Column ▾ menus (Seth, 2026-10-18: the bar's − buttons
+      // were "easy to click on accident"), each leaving a toast with Undo
+      el('button', { onclick: (e) => colPopover(e.currentTarget, t, cur().c, commit, widget, { count: last().c - cur().c + 1, del: () => { const n = last().c - cur().c + 1; ops.deleteCol(cur().c, last().c); FS.toast((n > 1 ? n + ' columns' : 'Column') + ' removed', 'ok', { action: { label: 'Undo', fn: () => opts.onUndo && opts.onUndo() } }); } }) }, 'Column ▾'),
+      el('button', { onclick: (e) => rowPopover(e.currentTarget, t, cur().r, commit, widget, { count: last().r - cur().r + 1, del: () => { const n = last().r - cur().r + 1; ops.deleteRow(cur().r, last().r); FS.toast((n > 1 ? n + ' rows' : 'Row') + ' removed', 'ok', { action: { label: 'Undo', fn: () => opts.onUndo && opts.onUndo() } }); } }) }, 'Row ▾'),
       el('button', { onclick: (e) => cellPopover(e.currentTarget, t, cur(), commit, widget) }, 'Cells ▾'),
       el('button', { onclick: (e) => tablePopover(e.currentTarget, t, commit, widget, opts) }, 'Table ▾'),
       el('span', { class: 'small muted', style: { marginLeft: '6px' } }, 'right-click a cell for all commands'),
     );
     container.appendChild(tools);
+    // the bar shows for a table that has been CLICKED INTO (a cell, the gutter, a tool), not on
+    // mere hover (Seth, 2026-10-18: "frequently under foot"); a press anywhere else lets go
+    container.addEventListener('mousedown', () => container.classList.add('tbl-active'), true);
+    container.addEventListener('focusin', () => container.classList.add('tbl-active'));
     return widget;
   }
 
   /* The table with the live cell selection, for the document-level clipboard and key handlers. */
   let activeWidget = null;
+  // a press outside a table takes its bar away again (see `active` in render)
+  document.addEventListener('mousedown', (e) => { document.querySelectorAll('.tbl-active').forEach((w) => { if (!w.contains(e.target) && !(e.target.closest && e.target.closest('.popover'))) w.classList.remove('tbl-active'); }); }, true);
   const liveSelection = () => {
     const w = activeWidget;
     if (!w || !w.sel || !w.container.isConnected || w.finishEdit) return null;
@@ -618,8 +624,9 @@
       item('Insert row below', () => ops.insertRow(range.r2 + 1));
       item('Insert column to the left', () => ops.insertCol(range.c1));
       item('Insert column to the right', () => ops.insertCol(range.c2 + 1));
-      item(multi && range.r1 !== range.r2 ? 'Delete rows' : 'Delete row', () => { for (let r = range.r2; r >= range.r1; r--) ops.deleteRow(r); }, range.r1 === 0 && range.r2 === 0);
-      item(multi && range.c1 !== range.c2 ? 'Delete columns' : 'Delete column', () => { for (let c = range.c2; c >= range.c1; c--) ops.deleteCol(c); }, t.rows[0].length <= range.c2 - range.c1 + 1);
+      const undoToast = (what) => FS.toast(what + ' removed', 'ok', { action: { label: 'Undo', fn: () => opts.onUndo && opts.onUndo() } });
+      item(multi && range.r1 !== range.r2 ? 'Delete rows' : 'Delete row', () => { for (let r = range.r2; r >= range.r1; r--) ops.deleteRow(r); undoToast(range.r1 !== range.r2 ? (range.r2 - range.r1 + 1) + ' rows' : 'Row'); }, range.r1 === 0 && range.r2 === 0);
+      item(multi && range.c1 !== range.c2 ? 'Delete columns' : 'Delete column', () => { for (let c = range.c2; c >= range.c1; c--) ops.deleteCol(c); undoToast(range.c1 !== range.c2 ? (range.c2 - range.c1 + 1) + ' columns' : 'Column'); }, t.rows[0].length <= range.c2 - range.c1 + 1);
       sep();
       if (multi) item('Merge cells', () => ops.mergeRange(range), range.r1 === 0 && range.r2 > 0);
       else {
@@ -936,6 +943,9 @@
         else if (e.key === 'ArrowDown' && e.altKey) { e.preventDefault(); finish(); moveTo(r + 1, c); }
         else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') { e.preventDefault(); wrapSel(ed, '**'); refresh(); }
         else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'i') { e.preventDefault(); wrapSel(ed, '*'); refresh(); }
+        else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'e') { e.preventDefault(); wrapSel(ed, '`'); refresh(); }
+        else if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'x') { e.preventDefault(); wrapSel(ed, '~~'); refresh(); }
+        else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); e.stopPropagation(); if (FS.linkDialog) FS.linkDialog(); }   // ours alone: the app's Ctrl+K must not open a second dialog
         else if (!(e.ctrlKey || e.metaKey)) e.stopPropagation();   // plain keys are the cell's; app shortcuts pass through
       });
       ed.addEventListener('blur', () => setTimeout(() => { if (ed.isConnected) finish(); }, 0));
@@ -1074,20 +1084,23 @@
     });
   }
 
-  function colPopover(anchor, t, c, commit, widget) {
+  const closePopovers = () => document.querySelectorAll('.popover').forEach((p) => p._close && p._close());
+  function colPopover(anchor, t, c, commit, widget, more) {
     const props = t.style.cols[c + 1] = t.style.cols[c + 1] || {};
     propsPopover(anchor, 'Column ' + (c + 1), props, () => { commit(); widget.refresh(); }, (pop, p, onChange) => {
       const w = el('input', { type: 'text', value: p.width || '', placeholder: 'e.g. 30% or 200px', style: { width: '130px' } });
       w.addEventListener('change', () => { if (w.value.trim()) p.width = w.value.trim(); else delete p.width; onChange(); });
       pop.appendChild(el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Width'), w));
+      if (more && more.del) pop.appendChild(el('div', { class: 'row' }, el('button', { class: 'btn danger', 'data-test': 'col-delete', disabled: t.rows[0].length <= (more.count || 1), title: 'Remove the current / selected column(s); Undo in the message after', onclick: () => { closePopovers(); more.del(); } }, more.count > 1 ? 'Delete ' + more.count + ' columns' : 'Delete column')));
     });
   }
-  function rowPopover(anchor, t, r, commit, widget) {
+  function rowPopover(anchor, t, r, commit, widget, more) {
     const props = t.style.rows[r + 1] = t.style.rows[r + 1] || {};
     propsPopover(anchor, r === 0 ? 'Header row' : 'Row ' + (r + 1), props, () => { commit(); widget.refresh(); }, (pop, p, onChange) => {
       const hgt = el('input', { type: 'text', value: p.height || '', placeholder: 'e.g. 40px', style: { width: '130px' } });
       hgt.addEventListener('change', () => { if (hgt.value.trim()) p.height = hgt.value.trim(); else delete p.height; onChange(); });
       pop.appendChild(el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Height'), hgt));
+      if (more && more.del) pop.appendChild(el('div', { class: 'row' }, el('button', { class: 'btn danger', 'data-test': 'row-delete', disabled: r === 0 && (more.count || 1) === 1, title: 'Remove the current / selected row(s); Undo in the message after', onclick: () => { closePopovers(); more.del(); } }, more.count > 1 ? 'Delete ' + more.count + ' rows' : 'Delete row')));
     });
   }
   function cellPopover(anchor, t, at, commit, widget) {

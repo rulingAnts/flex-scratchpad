@@ -38,9 +38,11 @@
       if (offset < acc + len || (offset === acc + len && !n.nodeValue.endsWith('\n'))) return { node: n, offset: offset - acc };
       if (offset === acc + len) {
         // right after a line break: put the caret at the START of the next line's span (which
-        // may hold only a <br>), never at the tail of the "\n" text node
-        const next = n.nextSibling;
-        if (next && next.nodeType === 1) {
+        // may hold only a <br>), never at the tail of the "\n" text node — the "\n" ends the
+        // line's own span (markdown.decorate), so the next line is that span's next sibling
+        const line = n.parentNode && n.parentNode.closest ? n.parentNode.closest('.md-line') : null;
+        const next = line && line.parentNode === root ? line.nextElementSibling : n.nextSibling && n.nextSibling.nodeType === 1 ? n.nextSibling : null;
+        if (next) {
           const inner = firstText(next);
           return inner ? { node: inner, offset: 0 } : { node: next, offset: 0 };
         }
@@ -104,12 +106,19 @@
     ['flex', 'FLEx example', ''], ['file', 'Attached file', ''], ['hr', 'Divider', '---'],
   ];
   const TEXT_TYPES = new Set(['p', 'h', 'list', 'quote', 'code']);
+  /* What a block is called in a message ("Paragraph removed"). */
+  const blockLabel = (b) => ({ p: 'Paragraph', h: 'Heading', list: 'List', quote: 'Quote', code: 'Code block', table: 'Table', chart: 'Chart', hr: 'Divider', flex: 'Example' }[b.type] || 'Block');
   const PLACEHOLDER = 'Write something, or type / for a menu';
 
   /* ------------------------------------------------------------------ the editor */
-  /* With markers hidden, show the markers of the styled run the caret is in (Typora-style), so
-   * a bold word being edited reads **bold** and the boundary is visible. Pure DOM: runs are the
-   * maximal sequences of decorated spans on the caret's line; line prefixes never reveal. */
+  /* With markers hidden, show ONLY the markup that applies at the caret (Seth, 2026-10-18:
+   * "whatever character or style markup applies to the current cursor position should be
+   * visible, but none of the rest of it … roughly how WhatsApp works"): the markers of every
+   * styled run that encloses or touches the caret (nested runs too: at a word that is bold and
+   * italic all four show) and the caret line's own heading `###` / quote `>`; a bullet, a
+   * number or a checkbox is drawn as its glyph and never as text. Pure DOM: the markers on the
+   * caret's line are paired left to right (the same delimiter text; `[`…`](…)`, `[[`…`]]`), and
+   * a pair whose span holds the caret reveals; a lone marker (<br>) reveals when touched. */
   function revealMarkers() {
     document.querySelectorAll('.md-marker.reveal').forEach((x) => x.classList.remove('reveal'));
     if (!document.body.classList.contains('md-hide')) return;
@@ -123,18 +132,28 @@
     r.setStart(line, 0);
     try { r.setEnd(sel.anchorNode, sel.anchorOffset); } catch (e) { return; }
     const caret = r.toString().length;
-    const runs = [];
-    let pos = 0, run = [], runStart = 0;
+    const marks = [];
+    let pos = 0;
     for (const ch of line.childNodes) {
-      if (ch.nodeType === 1 && ch.tagName !== 'BR') { if (!run.length) runStart = pos; run.push(ch); }
-      else if (run.length) { runs.push({ start: runStart, end: pos, els: run }); run = []; }
-      pos += ch.textContent.length;
+      const len = ch.textContent.length;
+      if (ch.nodeType === 1 && ch.classList.contains('md-marker')) {
+        if (pos === 0 && /\bmd-(h\d?|quote-mk)\b/.test(ch.className)) ch.classList.add('reveal');   // the line's own style
+        else if (!/\bmd-(bullet|num|task|ind)\b/.test(ch.className)) marks.push({ el: ch, s: pos, e: pos + len, t: ch.textContent });
+      }
+      pos += len;
     }
-    if (run.length) runs.push({ start: runStart, end: pos, els: run });
-    for (const rr of runs) {
-      if (caret < rr.start || caret > rr.end) continue;
-      for (const e of rr.els) if (e.classList.contains('md-marker') && !/\bmd-(h\d?|quote-mk|bullet|num|task)\b/.test(e.className)) e.classList.add('reveal');
+    const open = [], pairs = [];
+    const take = (t) => { const k = open.map((o) => o.t).lastIndexOf(t); return k >= 0 ? open.splice(k)[0] : null; };
+    for (const m of marks) {
+      if (m.t === '[' || m.t === '[[') { open.push(m); continue; }
+      if (m.t === ']]' || m.t.startsWith('](')) { const o = take(m.t === ']]' ? '[[' : '['); if (o) pairs.push([o, m]); continue; }
+      const o = take(m.t);
+      if (o) pairs.push([o, m]);
+      else if (/^(\*+|_+|~~|==|`+)$/.test(m.t)) open.push(m);
+      else pairs.push([m, m]);
     }
+    for (const o of open) pairs.push([o, o]);
+    for (const [a, z] of pairs) if (caret >= a.s && caret <= z.e) { a.el.classList.add('reveal'); z.el.classList.add('reveal'); }
   }
   document.addEventListener('selectionchange', revealMarkers);
 
@@ -150,6 +169,14 @@
       this.findQuery = '';
       this.activeTable = null;      // the table widget whose cell is being edited
       root.classList.add('editor-root');
+      // the sticky headings strip lies over the top of the scroller (stickyHeadings below)
+      this.sticky = el('div', { id: 'sticky-heads', 'data-test': 'sticky-heads', hidden: true });
+      if (root.parentNode) root.parentNode.insertBefore(this.sticky, root);
+      this.stickyOn = true;
+      root.addEventListener('scroll', () => this.scheduleSticky(), { passive: true });
+      // markers hidden: the caret never rests inside a line's hidden prefix (see snapPastPrefix)
+      document.addEventListener('selectionchange', () => this.snapPastPrefix());
+      if (typeof ResizeObserver === 'function') new ResizeObserver(() => this.scheduleSticky()).observe(root);
       // A click on the page's background (Seth, 2026-10-16: "if I click outside the table, it
       // scrolls to the same position, but deselects the cell/table"): only BELOW the last block
       // does it put the caret at the end of the note; anywhere else it lets go of the cell, the
@@ -175,6 +202,96 @@
       this.wireDrag(root);
       this.wireMultiSelect(root);
       this.wireInsertMenu(root);
+      this.wireGapBar(root);
+    }
+
+    /* -- the bar between blocks (Seth, 2026-10-18: "Between blocks an empty line is allowed —
+     * in fact, it would be a convenient place for an 'add/remove block' bar similar to the bar
+     * at the end of our table") ------------------------------------------------------------
+     * One floating strip, `#blk-gap`, shown while the pointer rests in the gap between two
+     * blocks (or just above the first / below the last): + Paragraph · + Example · + Table ·
+     * + More ▾ insert AT THAT GAP; − Above / − Below remove the neighbouring block (the one it
+     * would take is marked while the button is hovered). It lives beside the root (renderAll
+     * empties the root) and hides on scroll, during a drag and when the pointer leaves. */
+    wireGapBar(root) {
+      const pane = root.parentNode;
+      if (!pane) return;
+      const bar = el('div', { id: 'blk-gap', 'data-test': 'blk-gap', hidden: true });
+      pane.appendChild(bar);
+      this.gapBar = bar;
+      let gap = null, hideT = 0;
+      const hide = () => { bar.hidden = true; gap = null; this.root.querySelectorAll('.del-hint').forEach((x) => x.classList.remove('del-hint')); };
+      const hideSoon = () => { clearTimeout(hideT); hideT = setTimeout(() => { if (!bar.matches(':hover')) hide(); }, 160); };
+      const shown = () => this.blocks.filter((b) => b.el && b.el.isConnected && b.el.offsetParent !== null && !b.hidden);
+      // the gap under the pointer: {above, below} blocks (either may be null at the ends)
+      // the zone is the gap itself (8px) and a couple of pixels, not the blocks' edges (Seth,
+      // 2026-10-18: the bar was "frequently under foot and easy to click on accident")
+      const gapAt = (y) => {
+        const vis = shown();
+        if (!vis.length) return null;
+        const pad = 2;
+        for (let i = 0; i < vis.length; i++) {
+          const r = vis[i].el.getBoundingClientRect();
+          const next = vis[i + 1];
+          const nr = next ? next.el.getBoundingClientRect() : null;
+          if (i === 0 && y < r.top && y > r.top - 10) return { above: null, below: vis[0], y: r.top - 2 };
+          if (nr ? (y >= r.bottom - pad && y <= nr.top + pad) : (y >= r.bottom - pad && y <= r.bottom + 12)) return { above: vis[i], below: next || null, y: nr ? (r.bottom + nr.top) / 2 : r.bottom + 2 };
+        }
+        return null;
+      };
+      const hint = (b, on) => { if (b && b.el) b.el.classList.toggle('del-hint', !!on); };
+      const draw = (g) => {
+        gap = g;
+        bar.innerHTML = '';
+        const ins = (kind) => () => { const g0 = gap; hide(); if (!g0) return; if (g0.above) this.insertNewBlock(g0.above, 'after', kind); else this.insertNewBlock(g0.below, 'before', kind); };
+        // a removal is undoable from the toast it leaves (and the button must be clicked twice)
+        const rm = (b) => () => { hide(); if (b && this.blocks.includes(b)) { const what = blockLabel(b); this.deleteBlock(b); FS.toast(what + ' removed', 'ok', { action: { label: 'Undo', fn: () => this.undoStep() } }); } };
+        const btn = (label, title, fn, extra) => el('button', Object.assign({ title, onmousedown: (e) => e.preventDefault(), onclick: fn }, extra || {}), label);
+        bar.append(
+          btn('+ Paragraph', 'A new paragraph here', ins('p'), { 'data-gap': 'p' }),
+          btn('+ Example', 'A FLEx example here (opens the picker)', ins('flex'), { 'data-gap': 'flex' }),
+          btn('+ Table', 'A new table here', ins('table'), { 'data-gap': 'table' }),
+          btn('+ More \u25BE', 'Any other kind of block here', (e) => {
+            const g0 = gap; const anchor = e.currentTarget;
+            FS.popover(anchor, (pop, close) => {
+              pop.classList.add('menu');
+              const b = g0.above || g0.below;
+              this.insertSection(pop, close, b);
+              pop.querySelectorAll(g0.above ? '[data-ins-where="before"]' : '[data-ins-where="after"]').forEach((x) => x.remove());
+              pop.querySelectorAll('.ins-grid .tog').forEach((x) => { x.textContent = 'Insert'; });
+            });
+          }, { 'data-gap': 'more' }));
+        if (g.above || g.below) bar.appendChild(el('span', { class: 'gap-sep' }));
+        if (g.above) bar.appendChild(FS.armed(btn('\u2212 Above', 'Remove the block above this line (click twice)', null, { 'data-gap': 'rm-above', onmouseenter: () => hint(g.above, true), onmouseleave: () => hint(g.above, false) }), rm(g.above)));
+        if (g.below) bar.appendChild(FS.armed(btn('\u2212 Below', 'Remove the block below this line (click twice)', null, { 'data-gap': 'rm-below', onmouseenter: () => hint(g.below, true), onmouseleave: () => hint(g.below, false) }), rm(g.below)));
+        const pr = pane.getBoundingClientRect();
+        bar.hidden = false;
+        bar.style.top = Math.round(g.y - pr.top - bar.offsetHeight / 2) + 'px';
+        const rr = root.getBoundingClientRect();
+        bar.style.left = Math.round(rr.left - pr.left + rr.width / 2 - bar.offsetWidth / 2) + 'px';
+      };
+      // the bar appears only once the pointer has RESTED in a gap (350 ms): passing through
+      // shows nothing; `gapBarOn` (Settings: "Show the bar between blocks") switches it off
+      let pendT = 0, pend = null;
+      const same = (a, b) => a && b && a.above === b.above && a.below === b.below;
+      root.addEventListener('mousemove', (e) => {
+        if (this.gapBarOn === false) { if (!bar.hidden) hide(); return; }
+        if (FS.drag || e.buttons) { clearTimeout(pendT); pend = null; if (!bar.hidden) hide(); return; }
+        const g = gapAt(e.clientY);
+        if (!g) { clearTimeout(pendT); pend = null; if (!bar.hidden) hideSoon(); return; }
+        clearTimeout(hideT);
+        if (!bar.hidden && same(gap, g)) return;
+        if (same(pend, g)) return;
+        clearTimeout(pendT); pend = g;
+        pendT = setTimeout(() => { if (same(pend, g)) { pend = null; draw(g); } }, 350);
+      });
+      root.addEventListener('mouseleave', () => { clearTimeout(pendT); pend = null; });
+      root.addEventListener('mouseleave', () => hideSoon());
+      bar.addEventListener('mouseleave', () => hideSoon());
+      bar.addEventListener('mouseenter', () => clearTimeout(hideT));
+      root.addEventListener('scroll', () => { if (!bar.hidden) hide(); }, { passive: true });
+      root.addEventListener('dragstart', () => hide());
+      root.addEventListener('keydown', () => { if (!bar.hidden) hide(); });
     }
 
     /* -- selecting across blocks (Seth, 2026-10-16) --------------------------------------
@@ -754,6 +871,114 @@
         if (n > 0 && !more) { more = el('button', { class: 'fold-more', contenteditable: 'false', title: 'Expand this section', onmousedown: (e) => { e.preventDefault(); this.setFold(b, false); } }); b.el.appendChild(more); }
         if (more) { if (n > 0) more.textContent = '\u22ef ' + n + (n === 1 ? ' block' : ' blocks'); else more.remove(); }
       });
+      this.scheduleSticky();
+    }
+    /* -- sticky headings (Seth, 2026-10-17: "make whatever headings apply to the current viewport
+     * be sticky", with a way to turn it off) ------------------------------------------------
+     * The headings that govern the first block under the top of the view — its nearest heading
+     * above, that one's nearest heading of a higher level, and so on — are shown in a strip over
+     * the top of the scroller once they have scrolled out of it, outermost first. Each row folds
+     * its heading IN PLACE ("they can collapse the sticky heading even if they're not scrolled up
+     * to the top") and then scrolls to that heading ("instead of skipping ahead or going to the
+     * start or end of the note"); a click on the title scrolls to it. The strip is recomputed on
+     * scroll, resize and every redraw; `scroll-padding-top` keeps focus moves from landing under it. */
+    setSticky(on) {
+      this.stickyOn = on !== false;
+      if (!this.stickyOn) { this.sticky.hidden = true; this.sticky.innerHTML = ''; this._stickyKey = null; this.root.style.scrollPaddingTop = ''; }
+      this.scheduleSticky();
+    }
+    scheduleSticky() {
+      if (this._stickyReq || !this.stickyOn) return;
+      this._stickyReq = requestAnimationFrame(() => { this._stickyReq = 0; this.updateSticky(); });
+    }
+    /* The chain of headings for the first block whose bottom lies under the line `top` (a page
+     * coordinate), innermost last; a heading counts only once its own top has passed the line. */
+    stickyChain(top) {
+      const blocks = this.blocks;
+      let i = -1;
+      for (let k = 0; k < blocks.length; k++) {
+        const b = blocks[k];
+        if (!b.el || this.isHidden(b)) continue;
+        if (b.el.getBoundingClientRect().bottom > top) { i = k; break; }
+      }
+      if (i < 0) return [];
+      const chain = [];
+      let lvl = 7;
+      for (let j = i; j >= 0; j--) {
+        const b = blocks[j], hl = MD.headingLevel(b);
+        if (!hl || hl >= lvl || b.folded) { if (hl && hl < lvl && b.folded) lvl = hl; continue; }
+        if (j === i && !(b.el.getBoundingClientRect().top < top - 1)) { lvl = hl; continue; }
+        chain.unshift(b);
+        lvl = hl;
+        if (lvl === 1) break;
+      }
+      return chain;
+    }
+    updateSticky() {
+      const strip = this.sticky;
+      if (!this.stickyOn || !strip || !this.root.isConnected || !this.blocks.length) return;
+      const sc = this.root, rr = sc.getBoundingClientRect();
+      strip.style.top = sc.offsetTop + 'px';
+      if (rr.height < 1) { strip.hidden = true; return; }
+      // the strip's own height moves the line it measures against: settle in at most three passes
+      let chain = [], h = strip.hidden ? 0 : strip.offsetHeight;
+      for (let pass = 0; pass < 3; pass++) {
+        chain = this.stickyChain(rr.top + h);
+        const key = chain.map((b) => b.id + ':' + b.src).join('\n');
+        if (key !== this._stickyKey) {
+          this._stickyKey = key;
+          strip.innerHTML = '';
+          chain.forEach((b, depth) => {
+            const lvl = MD.headingLevel(b);
+            const row = el('div', { class: 'sh-row sh-l' + lvl, dataset: { id: b.id }, 'data-test': 'sticky-row', style: { paddingInlineStart: depth ? (depth * 14) + 'px' : '' } },
+              el('button', { class: 'sh-fold', title: 'Collapse this section', 'data-test': 'sticky-fold', onmousedown: (e) => { e.preventDefault(); this.foldFromSticky(b); } }, '\u25be'),
+              el('span', { class: 'sh-title', dir: 'auto', title: 'Go to this heading', onmousedown: (e) => { e.preventDefault(); this.scrollToHeading(b); } }, MD.plainText(b.src) || '\u00a0'));
+            strip.appendChild(row);
+          });
+          strip.hidden = !chain.length;
+        }
+        const nh = strip.hidden ? 0 : strip.offsetHeight;
+        if (nh === h) break;
+        h = nh;
+      }
+      sc.style.scrollPaddingTop = h ? h + 'px' : '';
+    }
+    /* Scroll so heading `b` sits right under the strip rows of the headings above it. */
+    scrollToHeading(b) {
+      if (!b || !b.el || this.isHidden(b)) return;
+      const sc = this.root;
+      const chainAbove = this.stickyOn ? this.ancestorsOf(b) : [];
+      // the rows for its ancestors stay; measure what they will take by the rows now in the strip
+      let above = 0;
+      if (this.stickyOn && !this.sticky.hidden) {
+        for (const row of this.sticky.children) if (chainAbove.some((a) => a.id === row.dataset.id)) above += row.offsetHeight;
+        if (!above && chainAbove.length) above = this.sticky.offsetHeight / Math.max(1, this.sticky.children.length) * chainAbove.length;
+      } else if (chainAbove.length) {
+        above = 30 * chainAbove.length;
+      }
+      const delta = b.el.getBoundingClientRect().top - (sc.getBoundingClientRect().top + above);
+      sc.scrollTop = Math.max(0, sc.scrollTop + delta);
+      this.updateSticky();
+      // a second pass once the strip has its final rows
+      const d2 = b.el.getBoundingClientRect().top - (sc.getBoundingClientRect().top + (this.sticky.hidden ? 0 : this.sticky.offsetHeight));
+      if (Math.abs(d2) > 1) { sc.scrollTop = Math.max(0, sc.scrollTop + d2); this.updateSticky(); }
+    }
+    /* The headings above `b` in the outline: its nearest heading of a higher level, and so on. */
+    ancestorsOf(b) {
+      const i = this.blocks.indexOf(b), out = [];
+      let lvl = MD.headingLevel(b) || 7;
+      for (let j = i - 1; j >= 0 && lvl > 1; j--) {
+        const hl = MD.headingLevel(this.blocks[j]);
+        if (hl && hl < lvl) { out.unshift(this.blocks[j]); lvl = hl; }
+      }
+      return out;
+    }
+    foldFromSticky(b) {
+      if (!b || b.type !== 'h') return;
+      const act = document.activeElement;
+      if (act && act.blur && this.root.contains(act)) act.blur();   // setFold would otherwise move the caret (and the view) to the heading's end
+      this.setFold(b, true);
+      this.scrollToHeading(b);
     }
     isHidden(b) { return !!(b && b.el && b.el.classList.contains('fold-hidden')); }
     setFold(b, folded) {
@@ -855,6 +1080,7 @@
       if (b.type === 'table') {
         wrap._table = FS.tables.render(host, b.src, {
           onChange: (src) => { b.src = src; this.changed(); },
+          onUndo: () => this.undoStep(),
           openLink: (href) => this.openLink(href),
           onPasteLink: (text, insert) => this.opts.onPasteLink && this.opts.onPasteLink(text, insert),
           onPasteLocate: (text, insert, fallback) => this.opts.onPasteLocate ? this.opts.onPasteLocate(text, insert, fallback) : fallback(),
@@ -974,8 +1200,29 @@
       });
     }
 
+    /* With markers hidden (Seth, 2026-10-18: "the cursor goes to the left of the ### and makes the
+     * ### appear … text should automatically start typing to the RIGHT of a heading or list markup
+     * tag"): a caret that lands inside a line's hidden prefix — a click, Home, a new heading — is
+     * moved to just after it, so what is typed goes after the markup, never before it. Returns
+     * the caret's place in the body, or -1 when there was nothing to do. */
+    snapPastPrefix(body, b) {
+      if (!document.body.classList.contains('md-hide')) return -1;
+      body = body || document.activeElement;
+      if (!body || !body.classList || !body.classList.contains('blk-body') || !this.root.contains(body)) return -1;
+      const sel = window.getSelection();
+      if (!sel || !sel.isCollapsed || !sel.rangeCount || !body.contains(sel.anchorNode)) return -1;
+      b = b || this.blocks.find((x) => x.el && x.el.contains(body));
+      if (!b) return -1;
+      const a = getCaret(body), s = body.textContent;
+      const ls = s.lastIndexOf('\n', a - 1) + 1, le = s.indexOf('\n', ls);
+      const pre = MD.linePrefix(s.slice(ls, le < 0 ? s.length : le), b.type);
+      if (!pre || a - ls >= pre.len) return -1;
+      setCaret(body, ls + pre.len);
+      return ls + pre.len;
+    }
     onBeforeInput(e, body, b) {
       const it = e.inputType;
+      if (it.startsWith('insert')) this.snapPastPrefix(body, b);
       if (it === 'historyUndo') { e.preventDefault(); this.undoStep(); return; }
       if (it === 'historyRedo') { e.preventDefault(); this.redoStep(); return; }
       if (it === 'insertParagraph') { e.preventDefault(); this.enter(body, b); return; }
@@ -1016,9 +1263,32 @@
       if (mod && e.key.toLowerCase() === 'b') { e.preventDefault(); this.wrapSelection('**'); return; }
       if (mod && e.key.toLowerCase() === 'i') { e.preventDefault(); this.wrapSelection('*'); return; }
       if (mod && e.shiftKey && e.key.toLowerCase() === 'h') { e.preventDefault(); this.wrapSelection('=='); return; }
-      if (mod && e.key === 'Enter') { e.preventDefault(); this.insertBlockAfter(b, { type: 'p', src: '' }, true); return; }
+      if (mod && e.key === 'Enter') { e.preventDefault(); if (e.shiftKey) this.insertNewBlock(b, 'before', 'p'); else this.insertBlockAfter(b, { type: 'p', src: '' }, true); return; }
+      // the common editing keys (Seth, 2026-10-18): inline code, strikethrough; the lists and
+      // "plain text" are in app.js with the rest of the global shortcuts
+      if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'e') { e.preventDefault(); this.wrapSelection('`'); return; }
+      if (mod && e.shiftKey && e.key.toLowerCase() === 'x') { e.preventDefault(); this.wrapSelection('~~'); return; }
       if (e.key === 'Tab' && (b.type === 'list' || b.type === 'code')) { e.preventDefault(); this.indent(body, b, e.shiftKey ? -1 : 1); return; }
+      if (mod && (e.key === ']' || e.key === '[') && b.type === 'list') { e.preventDefault(); this.indent(body, b, e.key === ']' ? 1 : -1); return; }
       if (e.key === 'Escape') { body.blur(); return; }
+      if ((e.key === 'ArrowLeft' || e.key === 'Home') && !mod && !e.shiftKey && !e.altKey && document.body.classList.contains('md-hide')) {
+        // markers hidden: Home lands after the prefix; Left from there steps over it to the line before
+        const sel = window.getSelection();
+        if (sel && sel.isCollapsed) {
+          const a = getCaret(body), s = body.textContent;
+          const ls = s.lastIndexOf('\n', a - 1) + 1, le = s.indexOf('\n', ls);
+          const pre = MD.linePrefix(s.slice(ls, le < 0 ? s.length : le), b.type);
+          if (pre) {
+            if (e.key === 'Home') { e.preventDefault(); setCaret(body, ls + pre.len); return; }
+            if (a <= ls + pre.len) {
+              e.preventDefault();
+              if (ls > 0) setCaret(body, ls - 1);
+              else { const i = this.blocks.indexOf(b); if (i > 0) this.focusBlock(i - 1, 'end'); }
+              return;
+            }
+          }
+        }
+      }
       if (e.key === 'Backspace' && !mod && !e.altKey && document.body.classList.contains('md-hide')) {
         // markers hidden: Backspace right after a line prefix removes the whole prefix (the
         // bullet, the heading, the quote bar) instead of eating one invisible character
@@ -1107,6 +1377,51 @@
       const a = getCaret(body), z = getCaretEnd(body);
       const s = body.textContent;
       this.setText(body, b, s.slice(0, a) + text + s.slice(z), a + text.length);
+    }
+    /* Where a link would go (Ctrl+K, the 🔗 button — Seth, 2026-10-18): the focused text block,
+     * the selection in it, and the `[text](url)` / `[[note]]` link under the caret when there is
+     * one (its whole span, text and href), so the dialog edits it instead of nesting a new one.
+     * null when the caret is not in a text block (a table cell has its own route). */
+    linkContext() {
+      const b = this.active;
+      if (!b || !b.el || !TEXT_TYPES.has(b.type) || b.type === 'code') return null;
+      const body = b.el.querySelector('.blk-body');
+      if (!body || document.activeElement !== body) return null;
+      const a = getCaret(body), z = getCaretEnd(body);
+      const s = body.textContent;
+      const ls = s.lastIndexOf('\n', a - 1) + 1, le0 = s.indexOf('\n', a), le = le0 < 0 ? s.length : le0;
+      const line = s.slice(ls, le);
+      const out = { marks: [], embeds: [], links: [], tags: [] };
+      for (let i = 0; i < line.length; i++) out.marks.push(new Set());
+      MD.markInline(line, out, 0);
+      // never the hidden readable copy of a FLEx object (`[…](silfw://… "flex-copy")`, flexcopy.js):
+      // the editor strips them on open, and if one is ever still in the text it is not a link to edit
+      const ours = (l) => /"flex-copy"\)$/.test(line.slice(l.start, l.end));
+      const hit = out.links.find((l) => !ours(l) && a >= l.start && a <= l.end && z >= l.start && z <= l.end);
+      const link = hit ? { start: ls + hit.start, end: ls + hit.end, text: hit.text, href: hit.href, wiki: hit.href.startsWith('note:') && s.slice(ls + hit.start, ls + hit.start + 2) === '[[' } : null;
+      return { body, b, start: a, end: z, selected: s.slice(a, z), link };
+    }
+    /* Replace [start, end) of a text block with `text`, the caret after it (one undo step). */
+    replaceRange(body, b, start, end, text) {
+      const s = body.textContent;
+      if (document.activeElement !== body) body.focus({ preventScroll: true });
+      this.setText(body, b, s.slice(0, start) + text + s.slice(end), start + text.length);
+    }
+    /* Back to plain text: drop the heading, list or quote prefix of the current line(s)
+     * (Ctrl+Alt+0, as in Google Docs). */
+    plainText() {
+      const b = this.active;
+      if (!b || !b.el || !TEXT_TYPES.has(b.type)) return;
+      const body = b.el.querySelector('.blk-body');
+      if (!body) return;
+      const s = body.textContent, a = getCaret(body);
+      const ls = s.lastIndexOf('\n', a - 1) + 1;
+      const line = s.slice(ls, s.indexOf('\n', a) < 0 ? s.length : s.indexOf('\n', a));
+      if (b.type === 'h') return this.linePrefix('h', MD.headingLevel(b));
+      if (b.type === 'quote') return this.linePrefix('quote');
+      if (/^\s*[-*+]\s\[[ xX]\]/.test(line)) return this.linePrefix('task');
+      if (/^\s*\d+[.)]\s/.test(line)) return this.linePrefix('num');
+      if (/^\s*[-*+]\s/.test(line)) return this.linePrefix('list');
     }
     /* A FLEx embed inserted after text on a line goes INLINE as a chip (Seth, 2026-10-13: "put
      * chips inline with text"); at the start of a line, or when it is not a single embed, the
@@ -1211,16 +1526,42 @@
       setCaret(fresh.querySelector('.blk-body'), Math.max(0, a + (first === last ? delta : 0)));
       this.changed();
     }
+    /* Step the list items under the selection in or out by one level (two spaces; at most four
+     * levels), keeping the selection on the same text (Seth, 2026-10-18: lists "need to include
+     * the ability to increase and decrease the indent"). Tab / Shift+Tab, Ctrl+] / Ctrl+[, the
+     * toolbar's ⇥ ⇤ and the block menu all come here. */
     indent(body, b, dir) {
-      const a = getCaret(body);
+      const a = getCaret(body), z = getCaretEnd(body);
       const s = body.textContent;
-      const lineStart = s.lastIndexOf('\n', a - 1) + 1;
-      const line = s.slice(lineStart, s.indexOf('\n', lineStart) < 0 ? s.length : s.indexOf('\n', lineStart));
-      let newLine;
-      if (dir > 0) newLine = '  ' + line;
-      else newLine = line.replace(/^ {1,2}/, '');
-      const delta = newLine.length - line.length;
-      this.setText(body, b, s.slice(0, lineStart) + newLine + s.slice(lineStart + line.length), Math.max(lineStart, a + delta));
+      const lines = s.split('\n');
+      let pos = 0, first = -1, last = -1;
+      lines.forEach((ln, i) => { const end = pos + ln.length; if (first < 0 && a <= end) first = i; if (z >= pos && z <= end + (i < lines.length - 1 ? 1 : 0)) last = i; pos = end + 1; });
+      if (first < 0) first = 0;
+      if (last < first) last = first;
+      let dFirst = 0, dAll = 0;
+      for (let i = first; i <= last; i++) {
+        const line = lines[i];
+        let out = line;
+        if (dir > 0) { if ((line.match(/^ */)[0].length) < 8) out = '  ' + line; }
+        else out = line.replace(/^ {1,2}/, '');
+        const d = out.length - line.length;
+        if (i === first) dFirst = d;
+        dAll += d;
+        lines[i] = out;
+      }
+      if (!dAll) return;
+      const lineStart = s.split('\n').slice(0, first).reduce((n, ln) => n + ln.length + 1, 0);
+      this.setText(body, b, lines.join('\n'), Math.max(lineStart, a + dFirst), a === z ? undefined : Math.max(lineStart, z + dAll));
+    }
+    /* The toolbar's / menu's indent: the active list block, or nothing. */
+    indentActive(dir) {
+      const b = this.active;
+      if (!b || !b.el || (b.type !== 'list' && b.type !== 'code')) return false;
+      const body = b.el.querySelector('.blk-body');
+      if (!body) return false;
+      if (document.activeElement !== body) body.focus();
+      this.indent(body, b, dir);
+      return true;
     }
     toggleTask(body, b, span) {
       // the span's text is "[ ]" or "[x]"; find its offset in the block text
@@ -1463,6 +1804,22 @@
     }
     /* Insert markdown at the current position: into a table cell, at the caret of a text block,
      * replacing an empty paragraph, or after the active widget. */
+    /* Rewrite several embeds at once (Seth, 2026-10-17: tag styles "applyable to a group of
+     * examples by highlight"): fn(src) → the new source of each of `srcs`, wherever it stands. */
+    mapEmbeds(srcs, fn) {
+      let n = 0;
+      for (const b of this.blocks) {
+        let src = b.src;
+        for (const old of new Set(srcs)) {
+          if (!src.includes(old)) continue;
+          const next = fn(old);
+          if (next && next !== old) { src = src.split(old).join(next); n++; }
+        }
+        if (src !== b.src) b.src = src;
+      }
+      if (n) { this.changed(); this.renderAll(); }
+      return n;
+    }
     insertMarkdown(md, asBlock) {
       if (this.activeTable && this.activeTable.insertText) { this.activeTable.insertText(md.replace(/\n/g, ' ')); return; }
       let b = this.active && this.blocks.includes(this.active) ? this.active : this.blocks[this.blocks.length - 1];
@@ -1654,6 +2011,27 @@
       if (b.type !== 'h') return;
       this.setBlockSrc(b, b.src.replace(/^#{1,6}\s+/, '#'.repeat(lv) + ' '));
     }
+    /* Promote (dir -1) or demote (+1) EVERY heading of the note, of the cross-block selection
+     * when there is one, or of `range` [a, z] (Seth, 2026-10-18: "promote and demote all headers
+     * in a note or within a selected range"). The levels keep their distances: when a heading is
+     * already at the end (H1 going up, H6 going down) nothing moves — merging two levels would
+     * lose the outline. Returns {n: headings seen, scope: 'note' | 'selection', blocked?: level}. */
+    shiftHeadings(dir, range) {
+      let a = 0, z = this.blocks.length - 1, scope = 'note';
+      const m = this.msel;
+      if (range) { [a, z] = range; scope = 'selection'; }
+      else if (m) { a = this.blocks.indexOf(m.a.b); z = this.blocks.indexOf(m.z.b); scope = 'selection'; }
+      const heads = this.blocks.slice(a, z + 1).filter((b) => b.type === 'h');
+      const lv = (b) => MD.headingLevel(b);
+      if (!heads.length) return { n: 0, scope };
+      const stuck = heads.find((b) => lv(b) + dir < 1 || lv(b) + dir > 6);
+      if (stuck) return { n: heads.length, scope, blocked: lv(stuck) };
+      for (const b of heads) b.src = b.src.replace(/^#{1,6}(?=\s)/, '#'.repeat(lv(b) + dir));
+      this.renderAll();
+      this.changed({ force: true });
+      if (m && !range) this.setMsel(m.a, m.z);               // the selection stays for the next step
+      return { n: heads.length, scope };
+    }
     blockMenu(anchor, b) {
       FS.popover(anchor, (pop, close) => {
         const item = (label, fn, cls) => pop.appendChild(el('button', { class: 'menu-item ' + (cls || ''), onclick: () => { close(); fn(); } }, label));
@@ -1669,6 +2047,11 @@
           item('Copy', () => this.copyBlocks(b));
           item('Duplicate', () => this.duplicateBlocks(b));
           item('Delete', () => this.deleteBlocks(ra, rz), 'danger');
+          if (this.blocks.slice(ra, rz + 1).some((x) => x.type === 'h')) {
+            pop.appendChild(el('hr'));
+            item('\u21e4 Promote the headings here (H2 \u2192 H1)', () => this.shiftHeadings(-1, [ra, rz]));
+            item('\u21e5 Demote the headings here (H1 \u2192 H2)', () => this.shiftHeadings(1, [ra, rz]));
+          }
           pop.appendChild(el('hr'));
           this.insertSection(pop, close, b);
           return;
@@ -1694,6 +2077,12 @@
             pop.appendChild(row);
           }
           item('Turn into checklist', () => { this.active = b; this.focusBlock(this.blocks.indexOf(b), 0); this.linePrefix('task'); });
+          if (b.type === 'list') {
+            const row = el('div', { class: 'menu-row', 'data-test': 'list-indent' }, el('span', { class: 'menu-label' }, 'List indent'));
+            row.appendChild(el('button', { class: 'tog', title: 'Decrease indent (Shift+Tab, Ctrl+[)', onclick: () => { close(); this.active = b; if (document.activeElement !== b.el.querySelector('.blk-body')) this.focusBlock(this.blocks.indexOf(b), 0); this.indentActive(-1); } }, '\u21e4 Less'));
+            row.appendChild(el('button', { class: 'tog', title: 'Increase indent (Tab, Ctrl+])', onclick: () => { close(); this.active = b; if (document.activeElement !== b.el.querySelector('.blk-body')) this.focusBlock(this.blocks.indexOf(b), 0); this.indentActive(1); } }, '\u21e5 More'));
+            pop.appendChild(row);
+          }
           if (/^\s*\d+[.)]\s/.test(b.src)) {
             // the first item's typed number is where the list starts (markdown.numberLines)
             item('Start numbering at…', () => {

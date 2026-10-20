@@ -30,7 +30,11 @@ test('decoration keeps every character (textContent === markdown)', () => {
 
 test('empty lines get a <br> so the caret has a line to sit on', () => {
   assert.equal(MD.decorate('', 'p'), '<span class="md-line "><br></span>');
-  assert.equal(MD.decorate('a\n', 'p').split('\n')[1], '<span class="md-line "><br></span>');
+  // the "\n" ends the FIRST line's span (between two block spans it would be an empty line of
+  // its own and double the spacing — Seth, 2026-10-18); an empty middle line is just its "\n"
+  assert.equal(MD.decorate('a\n', 'p'), '<span class="md-line ">a\n</span><span class="md-line "><br></span>');
+  assert.equal(MD.decorate('a\n\nb', 'p'), '<span class="md-line ">a\n</span><span class="md-line ">\n</span><span class="md-line ">b</span>');
+  assert.equal(MD.decorate('- a\n- b', 'list').replace(/<[^>]+>/g, ''), '- a\n- b');
 });
 
 test('task and heading markers', () => {
@@ -156,10 +160,14 @@ test('outline numbers are computed per level and carry across loose-list blocks'
   assert.deepEqual(MD.numberLines(['1. again'], 'list', { counters: [] }), [1]);
   // decorate shows the computed number and keeps the typed text intact
   const html = MD.decorate('1. one\n  2. sub', 'list', { counters: [] });
-  assert.equal((html.match(/data-num="1\."/g) || []).length, 4);          // on the line AND on the number span
-  assert.match(html, /<span class="md-marker md-num" data-num="1\.">\s*2\. <\/span>/);
-  assert.match(html, /md-num" data-num="1\.">\s*2\. <\/span>/);
+  assert.equal((html.match(/data-num="1\."/g) || []).length, 2);          // on the line AND on the number span
+  // a nested item is lettered, the level below roman (Seth, 2026-10-18: "display it prettily")
+  assert.equal((html.match(/data-num="a\."/g) || []).length, 2);
+  assert.match(html, /<span class="md-marker md-num" data-num="a\.">\s*2\. <\/span>/);
   assert.equal(html.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&'), '1. one\n  2. sub');
+  assert.deepEqual([1, 2, 3, 4, 27].map((n) => MD.numberLabel(n, 1)), ['a.', 'b.', 'c.', 'd.', 'aa.']);
+  assert.deepEqual([1, 4, 9].map((n) => MD.numberLabel(n, 2)), ['i.', 'iv.', 'ix.']);
+  assert.equal(MD.numberLabel(2, 3), '2.');
 });
 
 test('an embed inside a line of text becomes a chip span whose text is still the markdown', () => {

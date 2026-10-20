@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import base64
 import json
+import re
+import uuid
 import os
 import subprocess
 import sys
@@ -19,7 +21,8 @@ from . import APP_NAME, __version__, build_id
 from .config import AppConfig
 from .flex import FlexService
 from .flex.lcm import FlexError
-from .notebook import ATTACH_DIR, Notebook, inline_tags
+from .log import LOG, logged as _logged
+from .notebook import ATTACH_DIR, Notebook, clean_rule, example_keys, inline_tags, match_embed, match_keys
 
 
 def safe_filename(name: str) -> str:
@@ -97,6 +100,8 @@ class Api:
             svc.open()
 
     def _progress(self, message: str) -> None:
+        if message:
+            LOG.info("progress: %s", message)
         self._emit("progress", {"message": message})
 
     def _emit(self, event: str, data: dict) -> None:
@@ -124,6 +129,14 @@ class Api:
                 "flex": self._flex.status(),
                 "canBrowse": self._window is not None,
             }
+
+    def client_log(self, level: str, message: str, where: str = "") -> bool:
+        """What the page reports (window.onerror, unhandled promise rejections, console.error /
+        console.warn — api.js `clientLog`): into the same log as everything else, so a JS failure
+        shows in the terminal transcript without the developer tools."""
+        lvl = {"error": 30 + 10, "warn": 30, "warning": 30, "info": 20, "debug": 10}.get(str(level or "").lower(), 20)
+        LOG.log(lvl, "page %s: %s%s", level, str(message or "")[:2000], (" @ " + str(where)[:300]) if where else "")
+        return True
 
     def choose_notebook_folder(self) -> dict | None:
         """Native folder dialog; switches the notebook if the user picks one."""
@@ -166,9 +179,65 @@ class Api:
         d["inlineTags"] = inline_tags(n.body)
         return d
 
-    def create_note(self, tab: str | None = None, folder: str = "", title: str = "", body: str = "", kind: str = "") -> dict:
-        n = self._nb.create_note(tab, folder, title, body, kind or "")
+    def create_note(self, tab: str | None = None, folder: str = "", title: str = "", body: str = "", kind: str = "", chart: str = "") -> dict:
+        n = self._nb.create_note(tab, folder, title, body, kind or "", chart=chart or "")
         return self.get_note(n.id)
+
+    # -- chart notes (Seth, 2026-10-18: "a text chart note type … custom columns … project-wide") --
+
+    def create_chart_note(self, tab: str | None, folder: str, title: str, chart_guid: str, view: str = "") -> dict:
+        """A note that IS one text chart (`kind: chart`, `chart: <guid>`): its body starts with the
+        view embed (`{{flex:chart <guid> …}}`, every view setting and the user's styles) that
+        ui/js/chartnote.js owns, the custom columns and their values after it."""
+        g = (chart_guid or "").lower()
+        try:
+            ch = self._flex.get_object("chart", g, prefer_cache=False)
+        except FlexError as e:
+            raise RuntimeError(e.message) from e
+        body = (view.strip() if view and view.strip().startswith("{{flex:chart " + g) else "{{flex:chart " + g + "}}") + "\n"
+        n = self._nb.create_note(tab, folder, title or ((ch.get("name") or "Chart") + " \u2014 " + (ch.get("title") or "")), body, "chart", chart=g)
+        return self.get_note(n.id)
+
+    def set_note_chart(self, note_id: str, chart_guid: str) -> dict:
+        """Change the chart a chart note shows (the page rewrites its view embed; the values it
+        held stay in the file, keyed by the old rows' anchors)."""
+        g = (chart_guid or "").lower()
+        try:
+            self._flex.get_object("chart", g, prefer_cache=False)
+        except FlexError as e:
+            raise RuntimeError(e.message) from e
+        return self.get_note(self._nb.set_chart(note_id, g).id)
+
+    def chart_lists(self) -> dict:
+        """The notebook's choice lists for chart-note list columns: {name: {options: [...], open: bool}}."""
+        return self._nb.config.setdefault("chartLists", {})
+
+    def set_chart_list(self, name: str, options: list | None = None, open_: bool | None = None, rename: str | None = None) -> dict:
+        """Create or change one list (project-wide: every chart note using the name sees it);
+        `rename` moves it under a new name; options is None → delete it."""
+        name = str(name or "").strip()[:80]
+        if not name:
+            raise ValueError("A list needs a name")
+        lists = self._nb.config.setdefault("chartLists", {})
+        if options is None and rename is None and open_ is None:
+            lists.pop(name, None)
+        else:
+            cur = dict(lists.get(name) or {"options": [], "open": True})
+            if options is not None:
+                seen: list[str] = []
+                for o in options:
+                    o = str(o or "").strip()[:120]
+                    if o and o not in seen:
+                        seen.append(o)
+                cur["options"] = seen
+            if open_ is not None:
+                cur["open"] = bool(open_)
+            if rename and rename.strip() and rename.strip() != name:
+                lists.pop(name, None)
+                name = rename.strip()[:80]
+            lists[name] = cur
+        self._nb.save_config()
+        return lists
 
     def list_collections(self) -> list[dict]:
         """The example collections, for "Add to collection…" (newest first, with counts)."""
@@ -177,6 +246,45 @@ class Api:
     def add_to_collection(self, note_id: str, embeds: list[str]) -> dict:
         """Append examples (embed sources) to an example collection; returns its summary."""
         return self._nb.append_examples(note_id, list(embeds or [])).summary()
+
+    # RULE COLLECTIONS (Seth, 2026-10-18: "create a collection with ALL lines that match a
+    # specific rule. And … have that collection add new matches found in the database that
+    # aren't already in that collection"): the rule is kept in the collection's header.
+    def rule_matches(self, rule: dict) -> list[dict]:
+        """The lines a rule matches now (the dialog's count and preview)."""
+        try:
+            return self._flex.rule_matches(rule or {})
+        except FlexError as e:
+            raise RuntimeError(e.message) from e
+
+    def create_rule_collection(self, tab: str | None, folder: str, title: str, rule: dict) -> dict:
+        """A new collection holding every line the rule matches, one example each, in text order."""
+        rule = clean_rule(rule)
+        if not rule:
+            raise RuntimeError("Choose at least one tag for the rule, or a chart search")
+        rows = self.rule_matches(rule)
+        body = "\n\n".join(match_embed(r) for r in rows)
+        n = self._nb.create_note(tab, folder or "", title or "", body + ("\n" if body else ""), "examples", rule=rule)
+        d = self.get_note(n.id)
+        d["matched"] = len(rows)
+        return d
+
+    def update_rule_collection(self, note_id: str) -> dict:
+        """Add the lines the rule matches now that the collection does not hold yet, at its end.
+        Returns {added: [embed sources], total, matched, note}."""
+        n = self._nb.get_note(note_id)
+        if n.kind != "examples" or not n.rule:
+            raise RuntimeError("This collection has no rule")
+        rows = self.rule_matches(n.rule)
+        have = example_keys(n.body)
+        add = [match_embed(r) for r in rows if not any(k in have for k in match_keys(r))]
+        if add:
+            n = self._nb.append_examples(note_id, add)
+        return {"added": add, "matched": len(rows), "total": n.summary().get("exampleCount", 0), "note": self.get_note(n.id)}
+
+    def set_note_rule(self, note_id: str, rule: dict | None) -> dict:
+        """Change (or remove) a collection's rule; what it holds is left as it is."""
+        return self.get_note(self._nb.set_rule(note_id, rule).id)
 
     def save_note(self, note_id: str, patch: dict) -> dict:
         patch = patch or {}
@@ -268,10 +376,11 @@ class Api:
             return d
         return None
 
-    def export_note_html(self, note_id: str, html: str, path: str | None = None) -> str | None:
-        """Save a self-contained HTML export (built by the page) through a save dialog."""
+    def export_note_html(self, note_id: str, html: str, path: str | None = None, suffix: str = "") -> str | None:
+        """Save a self-contained HTML export (built by the page) through a save dialog; `suffix`
+        is added to the suggested name (" slides" for a slideshow)."""
         n = self._nb.get_note(note_id)
-        target = path or self._save_dialog((n.title or "note") + ".html")
+        target = path or self._save_dialog((n.title or "note") + (suffix or "") + ".html")
         if not target:
             return None
         Path(target).write_text(html, encoding="utf-8", newline="\n")
@@ -327,6 +436,42 @@ class Api:
         if not target:
             return None
         Path(target).write_bytes(build_docx(doc))
+        return target
+
+    def export_note_pdf(self, note_id: str, html: str, path: str | None = None, landscape: bool = False) -> dict:
+        """A PDF of the page's HTML export, written directly through WebView2 on Windows
+        (pdf_print.py); {"fallback": True} tells the page to use the browser's print dialog
+        instead (any other platform, or a WebView2 we cannot reach — the save dialog is then
+        never shown, the print dialog has its own)."""
+        from . import pdf_print
+        if not pdf_print.available(self._window):
+            return {"fallback": True}
+        n = self._nb.get_note(note_id)
+        target = path or self._save_dialog((n.title or "note") + ".pdf")
+        if not target:
+            return {"cancelled": True}
+        ok = pdf_print.print_to_pdf(html, target, self._nb.private_dir / "export-tmp", landscape=landscape)
+        return {"path": target} if ok else {"fallback": True, "failed": True, "path": target}
+
+    def export_note_pptx(self, note_id: str, deck: dict, path: str | None = None) -> str | None:
+        """PowerPoint from the page's slide model (export.js slidesOf; zero-dependency writer)."""
+        from .pptx_writer import build_pptx
+        n = self._nb.get_note(note_id)
+        target = path or self._save_dialog((n.title or "note") + ".pptx")
+        if not target:
+            return None
+        Path(target).write_bytes(build_pptx(deck))
+        return target
+
+    def export_note_xlsx(self, note_id: str, doc: dict, path: str | None = None) -> str | None:
+        """Excel workbook from the page's export model (zero-dependency writer): the note, an
+        Examples sheet, a rows sheet per chart."""
+        from .xlsx_writer import build_xlsx
+        n = self._nb.get_note(note_id)
+        target = path or self._save_dialog((n.title or "note") + ".xlsx")
+        if not target:
+            return None
+        Path(target).write_bytes(build_xlsx(doc))
         return target
 
     def export_note_flextext(self, note_id: str, items: list[dict], opts: dict | None = None, path: str | None = None) -> dict | None:
@@ -742,15 +887,169 @@ class Api:
     def flex_get(self, kind: str, guid: str, seg_from: int | None = None, seg_to: int | None = None,
                  prefer_cache: bool = False, ws: dict | None = None, at: list | None = None) -> dict:
         try:
-            return self._flex.get_object(kind, guid, seg_from, seg_to, prefer_cache, ws or None, at or None)
+            obj = self._flex.get_object(kind, guid, seg_from, seg_to, prefer_cache, ws or None, at or None)
         except FlexError as e:
             raise RuntimeError(e.message)
+        if not obj.get("cached"):
+            # the snapshot just gained this object's words and tags: the notes quoting it are searchable by them now
+            try:
+                self._nb.reindex_mentioning(guid)
+            except Exception:  # noqa: BLE001 — never let the index fail a rendering
+                pass
+        return obj
 
     def flex_search_entries(self, q: str, limit: int = 30) -> list[dict]:
         try:
             return self._flex.search_entries(q, limit)
         except FlexError as e:
             raise RuntimeError(e.message)
+
+    def flex_text_tags(self) -> list[dict]:
+        """The project's text markup tags (the picker's Tags search, the tag style editors)."""
+        return self._flex.text_tags()
+
+    def export_chart(self, guid: str, fmt: str = "xml", rows: list | None = None, path: str | None = None) -> str | None:
+        """A text chart (or rows a..b of it) as FieldWorks' discourse-chart XML or as JSON with
+        every GUID (flex/chart_export.py); `path` skips the save dialog (tests)."""
+        from .flex import chart_export
+        fmt = (fmt or "xml").lower()
+        if fmt not in ("xml", "json"):
+            raise ValueError("fmt is xml or json")
+        try:
+            chart = self._flex.get_object("chart", guid, prefer_cache=False)
+        except FlexError as e:
+            raise RuntimeError(e.message) from e
+        rr = None
+        if rows and len(rows) >= 1 and rows[0]:
+            rr = (int(rows[0]), int(rows[1] if len(rows) > 1 and rows[1] else rows[0]))
+        name = safe_filename((chart.get("name") or "chart") + " - " + (chart.get("title") or "") + (f" rows {rr[0]}-{rr[1]}" if rr else "")) + "." + fmt
+        target = path or self._save_dialog(name)
+        if not target:
+            return None
+        app = f"{APP_NAME} {__version__} (build {build_id()})"
+        text = chart_export.discourse_xml(chart, rr, app) if fmt == "xml" else chart_export.chart_json(chart, rr, app)
+        Path(target).write_text(text, encoding="utf-8", newline="\n")
+        LOG.info("chart %s exported as %s → %s", guid[:8], fmt, target)
+        return target
+
+    def chart_search(self, q: str) -> list[dict]:
+        """The chart rows a query matches (FlexService.chart_search): the picker's chart search."""
+        try:
+            return self._flex.chart_search(q or "")
+        except FlexError as e:
+            raise RuntimeError(e.message) from e
+
+    def chart_profile(self, term: str) -> dict:
+        """Where a lexical item sits in the charts: counts per template and column, with the rows."""
+        try:
+            return self._flex.chart_profile(term or "")
+        except FlexError as e:
+            raise RuntimeError(e.message) from e
+
+    def flex_charts(self, text_guid: str = "") -> list[dict]:
+        """The project's text charts, or one text's (the picker's Charts tab, a chart note)."""
+        return self._flex.charts(text_guid or None)
+
+    def flex_chart_markers(self) -> list[dict]:
+        return self._flex.chart_markers()
+
+    def flex_tag_occurrences(self, tag_guid: str, q: str = "") -> list[dict]:
+        try:
+            return self._flex.tag_occurrences(tag_guid, q)
+        except FlexError as e:
+            raise RuntimeError(e.message) from e
+
+    # FLEx tag STYLES (Seth, 2026-10-17: project-, tab-, folder- and example-scoped, "the most
+    # specific one takes precedent"): the notebook keeps the first three in notebook.json
+    # (`tagStyles.project[<project>]`, `.tab[<dir>]`, `.folder[<tab>/<path>]`); an example's own
+    # are in its embed (`tags=`). A rule: {tag, enabled, hide, bg, fg, b, i, u, label}.
+    _BRACKETS = ("sq", "rd", "cu", "an", "db", "ce", "fl", "bar")
+
+    @classmethod
+    def _clean_tag_rules(cls, rules) -> list[dict]:
+        """A rule list as the page sends it, kept to what tagstyles.js understands: the tag (a
+        name, abbreviation, GUID, `group:<name>`, `filter:<id>` or `*`), on/off, the bar's colours,
+        B I U, and the text styles (brackets, hl, tile, box, the words' colour, the bar switch)."""
+        clean = []
+        for r in rules or []:
+            if not isinstance(r, dict) or not str(r.get("tag") or "").strip():
+                continue
+            out = {"tag": str(r["tag"]).strip()[:120], "enabled": r.get("enabled", True) is not False}
+            if r.get("hide") is not None:
+                out["hide"] = bool(r["hide"])
+            if r.get("empty") is not None:        # a chart marker in a cell with no words (Seth, 2026-10-19)
+                out["empty"] = bool(r["empty"])
+            for k in ("bg", "fg", "c", "tc", "bc"):
+                v = str(r.get(k) or "")
+                if re.fullmatch(r"#[0-9a-fA-F]{6}", v):
+                    out[k] = v.lower()
+            # the border's line style and thickness (Seth, 2026-10-18)
+            if r.get("bs") in ("solid", "dashed", "dotted", "double"):
+                out["bs"] = r["bs"]
+            try:
+                bw = int(r.get("bw") or 0)
+            except (TypeError, ValueError):
+                bw = 0
+            if 1 <= bw <= 6:
+                out["bw"] = bw
+            for k in ("b", "i", "u", "hl", "tile", "box"):
+                if r.get(k):
+                    out[k] = True
+            if r.get("br") in cls._BRACKETS:
+                out["br"] = r["br"]
+            if r.get("bar") is not None:
+                out["bar"] = bool(r["bar"])
+            if r.get("label") is False:
+                out["label"] = False
+            # moved text (Seth, 2026-10-19): whose look it wears, and its label
+            if r.get("ms") in ("from", "to", "own"):
+                out["ms"] = r["ms"]
+            if r.get("ml") in ("from", "to", "off"):
+                out["ml"] = r["ml"]
+            clean.append(out)
+        return clean
+
+    def _tag_styles(self) -> dict:
+        ts = self._nb.config.setdefault("tagStyles", {})
+        for k in ("project", "tab", "folder", "note", "text"):
+            ts.setdefault(k, {})
+        ts.setdefault("filters", [])
+        return ts
+
+    def set_tag_styles(self, kind: str, key: str, rules: list[dict]) -> dict:
+        if kind not in ("project", "tab", "folder", "note", "text"):
+            raise ValueError("tag styles are kept per project, tab, folder, note or text")
+        clean = self._clean_tag_rules(rules)
+        ts = self._tag_styles()
+        bucket = ts.setdefault(kind, {})
+        if clean:
+            bucket[key or ""] = clean
+        else:
+            bucket.pop(key or "", None)
+        self._nb.save_config()
+        return ts
+
+    def set_tag_filters(self, filters: list[dict]) -> dict:
+        """The notebook's visual filters (Seth, 2026-10-18: "various 'visual filters' based on text
+        tags like … in Logos"): [{id, name, enabled, rules}], in the order they are consulted."""
+        clean = []
+        seen = set()
+        for f in filters or []:
+            if not isinstance(f, dict):
+                continue
+            fid = re.sub(r"[^a-z0-9_-]", "", str(f.get("id") or "").lower())[:40] or ("f" + uuid.uuid4().hex[:10])
+            if fid in seen:
+                continue
+            seen.add(fid)
+            clean.append({"id": fid, "name": str(f.get("name") or "").strip()[:80], "enabled": f.get("enabled", True) is not False,
+                          "rules": self._clean_tag_rules(f.get("rules"))})
+        ts = self._tag_styles()
+        ts["filters"] = clean
+        self._nb.save_config()
+        return ts
+
+    def flex_tags_used(self) -> dict:
+        return self._nb.flex_tags_used()
 
     def flex_texts(self, q: str = "") -> list[dict]:
         try:
@@ -782,6 +1081,14 @@ class Api:
     def flex_open_object(self, kind: str, guid: str) -> bool:
         """Jump to an object in FieldWorks by kind + GUID (a link chip was clicked)."""
         from .flex import model
+        if kind == "chart":
+            # FieldWorks has no link to a chart itself: open its text (the Text Chart tab is there)
+            try:
+                chart = self._flex.get_object("chart", guid, prefer_cache=True)
+            except FlexError:
+                chart = {}
+            url = chart.get("url") or model.goto_url(self._flex.project_name, "text", chart.get("text") or guid)
+            return self._open_url(url)
         url = model.goto_url(self._flex.project_name, kind, guid)
         return self._open_url(url)
 
@@ -816,6 +1123,12 @@ class Api:
             raise RuntimeError("Not a FieldWorks link.")
         return self._open_url(url)
 
+    def open_web(self, url: str) -> bool:
+        """Open an http(s) page in the default browser (the regex help links). Nothing else."""
+        if not url or not re.match(r"^https?://", url, re.I):
+            raise RuntimeError("Not a web address.")
+        return self._open_url(url)
+
     # -- audio ------------------------------------------------------------------------------
 
     def audio_clip(self, text_guid: str, media_guid: str | None, begin: int, end: int) -> dict:
@@ -823,6 +1136,10 @@ class Api:
             return self._flex.ensure_clip(text_guid, media_guid, begin, end)
         except FlexError as e:
             raise RuntimeError(e.message)
+
+    def export_clips(self, items: list[dict]) -> list[dict]:
+        """The recordings an HTML export embeds, one compressed clip per example (base64)."""
+        return self._flex.export_clips(items or [])
 
     def audio_store_clip(self, text_guid: str, begin: int, end: int, data_base64: str, mime: str = "audio/webm") -> dict:
         return self._flex.store_captured_clip(text_guid, begin, end, data_base64, mime)
@@ -883,7 +1200,7 @@ class Api:
         return self._dialog("open", allow_multiple=False, file_types=tuple(types))
 
     _SAVE_TYPES = {".flextext": "FLEx interlinear text", ".html": "Web page", ".md": "Markdown",
-                   ".docx": "Word document", ".zip": "Zip archive", ".wav": "WAV audio"}
+                   ".docx": "Word document", ".xlsx": "Excel workbook", ".pptx": "PowerPoint presentation", ".pdf": "PDF document", ".zip": "Zip archive", ".wav": "WAV audio"}
 
     def _save_dialog(self, name: str) -> str | None:
         """A save dialog suggesting `name`, made safe for a Windows filename, and a path that
@@ -927,3 +1244,11 @@ class Api:
             return True
         except OSError:
             return False
+
+
+# Every public method of Api is the js_api surface; each call is logged (flex_scratchpad/log.py:
+# the arguments, the result in short, the time; secrets redacted) so a run from a terminal says
+# exactly what the page asked for and what came back.
+for _name, _fn in list(vars(Api).items()):
+    if not _name.startswith("_") and callable(_fn) and not isinstance(_fn, (staticmethod, classmethod, property)):
+        setattr(Api, _name, _logged(_fn))

@@ -16,9 +16,22 @@
   const flexGet = async (kind, guid, a, b, refresh, ws, at) => {
     const k = keyOf(kind, guid, a, b, ws, at);
     if (!refresh && mem.has(k)) return mem.get(k);
-    const p = FS.api.flex_get(kind, guid, a || null, b || null, false, ws || null, at || null).then((obj) => { mem.set(k, obj); return obj; }, (e) => { mem.delete(k); throw e; });
+    const p = FS.api.flex_get(kind, guid, a || null, b || null, false, ws || null, at || null).then((obj) => { mem.set(k, obj); if (FS.flexcopy) FS.flexcopy.fetched(); return obj; }, (e) => { mem.delete(k); throw e; });
     mem.set(k, p);
     return p;
+  };
+  /* The object an embed was last drawn from, if it has been fetched (never fetches): what the
+   * note's plain-text copies are written from (flexcopy.js). */
+  const peek = (spec) => {
+    if (!spec || spec.kind === 'file') return null;
+    const kind = spec.kind === 'sense' ? 'entry' : spec.kind;
+    const t = spec.kind === 'text' || spec.kind === 'chart';
+    const a = t && spec.seg ? spec.seg[0] : null, b = t && spec.seg ? spec.seg[1] : null, at = t ? spec.at : null;
+    for (const ws of spec.kind === 'text' && spec.ws ? [spec.ws, null] : [null]) {
+      const v = mem.get(keyOf(kind, spec.guid, a, b, ws, at));
+      if (v && typeof v.then !== 'function') return v;
+    }
+    return null;
   };
   const invalidate = (kind, guid) => { for (const k of [...mem.keys()]) if (!kind || k.startsWith((kind === 'sense' ? 'entry' : kind) + '|' + (guid || ''))) mem.delete(k); };
 
@@ -34,6 +47,25 @@
   /* After a fetch: a text embed records its anchors the first time, and follows them when
    * FLEx has renumbered its segments — rewriting `seg=` in the note (silently, via onSpecChange). */
   function syncAnchors(spec, obj, opts) {
+    if (spec.kind === 'chart') {
+      // a chart's rows are anchored by their GUIDs the same way (rows=, at=); the row styles
+      // (hl=r2 …) move with the numbers, which is the best that can be done without a ledger
+      if (!obj || obj.kind !== 'chart' || !opts.onSpecChange || !spec.seg) return false;
+      const anchors = obj.anchors && obj.anchors[0] ? obj.anchors : null;
+      let changed = false;
+      if (obj.rangeMoved && obj.range && obj.range[0] && (obj.range[0] !== spec.seg[0] || obj.range[1] !== spec.seg[1])) {
+        const d = obj.range[0] - spec.seg[0];
+        if (d && obj.range[1] - spec.seg[1] === d) for (const g of spec.styles || []) for (const t of g.targets) { if (t.row != null) t.row += d; if (t.rowEnd != null) t.rowEnd += d; }
+        spec.seg = [obj.range[0], obj.range[1]];
+        changed = true;
+      }
+      if (anchors && (!spec.at || (obj.rangeMoved && (spec.at[0] !== anchors[0] || spec.at[1] !== anchors[1])))) { spec.at = anchors; changed = true; }
+      if (changed) {
+        opts.onSpecChange(spec);
+        if (obj.rangeMoved) { const lab = (n) => { const e = (obj.index || []).find((i) => i.n === n); return e ? e.label : String(n); }; FS.toast('Rows renumbered in FLEx — the chart now shows ' + lab(spec.seg[0]) + (spec.seg[1] !== spec.seg[0] ? '–' + lab(spec.seg[1]) : '')); }
+      }
+      return changed;
+    }
     if (spec.kind !== 'text' || !obj || obj.kind !== 'text' || !opts.onSpecChange || !spec.seg || obj.lost) return false;
     const anchors = obj.anchors && obj.anchors[0] ? obj.anchors : null;
     let changed = false;
@@ -315,6 +347,12 @@
     const segs = obj.segments || [];
     const mediaByGuid = new Map((obj.media || []).map((m) => [m.guid, m]));
     const box = el('div', { class: 'flex-obj text-obj' + (obj.cached ? ' cached' : '') });
+    // FLEx's text markup tags (Seth, 2026-10-17): drawn under the words when the `tag` line is on
+    const objT = withChartTags(obj, spec);
+    const tagsHere = (objT.tags || []).length && FS.tagstyles ? FS.tagstyles.tagsIn(objT) : [];
+    if (FS.tagstyles && FS.tagstyles.noteTextTitle) FS.tagstyles.noteTextTitle(obj.guid, obj.title);
+    box._showTags = tagsHere.length > 0 && (R.showsTags(spec) || R.showsCols(spec));
+    if (tagsHere.length) box.dataset.tags = tagNames(obj);   // app.js: filtering the note's examples by tag
     const range = obj.range || [segs[0] && segs[0].n, segs.length && segs[segs.length - 1].n];
     // FLEx's own numbers (paragraph.segment, as its Gloss / Print views show them) are what a
     // reader knows the segments by; the running count is what `seg=` addresses.
@@ -337,6 +375,7 @@
       head.appendChild(el('button', { class: 'lnk play-range', title: 'Play this range', onclick: () => playRange(box, obj, segs.filter((x) => !blankSeg(x)), mediaByGuid, opts) }, '▶ Play ' + flexRange));
     }
     head.appendChild(el('button', { class: 'lnk', title: 'Reload from FLEx', onclick: () => opts.refresh && opts.refresh() }, '↻'));
+    if (opts.editable && tagsHere.length) head.appendChild(el('button', { class: 'lnk tag-btn', 'data-test': 'tag-btn', title: 'FLEx text markup tags' + (R.showsCols(spec) ? ' and chart columns' : '') + ' in this example: show, hide, style', onclick: (e) => FS.tagstyles.examplePopover(e.currentTarget, spec, objT, opts) }, '\u2691 ' + tagsHere.length));
     if (opts.editable && !opts.overlay) head.appendChild(el('button', { class: 'lnk', 'data-test': 'collapse-obj', title: 'Collapse to a chip', onclick: () => setCollapsed(spec, opts, true) }, '⤡'));
     if (opts.editable && opts.inCell && opts.editCell && !opts.overlay) head.appendChild(el('button', { class: 'lnk', title: 'Edit the cell\u2019s text (type before or after this example, add another)', onclick: () => opts.editCell() }, '✎'));
     if (opts.editable && !opts.overlay && opts.duplicate) head.appendChild(el('button', { class: 'lnk', title: 'Duplicate this object', onclick: () => opts.duplicate() }, '⧉'));
@@ -361,6 +400,112 @@
     return box;
   }
 
+  /* The tags shown on one segment: [{t, res, a, z, lane, firstAi, lastAi}] — `a`..`z` the analysis
+   * indices the tag covers IN THIS SEGMENT (a tag over several segments covers all of the middle
+   * ones), `lane` so overlapping tags stack, first/lastAi its first and last word cell here. */
+  /* The text's CHART COLUMNS as tags (Seth, 2026-10-18: "style spans of non-chart interlinear text
+   * objects that are mapped to text chart columns"): every word group of the text's charts
+   * (obj.chartSpans, from FlexService._chart_spans) as a tag item with `column: true`, keyed
+   * `column:<Group/Name>` in the rules, drawn by the tag machinery when the `cols` line is on. */
+  function chartTags(obj) {
+    const out = [];
+    (obj.chartSpans || []).forEach((s, i) => {
+      const col = s.column || {};
+      const path = col.path || [];
+      if (FS.tagstyles && FS.tagstyles.noteColumn) FS.tagstyles.noteColumn(col);
+      out.push({ guid: 'col-' + (s.chart || '') + '-' + i, synthetic: true,
+        tag: { guid: 'column:' + (col.guid || col.name), name: path.concat([col.name]).join('/'), abbr: col.abbr || col.name, group: path[path.length - 1] || '', path, column: true, fore: '', back: '', chart: s.chartName, rowLabel: s.row },
+        from: s.from, to: s.to });
+    });
+    return out;
+  }
+  const withChartTags = (obj, spec) => (R.showsCols(spec) && (obj.chartSpans || []).length ? Object.assign({}, obj, { tags: (obj.tags || []).concat(chartTags(obj)) }) : obj);
+  function segTags(obj, spec, seg) {
+    const out = [];
+    obj = withChartTags(obj, spec);
+    const textOn = R.showsTags(spec), colsOn = R.showsCols(spec);
+    for (const t of obj.tags || []) {
+      if (t.synthetic ? !colsOn : !textOn) continue;          // each kind only when its line is on
+      if (!t.from || !t.to || seg.n < t.from.seg || seg.n > t.to.seg) continue;
+      const res = FS.tagstyles ? FS.tagstyles.resolve(t.tag, spec) : { bg: '#ffd6a5', fg: '#1a1d21', label: true };
+      if (res.hide) continue;
+      out.push({ t, res, a: seg.n === t.from.seg ? t.from.w : 0, z: seg.n === t.to.seg ? t.to.w : Infinity });
+    }
+    out.sort((x, y) => x.a - y.a || y.z - x.z);
+    const ais = (seg.words || []).map((w, i) => (w.punct ? null : (w.ai != null ? w.ai : i))).filter((x) => x != null);
+    // a LANE under the words only for a tag drawn as a bar (res.showBar); a tag styling the text
+    // itself (brackets, a marker, a tile, a border) has lane -1 and its own place in the row
+    const laneEnd = [];
+    for (const o of out) {
+      o.firstAi = ais.find((x) => x >= o.a);
+      o.lastAi = [...ais].reverse().find((x) => x <= o.z);
+      o.span = (o.t.to.seg - o.t.from.seg) * 10000 + (o.t.to.w - o.t.from.w);
+      if (!o.res.showBar) { o.lane = -1; continue; }
+      let l = 0;
+      while (laneEnd[l] != null && laneEnd[l] >= o.a) l++;
+      o.lane = l; laneEnd[l] = o.z;
+    }
+    const live = out.filter((o) => o.firstAi != null && o.lastAi != null);
+    // nesting depth among the overlays (tile / border / marker): the longer span is outside
+    const ov = live.filter((o) => o.res.hl || o.res.tile || o.res.box).sort((x, y) => y.span - x.span || x.a - y.a);
+    ov.forEach((o, i) => { o.depth = ov.slice(0, i).filter((p) => p.firstAi <= o.firstAi && p.lastAi >= o.lastAi).length; });
+    return live;
+  }
+
+  /* The text styles of the tags on a segment, laid over its word row: a marker over the word
+   * line (hl), a tinted tile behind the whole column (tile), a border round it (box). Drawn from
+   * the cells' geometry once they are laid out, again when the row's size changes (a font that
+   * arrives late, a narrower window wrapping the row), one piece per visual line. */
+  const ovRows = new WeakMap();
+  // the overlays are re-placed on the NEXT frame: drawing inside the callback is what Chromium
+  // reports as "ResizeObserver loop completed with undelivered notifications" (Seth's log, 2026-10-19)
+  const ovPending = new Set();
+  const ovObserver = typeof ResizeObserver === 'function' ? new ResizeObserver((entries) => {
+    const first = !ovPending.size;
+    for (const e of entries) ovPending.add(e.target);
+    if (first) requestAnimationFrame(() => { const rows = [...ovPending]; ovPending.clear(); for (const r of rows) { const fn = ovRows.get(r); if (fn) fn(); } });
+  }) : null;
+  function placeTagOverlays(row, items) {
+    let layer = row.querySelector(':scope > .tag-ovl');
+    if (!items.length) { if (layer) layer.remove(); return; }
+    if (!layer) { layer = el('div', { class: 'tag-ovl' }); row.insertBefore(layer, row.firstChild); }
+    const TS = FS.tagstyles;
+    const draw = () => {
+      if (!row.isConnected) return;
+      layer.innerHTML = '';
+      const cells = [...row.querySelectorAll(':scope > .word-cell[data-ai]')];
+      for (const o of items) {
+        const covered = cells.filter((c) => { const ai = +c.dataset.ai; return ai >= o.firstAi && ai <= o.lastAi; });
+        const lines = new Map();
+        for (const c of covered) { const k = c.offsetTop; if (!lines.has(k)) lines.set(k, []); lines.get(k).push(c); }
+        for (const group of lines.values()) {
+          const left = Math.min(...group.map((c) => c.offsetLeft)), right = Math.max(...group.map((c) => c.offsetLeft + c.offsetWidth));
+          const top = Math.min(...group.map((c) => c.offsetTop)), bottom = Math.max(...group.map((c) => c.offsetTop + c.offsetHeight));
+          const d = (o.depth || 0) * 3;
+          const frame = { left: (left - 3 + d) + 'px', top: (top - 2 + d) + 'px', width: Math.max(0, right - left + 6 - 2 * d) + 'px', height: Math.max(0, bottom - top + 4 - 2 * d) + 'px' };
+          const title = o.t.tag.name + (o.t.tag.group ? ' \u2014 ' + o.t.tag.group : '');
+          // a tile is the tag's colour tinted, or the rule's own tile colour, a little stronger (it was chosen as is);
+          // a border has the rule's line style and thickness (Seth, 2026-10-18), else 2px solid
+          if (o.res.tile) layer.appendChild(el('div', { class: 'tag-ov tag-ov-tile', dataset: { tag: o.t.tag.name }, title, style: Object.assign({ background: o.res.tc ? TS.rgba(o.res.tc, 0.55) : TS.rgba(o.res.bg, 0.38) }, frame) }));
+          if (o.res.box) layer.appendChild(el('div', { class: 'tag-ov tag-ov-box', dataset: { tag: o.t.tag.name }, title, style: Object.assign({ borderColor: o.res.bc || o.res.ink, borderStyle: o.res.bs || 'solid', borderWidth: (o.res.bw || 2) + 'px' }, frame) }));
+          if (o.res.hl) {
+            const txts = group.map((c) => [c, c.querySelector(':scope > .il-txt')]).filter((x) => x[1]);
+            if (txts.length) {
+              const t0 = Math.min(...txts.map(([c, t]) => c.offsetTop + t.offsetTop)), t1 = Math.max(...txts.map(([c, t]) => c.offsetTop + t.offsetTop + t.offsetHeight));
+              const dd = (o.depth || 0) * 2;
+              layer.appendChild(el('div', { class: 'tag-ov tag-ov-hl', dataset: { tag: o.t.tag.name }, title, style: { left: (left - 2 + dd) + 'px', top: (t0 + 1 + dd) + 'px', width: Math.max(0, right - left + 4 - 2 * dd) + 'px', height: Math.max(0, t1 - t0 - 2 - 2 * dd) + 'px', background: TS.rgba(o.res.bg, 0.75) } }));
+            }
+          }
+        }
+      }
+    };
+    ovRows.set(row, draw);
+    if (ovObserver) ovObserver.observe(row);
+    draw();
+    requestAnimationFrame(draw);
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(draw);
+  }
+
   function renderSegment(seg, obj, spec, lines, index, vern, anal, mediaByGuid, opts, box, sel) {
     const row = el('div', { class: 'segment', dataset: { n: seg.n } });
     const gutter = el('div', { class: 'seg-gutter' }, el('span', { class: 'segnum', title: 'FLEx segment ' + (seg.label || seg.n) + (seg.label && seg.label !== String(seg.n) ? ' (segment ' + seg.n + ' of the text, as seg= counts them)' : '') }, seg.label || String(seg.n)));
@@ -381,14 +526,29 @@
     const hasLine = (word, line) => line === 'txt' || (line === 'morph' && !!(word.morphs && word.morphs.length)) || (line === 'mgls' && !!(word.morphs && word.morphs.some((m) => m.gls))) || (line === 'cf' && !!(word.morphs && word.morphs.some((m) => m.cf))) || (line === 'gls' && !!word.gls) || (line === 'pos' && !!word.pos);
     const realWords = (seg.words || []).filter((x) => !x.punct);
     const present = lines.filter((line) => ['txt', 'morph', 'mgls', 'cf', 'gls', 'pos'].includes(line) && realWords.some((x) => hasLine(x, line)));
-    (seg.words || []).forEach((word) => {
+    // the segment's FLEx tags, each in a lane (overlapping tags stack), as rows under the words
+    const tags = box && box._showTags ? segTags(obj, spec, seg) : [];
+    const lanes = tags.reduce((m, o) => Math.max(m, o.lane + 1), 0);
+    // brackets round a tagged span (Seth, 2026-10-18): a cell of its own before the first word
+    // and after the last, the outer tag's outside the inner's; the abbreviation rides the closing
+    // one when the tag has no bar
+    const bracketCell = (o, close) => {
+      const [a, z] = FS.tagstyles.BRACKETS[o.res.br];
+      const t = o.t.tag;
+      const line = el('div', Object.assign({ class: 'il-line il-txt tag-br', style: { color: o.res.ink } }, wsAttrs(vern)), close ? z : a);
+      if (close && o.res.label && !o.res.showBar) line.appendChild(el('sub', { class: 'tag-br-label' }, t.abbr || t.name));
+      return el('div', { class: 'word-cell br-cell' + (close ? ' br-close' : ' br-open'), dataset: { tag: t.name }, title: t.name + (t.group ? ' \u2014 ' + t.group : '') + ' (FLEx text markup tag)' }, line);
+    };
+    (seg.words || []).forEach((word, ti) => {
       if (word.punct) {
         wordRow.appendChild(el('div', { class: 'word-cell punct-cell' }, el('div', Object.assign({ class: 'il-line il-txt' }, wsAttrs(vern)), word.txt)));
         return;
       }
       w++;
       const wi = w;                      // this cell's ordinal — captured per cell, not the loop counter
-      const cell = el('div', { class: 'word-cell', dataset: { w: wi } });
+      const ai = word.ai != null ? word.ai : ti;        // FLEx's analysis index: what a tag's begin / end count
+      for (const o of tags.filter((x) => x.res.br && x.firstAi === ai && seg.n === x.t.from.seg).sort((x, y) => y.span - x.span)) wordRow.appendChild(bracketCell(o, false));
+      const cell = el('div', { class: 'word-cell', dataset: { w: wi, ai } });
       const sf = (line) => R.stylesFor(index, seg.n, line, wi);
       const blank = (cls) => el('div', { class: 'il-line il-empty ' + cls, html: '&nbsp;' });
       for (const line of present) {
@@ -399,6 +559,24 @@
         else if (line === 'cf') cell.appendChild(el('div', { class: 'il-line il-cf', html: styledParts(word.morphs.map((m) => m.cf || ''), sf('cf')) }));
         else if (line === 'gls') cell.appendChild(el('div', { class: 'il-line il-gls', lang: anal.tag || null, html: styled(word.gls, sf('gls')) }));
         else if (line === 'pos') cell.appendChild(el('div', { class: 'il-line il-pos', html: styled(word.pos, sf('pos')) }));
+      }
+      for (let l = 0; l < lanes; l++) {
+        const o = tags.find((x) => x.lane === l && ai >= x.a && ai <= x.z);
+        if (!o) { cell.appendChild(blank('il-tag')); continue; }
+        const first = ai === o.firstAi, last = ai === o.lastAi, t = o.t.tag;
+        const bar = el('span', { class: 'tagbar' + (first ? ' first' : '') + (last ? ' last' : '') + (seg.n > o.t.from.seg ? ' cont' : '') + (seg.n < o.t.to.seg ? ' more' : '') + (o.res.label ? '' : ' nolabel'),
+          style: { background: o.res.bg, color: o.res.fg }, title: t.name + (t.group ? ' \u2014 ' + t.group : '') + ' (FLEx text markup tag' + (o.res.styleVia ? '; styled by ' + o.res.styleVia.label : '') + ')' },
+          first && o.res.label ? (seg.n > o.t.from.seg ? '\u2026' : '') + (t.abbr || t.name) : '\u00a0');
+        cell.appendChild(el('div', { class: 'il-line il-tag', dataset: { tag: t.name } }, bar));
+      }
+      // the words themselves: bold / italic / underline / a colour, from every tag on this word
+      for (const o of tags) {
+        if (ai < o.a || ai > o.z || !(o.res.b || o.res.i || o.res.u || o.res.c)) continue;
+        const te = cell.querySelector('.il-txt');
+        if (!te) continue;
+        if (o.res.b) te.classList.add('tag-b'); if (o.res.i) te.classList.add('tag-i');
+        if (o.res.u) { te.classList.add('tag-u'); te.style.setProperty('--tag-ul', o.res.ink); }
+        if (o.res.c) te.style.color = o.res.c;
       }
       if (opts.editable) {
         cell.addEventListener('click', (e) => {
@@ -439,9 +617,12 @@
         });
       }
       wordRow.appendChild(cell);
+      for (const o of tags.filter((x) => x.res.br && x.lastAi === ai && seg.n === x.t.to.seg).sort((x, y) => x.span - y.span)) wordRow.appendChild(bracketCell(o, true));
     });
     if (!(seg.words || []).length) wordRow.appendChild(el('span', Object.assign({ class: 'il-txt' }, wsAttrs(vern)), seg.baseline || ''));
     main.appendChild(wordRow);
+    const overlays = tags.filter((o) => o.res.hl || o.res.tile || o.res.box);
+    if (overlays.length) { wordRow.classList.add('has-tag-ov'); queueMicrotask(() => placeTagOverlays(wordRow, overlays)); }
     const lineEl = (cls, line, text) => {
       const d = el('div', { class: cls, lang: anal.tag || null, html: styled(text, R.stylesFor(index, seg.n, line, 0)) });
       // a click styles the whole line; a drag-selection inside it styles just those characters
@@ -513,12 +694,18 @@
       try { capture = captureClip(a, begin, end, obj.guid); } catch (e) { capture = null; }
     }
     // which line is playing: the file time under the playhead, against each line's span
-    let lit = null;
+    // the playing line wears .playing-line: an example's .segment, or every cell of a chart
+    // that holds words from that line (Seth, 2026-10-18: "highlighting (while playing) the
+    // cells that contain data from that line")
+    let litN = null;
     const light = (n) => {
-      if (lit && lit.dataset.n === String(n)) return;
-      if (lit) lit.classList.remove('playing-line');
-      lit = n == null ? null : box.querySelector('.segment[data-n="' + n + '"]');
-      if (lit) { lit.classList.add('playing-line'); follow.to(lit); }
+      if (litN === n) return;
+      box.querySelectorAll('.playing-line').forEach((x) => x.classList.remove('playing-line'));
+      litN = n;
+      if (n == null) return;
+      const hits = box.querySelectorAll('.segment[data-n="' + n + '"], .ccell[data-segs~="' + n + '"]');
+      hits.forEach((x) => x.classList.add('playing-line'));
+      if (hits[0]) follow.to(hits[0].closest('tr') || hits[0]);
     };
     const lineAt = (t) => {
       const ft = info.clipUrl ? begin + t : t;
@@ -729,7 +916,7 @@
         pop.appendChild(el('hr'));
       } else {
         pop.appendChild(el('div', { class: 'row' }, el('b', {}, 'Lines to show')));
-        const names = { txt: 'Word', morph: 'Morphemes', mgls: 'Morph glosses', cf: 'Lex. entries', gls: 'Word gloss', pos: 'Category', ft: 'Free translation', lit: 'Literal translation', note: 'Notes' };
+        const names = { txt: 'Word', morph: 'Morphemes', mgls: 'Morph glosses', cf: 'Lex. entries', gls: 'Word gloss', pos: 'Category', ft: 'Free translation', lit: 'Literal translation', note: 'Notes', tag: 'FLEx text markup tags', cols: 'Chart columns (from the text’s charts, drawn like tags)' };
         const current = spec.lines && spec.lines.length ? spec.lines : R.DEFAULT_LINES;
         for (const l of R.LINES) {
           const cb = el('input', { type: 'checkbox', checked: current.includes(l) });
@@ -860,6 +1047,7 @@
     if (F.has('cf') && obj.citationForm && obj.citationForm !== obj.headword && obj.citationForm !== obj.lexemeForm) head.appendChild(el('span', Object.assign({ class: 'ecf', title: 'citation form' }, wsAttrs(vern)), obj.citationForm));
     if (F.has('lf') && obj.lexemeForm && obj.lexemeForm !== obj.headword) head.appendChild(el('span', Object.assign({ class: 'ecf', title: 'lexeme form' }, wsAttrs(vern)), obj.lexemeForm));
     if (F.has('mt') && obj.morphType) head.appendChild(el('span', { class: 'mtype' }, obj.morphType));
+    if (FS.chartProfile && !opts.inCell && !opts.overlay) head.appendChild(el('button', { class: 'lnk', 'data-test': 'entry-chart-profile', title: 'Which chart columns this item sits in, across the project’s text charts', onclick: () => FS.chartProfile(obj.lexemeForm || obj.headword || '') }, '\u25a6 In charts'));
     if (spec.label) head.appendChild(el('span', { class: 'badge' }, spec.label));
     if (obj.cached) head.appendChild(el('span', { class: 'badge warn', title: obj.liveError || '' }, 'cached' + (obj.cachedAt ? ' ' + obj.cachedAt.slice(0, 10) : '')));
     head.appendChild(el('span', { class: 'spacer' }));
@@ -966,9 +1154,12 @@
     else { if (collapsed) spec.extra.collapsed = true; else delete spec.extra.collapsed; }
     opts.onSpecChange && opts.onSpecChange(spec);
   }
+  // a text and a chart are the two kinds with a range (`seg=` / `rows=`) and anchors (`at=`)
+  const ranged = (spec) => spec.kind === 'text' || spec.kind === 'chart';
   function chipTitle(spec, obj) {
     if (spec.label) return spec.label;
     if (!obj) return spec.kind + ' ' + spec.guid.slice(0, 8) + '…';
+    if (obj.kind === 'chart') return (obj.name || 'Chart') + ' · ' + (obj.title || '');
     if (obj.kind === 'entry') {
       if (spec.kind === 'sense') { const sn = (obj.senses || []).find((x) => x.guid === spec.guid); if (sn) return (obj.headword || '') + ' ' + (sn.number ? sn.number + '. ' : '') + (sn.gloss || ''); }
       return (obj.headword || obj.lexemeForm || '?') + (obj.senses && obj.senses[0] && obj.senses[0].gloss ? ' ‘' + obj.senses[0].gloss + '’' : '');
@@ -977,28 +1168,40 @@
     return obj.title || '(untitled text)';
   }
   function chipRange(spec, obj) {
+    if (spec.kind === 'chart') {
+      const r = spec.seg || (obj && obj.range) || null;
+      if (!r) return 'all rows';
+      const lab = (n) => { const e = obj && obj.index && obj.index.find((i) => i.n === n); return e ? e.label : String(n); };
+      return 'rows ' + (r[0] === r[1] ? lab(r[0]) : lab(r[0]) + '–' + lab(r[1]));
+    }
     if (spec.kind !== 'text') return '';
     const r = spec.seg || (obj && obj.range) || null;
     if (!r) return 'all';
     return r[0] === r[1] ? labelOf(obj, r[0]) : labelOf(obj, r[0]) + '–' + labelOf(obj, r[1]);
   }
 
+  /* The names of the tags an object shows, for app.js's filtering of a note's examples by tag —
+   * on a full example, a collapsed chip and an inline chip alike (Seth, 2026-10-18: notes full of
+   * chips said "0 of 0"). */
+  function tagNames(obj) {
+    return obj && (obj.tags || []).length && FS.tagstyles ? FS.tagstyles.tagsIn(obj).map((x) => x.tag.name).join('\n') : '';
+  }
   function renderChip(container, spec, opts) {
     container.innerHTML = '';
-    const icon = spec.kind === 'text' ? '¶' : spec.kind === 'wordform' ? 'ω' : '📖';
+    const icon = spec.kind === 'text' ? '¶' : spec.kind === 'chart' ? '▦' : spec.kind === 'wordform' ? 'ω' : '📖';
     const chip = el('span', { class: 'flex-collapsed kind-' + spec.kind, tabindex: 0, title: 'Click to preview; ⤢ to expand' + (opts.collection ? '' : '; drag to move'), draggable: opts.editable && !opts.collection ? 'true' : null });   // a collection drags a card by its own grip
     const ttl = el('span', { class: 'cttl' }, chipTitle(spec, null));
     chip.appendChild(el('span', { class: 'cicon' }, icon));
     chip.appendChild(ttl);
     const range = chipRange(spec, null);
     const rangeEl = el('span', { class: 'crange' }, range);
-    if (spec.kind === 'text') chip.appendChild(rangeEl);
+    if (ranged(spec)) chip.appendChild(rangeEl);
     if (opts.editable) chip.appendChild(el('button', { class: 'cexp', title: opts.inCell ? 'Show the full example in this cell' : 'Expand in place', onclick: (e) => { e.stopPropagation(); closeOverlay(); setCollapsed(spec, opts, false); } }, '⤢'));
     container.appendChild(chip);
     // fill the title from the (cached) object without blocking the chip
     const kind = spec.kind === 'sense' ? 'entry' : spec.kind;
-    flexGet(kind, spec.guid, spec.kind === 'text' && spec.seg ? spec.seg[0] : null, spec.kind === 'text' && spec.seg ? spec.seg[1] : null, false, null, spec.kind === 'text' ? spec.at : null)
-      .then((obj) => { if (syncAnchors(spec, obj, opts)) return; ttl.textContent = chipTitle(spec, obj); rangeEl.textContent = chipRange(spec, obj); const ws = obj.ws && obj.ws.vern; if (ws && obj.kind !== 'wordform') { if (ws.rtl) ttl.dir = 'rtl'; if (ws.tag) ttl.lang = ws.tag; } if (obj.cached) chip.classList.add('cached'); })
+    flexGet(kind, spec.guid, ranged(spec) && spec.seg ? spec.seg[0] : null, ranged(spec) && spec.seg ? spec.seg[1] : null, false, null, ranged(spec) ? spec.at : null)
+      .then((obj) => { if (syncAnchors(spec, obj, opts)) return; ttl.textContent = chipTitle(spec, obj); rangeEl.textContent = chipRange(spec, obj); const ws = obj.ws && obj.ws.vern; if (ws && obj.kind !== 'wordform') { if (ws.rtl) ttl.dir = 'rtl'; if (ws.tag) ttl.lang = ws.tag; } if (obj.cached) chip.classList.add('cached'); const tn = tagNames(obj); if (tn) chip.dataset.tags = tn; })
       .catch((e) => { chip.classList.add('err'); chip.title = e.message || String(e); });
     // click → pinned overlay; hover → temporary overlay
     chip.addEventListener('click', (e) => { if (e.target.closest('.cexp')) return; openOverlay(chip, spec, opts, { pinned: true }); });
@@ -1163,10 +1366,10 @@
     const doRender = async (refresh) => {
       try {
         const kind = spec.kind === 'sense' ? 'entry' : spec.kind;
-        const obj = await flexGet(kind, spec.guid, spec.kind === 'text' && spec.seg ? spec.seg[0] : null, spec.kind === 'text' && spec.seg ? spec.seg[1] : null, refresh, spec.kind === 'text' ? spec.ws : null, spec.kind === 'text' ? spec.at : null);
+        const obj = await flexGet(kind, spec.guid, ranged(spec) && spec.seg ? spec.seg[0] : null, ranged(spec) && spec.seg ? spec.seg[1] : null, refresh, spec.kind === 'text' ? spec.ws : null, ranged(spec) ? spec.at : null);
         if (syncAnchors(spec, obj, opts)) return;          // the spec changed: the owner re-renders
         const o = Object.assign({}, opts, { refresh: () => reload() });
-        const node = kind === 'text' ? renderText(obj, spec, o) : kind === 'wordform' ? renderWordform(obj, spec, o) : renderEntry(obj, spec, o);
+        const node = kind === 'text' ? renderText(obj, spec, o) : kind === 'chart' ? FS.chart.renderChart(obj, spec, o) : kind === 'wordform' ? renderWordform(obj, spec, o) : renderEntry(obj, spec, o);
         const restore = keep && container.isConnected ? holdScroll(container) : null;   // only when a drawing is REPLACED
         container.innerHTML = '';
         container.appendChild(node);
@@ -1216,8 +1419,8 @@
         return;
       }
       const kind = spec.kind === 'sense' ? 'entry' : spec.kind;
-      flexGet(kind, spec.guid, spec.kind === 'text' && spec.seg ? spec.seg[0] : null, spec.kind === 'text' && spec.seg ? spec.seg[1] : null, false, null, spec.kind === 'text' ? spec.at : null)
-        .then((obj) => { if (!span.isConnected) return; span.dataset.title = chipTitle(spec, obj); if (spec.kind === 'text') span.dataset.range = chipRange(spec, obj); if (obj.cached) span.classList.add('cached'); })
+      flexGet(kind, spec.guid, ranged(spec) && spec.seg ? spec.seg[0] : null, ranged(spec) && spec.seg ? spec.seg[1] : null, false, null, ranged(spec) ? spec.at : null)
+        .then((obj) => { if (!span.isConnected) return; span.dataset.title = chipTitle(spec, obj); if (ranged(spec)) span.dataset.range = chipRange(spec, obj); if (obj.cached) span.classList.add('cached'); const tn = tagNames(obj); if (tn) span.dataset.tags = tn; })
         .catch((e) => { span.classList.add('err'); span.title = e.message || String(e); });
       if (!opts) return;
       const o = {
@@ -1235,5 +1438,5 @@
     });
   }
 
-  FS.interlinear = { blankSeg, nowPlaying, render, renderText, renderEntry, renderWordform, renderChip, hydrateInline, openContext, wholeText, openOverlay, closeOverlay, isCollapsed, setCollapsed, styled, styledParts, invalidate, flexGet, openInFlex, labelOf, numberFor, flexTsv, HL_COLORS };
+  FS.interlinear = { playRange, audio, chipTitle, chipRange, blankSeg, peek, segTags, chartTags, withChartTags, nowPlaying, render, renderText, renderEntry, renderWordform, renderChip, hydrateInline, openContext, wholeText, openOverlay, closeOverlay, isCollapsed, setCollapsed, styled, styledParts, invalidate, flexGet, openInFlex, labelOf, numberFor, flexTsv, HL_COLORS };
 })();

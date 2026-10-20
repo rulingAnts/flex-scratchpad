@@ -546,3 +546,70 @@ def test_unreadable_punctuation_comes_from_the_baseline_or_is_dropped():
     assert model.fill_punctuation([model.make_word("", punct=True)], "") == []
     src = (Path(__file__).resolve().parent.parent / "flex_scratchpad" / "flex" / "lcm.py").read_text(encoding="utf-8")
     assert "tok.ShortName" not in src.replace("never tok.ShortName", "")
+
+
+def test_export_clips_gives_one_compressed_clip_per_example(tmp_path, monkeypatch):
+    """Seth, 2026-10-18: the HTML export embeds the audio as base64 — one clip per example, cut
+    like the playback clip and compressed through ffmpeg when there is one, the WAV slice itself
+    otherwise; an example without a recording gets an error instead of a player."""
+    import base64
+    from flex_scratchpad.flex import audio
+    nb = Notebook(tmp_path / "nb")
+    svc = FlexService(nb)
+    svc.configure(source="demo")
+    svc.open()
+    items = [{"id": "a", "text": T_STORY, "begin": 1500, "end": 3200}, {"id": "b", "text": T_STORY, "begin": 0, "end": 0}, {"id": "c", "text": T_ARAB, "begin": 0, "end": 1000}]
+    # no ffmpeg → the WAV slice itself
+    monkeypatch.setattr(audio, "find_ffmpeg", lambda configured="": None)
+    out = svc.export_clips(items)
+    assert [o["id"] for o in out] == ["a", "b", "c"]
+    assert out[0]["mime"] == "audio/wav" and out[0]["bytes"] > 1000 and base64.b64decode(out[0]["base64"])[:4] == b"RIFF"
+    assert out[1]["error"] == "no timing" and "error" in out[2]
+    # ffmpeg (when this machine has one) → Opus in Ogg, kept beside the clip for the next export
+    import shutil
+    real = shutil.which("ffmpeg")
+    if real:
+        monkeypatch.setattr(audio, "find_ffmpeg", lambda configured="": real)
+        out = svc.export_clips(items[:1])
+        assert out[0]["mime"] in ("audio/ogg", "audio/mpeg") and out[0]["bytes"] > 100, out[0]
+        kept = list(svc.cache.audio_dir(svc.project_name).glob("*_1500-3200.export.*"))
+        assert kept and svc.cache.find_audio_clip(svc.project_name, T_STORY, 1500, 3200).suffix in (".wav", ".flac"), kept   # the copy is never mistaken for the clip
+
+
+def test_snapshot_writes_from_many_threads_and_a_failing_write_keep_the_live_read(tmp_path):
+    """Seth, 2026-10-19: twelve examples of one text fetched at once wrote the same snapshot from
+    twelve threads; on Windows the second `os.replace` hit "Access is denied" and a good live read
+    was shown as "the snapshot". Writes are serialised, and a write that still fails is logged,
+    never raised through the fetch."""
+    import threading
+    from flex_scratchpad.flex import FlexService
+    from flex_scratchpad.flex.cache import SnapshotCache
+    from flex_scratchpad.notebook import Notebook
+    svc = FlexService(Notebook(tmp_path / "nb"))
+    svc.configure(source="demo", project="Kalu Demo")
+    svc.open()
+    from flex_scratchpad.flex.demo import T_STORY
+    errors = []
+
+    def one(i):
+        try:
+            o = svc.get_object("text", T_STORY, 1 + (i % 3), 2 + (i % 3))
+            assert o["cached"] is False
+        except Exception as e:  # noqa: BLE001
+            errors.append(e)
+    ts = [threading.Thread(target=one, args=(i,)) for i in range(12)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    assert not errors
+    assert not list((svc.cache.project_dir(svc.project_name)).glob("*.tmp"))
+    # the live read survives a snapshot that cannot be written
+    broken = SnapshotCache(tmp_path / "nb" / ".scratchpad" / "flex-cache-broken")
+
+    def boom(*a, **k):
+        raise PermissionError("Access is denied")
+    broken.put = boom
+    svc.cache = broken
+    o = svc.get_object("text", T_STORY, 1, 2)
+    assert o["cached"] is False and o["segments"]

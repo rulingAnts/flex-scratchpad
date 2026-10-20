@@ -11,14 +11,15 @@ import threading
 from pathlib import Path
 
 from . import model
+from ..log import LOG
 from .audio import cut_clip, store_clip_bytes
 from .cache import SnapshotCache
 from .lcm import FlexError
 
-EMBED_RE = re.compile(r"\{\{\s*flex:(entry|sense|text|wordform)\s+([0-9a-fA-F-]{36})", re.I)
+EMBED_RE = re.compile(r"\{\{\s*flex:(entry|sense|text|wordform|chart)\s+([0-9a-fA-F-]{36})", re.I)
 # the whole embed, for refresh-all: kind, guid and the rest of the spec (seg= / at= are read out of it)
-EMBED_FULL_RE = re.compile(r"\{\{\s*flex:(entry|sense|text|wordform)\s+([0-9a-fA-F-]{36})([^}]*)\}\}", re.I)
-LINK_RE = re.compile(r"\(flex:(entry|sense|text|wordform)/([0-9a-fA-F-]{36})", re.I)
+EMBED_FULL_RE = re.compile(r"\{\{\s*flex:(entry|sense|text|wordform|chart)\s+([0-9a-fA-F-]{36})([^}]*)\}\}", re.I)
+LINK_RE = re.compile(r"\(flex:(entry|sense|text|wordform|chart)/([0-9a-fA-F-]{36})", re.I)
 
 
 import unicodedata as _ud
@@ -101,6 +102,7 @@ class FlexService:
         self.progress = progress or (lambda msg: None)
         self.last_error: str = ""
         self.last_error_code: str = ""
+        self._chart_rows: list[dict] | None = None     # the chart search index (chart_rows)
 
     # -- configuration -----------------------------------------------------------
 
@@ -170,6 +172,7 @@ class FlexService:
             src = cfg.get("source", "lcm")
             self.last_error = ""
             self.last_error_code = ""
+            self._chart_rows = None
             try:
                 if src == "demo":
                     from .demo import DemoBackend
@@ -196,11 +199,15 @@ class FlexService:
                 self.last_error = e.message
                 self.last_error_code = e.code
                 self.backend = None
+                LOG.warning("FLEx source not opened (%s): %s%s", e.code, e.message, (" — " + e.detail[:300]) if e.detail else "")
             except Exception as e:  # noqa: BLE001
                 self.last_error = f"Could not open the FLEx source: {e}"
                 self.last_error_code = "lcm"
                 self.backend = None
-            return self.status()
+                LOG.exception("FLEx source not opened")
+            st = self.status()
+            LOG.info("FLEx source: %s project=%r open=%s", st.get("source"), st.get("project"), st.get("open"))
+            return st
 
     def close(self) -> None:
         with self.lock:
@@ -213,6 +220,8 @@ class FlexService:
 
     def refresh(self, indexes: bool = True) -> dict:
         with self.lock:
+            if indexes:
+                self._chart_rows = None          # the chart search index is rebuilt at the next search
             if self.backend is not None and hasattr(self.backend, "refresh"):
                 try:
                     self.backend.refresh() if indexes else self.backend.refresh(indexes=False)
@@ -240,27 +249,44 @@ class FlexService:
             variant += "~alts"          # every writing system: its own snapshot, never the lean one
         with self.lock:
             live_err = None
+
+            def keep(write):
+                # the snapshot is a convenience: a write that fails (a locked file, a full disk)
+                # must never turn a good live read into "showing the snapshot" (Seth, 2026-10-19)
+                try:
+                    write()
+                except Exception as e:  # noqa: BLE001
+                    LOG.warning("%s %s: snapshot not written: %s", kind, guid[:8], e)
+
             if not prefer_cache:
                 try:
                     be = self._live()
                     if kind == "entry":
                         obj = be.get_entry(guid)
-                        self.cache.put(self.project_name, "entry", guid, obj)
+                        keep(lambda: self.cache.put(self.project_name, "entry", guid, obj))
                     elif kind == "text":
                         obj = self._tracked_text(be, guid, seg_from, seg_to, ws, at, alts)
                         if not obj.get("lost"):
-                            self.cache.merge_text(self.project_name, variant, obj)
+                            keep(lambda: self.cache.merge_text(self.project_name, variant, obj))
                     elif kind == "wordform":
                         obj = be.get_wordform(guid)
-                        self.cache.put(self.project_name, "wordform", guid, obj)
+                        keep(lambda: self.cache.put(self.project_name, "wordform", guid, obj))
+                    elif kind == "chart":
+                        # the whole chart is read and snapshotted (charts are small); the embed's rows are sliced here
+                        whole = be.get_chart(guid)
+                        keep(lambda: self.cache.put(self.project_name, "chart", guid, whole))
+                        obj = model.slice_chart(whole, seg_from, seg_to, at)
                     else:
                         raise FlexError(f"Unknown object kind: {kind}", "", "kind")
                     obj = dict(obj)
                     obj["cached"] = False
+                    if kind == "text":
+                        obj["chartSpans"] = self._chart_spans(guid)
                     return obj
                 except FlexError as e:
                     live_err = e
                 except Exception as e:  # noqa: BLE001
+                    LOG.exception("%s %s: the live fetch failed", kind, guid[:8])
                     live_err = FlexError(str(e), "", "lcm")
             snap = self.cache.get(self.project_name, kind, variant) or self.cache.find(kind, variant) \
                 or (self.cache.get(self.project_name, kind, guid) or self.cache.find(kind, guid) if ws else None)
@@ -279,8 +305,13 @@ class FlexService:
                     out["rangeMoved"] = bool(r["moved"])
                     out["anchorsLost"] = bool(r["lost"])
                     snap = out
+                elif kind == "chart":
+                    snap = model.slice_chart(snap, seg_from, seg_to, at)
                 snap["cached"] = True
+                if kind == "text":
+                    snap["chartSpans"] = self._chart_spans(guid)
                 snap["liveError"] = live_err.message if live_err else ""
+                LOG.info("%s %s: showing the snapshot (%s)", kind, guid[:8], live_err.message if live_err else "cache preferred")
                 return snap
             if live_err:
                 raise live_err
@@ -813,10 +844,17 @@ class FlexService:
         for note_id, note_title, body in sources:
             for rx, key in ((EMBED_RE, "examples"), (LINK_RE, "links")):
                 for m in rx.finditer(body or ""):
-                    if m.group(1).lower() != "text":
-                        continue
+                    kind = m.group(1).lower()
                     g = m.group(2).lower()
-                    r = rows.setdefault(g, {"guid": g, "examples": 0, "links": 0, "notes": []})
+                    if kind == "chart":                      # a chart counts for the text it charts
+                        snap = self.cache.get(self.project_name, "chart", g) or self.cache.find("chart", g)
+                        g = (snap or {}).get("text") or ""
+                        if not g:
+                            continue
+                        key = "charts"
+                    elif kind != "text":
+                        continue
+                    r = rows.setdefault(g, {"guid": g, "examples": 0, "links": 0, "charts": 0, "notes": []})
                     r[key] += 1
                     if not any(n["id"] == note_id for n in r["notes"]):
                         r["notes"].append({"id": note_id, "title": note_title})
@@ -836,6 +874,221 @@ class FlexService:
             r["title"] = title or "(a text not in this project)"
             r["url"] = (snap or {}).get("url") or model.goto_url(self.project_name, "text", g)
         return sorted(rows.values(), key=lambda r: (r["title"].casefold(), r["guid"]))
+
+    # -- text markup tags (Seth, 2026-10-17) ----------------------------------------
+
+    def text_tags(self) -> list[dict]:
+        """The project's TextMarkupTags list; the last one seen is kept in the snapshot folder so
+        the style editors and the picker list the tags without FLEx."""
+        with self.lock:
+            try:
+                tags = self._live().list_text_tags()
+                self.cache.put(self.project_name, "list", "texttags", {"tags": tags})
+                return tags
+            except Exception:  # noqa: BLE001 — closed, or a backend without tags
+                snap = self.cache.get(self.project_name, "list", "texttags") if self.project_name else None
+                return list((snap or {}).get("tags") or [])
+
+    # -- text charts (Seth, 2026-10-18) -------------------------------------------------
+
+    def charts(self, text_guid: str | None = None) -> list[dict]:
+        """The project's constituent charts (optionally those of one text): live, else what the
+        snapshot folder holds, so a note's chart is still listed without FLEx."""
+        g = (text_guid or "").lower()
+        with self.lock:
+            try:
+                return self._live().list_charts(g or None)
+            except Exception:  # noqa: BLE001 — closed, or a backend without charts
+                out = []
+                d = self.cache.project_dir(self.project_name) if self.project_name else None
+                for f in sorted(d.glob("chart-*.json")) if d and d.is_dir() else []:
+                    snap = self.cache.get(self.project_name, "chart", f.stem[6:])
+                    if snap and (not g or snap.get("text") == g):
+                        out.append({"guid": snap["guid"], "name": snap.get("name", ""), "text": snap.get("text", ""), "title": snap.get("title", ""),
+                                    "rows": snap.get("rowCount", 0), "template": (snap.get("template") or {}).get("name", ""),
+                                    "columns": len((snap.get("template") or {}).get("columns") or []), "cached": True})
+                return out
+
+    def chart_markers(self) -> list[dict]:
+        """The project's Chart Markers list (kept in the snapshot folder like the text tags)."""
+        with self.lock:
+            try:
+                items = self._live().list_chart_markers()
+                self.cache.put(self.project_name, "list", "chartmarkers", {"markers": items})
+                return items
+            except Exception:  # noqa: BLE001
+                snap = self.cache.get(self.project_name, "list", "chartmarkers") if self.project_name else None
+                return list((snap or {}).get("markers") or [])
+
+    def tag_occurrences(self, tag_guid: str, q: str = "") -> list[dict]:
+        with self.lock:
+            rows = self._live().tag_occurrences(tag_guid)
+        ql = (q or "").strip().casefold()
+        if ql:
+            rows = [r for r in rows if ql in (r.get("title", "") + " " + r.get("words", "") + " " + r.get("label", "")).casefold()]
+        return rows
+
+    def rule_matches(self, rule: dict) -> list[dict]:
+        """Every LINE (segment range) carrying any tag a rule names (Seth, 2026-10-18: "a
+        collection with ALL lines that match a specific rule"). A selector is a tag's GUID,
+        name or abbreviation, `group:<name>` (every tag under that group, at any depth) or `*`;
+        `texts` limits the search to those texts. One row per distinct range, in text order,
+        each with the names of the tags that put it there. A rule with `charts` (a chart search
+        query) matches CHART ROWS instead (chart_search): one row per chart row."""
+        rule = rule or {}
+        if (rule.get("charts") or "").strip():
+            return self.chart_search(rule["charts"])
+        sels = [str(t).strip() for t in rule.get("tags") or [] if str(t).strip()]
+        if not sels:
+            return []
+        tags = self.text_tags()
+        want: dict[str, None] = {}
+        norm = lambda x: str(x or "").strip().casefold().replace("_", " ")  # noqa: E731
+        for sel in sels:
+            if sel == "*":
+                for t in tags:
+                    want[t["guid"]] = None
+            elif sel.lower().startswith("group:"):
+                g = norm(sel[6:])
+                for t in tags:
+                    if any(norm(p) == g for p in (t.get("path") or [t.get("group")])):
+                        want[t["guid"]] = None
+            else:
+                for t in tags:
+                    if sel.lower() == t["guid"] or norm(sel) in (norm(t.get("name")), norm(t.get("abbr"))):
+                        want[t["guid"]] = None
+        names = {t["guid"]: t.get("name") or t.get("abbr") or "?" for t in tags}
+        only = {str(x).lower() for x in rule.get("texts") or []}
+        rows: dict[tuple, dict] = {}
+        for guid in want:
+            for r in self.tag_occurrences(guid):
+                if only and str(r.get("text", "")).lower() not in only:
+                    continue
+                key = (r.get("text"), r.get("seg"), r.get("segTo"))
+                if key in rows:
+                    if names.get(guid) not in rows[key]["tags"]:
+                        rows[key]["tags"].append(names.get(guid))
+                else:
+                    rows[key] = dict(r, tags=[names.get(guid)])
+        out = list(rows.values())
+        out.sort(key=lambda r: (str(r.get("title", "")).casefold(), r.get("seg") or 0, r.get("segTo") or 0))
+        return out
+
+    # -- text chart search (Seth, 2026-10-18: "FLEx does not give us great ways to search text
+    # charts … returning cells or rows with a certain text chart markers or which column a
+    # certain lexical item is found in") -------------------------------------------------------
+
+    def _chart_spans(self, text_guid: str) -> list[dict]:
+        """Every word group of the text's charts, as spans an interlinear example can show as
+        synthetic tags (Seth, 2026-10-18: "style spans of non-chart interlinear text objects that
+        are mapped to text chart columns"): [{chart, chartName, template, row (label), column:
+        {guid, name, abbr, path}, from: {seg, w}, to: {seg, w}}]. From the charts already
+        snapshotted (the live list when open); never a fetch of its own beyond the charts."""
+        out: list[dict] = []
+        try:
+            summaries = self.charts(text_guid)
+        except Exception:  # noqa: BLE001
+            return out
+        for summ in summaries:
+            snap = self.cache.get(self.project_name, "chart", summ["guid"]) or self.cache.find("chart", summ["guid"])
+            if snap is None and self.backend is not None:
+                try:
+                    snap = self.get_object("chart", summ["guid"])
+                except Exception:  # noqa: BLE001
+                    snap = None
+            if not snap:
+                continue
+            columns = (snap.get("template") or {}).get("columns") or []
+            cols = {c["n"]: c for c in columns}
+            for r in snap.get("rows") or []:
+                for c in r.get("cells") or []:
+                    if c.get("kind") != "words" or not c.get("seg"):
+                        continue
+                    col = cols.get(c.get("colN")) or {}
+                    span_cols = [col]
+                    nb = merged_neighbour(c, columns)
+                    if nb:            # a merged cell: a span for the neighbour column too (it could be either)
+                        span_cols.append(nb)
+                    for k, sc in enumerate(span_cols):
+                        out.append({"chart": snap.get("guid", ""), "chartName": snap.get("name", ""), "template": (snap.get("template") or {}).get("name", ""),
+                                    "row": r.get("label", ""), "column": {"guid": sc.get("guid", ""), "name": sc.get("name", ""), "abbr": sc.get("abbr", ""), "path": list(sc.get("path") or [])},
+                                    "merged": bool(k), "from": dict(c.get("from") or {"seg": c.get("seg"), "w": 0}), "to": dict(c.get("to") or {"seg": c.get("segTo"), "w": 0})})
+        return out
+
+    def chart_rows(self, refresh: bool = False) -> list[dict]:
+        """One record per CHART ROW across every chart of the project (live, each chart
+        snapshotted on the way; the snapshots when FLEx is closed), kept for the session:
+        {chart, chartName, text, title, template, row, label, guid, at, clause, endSent, endPara,
+        markers (names + their groups), moved, clauseref, notes, cells: [{colN, col, abbr, path,
+        words, glosses, forms, cfs, mgls, pos, seg, segTo}]}."""
+        with self.lock:
+            if self._chart_rows is not None and not refresh:
+                return self._chart_rows
+            rows: list[dict] = []
+            # only the charts that have rows are read (Seth's project, 2026-10-18: 80 charts, most of
+            # them the empty chart FLEx makes when a template's tab is opened); each one is snapshotted
+            # on the way, so the second build is quick
+            todo = [s for s in self.charts() if s.get("rows")]
+            for i, summ in enumerate(todo, 1):
+                self.progress(f"Reading chart {i} of {len(todo)}: {summ.get('title') or ''}…")
+                try:
+                    chart = self.get_object("chart", summ["guid"])
+                except FlexError as e:
+                    LOG.warning("chart %s not read for the index: %s", summ["guid"][:8], e.message)
+                    continue
+                rows.extend(_chart_index_rows(chart))
+            self.progress("")
+            LOG.info("chart index: %d rows from %d charts", len(rows), len(todo))
+            self._chart_rows = rows
+            return rows
+
+    def chart_search(self, q: str) -> list[dict]:
+        """The chart rows a query matches, in chart order. The query: words (matched against the
+        words, glosses, morpheme forms and notes), `col:Subject` (a column by name, Group/Name,
+        abbreviation or c3 — content terms then apply to THAT column's cells), `marker:Topic`
+        (a chart marker on the row, or its group; `*` = any), `lex:kabir` (a word, morpheme form
+        or lexeme form), `gloss:dog`, `word:kabir`, `pos:n`, `clause:dependent|speech|song|normal`,
+        `moved[:preposed|postposed]`, `clauseref`, `endsent`, `endpara`, `chart:name`,
+        `text:title`, `template:name`, `row:2a`, `note:text`, `-term` to exclude. Each hit carries
+        `hits` (the column numbers that matched) and `embed` / keys for a collection."""
+        terms = _parse_chart_query(q)
+        out = []
+        for r in self.chart_rows():
+            hit = _row_matches(r, terms)
+            if hit is None:
+                continue
+            row = dict(r)
+            row["hits"] = hit
+            out.append(row)
+        return out
+
+    def chart_profile(self, term: str) -> dict:
+        """Where a lexical item sits in the charts (Seth: "which column a certain lexical item is
+        found in"): the cells whose words, morpheme forms, lexeme forms or glosses contain `term`,
+        counted per template and column, each count with its rows."""
+        from ..notebook import normalize
+        t = normalize(term or "", True)
+        out: dict = {"term": term, "total": 0, "templates": []}
+        if not t:
+            return out
+        tmpl: dict[str, dict] = {}
+        for r in self.chart_rows():
+            for c in r["cells"]:
+                hay = c["words"] + c["forms"] + c["cfs"] + c["glosses"] + c["mgls"]
+                if not any(t in normalize(x, True) for x in hay):
+                    continue
+                tp = tmpl.setdefault(r["template"] or "", {"name": r["template"] or "", "columns": {}, "total": 0})
+                col = tp["columns"].setdefault(c["path"], {"name": c["col"], "path": c["path"], "colN": c["colN"], "count": 0, "rows": []})
+                col["count"] += 1
+                tp["total"] += 1
+                out["total"] += 1
+                col["rows"].append({"chart": r["chart"], "chartName": r["chartName"], "title": r["title"], "row": r["row"], "label": r["label"], "at": r["at"],
+                                    "words": " ".join(c["words"]), "glosses": " ".join(c["glosses"])})
+        for tp in tmpl.values():
+            cols = sorted(tp["columns"].values(), key=lambda c: c["colN"])
+            out["templates"].append({"name": tp["name"], "total": tp["total"], "columns": cols})
+        out["templates"].sort(key=lambda x: -x["total"])
+        return out
 
     # -- search index support -----------------------------------------------------
 
@@ -891,6 +1144,46 @@ class FlexService:
                 "needsCapture": bool(found and not clip),
             }
 
+    def export_clips(self, items: list[dict]) -> list[dict]:
+        """The recordings an HTML export embeds (Seth, 2026-10-18: "audio players and base64
+        embedded audio where audio files and segmentation data are available and match"): per
+        item {id, text, media?, begin, end} — ONE clip per example or chart, its first timed line's
+        begin to its last one's end, so the page seeks inside it per line — the clip is cut as for
+        playback (the cache, else the live file) and compressed for the page
+        (`audio.encode_for_embed`), returned as {id, mime, base64, bytes, begin, end}; an item
+        whose audio cannot be had says `error` instead and the page shows that example without
+        a player. The compressed copies live beside the clips (`<text>_<b>-<e>.export.ogg`) so a
+        second export is instant."""
+        import base64
+        from .audio import encode_for_embed, find_ffmpeg
+        exe = find_ffmpeg(self.nb.config.get("settings", {}).get("ffmpegPath", ""))
+        out = []
+        for it in items or []:
+            rid = it.get("id")
+            try:
+                begin, end = int(it.get("begin", 0)), int(it.get("end", 0))
+                if end <= begin or not it.get("text"):
+                    out.append({"id": rid, "error": "no timing"})
+                    continue
+                info = self.ensure_clip(it["text"], it.get("media"), begin, end)
+                src = info.get("clipPath")
+                if not src:
+                    out.append({"id": rid, "error": "The recording is not available on this computer." if not info.get("found") else "This recording cannot be cut here (a non-WAV file needs ffmpeg)."})
+                    continue
+                stem = self.cache.audio_clip_path(self.project_name, it["text"], begin, end, ".export")
+                enc = encode_for_embed(src, stem, exe)
+                if not enc:
+                    out.append({"id": rid, "error": "The clip could not be encoded."})
+                    continue
+                data = Path(enc[0]).read_bytes()
+                out.append({"id": rid, "mime": enc[1], "base64": base64.b64encode(data).decode("ascii"), "bytes": len(data), "begin": begin, "end": end})
+            except FlexError as e:
+                out.append({"id": rid, "error": e.message})
+            except Exception as e:  # noqa: BLE001
+                LOG.warning("export_clips: %s", e)
+                out.append({"id": rid, "error": str(e)})
+        return out
+
     def store_captured_clip(self, text_guid: str, begin: int, end: int, data_base64: str, mime: str = "audio/webm") -> dict:
         ext = ".webm" if "webm" in mime else ".ogg" if "ogg" in mime else ".wav" if "wav" in mime else ".bin"
         with self.lock:
@@ -912,3 +1205,192 @@ class FlexService:
                 if hasattr(self.backend, "media_folders"):
                     self.backend.media_folders = list(mc["folders"])
             return mc
+
+
+# --------------------------------------------------------------------------- chart search helpers
+
+def merged_neighbour(cell: dict, columns: list[dict]) -> dict | None:
+    """The template column a merged cell part extends into (FLEx's MergesAfter / MergesBefore), or
+    None. A merged cell belongs to BOTH columns in every search (Seth, 2026-10-19: "I merge columns
+    when I'm unsure which column it is because it could be either")."""
+    if not (cell.get("mergeAfter") or cell.get("mergeBefore")):
+        return None
+    ns = [c.get("n") for c in columns]
+    if cell.get("colN") not in ns:
+        return None
+    i = ns.index(cell.get("colN"))
+    j = i + 1 if cell.get("mergeAfter") else i - 1
+    return columns[j] if 0 <= j < len(columns) else None
+
+
+def _chart_index_rows(chart: dict) -> list[dict]:
+    columns = (chart.get("template") or {}).get("columns") or []
+    cols = {c["n"]: c for c in columns}
+    out = []
+    for r in chart.get("rows") or []:
+        cells, markers, moved = [], [], []
+        clauseref = False
+        for c in r.get("cells") or []:
+            k = c.get("kind")
+            if k == "words":
+                col = cols.get(c.get("colN")) or {}
+                words = [w for w in c.get("words") or [] if not w.get("punct")]
+                morphs = [m for w in words for m in w.get("morphs") or []]
+                rec = {"colN": c.get("colN") or 0, "col": col.get("name", ""), "abbr": col.get("abbr", ""),
+                       "path": "/".join((col.get("path") or []) + [col.get("name", "")]),
+                       "words": [w.get("txt", "") for w in words], "glosses": [w.get("gls", "") for w in words],
+                       "forms": [m.get("form", "") for m in morphs], "cfs": [m.get("cf", "") for m in morphs if m.get("cf")],
+                       "mgls": [m.get("gls", "") for m in morphs], "pos": [w.get("pos", "") for w in words if w.get("pos")],
+                       "seg": c.get("seg"), "segTo": c.get("segTo")}
+                cells.append(rec)
+                nb = merged_neighbour(c, columns)
+                if nb:    # a MIRROR record under the merged-into column: the words match either column
+                    cells.append(dict(rec, colN=nb.get("n") or 0, col=nb.get("name", ""), abbr=nb.get("abbr", ""),
+                                      path="/".join((nb.get("path") or []) + [nb.get("name", "")]), mirror=True, mergedInto=c.get("colN") or 0))
+            elif k == "tag" and c.get("tag"):
+                t = c["tag"]
+                markers.append(t.get("name") or t.get("abbr") or "")
+                if t.get("abbr"):
+                    markers.append(t["abbr"])
+                markers.extend(t.get("path") or [])
+            elif k == "moved":
+                moved.append("preposed" if c.get("preposed") else "postposed")
+            elif k == "clause":
+                clauseref = True
+        out.append({"chart": chart.get("guid", ""), "chartName": chart.get("name", ""), "text": chart.get("text", ""), "title": chart.get("title", ""),
+                    "template": (chart.get("template") or {}).get("name", ""), "row": r.get("n"), "label": r.get("label", ""), "guid": r.get("guid", ""),
+                    "at": model.anchor_of(r.get("guid", "")), "clause": r.get("clause", "normal"), "endSent": bool(r.get("endSent")), "endPara": bool(r.get("endPara")),
+                    "markers": [m for m in markers if m], "moved": moved, "clauseref": clauseref, "notes": r.get("notes", ""), "cells": cells})
+    return out
+
+
+# `-key:value` excludes; a bare `-mo` is the text "-mo" (a suffix), never a negation
+# a value may be a regular expression, `/pattern/flags` (Seth, 2026-10-19: "support regex for text")
+_QTOKEN = re.compile(r'(-(?=[A-Za-z]+:))?(?:([A-Za-z]+):)?("([^"]*)"|/((?:\\.|[^/\\])*)/([a-z]*)|\S+)')
+ROW_KEYS = ("marker", "clause", "chart", "text", "template", "row", "label", "note", "notes", "moved", "clauseref", "endsent", "endpara")
+CELL_KEYS = ("col", "column", "lex", "gloss", "word", "words", "pos", "form", "morph", "txt", "gls", "mgls", "cf")
+
+
+def _rx_hit(t: dict, xs) -> bool:
+    """A regex term against the values as written (NFC), not the normalised text."""
+    rx = t["rx"]
+    return any(rx.search(_ud.normalize("NFC", x or "")) for x in xs)
+
+
+def _parse_chart_query(q: str) -> list[dict]:
+    """[{neg, key, val}] — key '' for a bare word; a quoted value keeps its spaces."""
+    from ..notebook import normalize
+    out = []
+    for m in _QTOKEN.finditer(q or ""):
+        neg, key, raw, quoted, pat, flags = m.group(1), (m.group(2) or "").lower(), m.group(3), m.group(4), m.group(5), m.group(6)
+        val = quoted if quoted is not None else raw
+        if key and key not in ROW_KEYS + CELL_KEYS:        # not a key we know: the whole token is a word
+            val, key, neg, pat = m.group(0), "", None, None
+        if not key and val.lower() in ("moved", "clauseref", "endsent", "endpara"):   # bare row flags
+            key, val = val.lower(), ""
+        rx = None
+        if pat is not None:
+            try:
+                rx = re.compile(pat, (re.I if "i" in (flags or "") else 0) | (re.M if "m" in (flags or "") else 0) | (re.S if "s" in (flags or "") else 0))
+            except re.error:
+                rx = None                                      # an unfinished pattern matches as plain text
+        out.append({"neg": bool(neg), "key": key, "val": normalize(val, True), "raw": val, "rx": rx})
+    return out
+
+
+def _cell_matches(c: dict, t: dict) -> bool:
+    from ..notebook import normalize
+    v = t["val"]
+    k = t["key"]
+    has = (lambda xs: _rx_hit(t, xs)) if t.get("rx") else (lambda xs: any(v and v in normalize(x, True) for x in xs))  # noqa: E731
+    if k in ("col", "column"):
+        if t.get("rx"):
+            return _rx_hit(t, [c["col"], c["abbr"], c["path"]])
+        if not v:
+            return False
+        if re.fullmatch(r"c\d+", v):
+            return str(c["colN"]) == v[1:]
+        return normalize(c["col"], True) == v or normalize(c["abbr"], True) == v or normalize(c["path"], True) == v \
+            or normalize(c["path"], True).endswith("/" + v) or any(normalize(p, True) == v for p in c["path"].split("/")[:-1])
+    if k == "lex":
+        return has(c["words"]) or has(c["forms"]) or has(c["cfs"])
+    if k in ("gloss", "gls"):
+        return has(c["glosses"]) or has(c["mgls"])
+    if k in ("word", "words", "txt"):
+        return has(c["words"])
+    if k == "mgls":
+        return has(c["mgls"])
+    if k == "cf":
+        return has(c["cfs"])
+    if k in ("form", "morph"):
+        return has(c["forms"]) or has(c["cfs"])
+    if k == "pos":
+        return _rx_hit(t, c["pos"]) if t.get("rx") else any(normalize(x, True) == v for x in c["pos"])
+    return has(c["words"]) or has(c["glosses"]) or has(c["forms"]) or has(c["cfs"]) or has(c["mgls"])   # a bare word
+
+
+def _row_term(r: dict, t: dict) -> bool:
+    from ..notebook import normalize
+    v, k = t["val"], t["key"]
+    if t.get("rx"):
+        if k == "marker":
+            return _rx_hit(t, r["markers"])
+        if k in ("chart", "text", "template", "note", "notes", "row", "label"):
+            return _rx_hit(t, [{"chart": r["chartName"], "text": r["title"], "template": r["template"], "note": r["notes"], "notes": r["notes"], "row": r["label"], "label": r["label"]}[k]])
+    if k == "marker":
+        return bool(r["markers"]) if v == "*" else any(normalize(m, True) == v for m in r["markers"])
+    if k == "clause":
+        return r["clause"] == v
+    if k == "chart":
+        return v in normalize(r["chartName"], True)
+    if k == "text":
+        return v in normalize(r["title"], True)
+    if k == "template":
+        return v in normalize(r["template"], True)
+    if k in ("row", "label"):
+        return normalize(r["label"], True) == v or str(r["row"]) == v
+    if k in ("note", "notes"):
+        return bool(v) and v in normalize(r["notes"], True)
+    if k == "moved":
+        return (v in r["moved"]) if v and v not in ("moved", "yes", "true") else bool(r["moved"])
+    if k == "clauseref":
+        return r["clauseref"]
+    if k == "endsent":
+        return r["endSent"]
+    if k == "endpara":
+        return r["endPara"]
+    return False
+
+
+def _row_matches(r: dict, terms: list[dict]) -> list[int] | None:
+    """The column numbers that matched (every column when no cell term narrows it), or None."""
+    from ..notebook import normalize
+    col_terms = [t for t in terms if t["key"] in ("col", "column") and not t["neg"]]
+    content = [t for t in terms if (t["key"] in CELL_KEYS and t["key"] not in ("col", "column")) or t["key"] == ""]
+    for t in terms:
+        if t["key"] in ROW_KEYS:
+            if _row_term(r, t) == t["neg"]:
+                return None
+        elif t["neg"] and t["key"] in ("col", "column"):
+            if any(_cell_matches(c, dict(t, neg=False)) for c in r["cells"]):
+                return None
+    cells = r["cells"]
+    if col_terms:
+        cells = [c for c in cells if any(_cell_matches(c, t) for t in col_terms)]
+        if not cells:
+            return None
+    if content:
+        pos = [t for t in content if not t["neg"]]
+        neg = [t for t in content if t["neg"]]
+        for t in neg:
+            if any(_cell_matches(c, t) for c in r["cells"]) or (t["key"] == "" and t["val"] in normalize(r["notes"], True)):
+                return None
+        if pos:
+            good = [c for c in cells if all(_cell_matches(c, t) for t in pos)]
+            if not good:
+                # a bare word may also be in the row's notes
+                if col_terms or not all(t["key"] == "" and t["val"] in normalize(r["notes"], True) for t in pos):
+                    return None
+                return []
+            return [c["colN"] for c in good]
+    return [c["colN"] for c in cells] if (col_terms or content) else []

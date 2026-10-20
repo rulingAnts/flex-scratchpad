@@ -3,6 +3,11 @@
 # tagged commit, so it works from any branch: windows-package.yml builds and tests the Setup .exe
 # and the portable zip on a Windows runner, then `publish` makes the pre-release with them, their
 # SHA-256 sums and build/RELEASE-NOTES.md. Nothing is published unless every test passed.
+# RUN BY HAND TOO (Seth, 2026-10-20: "build and push another pre-release", "mark our latest release
+# as a release instead of a pre-release" — a cloud session may push its branch but not a tag, nor
+# edit a release): Actions › Release › Run workflow on a branch, with `tag` = the tag to make at that
+# branch's head (and `final` to publish it as a full release), or `promote` = an existing tag to
+# mark as a full release and the latest, which builds nothing.
 # Public repository, standard runners (windows-latest, ubuntu-latest): free. No schedule.
 name: Release
 
@@ -10,19 +15,46 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release this tag, e.g. v0.1.0-beta.3; it is created at the chosen branch's head"
+        required: false
+        default: ""
+      final:
+        description: "Publish it as a full release (unticked: a pre-release)"
+        type: boolean
+        default: false
+      promote:
+        description: "Instead: mark this EXISTING release's tag as a full release and the latest; builds nothing"
+        required: false
+        default: ""
 
 permissions:
   contents: write
 
 jobs:
+  promote:
+    if: ${{ inputs.promote != '' }}
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Mark the release as final and the latest
+        run: gh release edit "${{ inputs.promote }}" --repo "$GITHUB_REPOSITORY" --prerelease=false --latest
+
   version:
+    if: ${{ !inputs.promote }}
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
     steps:
       - id: v
         run: |
-          tag="${GITHUB_REF_NAME}"
+          tag="${{ inputs.tag || github.ref_name }}"
+          case "$tag" in v[0-9]*) ;; *) echo "not a version tag: $tag" >&2; exit 1;; esac
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
           echo "${tag#v}"
 
@@ -37,21 +69,26 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
-      TAG: ${{ github.ref_name }}
+      TAG: ${{ needs.version.outputs.tag }}
       VERSION: ${{ needs.version.outputs.version }}
+      MADE_HERE: ${{ inputs.tag != '' }}
+      FINAL: ${{ inputs.final }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: windows-packages
           path: out
-      - name: Publish the pre-release
+      - name: Publish the release
         run: |
           ls -la out
-          # every tag here is a pre-release until a release is called final by hand
+          # a pushed tag is a pre-release until a release is called final by hand (or `final` is
+          # ticked on a manual run); a manual run makes its tag at this commit
+          flags=(--prerelease)
+          if [ "$FINAL" = "true" ]; then flags=(--latest); fi
+          if [ "$MADE_HERE" = "true" ]; then flags+=(--target "$GITHUB_SHA"); else flags+=(--verify-tag); fi
           gh release create "$TAG" out/* \
             --repo "$GITHUB_REPOSITORY" \
             --title "FLEx Scratchpad $VERSION" \
             --notes-file build/RELEASE-NOTES.md \
-            --prerelease \
-            --verify-tag
+            "${flags[@]}"

@@ -320,3 +320,75 @@ def test_closing_backs_up_first_and_honours_each_choice(tmp_path):
     t.start()
     assert backup_then_close(api, lambda: closed.append(3), started.append) == "failed"
     assert ("backupClosing", {"state": "failed", "message": "offline"}) in events and closed[-1] == 3
+    # 4. a run that does not answer the cancel (Seth, 2026-10-18: the button "appears to do
+    #    nothing"): the choice still closes the window after a short grace, the process started
+    import time
+    from flex_scratchpad import app as app_mod
+    app_mod.CLOSE_GRACE = 0.5
+    b.run = lambda reason="manual": (time.sleep(5), {"ok": True})[1]
+    threading.Timer(0.3, lambda: api.backup_close_choice("background")).start()
+    t0 = time.monotonic()
+    assert backup_then_close(api, lambda: closed.append(4), started.append) == "background"
+    assert time.monotonic() - t0 < 3 and closed[-1] == 4 and started[-1] == str(api._nb.root)
+
+
+def test_a_lock_left_by_a_dead_process_does_not_block_the_next_backup(tmp_path):
+    """The window closed with "finish in the background" can end before its backup thread let go
+    of the lock; the quiet process must not wait six hours for that (Seth, 2026-10-18)."""
+    api, b = make(tmp_path)
+    api.backup_save({"kind": "folder", "folder": str(tmp_path / "bk")})
+    lock = b.lock_dir / "backup.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text("999999999", encoding="utf-8")        # no such process
+    assert api.backup_now()["ok"]
+    # a lock whose holder is alive (this process) still blocks
+    lock.write_text(str(__import__("os").getpid()), encoding="utf-8")
+    assert api.backup_now().get("busy")
+    lock.unlink()
+
+
+def test_atomic_writes_ride_out_a_busy_target_and_many_threads(tmp_path, monkeypatch):
+    """Windows cannot replace a file another handle has open: `replace_file` retries, and the
+    config saves from many threads at once without tripping over each other (Seth, 2026-10-19:
+    "Access is denied … config.json.tmp -> config.json" on the backup-before-closing screen)."""
+    import os
+    import threading
+    from flex_scratchpad import fsutil
+    from flex_scratchpad.config import AppConfig
+    calls = {"n": 0}
+    real = os.replace
+
+    def flaky(a, b):
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            raise PermissionError(5, "Access is denied")
+        return real(a, b)
+    monkeypatch.setattr(fsutil.os, "replace", flaky)
+    monkeypatch.setattr(fsutil.time, "sleep", lambda s: None)
+    src, dst = tmp_path / "a.tmp", tmp_path / "a.json"
+    src.write_text("x", encoding="utf-8")
+    fsutil.replace_file(src, dst)
+    assert dst.read_text(encoding="utf-8") == "x" and calls["n"] == 3
+    # out of patience: the error comes through and the temp file is gone
+    calls["n"] = -100
+    src.write_text("y", encoding="utf-8")
+    import pytest
+    with pytest.raises(PermissionError):
+        fsutil.replace_file(src, dst, tries=3)
+    assert not src.exists()
+    monkeypatch.setattr(fsutil.os, "replace", real)
+    cfg = AppConfig(tmp_path / "config.json")
+    errors = []
+
+    def one(i):
+        try:
+            cfg.data["k%d" % i] = i
+            cfg.save()
+        except Exception as e:  # noqa: BLE001
+            errors.append(e)
+    ts = [threading.Thread(target=one, args=(i,)) for i in range(16)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    assert not errors and not list(tmp_path.glob("*.tmp"))

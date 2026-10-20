@@ -56,10 +56,49 @@ def test_docx_numbered_indented_examples():
     ]}
     xml = zipfile.ZipFile(__import__("io").BytesIO(build_docx(doc))).read("word/document.xml").decode("utf-8")
     ET.fromstring(xml)
-    assert xml.index(">(1)<") < xml.index(">Kabir<") and xml.index(">(2)<") < xml.index(">kabir<")
-    assert '<w:tblInd w:w="720" w:type="dxa"/>' in xml                       # the interlinear grid, 2 levels
-    assert '<w:ind w:left="1080"/>' in xml                                   # its Free line: 360 + 720
+    # the example's number is Word's own, in a first cell styled LingTeX Example (LingTeX-Word's shape)
+    assert xml.index('<w:pStyle w:val="LingTeXExample"/>') < xml.index(">Kabir<") and xml.index(">(2)<") < xml.index(">kabir<")
+    assert '<w:tblInd w:w="720" w:type="dxa"/>' in xml                       # the interlinear table, 2 levels in
+    assert '<w:ind w:left="1440"/>' in xml                                   # its Free line: the indent + the number column (36 pt)
     assert '<w:ind w:left="360"/>' in xml and '<w:ind w:left="720"/>' in xml  # entry head / sense (level 0) + 1
+
+
+def test_docx_examples_are_lingtex_word_tables():
+    """Seth, 2026-10-18: "all of our IGTs should be rendered using LingTeX Word styling wherever
+    they're expanded" — the LingTeX Interlinear table style, a paragraph style per tier, the free
+    translation as a LingTeX Free paragraph in single quotes, grammatical glosses in small
+    capitals through the LingTeX Gram Gloss character style (lowercased, first letter kept),
+    the number by Word's LingTeX Example Number list, a FLEx link after the translation."""
+    from flex_scratchpad.docx_writer import is_gram_gloss, split_gloss_segments, small_caps_form, gram_gloss_runs
+    assert [is_gram_gloss(x) for x in ("ERG", "3SG", "1pl", "dog", "N.", "P.N.", "A", "PST", "3SG.M", "")] == [True, True, True, False, False, False, False, True, False, False]
+    assert split_gloss_segments("3SG-sleep-PST.CMP") == ["3SG", "-", "sleep", "-", "PST", ".", "CMP"]
+    assert small_caps_form("ERG") == "Erg" and small_caps_form("3SG") == "3Sg"
+    runs = gram_gloss_runs([{"text": "3SG-sleep-PST", "color": "#2a6e2a"}])
+    assert [(r["text"], r.get("rStyle")) for r in runs] == [("3Sg", "LingTeXGramGloss"), ("-", None), ("sleep", None), ("-", None), ("Pst", "LingTeXGramGloss")]
+    block = {"type": "interlinear", "title": "The dog", "url": "silfw://localhost/link?app=flex&guid=x", "ws": {"font": "Charis SIL"}, "exNum": "(1)", "segments": [
+        {"n": 1, "label": "1.1", "lines": [{"name": "txt", "cells": [[{"text": "Kabir lo", "color": "#00379c"}], [{"text": "ka-nuwa-mo", "color": "#00379c"}]]},
+                                            {"name": "mgls", "cells": [[{"text": "dog", "color": "#2a6e2a"}], [{"text": "3SG-sleep-PST", "color": "#2a6e2a"}]]},
+                                            {"name": "pos", "cells": [[{"text": "n", "color": "#7a3e9d"}], [{"text": "v", "color": "#7a3e9d"}]]}],
+         "free": [{"text": "The dog slept.", "hl": "#fff2a8"}]},
+        {"n": 2, "label": "1.2", "lines": [{"name": "txt", "cells": [[{"text": "Haŋa"}]]}, {"name": "mgls", "cells": [[{"text": "yesterday"}]]}], "free": [{"text": "Yesterday."}]}]}
+    z = zipfile.ZipFile(__import__("io").BytesIO(build_docx({"title": "LT", "blocks": [block]})))
+    xml = z.read("word/document.xml").decode("utf-8")
+    styles = z.read("word/styles.xml").decode("utf-8")
+    numbering = z.read("word/numbering.xml").decode("utf-8")
+    for part in (xml, styles, numbering):
+        ET.fromstring(part)
+    for name in ("LingTeX Interlinear", "LingTeX Vernacular", "LingTeX Morphemes", "LingTeX Gloss", "LingTeX Word Gloss", "LingTeX Category", "LingTeX Free", "LingTeX Gram Gloss", "LingTeX Example", "LingTeX Example Number"):
+        assert f'w:val="{name}"' in styles, name
+    assert '<w:lvlText w:val="(%1)"/>' in numbering and '<w:lvlText w:val="%2."/>' in numbering
+    assert xml.count('<w:tblStyle w:val="LingTeXInterlinear"/>') == 2                   # one table per line of text
+    assert '<w:pStyle w:val="LingTeXVernacular"/>' in xml and '<w:pStyle w:val="LingTeXGloss"/>' in xml and '<w:pStyle w:val="LingTeXCategory"/>' in xml
+    assert "Kabir\u00a0lo" in xml                                                          # the baseline keeps its space unbreakable
+    assert '<w:rStyle w:val="LingTeXGramGloss"/>' in xml and ">3Sg<" in xml and ">Pst<" in xml and ">sleep<" in xml
+    assert '<w:color w:val="00379C"/>' not in xml and '<w:color w:val="2A6E2A"/>' not in xml   # the styles carry the look; the app's colours do not travel
+    assert '<w:pStyle w:val="LingTeXFree"/>' in xml and "\u2018" in xml and "The dog slept." in xml and '<w:highlight w:val="yellow"/>' in xml   # the user's highlight stays
+    assert xml.count('<w:pStyle w:val="LingTeXExample"/>') == 3 and xml.count('<w:numPr><w:ilvl w:val="1"/><w:numId w:val="1"/></w:numPr>') == 2   # "(1)" and "a." on line 1, "b." on line 2
+    assert 'TargetMode="External"' in z.read("word/_rels/document.xml.rels").decode("utf-8") and ">The dog 1.1<" in xml   # the FLEx link after the translation
+    assert '<w:cantSplit/>' in xml and "numbering.xml" in z.read("[Content_Types].xml").decode("utf-8")
 
 
 def test_docx_indented_table():

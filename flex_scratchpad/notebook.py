@@ -22,6 +22,9 @@ A note file is a small front-matter header followed by the markdown body:
 An EXAMPLE COLLECTION (Seth, 2026-10-16) is a note whose header also says `kind: examples`: its
 body is nothing but interlinear examples, one `{{flex:text …}}` per paragraph, in order, and it
 is the one kind of note that exports as a FLEx text. Ordinary notes carry no `kind` line.
+A collection made from a RULE (Seth, 2026-10-18) also says `rule-tags: [Topic, group:Arguments]`
+(and `rule-texts: […]` when limited to texts): every line carrying one of those FLEx text markup
+tags; `Api.update_rule_collection` appends the matches it does not hold yet.
 
 Only a YAML *subset* is written and read (scalars, `[a, b]` lists, JSON-quoted strings), so there
 is no PyYAML dependency. Everything is UTF-8 with `\n` newlines; user text is never normalised or
@@ -41,9 +44,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Iterable
 
+from .log import LOG
+from .fsutil import replace_file
+
 CONFIG_NAME = "notebook.json"
-NOTE_KINDS = ("", "examples")
-EXAMPLE_LINE_RE = re.compile(r"^\s*\{\{flex:text\b[^\n]*\}\}\s*$", re.M)
+NOTE_KINDS = ("", "examples", "chart")
+EXAMPLE_LINE_RE = re.compile(r"^\s*\{\{flex:(?:text|chart)\b[^\n]*\}\}\s*$", re.M)   # an example, or a chart row (Seth, 2026-10-18)
 PRIVATE_DIR = ".scratchpad"
 # Files attached to notes (Seth, 2026-10-17): copied here under their own names, visible beside
 # the tabs so the notebook stays readable without the app; a `{{file attachments/…}}` embed in a
@@ -172,9 +178,15 @@ class Note:
     created: str = ""
     updated: str = ""
     pinned: bool = False
-    kind: str = ""           # '' = an ordinary note; 'examples' = an example collection
+    kind: str = ""           # '' = an ordinary note; 'examples' = an example collection; 'chart' = a chart note
+    chart: str = ""          # a chart note's FLEx chart GUID (`chart:` in the front matter)
     body: str = ""
     path: Path | None = None
+    # A RULE COLLECTION (Seth, 2026-10-18: "create a collection with ALL lines that match a
+    # specific rule … and … add new matches found in the database that aren't already in that
+    # collection"): {tags: [tag GUIDs / names / "group:<name>" / "*"], texts: [text GUIDs]} —
+    # in the file as `rule-tags:` and `rule-texts:`; None for every other note.
+    rule: dict | None = None
 
     def meta(self) -> dict:
         d = asdict(self)
@@ -200,6 +212,21 @@ FOLD_MARK = re.compile(r"^(#{1,6}\s.*?)\s+\{collapsed\}[ \t]*$", re.M)
 
 def without_fold_marks(body: str) -> str:
     return FOLD_MARK.sub(r"\1", body or "")
+
+
+# The plain-text copy written after each FLEx object so a file reads without the app
+# (ui/js/flexcopy.js, which writes it; Seth, 2026-10-17): a block form (a "flex-copy" link line,
+# then an optional ```flex-copy fence) or an inline one (the link right after the object). The app
+# never shows it, so excerpts, search and tags leave it out too. Keep in step with flexcopy.js.
+_COPY_EMB = r"\{\{\s*flex:[^{}]*\}\}"
+_COPY_LINK = r'\[((?:\\.|[^\]\\\n])*)\]\(([^\s()]*) "flex-copy"\)'
+FLEX_COPY_BLOCK = re.compile("(" + _COPY_EMB + r")[ \t]*\n[ \t]*" + _COPY_LINK
+                             + r"[ \t]*(?:\n[ \t]*```flex-copy[ \t]*\n([\s\S]*?)\n[ \t]*```[ \t]*)?(?=\n|$)")
+FLEX_COPY_INLINE = re.compile("(" + _COPY_EMB + ")" + _COPY_LINK)
+
+
+def without_flex_copies(body: str) -> str:
+    return FLEX_COPY_INLINE.sub(r"\1", FLEX_COPY_BLOCK.sub(r"\1", body or ""))
 _INLINE_TAG = re.compile(r"(?<![\w#/&])#([\w][\w\-]*)", re.UNICODE)
 
 
@@ -215,7 +242,7 @@ def _file_word(m: re.Match) -> str:
 
 
 def excerpt(body: str, n: int = 160) -> str:
-    s = _EMBED.sub(" ", _FILE_EMBED.sub(_file_word, without_fold_marks(body)))
+    s = _EMBED.sub(" ", _FILE_EMBED.sub(_file_word, without_fold_marks(without_flex_copies(body))))
     s = re.sub(r"```[\s\S]*?```", " ", s)
     s = _MD_NOISE.sub("", s)
     s = re.sub(r"[*_`~=]{1,3}", "", s)
@@ -223,9 +250,88 @@ def excerpt(body: str, n: int = 160) -> str:
     return s[:n]
 
 
+def clean_rule(rule) -> dict | None:
+    """A collection's rule as the page (or a file) gives it, kept to what matters: the tag
+    selectors and the texts it is limited to; None when it names no tag."""
+    if not isinstance(rule, dict):
+        return None
+    # a CHART rule (Seth, 2026-10-18): a chart search query; its matches are chart rows
+    charts = str(rule.get("charts") or "").strip()[:300]
+    if charts:
+        return {"charts": charts}
+    tags = [str(t).strip()[:120] for t in (rule.get("tags") or []) if str(t).strip()]
+    if not tags:
+        return None
+    out = {"tags": list(dict.fromkeys(tags))}
+    texts = [str(t).strip().lower() for t in (rule.get("texts") or []) if str(t).strip()]
+    if texts:
+        out["texts"] = list(dict.fromkeys(texts))
+    return out
+
+
+def rule_from_meta(meta: dict) -> dict | None:
+    if str(meta.get("rule-charts") or "").strip():
+        return clean_rule({"charts": str(meta.get("rule-charts"))})
+    tags = meta.get("rule-tags")
+    if isinstance(tags, str):
+        tags = [tags] if tags else []
+    texts = meta.get("rule-texts")
+    if isinstance(texts, str):
+        texts = [texts] if texts else []
+    return clean_rule({"tags": tags or [], "texts": texts or []})
+
+
+_EX_PARTS = re.compile(r"\{\{flex:(?:text|chart)\s+([0-9a-f-]{36})\b([^}]*)\}\}", re.I)
+
+
+def example_keys(body: str) -> set[str]:
+    """What a collection already holds, as keys a rule's matches can be compared with: for every
+    example, `<text>@<first anchor>-<last anchor>` when it has `at=`, and `<text>#<seg>-<segTo>`
+    (both when it has both), so a line found again by its anchors or by its numbers counts."""
+    keys: set[str] = set()
+    for m in _EX_PARTS.finditer(body or ""):
+        guid, rest = m.group(1).lower(), m.group(2)
+        seg = re.search(r"\b(?:seg|rows)=(\d+)(?:-(\d+))?", rest)
+        at = re.search(r"\bat=([0-9a-f]+)(?:-([0-9a-f]+))?", rest, re.I)
+        if at:
+            keys.add(f"{guid}@{at.group(1).lower()}-{(at.group(2) or at.group(1)).lower()}")
+        if seg:
+            keys.add(f"{guid}#{seg.group(1)}-{seg.group(2) or seg.group(1)}")
+    return keys
+
+
+def match_keys(row: dict) -> list[str]:
+    """The keys of one match of a rule (a tag occurrence row), in the same shapes."""
+    if row.get("chart"):                               # a chart row: `rows=n at=<anchor>`
+        g = str(row["chart"]).lower()
+        out = [f"{g}#{row.get('row')}-{row.get('row')}"]
+        if row.get("at"):
+            out.insert(0, f"{g}@{row['at']}-{row['at']}")
+        return out
+    guid = str(row.get("text") or "").lower()
+    out = [f"{guid}#{row.get('seg')}-{row.get('segTo', row.get('seg'))}"]
+    at = row.get("at") or []
+    if at and at[0]:
+        out.insert(0, f"{guid}@{at[0]}-{at[1] if len(at) > 1 and at[1] else at[0]}")
+    return out
+
+
+def match_embed(row: dict) -> str:
+    """The example source for one match: `{{flex:text <guid> seg=a-b at=x-y}}`, as flexref
+    serialises it, so the page and the file agree."""
+    if row.get("chart"):
+        return f"{{{{flex:chart {str(row['chart']).lower()} rows={row.get('row')}" + (f" at={row['at']}" if row.get("at") else "") + "}}"
+    seg = f"seg={row['seg']}" + (f"-{row['segTo']}" if row.get("segTo") not in (None, row["seg"]) else "")
+    at = row.get("at") or []
+    s = f"{{{{flex:text {str(row['text']).lower()} {seg}"
+    if at and at[0]:
+        s += " at=" + at[0] + (f"-{at[1]}" if len(at) > 1 and at[1] and at[1] != at[0] else "")
+    return s + "}}"
+
+
 def inline_tags(body: str) -> list[str]:
     """`#tag` written in the body counts as a tag (Seth, 2026-10-12). Not inside code/embeds."""
-    s = re.sub(r"```[\s\S]*?```|`[^`\n]*`", " ", body or "")
+    s = re.sub(r"```[\s\S]*?```|`[^`\n]*`", " ", without_flex_copies(body))
     s = _EMBED.sub(" ", s)
     out: list[str] = []
     for m in _INLINE_TAG.finditer(s):
@@ -287,6 +393,10 @@ def parse_query(q: str) -> dict:
         k, _, v = word.partition(":")
         if _ and k.lower() in filters and v:
             filters[k.lower()].append(v)
+        elif _ and k.lower() == "tagged" and v:
+            terms.append("\u2691" + v.replace(" ", "_"))      # a FLEx text markup tag on an example in the note (model.searchable_text)
+        elif _ and k.lower() == "marker" and v:
+            terms.append("\u2690" + v.replace(" ", "_"))      # a chart marker on a text chart in the note (model.chart_searchable_text)
         elif word.startswith("#") and len(word) > 1:
             filters["tag"].append(word[1:])
         else:
@@ -305,6 +415,7 @@ DEFAULT_CONFIG = {
     "flex": {"source": "lcm", "project": "", "flextextPath": ""},
     "media": {"byGuid": {}, "folders": []},
     "settings": {"diacriticsInsensitive": True},
+    "tagStyles": {"project": {}, "tab": {}, "folder": {}, "note": {}, "text": {}, "filters": []},   # FLEx text markup tag styles by scope, and the named visual filters (api.set_tag_styles / set_tag_filters)
 }
 
 
@@ -323,6 +434,7 @@ class Notebook:
         self._index_marks: dict[str, str] = {}
         self.ensure()
         self.load()
+        LOG.info("notebook %s: %d notes, %d tabs", self.root, len(self.notes), len(self.config.get("tabs") or []))
 
     # -- folders ---------------------------------------------------------------
 
@@ -439,6 +551,8 @@ class Notebook:
             updated=str(meta.get("updated") or datetime.fromtimestamp(stat.st_mtime).replace(microsecond=0).isoformat()),
             pinned=bool(meta.get("pinned", False)),
             kind=str(meta.get("kind") or ""),
+            chart=str(meta.get("chart") or "").lower() if str(meta.get("kind") or "") == "chart" else "",
+            rule=rule_from_meta(meta),
             body=body.replace("\r\n", "\n"),
             path=path,
         )
@@ -450,7 +564,7 @@ class Notebook:
             extra = self.extra_text(note.body) or ""
         except Exception:  # a cache problem must never break note loading
             extra = ""
-        blob = "\n".join([note.title, without_fold_marks(note.body), " ".join(note.tags), note.folder, note.tab, extra])
+        blob = "\n".join([note.title, without_fold_marks(without_flex_copies(note.body)), " ".join(note.tags), note.folder, note.tab, extra])
         self._index[note.id] = normalize(blob)
         self._index_marks[note.id] = normalize(blob, strip_marks=True)
 
@@ -469,6 +583,29 @@ class Notebook:
             if t["dir"] == tab:
                 return t
         return None
+
+    def reindex_mentioning(self, guid: str) -> int:
+        """Re-index the notes whose body names a FLEx object (just fetched: its snapshot now
+        holds words, glosses and tags the index did not have). Returns how many."""
+        g = (guid or "").lower()
+        if not g:
+            return 0
+        with self.lock:
+            hit = [n for n in self.notes.values() if g in n.body.lower()]
+            for n in hit:
+                self._reindex(n)
+            return len(hit)
+
+    def flex_tags_used(self) -> dict[str, list[str]]:
+        """The FLEx text markup tags on the examples of the notebook's notes, from the index's
+        ⚑ tokens (model.searchable_text): {token (casefolded, spaces as _): [note ids]} — the rail's
+        "FLEx tags" (Seth, 2026-10-18: "search or filter notes … by text markup tags")."""
+        with self.lock:
+            out: dict[str, list[str]] = {}
+            for nid, blob in self._index.items():
+                for tok in set(re.findall(r"\u2691(\S+)", blob)):
+                    out.setdefault(tok, []).append(nid)
+            return out
 
     def list_notes(self) -> list[dict]:
         with self.lock:
@@ -537,9 +674,18 @@ class Notebook:
         }
         if note.kind:                       # only collections carry it: ordinary files are unchanged
             meta["kind"] = note.kind
+        if note.kind == "chart" and note.chart:
+            meta["chart"] = note.chart
+        if note.rule and note.rule.get("tags"):
+            meta["rule-tags"] = list(note.rule["tags"])
+            if note.rule.get("texts"):
+                meta["rule-texts"] = list(note.rule["texts"])
+        elif note.rule and note.rule.get("charts"):
+            meta["rule-charts"] = note.rule["charts"]
         target = self._note_path(note)
         target.parent.mkdir(parents=True, exist_ok=True)
         _atomic_write(target, dump_front_matter(meta) + note.body)
+        LOG.debug("wrote %s (%d chars%s)", target.relative_to(self.root) if target.is_relative_to(self.root) else target, len(note.body), ", kind " + note.kind if note.kind else "")
         if note.path and note.path != target and note.path.exists():
             try:
                 note.path.unlink()
@@ -548,16 +694,23 @@ class Notebook:
         note.path = target
         self._reindex(note)
 
-    def create_note(self, tab: str | None = None, folder: str = "", title: str = "", body: str = "", kind: str = "") -> Note:
+    def create_note(self, tab: str | None = None, folder: str = "", title: str = "", body: str = "", kind: str = "",
+                    rule: dict | None = None, chart: str = "") -> Note:
         if kind not in NOTE_KINDS:
             raise ValueError(f"Unknown kind of note: {kind}")
+        rule = clean_rule(rule)
+        if rule and kind != "examples":
+            raise ValueError("Only an example collection can have a rule")
+        chart = (chart or "").lower()
+        if kind == "chart" and not re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", chart):
+            raise ValueError("A chart note needs the GUID of a FLEx text chart")
         with self.lock:
             tab = tab or (self.tab_dirs()[0] if self.tab_dirs() else DEFAULT_TAB)
             if tab not in self.tab_dirs():
                 self.add_tab(tab)
             ts = now_iso()
             note = Note(id=new_id(), title=title or "", tab=tab, folder=folder or "",
-                        created=ts, updated=ts, body=body, kind=kind)
+                        created=ts, updated=ts, body=body, kind=kind, rule=rule, chart=chart if kind == "chart" else "")
             self.notes[note.id] = note
             self._write_note(note)
             return note
@@ -570,7 +723,7 @@ class Notebook:
             src = self.get_note(note_id)
             same_place = (tab is None or tab == src.tab) and (folder is None or (folder or "") == (src.folder or ""))
             new_title = title if title is not None else ((src.title + " (copy)") if same_place and src.title else src.title)
-            copy = self.create_note(tab or src.tab, src.folder if folder is None else (folder or ""), new_title, src.body, src.kind)
+            copy = self.create_note(tab or src.tab, src.folder if folder is None else (folder or ""), new_title, src.body, src.kind, chart=src.chart)
             if src.tags:
                 copy = self.save_note(copy.id, tags=list(src.tags))
             return copy
@@ -595,6 +748,38 @@ class Notebook:
             if changed:
                 note.updated = now_iso()
                 self._write_note(note)
+            return note
+
+    def set_rule(self, note_id: str, rule: dict | None) -> Note:
+        """Give a collection its rule (or take it away with None)."""
+        rule = clean_rule(rule)
+        with self.lock:
+            note = self.get_note(note_id)
+            if note.kind != "examples":
+                raise ValueError(f"“{note.title or 'Untitled'}” is not an example collection")
+            if rule == note.rule:
+                return note
+            note.rule = rule
+            note.updated = now_iso()
+            self._write_note(note)
+            return note
+
+    def set_chart(self, note_id: str, chart_guid: str) -> Note:
+        """Point a chart note at another chart (Seth, 2026-10-18: "change the text chart source for
+        a text chart note"); the body (the view embed, the custom columns, the values) is the
+        page's to rewrite."""
+        g = (chart_guid or "").strip().lower()
+        if not g:
+            raise ValueError("No chart given")
+        with self.lock:
+            note = self.get_note(note_id)
+            if note.kind != "chart":
+                raise ValueError(f"“{note.title or 'Untitled'}” is not a chart note")
+            if g == note.chart:
+                return note
+            note.chart = g
+            note.updated = now_iso()
+            self._write_note(note)
             return note
 
     def append_examples(self, note_id: str, embeds: list[str]) -> Note:
@@ -637,6 +822,7 @@ class Notebook:
             if note.path and note.path.exists():
                 dest = self.trash_dir / f"{now_iso().replace(':', '-')}--{note.path.name}"
                 shutil.move(str(note.path), str(dest))
+                LOG.info("note %s trashed → %s", note_id, dest.name)
             self.notes.pop(note_id, None)
             self._index.pop(note_id, None)
             self._index_marks.pop(note_id, None)
@@ -882,7 +1068,7 @@ class Notebook:
                     pass
             else:
                 tmp.write_bytes(data or b"")
-            os.replace(tmp, target)
+            replace_file(tmp, target)
             return f"{ATTACH_DIR}/{target.name}"
 
     def resolve_file(self, ref: str) -> Path:
@@ -1087,4 +1273,4 @@ def _atomic_write(path: Path, text: str) -> None:
     tmp = path.with_name(path.name + ".tmp")
     with open(tmp, "w", encoding="utf-8", newline="\n") as f:
         f.write(text)
-    os.replace(tmp, path)
+    replace_file(tmp, path)

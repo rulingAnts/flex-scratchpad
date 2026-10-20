@@ -66,6 +66,145 @@ ENTRIES = [
 ]
 ENTRY_BY_GUID = {e["guid"]: e for e in ENTRIES}
 
+# The project's TextMarkupTags list (two levels in FLEx: a group, its tags) and a few tags on
+# the story, as FLEx's Text Tagging view would place them. Two carry FLEx's own colours, the
+# rest take the app's palette; one spans two segments.
+def _tag(n, name, abbr, group, back=""):
+    # `group` may be a path "Syntax/Roles" — the demo has one nested group to exercise the tree
+    return model.tag_item(f"7a9d0c00-0000-4000-8000-0000000000{n:02d}", name, abbr, "", "", back, path=group.split("/"))
+
+
+TAG_LIST = [
+    _tag(1, "Subject", "S", "Syntax/Arguments", "#dbeafe"),
+    _tag(2, "Object", "O", "Syntax/Arguments", "#fde68a"),
+    _tag(3, "Verb", "V", "Syntax"),
+    _tag(4, "Topic", "Top", "Discourse"),
+    _tag(5, "Focus", "Foc", "Discourse"),
+]
+TAG_BY_NAME = {t["name"]: t for t in TAG_LIST}
+# (tag, from segment, from word, to segment, to word) — words count the segment's tokens from 0
+STORY_TAGS = [("Subject", 1, 0, 1, 0), ("Verb", 1, 1, 1, 1), ("Focus", 2, 0, 2, 0), ("Subject", 2, 1, 2, 1),
+              ("Verb", 2, 2, 2, 2), ("Object", 2, 3, 2, 3), ("Topic", 4, 0, 4, 1), ("Topic", 5, 0, 6, 0)]
+
+
+def tag_occurrences_in(texts, tag_guid: str) -> list[dict]:
+    """Every place a tag is used, across texts: {text, title, seg, segTo, label, labelTo, at,
+    words} — `words` the tagged words of the first segment (the picker's row)."""
+    g = (tag_guid or "").lower()
+    out = []
+    for t in texts:
+        by_n = {s["n"]: s for s in t.get("segments") or []}
+        for tg in t.get("tags") or []:
+            if (tg.get("tag") or {}).get("guid") != g:
+                continue
+            a, b = by_n.get(tg["from"]["seg"]), by_n.get(tg["to"]["seg"])
+            if not a or not b:
+                continue
+            toks = a.get("words") or []
+            last = tg["to"]["w"] if a is b else len(toks) - 1
+            words = " ".join(w.get("txt", "") for w in toks[tg["from"]["w"]:last + 1] if not w.get("punct"))
+            out.append({"text": t["guid"], "title": t.get("title", ""), "seg": a["n"], "segTo": b["n"],
+                        "label": a.get("label") or str(a["n"]), "labelTo": b.get("label") or str(b["n"]),
+                        "at": [model.anchor_of(a.get("guid", "")), model.anchor_of(b.get("guid", ""))],
+                        "words": words + ("…" if a is not b else "")})
+    out.sort(key=lambda r: (r["title"].casefold(), r["seg"]))
+    return out
+
+
+# ---------------------------------------------------------------------------------- text chart
+# One constituent chart on the story (Seth, 2026-10-18), shaped like FLEx's default template —
+# column names REPEAT across groups (Prenuclear › Inner, Postnuclear › Inner), so columns must be
+# addressed by GUID or path, never by name alone — with every kind of cell FLEx makes: word
+# groups (one spanning part of a segment, one taking a whole one), a preposed moved-text
+# marker, a clause marker pointing at a dependent row, a chart tag from the Chart Markers list,
+# a speech row, a dependent row, sentence and paragraph ends, and a row note.
+CHART = "d15c0000-0000-4000-8000-00000000c001"
+CHART_TEMPLATE = "d15c0000-0000-4000-8000-0000000000a0"
+
+
+def _col(n, name, abbr, *path):
+    return model.make_column(f"d15c0000-0000-4000-8000-0000000000{n:02x}", name, abbr, list(path), n)
+
+
+CHART_COLUMNS = [
+    _col(1, "Outer", "Pre-O", "Prenuclear"), _col(2, "Inner", "Pre-I", "Prenuclear"),
+    _col(3, "Subject", "S", "Nucleus"), _col(4, "Verb", "V", "Nucleus"), _col(5, "Object", "O", "Nucleus"),
+    _col(6, "Inner", "Post-I", "Postnuclear"), _col(7, "Outer", "Post-O", "Postnuclear"),
+]
+COL = {c["n"]: c for c in CHART_COLUMNS}
+
+
+def _marker(n, name, abbr, group):
+    return model.tag_item(f"d15c0000-0000-4000-8000-00000000b0{n:02x}", name, abbr, "", "", "", path=[group])
+
+
+CHART_MARKERS = [_marker(1, "Topic", "Top", "Discourse"), _marker(2, "Focus", "Foc", "Discourse"),
+                 _marker(3, "New", "new", "Reference"), _marker(4, "Given", "giv", "Reference")]
+MARKER = {m["name"]: m for m in CHART_MARKERS}
+
+
+def _chart(story: dict) -> dict:
+    by_n = {s["n"]: s for s in story["segments"]}
+    ch = model.make_chart(CHART, "Story chart", story["guid"], story["title"], story["ws"]["vern"], story["ws"]["anal"],
+                          {"guid": CHART_TEMPLATE, "name": "Default", "columns": CHART_COLUMNS}, CHART_MARKERS)
+    ch["abbrev"] = story.get("abbrev", "")
+    ch["url"] = story.get("url", "")
+    g = lambda n: f"d15c0000-0000-4000-8000-0000000000{n:02x}"   # noqa: E731 — row / cell guids
+    ch["media"] = [dict(m) for m in story.get("media") or []]
+    W = lambda guid, col, seg, a, b=None, seg_to=None, **kw: model.make_word_cell(guid, col, by_n[seg], a, by_n[seg_to or seg], a if b is None else b, **kw)  # noqa: E731
+    rows = [
+        # 1a  Kabir | ka-nuwa-mo lo .          (seg 1: ai 0 Kabir, 1 ka-nuwa-mo, 2 lo, 3 .)
+        model.make_row(g(0x10), 1, "1a", "normal", end_sent=True, cells=[
+            W(g(0x11), COL[3], 1, 0), W(g(0x12), COL[4], 1, 1, 2),
+            model.make_marker_cell("tag", g(0x13), COL[6], tag=MARKER["New"])]),
+        # 1b  Haŋa (preposed) | tiket | ka-sila-mo | pemu | ← moved-from marker   (seg 2)
+        model.make_row(g(0x20), 2, "1b", "normal", end_sent=True, end_para=True, cells=[
+            W(g(0x21), COL[1], 2, 0), W(g(0x22), COL[3], 2, 1), W(g(0x23), COL[4], 2, 2), W(g(0x24), COL[5], 2, 3),
+            model.make_marker_cell("moved", g(0x25), COL[7], target=g(0x21), preposed=True)]),
+        # 2a  “Ɲamú!” — a speech row (seg 3: ai 0 “, 1 Ɲamú, 2 !”, 3 ka-sila, 4 lo, 5 .)
+        model.make_row(g(0x30), 3, "2a", "speech", dep_start=True, dep_end=True, cells=[W(g(0x31), COL[2], 3, 1)]),
+        # 2b  [2a] | ka-sila lo — the main clause, its clause marker pointing at 2a
+        model.make_row(g(0x40), 4, "2b", "normal", end_sent=True, cells=[
+            model.make_marker_cell("clause", g(0x41), COL[1], rows=[g(0x30)]), W(g(0x42), COL[4], 3, 3, 4)]),
+        # 2c  Kabir | ka-nuwa lo | pemu   (seg 4: Kabir 0, pemu 1, ka-nuwa 2, lo 3) — pemu charted after the verb
+        model.make_row(g(0x50), 5, "2c", "normal", end_sent=True, end_para=True, notes="Locative after the verb in the chart.", cells=[
+            W(g(0x51), COL[3], 4, 0), W(g(0x52), COL[4], 4, 2, 3), W(g(0x53), COL[6], 4, 1),
+            model.make_marker_cell("tag", g(0x54), COL[7], tag=MARKER["Given"])]),
+        # 3a  Tiket | ka-nuwa-mo   (seg 5)
+        model.make_row(g(0x60), 6, "3a", "normal", end_sent=True, cells=[W(g(0x61), COL[3], 5, 0), W(g(0x62), COL[4], 5, 1)]),
+        # 3b  Kabir lo — a fragment, both words in one group across Subject (merged into Verb)
+        model.make_row(g(0x70), 7, "3b", "normal", end_sent=True, end_para=True, cells=[W(g(0x71), COL[3], 6, 0, 1, merge_after=True)]),
+    ]
+    ch["rows"] = rows
+    ch["tags"] = list(story.get("tags") or [])        # the text's markup tags, drawn inside the cells on request
+    return model.finish_chart(ch, by_n)
+
+
+# A SECOND chart on the story with another template (a text has one chart per template it was
+# ever charted with — Seth's project, 2026-10-18): two sentence-level rows, a column nobody filled
+# (what "Hide empty columns" hides), and what "Change the chart…" switches to.
+CHART2 = "d15c0000-0000-4000-8000-00000000c002"
+CHART2_TEMPLATE = "d15c0000-0000-4000-8000-0000000000a1"
+CHART2_COLUMNS = [_col(0x21, "Topic", "Top"), _col(0x22, "Comment", "Com"), _col(0x23, "Tail", "Tail")]
+
+
+def _chart2(story: dict) -> dict:
+    by_n = {s["n"]: s for s in story["segments"]}
+    ch = model.make_chart(CHART2, "", story["guid"], story["title"], story["ws"]["vern"], story["ws"]["anal"],
+                          {"guid": CHART2_TEMPLATE, "name": "Topic-Comment", "columns": CHART2_COLUMNS}, CHART_MARKERS)
+    ch["abbrev"] = story.get("abbrev", "")
+    ch["url"] = story.get("url", "")
+    ch["media"] = [dict(m) for m in story.get("media") or []]
+    g = lambda n: f"d15c0000-0000-4000-8000-0000000002{n:02x}"   # noqa: E731
+    C2 = {c["n"]: c for c in CHART2_COLUMNS}
+    W = lambda guid, col, seg, a, b: model.make_word_cell(guid, col, by_n[seg], a, by_n[seg], b)  # noqa: E731
+    ch["rows"] = [
+        model.make_row(g(0x10), 1, "1", "normal", end_sent=True, cells=[W(g(0x11), C2[0x21], 1, 0, 0), W(g(0x12), C2[0x22], 1, 1, 2)]),
+        model.make_row(g(0x20), 2, "2", "normal", end_sent=True, end_para=True, cells=[W(g(0x21), C2[0x21], 2, 0, 1), W(g(0x22), C2[0x22], 2, 2, 3)]),
+    ]
+    ch["tags"] = list(story.get("tags") or [])
+    return model.finish_chart(ch, by_n)
+
 
 def W(txt, gls="", pos="", morphs=None, punct=False):
     return model.make_word(txt, punct=punct, gls=gls, pos=pos,
@@ -113,6 +252,8 @@ def _story() -> dict:
             f"9b1c2d3e-4f50-4a6b-8c7d-0e1f2a3b1{i:03d}", i, para, base, words, free=free, k=kk[para],
             begin=b, end=e, media=MEDIA_STORY, notes=["Segment one has a note."] if i == 1 else []))
     t["segmentCount"] = len(t["segments"])
+    t["tags"] = [model.make_tag(f"7a9d0c01-0000-4000-8000-0000000000{i:02d}", TAG_BY_NAME[name], a, wa, b, wb)
+                 for i, (name, a, wa, b, wb) in enumerate(STORY_TAGS, 1)]
     # a second analysis writing system on the first segment (what a real project carries)
     t["segments"][0]["freeAlts"] = {"en": "The dog slept.", "id": "Anjing itu tidur."}
     t["segments"][0]["words"][0]["glsAlts"] = {"en": "dog", "id": "anjing"}
@@ -172,6 +313,7 @@ class DemoBackend:
     def __init__(self, media_dir: str | Path | None = None, media_map: dict | None = None):
         self.project_name = PROJECT
         self.texts = {T_STORY: _story(), T_ARAB: _arabic()}
+        self.charts = {CHART: _chart(self.texts[T_STORY]), CHART2: _chart2(self.texts[T_STORY])}
         self.media_map = dict(media_map or {})
         self.media_dir = Path(media_dir) if media_dir else None
         if self.media_dir:
@@ -234,6 +376,39 @@ class DemoBackend:
         if not t:
             raise KeyError(f"No text with guid {guid}")
         return slice_text(t, seg_from, seg_to, max_segments, at=at, alts=alts)
+
+    def list_text_tags(self) -> list[dict]:
+        counts: dict[str, int] = {}
+        for t in self.texts.values():
+            for tg in t.get("tags") or []:
+                counts[tg["tag"]["guid"]] = counts.get(tg["tag"]["guid"], 0) + 1
+        return [dict(x, count=counts.get(x["guid"], 0)) for x in TAG_LIST]
+
+    def tag_occurrences(self, tag_guid: str) -> list[dict]:
+        return tag_occurrences_in(self.texts.values(), tag_guid)
+
+    # -- text charts (Seth, 2026-10-18) ------------------------------------------------
+    def list_charts(self, text_guid: str | None = None) -> list[dict]:
+        g = (text_guid or "").lower()
+        return [{"guid": c["guid"], "name": c["name"], "text": c["text"], "title": c["title"], "rows": c["rowCount"],
+                 "template": c["template"]["name"], "columns": len(c["template"]["columns"])}
+                for c in self.charts.values() if not g or c["text"] == g]
+
+    def get_chart(self, guid: str) -> dict:
+        import copy
+        c = self.charts.get((guid or "").lower())
+        if not c:
+            raise KeyError(f"No chart with guid {guid}")
+        return copy.deepcopy(c)
+
+    def list_chart_markers(self) -> list[dict]:
+        counts: dict[str, int] = {}
+        for c in self.charts.values():
+            for r in c["rows"]:
+                for cell in r["cells"]:
+                    if cell.get("kind") == "tag" and cell.get("tag"):
+                        counts[cell["tag"]["guid"]] = counts.get(cell["tag"]["guid"], 0) + 1
+        return [dict(m, count=counts.get(m["guid"], 0)) for m in CHART_MARKERS]
 
     def all_baselines(self) -> dict:
         return {g: {"title": t["title"], "segments": [(sg["n"], sg["baseline"], sg.get("free", "")) + model.index_lines(sg) + (sg.get("label") or str(sg["n"]), sg.get("guid", "")) for sg in t["segments"]]}

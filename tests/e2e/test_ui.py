@@ -13,6 +13,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent))
 from bridge import Harness  # noqa: E402
 from flex_scratchpad.flex.demo import T_ARAB, T_STORY  # noqa: E402
+from flex_scratchpad.notebook import without_flex_copies  # noqa: E402
 
 pw = pytest.importorskip("playwright.sync_api")
 
@@ -60,12 +61,16 @@ def body_of(h):
     Welcome note when the test made another, since edit times tie within a second."""
     notes = h.api._nb.list_notes()
     own = [n for n in notes if n["title"] != "Welcome to FLEx Scratchpad"] or notes
-    return h.api.get_note(own[0]["id"])["body"]
+    # what the user edited: the file also carries a plain-text copy after each FLEx object
+    # (flexcopy.js), which test_flex_objects_get_a_readable_copy_in_the_file checks on its own
+    return without_flex_copies(h.api.get_note(own[0]["id"])["body"])
 
 
 def tool(page, text, nth=0):
-    """Click a button in the bar under the nth table; the bar shows while the table is hovered."""
+    """Click a button in the bar under the nth table; the bar shows once the table was clicked into
+    (not on mere hover — Seth, 2026-10-18), so press on it first."""
     page.locator("table.md-table").nth(nth).hover()
+    page.locator("table.md-table").nth(nth).dispatch_event("mousedown")
     page.locator(".tbl-tools").nth(nth).locator("button", has_text=text).click()
 
 
@@ -232,6 +237,187 @@ def test_audio_segment_plays_and_clip_is_cached(app):
     assert info["found"] is False and re.search(r"_1500-3200\.(wav|flac)$", info["clipUrl"])
 
 
+def test_a_chart_plays_its_lines_and_lights_their_cells(app):
+    """Seth, 2026-10-18: "audio playback in the chart, with play controls on the first row that
+    starts an interlinear line. And highlighting (while playing) the cells that contain data
+    from that line"."""
+    h, page, errors = app
+    new_note(page, "Chart audio")
+    page.keyboard.type("{{flex:chart %s rows=1-3}}" % CHART)
+    page.keyboard.press("Enter")
+    page.wait_for_selector(".tchart .rlab .seg-play")
+    # one ▶ per timed line, on the row where it starts (demo: rows 1, 2a, 2b start lines 1, 2, 3)
+    assert page.locator(".tchart .rlab .chart-play").count() == 3
+    assert page.locator(".tchart .th-lab .seg-play").count() == 1
+    # ▶§ plays the whole sentence 2 (rows 2a–2b) from its first row (Seth: "a play button for 4, not just for 4a, 4b, 4c")
+    assert page.locator(".tchart .rlab .chart-play-sent").count() == 1          # rows 1a–1b (2a is alone in this range)
+    assert "rows 1a–1b" in page.locator(".tchart .rlab .chart-play-sent").get_attribute("title")
+    assert page.locator(".tchart tr[data-label='1a'] .chart-play-sent").count() == 1
+    page.locator(".tchart .rlab .chart-play").nth(1).click()
+    page.wait_for_selector(".chart-obj .transport")
+    page.wait_for_timeout(400)
+    assert page.evaluate("!!FS.interlinear.audio.current")
+    # the cells holding line 2's words are lit, nothing else
+    lit = page.locator(".tchart td.playing-line")
+    assert lit.count() >= 1
+    assert all("2" in (lit.nth(i).get_attribute("data-segs") or "").split() for i in range(lit.count()))
+    page.wait_for_timeout(2600)
+    assert page.evaluate("!!FS.interlinear.audio.current") is False
+    assert page.locator(".tchart td.playing-line").count() == 0
+
+
+def test_html_export_embeds_the_recordings_as_players(app):
+    """Seth, 2026-10-18: "pretty exports … including audio players and base64 embedded audio where
+    audio files and segmentation data are available and match" — for examples and charts alike."""
+    h, page, errors = app
+    new_note(page, "Players")
+    page.keyboard.type("{{flex:text %s seg=1-2}}" % T_STORY)
+    page.keyboard.press("Enter")
+    page.keyboard.type("{{flex:chart %s rows=1-2}}" % CHART)
+    page.keyboard.press("Enter")
+    page.keyboard.type("{{flex:text %s}}" % T_ARAB)        # no recording: no player, the page still exports
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#editor .chart-obj tr.crow")
+    page.wait_for_function("() => document.getElementById('save-state').textContent === 'Saved'", timeout=5000)
+    html_path = str(h.tmp / "players.html")
+    res = page.evaluate("""async (hp) => {
+      const api = window.pywebview.api;
+      const notes = await api.list_notes(); const note = (await Promise.all(notes.map((n) => api.get_note(n.id)))).find((n) => n.title === 'Players');
+      const editor = new FS.Editor(document.createElement('div'), {}); editor.load(FS.flexcopy.strip(note.body));
+      const doc = await FS.exporter.buildDoc(note, editor);
+      const timed = FS.exporter.timedBlocks(doc).length;
+      const stats = await FS.exporter.embedAudio(doc);
+      await api.export_note_html(note.id, FS.exporter.toHtml(doc), hp);
+      return { timed, stats, html: FS.exporter.toHtml(doc) };
+    }""", html_path)
+    assert res["timed"] == 2 and res["stats"]["count"] == 2 and res["stats"]["missing"] == 0, res["stats"]
+    html = res["html"]
+    assert html.count('<audio data-a=') == 2 and 'src="data:audio/' in html and '<div id="np"' in html
+    assert '<button class="play" data-a="a1" data-segs="1"' in html and 'data-segs="1 2"' in html      # a line, the whole example
+    assert 'class="tchart"' in html and '<td data-segs="1">' in html.split('class="tchart"')[1]      # the cells a line lights
+    assert '@page { size: landscape' in html and 'header class="doc"' in html
+    # the slideshow: a title slide, the two examples and the chart on slides of their own
+    deck = page.evaluate("""async () => {
+      const api = window.pywebview.api;
+      const notes = await api.list_notes(); const note = (await Promise.all(notes.map((n) => api.get_note(n.id)))).find((n) => n.title === 'Players');
+      const editor = new FS.Editor(document.createElement('div'), {}); editor.load(FS.flexcopy.strip(note.body));
+      const doc = await FS.exporter.buildDoc(note, editor);
+      const deck = FS.exporter.slidesOf(doc);
+      await api.export_note_pptx(note.id, deck, %r);
+      return { kinds: deck.slides.map((s) => s.kind + ':' + (s.blocks[0] ? s.blocks[0].type : '')), html: FS.exporter.toSlides(doc) };
+    }""" % str(h.tmp / "deck.pptx"))
+    assert deck["kinds"] == ["title:", "object:interlinear", "object:chart", "object:interlinear"], deck["kinds"]
+    assert deck["html"].count('<section class="slide') == 4 and 'id="toc"' in deck["html"]
+    import zipfile
+    zp = zipfile.ZipFile(str(h.tmp / "deck.pptx"))
+    assert zp.testzip() is None and "Kabir" in zp.read("ppt/slides/slide2.xml").decode("utf-8") and "<a:tbl>" in zp.read("ppt/slides/slide3.xml").decode("utf-8")
+    slides_path = str(h.tmp / "slides.html")
+    Path(slides_path).write_text(deck["html"], encoding="utf-8")
+    pg = page.context.new_page()
+    try:
+        pg.goto(Path(slides_path).resolve().as_uri())
+        pg.wait_for_selector(".slide.on")
+        assert pg.locator(".slide.on").get_attribute("data-n") == "0"
+        pg.keyboard.press("ArrowRight")
+        assert pg.locator(".slide.on").get_attribute("data-n") == "1" and pg.locator(".slide.on .seg").count() == 2
+        pg.keyboard.press("End")
+        assert pg.locator(".slide.on").get_attribute("data-n") == "3"
+        pg.keyboard.press("Home")
+        assert pg.locator("#ctr").inner_text() == "1 / 4"
+    finally:
+        pg.close()
+    # the written page plays on its own: open it in the browser and press a line's ▶
+    pg = page.context.new_page()
+    try:
+        pg.goto(Path(html_path).resolve().as_uri())
+        pg.wait_for_selector(".seg .play")
+        pg.locator(".seg .play").first.click()
+        pg.wait_for_selector(".seg.playing", timeout=5000)
+        assert pg.locator("#np").is_visible()
+        assert pg.evaluate("document.querySelector('.seg.playing').dataset.n") == "1"
+        pg.locator(".tchart tbody th .play").first.click()
+        pg.wait_for_selector(".tchart td.playing", timeout=5000)
+        assert "1" in pg.locator(".tchart td.playing").first.get_attribute("data-segs").split()
+        pg.locator("#np .st").click()
+        assert pg.locator(".playing").count() == 0
+    finally:
+        pg.close()
+    assert not errors
+
+
+def test_chart_columns_resize_and_a_collapsed_example_exports_as_a_link(app):
+    """Seth, 2026-10-18: "adjust column sizes (including off the right side, requiring rightward
+    scroll)"; a collapsed example or chip exports as "a text abbreviation or title and line range
+    that is a hyperlink to that text in FLEx"."""
+    h, page, errors = app
+    new_note(page, "Widths")
+    page.keyboard.type("{{flex:chart %s rows=1-3}}" % CHART)
+    page.keyboard.press("Enter")
+    page.keyboard.type("{{flex:text %s seg=1-2 collapsed}}" % T_STORY)
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#editor .chart-obj tr.crow")
+    page.wait_for_function("() => document.getElementById('save-state').textContent === 'Saved'", timeout=5000)
+    grip = page.locator("#editor .chart-obj [data-test=col-rs-4]")
+    th = page.locator("#editor .chart-obj thead th.th-col[data-col='4']")
+    before = th.bounding_box()["width"]
+    pane_w = page.evaluate("document.querySelector('#editor .chart-obj .chart-scroll').clientWidth")
+    box = grip.bounding_box()
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    page.mouse.down()
+    page.mouse.move(box["x"] + 420, box["y"] + 2, steps=8)
+    page.mouse.up()
+    page.wait_for_function("() => document.getElementById('save-state').textContent === 'Saved'", timeout=5000)
+    after = page.locator("#editor .chart-obj thead th.th-col[data-col='4']").bounding_box()["width"]
+    assert after > before + 300, (before, after)
+    body = body_of(h)
+    assert re.search(r"cw=4:\d+", body), body
+    # the table outgrew the pane and scrolls sideways
+    assert page.evaluate("() => { const s = document.querySelector('#editor .chart-obj .chart-scroll'); return s.scrollWidth > s.clientWidth; }"), pane_w
+    # the exports: the widths on the page's table, the collapsed example as a FLEx link
+    html = page.evaluate("""async () => {
+      const api = window.pywebview.api; const notes = await api.list_notes(); const note = (await Promise.all(notes.map((n) => api.get_note(n.id)))).find((n) => n.title === 'Widths');
+      const editor = new FS.Editor(document.createElement('div'), {}); editor.load(FS.flexcopy.strip(note.body));
+      const doc = await FS.exporter.buildDoc(note, editor); return FS.exporter.toHtml(doc);
+    }""")
+    assert re.search(r'<col style="width:\d+px">', html) and html.count('class="obj"') == 0 and '<a href="silfw://' in html and "1.1–1.2" in html, html[-800:]
+    # ⋯ → Reset column widths
+    page.locator("#editor .chart-obj [data-test=chart-menu]").click()
+    page.locator("[data-test=chart-reset-widths]").click()
+    page.wait_for_function("() => document.getElementById('save-state').textContent === 'Saved'", timeout=5000)
+    assert "cw=" not in body_of(h)
+    assert not errors
+
+
+def test_chart_header_rows_stick_while_the_chart_scrolls(app):
+    """Seth, 2026-10-18: "we want the chart header rows to be sticky"."""
+    h, page, errors = app
+    new_note(page, "Sticky chart")
+    page.keyboard.type("{{flex:chart %s}}" % CHART)
+    page.keyboard.press("Enter")
+    for i in range(30):
+        page.keyboard.type("Line %d after the chart." % i)
+        page.keyboard.press("Enter")
+    page.wait_for_selector("#editor .chart-obj tr.crow")
+    page.wait_for_timeout(300)
+    assert page.locator("[data-test=chart-sticky-head]").count() == 0 or not page.locator("[data-test=chart-sticky-head]").is_visible()
+    # scroll so the header has passed the top but the last rows are still in view
+    page.evaluate("""() => { const ed = document.getElementById('editor'); const t = document.querySelector('#editor .chart-obj table.tchart'); const r = t.getBoundingClientRect(), e = ed.getBoundingClientRect(); ed.scrollTop += (r.top - e.top) + 120; }""")
+    page.wait_for_selector("[data-test=chart-sticky-head]", state="visible", timeout=3000)
+    ghost = page.locator("[data-test=chart-sticky-head]")
+    assert "NUCLEUS" in ghost.inner_text().upper() and "Subject" in ghost.inner_text()      # (the group row is uppercased by CSS)
+    gb = ghost.bounding_box(); eb = page.locator("#editor").bounding_box()
+    assert abs(gb["y"] - eb["y"]) < 4, (gb, eb)
+    # the copy's columns sit over the table's
+    live = page.locator("#editor .chart-obj table.tchart thead th.th-col[data-col='3']").bounding_box()
+    copy = ghost.locator("th.th-col[data-col='3']").bounding_box()
+    assert abs(live["x"] - copy["x"]) < 2 and abs(live["width"] - copy["width"]) < 2, (live, copy)
+    # gone once the chart has scrolled away
+    page.evaluate("document.getElementById('editor').scrollTop += 2000")
+    page.wait_for_timeout(200)
+    assert not ghost.is_visible()
+    assert not errors
+
+
 def test_search_tags_and_folders(app):
     h, page, errors = app
     new_note(page, "Harmony")
@@ -268,6 +454,34 @@ def test_mock_mode_without_python(browser):
     page.locator(".note-card", has_text="Past tense").click()
     page.wait_for_selector("#editor .entry-card")
     page.wait_for_selector("#editor .text-obj .st-u")
+    ctx.close()
+
+
+def test_inside_the_app_the_page_waits_for_the_api_and_never_shows_the_demo(browser):
+    """Seth, 2026-10-19: the newest wheel started on the page's in-browser demo notebook ("Kalu
+    Demo", nothing else) — pywebview had not handed the page its api and after 15 s the page
+    quietly used the mock. A WebView2 page is known from window.chrome.webview before pywebview
+    injects anything: there the page waits, says so, and takes the api whenever it arrives."""
+    ctx = browser.new_context()
+    ctx.add_init_script("window.chrome = window.chrome || {}; window.chrome.webview = { postMessage() {} }; window.FS_BRIDGE_WAIT_MS = 400; window.FS_BRIDGE_RELOAD_MS = 1500;")
+    page = ctx.new_page()
+    from bridge import UI
+    page.goto(UI.as_uri())
+    page.wait_for_selector("[data-test='bridge-wait']", timeout=5000)
+    assert "Waiting for the app" in page.inner_text("#bridge-wait")
+    assert "flex-scratchpad -v" in page.inner_text("#bridge-wait")
+    page.wait_for_timeout(800)
+    assert page.evaluate("!!window.FS._mockActive") is False
+    assert page.locator("#tabs .tab-item").count() == 0
+    # the retry: the page reloads itself (pywebview injects on every navigation), at most twice
+    page.wait_for_function("sessionStorage.getItem('fs:bridgeReloads') === '1' && document.querySelector('#bridge-wait')", timeout=8000)
+    assert "Reloaded 1 time" in page.inner_text("#bridge-wait")
+    assert page.evaluate("!!window.FS._mockActive") is False
+    # the api arrives late (here: the mock standing in for it): the page goes on as usual
+    page.evaluate("window.pywebview = { api: FS.mockApi() }")
+    page.wait_for_selector("#tabs .tab-item", timeout=5000)
+    page.wait_for_selector("[data-test='bridge-wait']", state="detached", timeout=5000)
+    assert page.evaluate("sessionStorage.getItem('fs:bridgeReloads')") is None
     ctx.close()
 
 
@@ -412,7 +626,9 @@ def test_multiline_emphasis_wraps_per_line(app):
 def test_column_resize_writes_width_and_wide(app):
     h, page, errors = app
     th = page.locator("table.md-table thead th[data-c]").first
-    th.scroll_into_view_if_needed()
+    # the whole table in the middle of the view: at the bottom edge its sticky tool bar would sit over the header
+    page.evaluate("(el) => el.closest('.widget').scrollIntoView({ block: 'center' })", th.element_handle())
+    page.wait_for_timeout(200)
     handle = th.locator(".col-resizer")
     box = handle.bounding_box()
     page.mouse.move(box["x"] + 4, box["y"] + box["height"] / 2)
@@ -508,11 +724,14 @@ def test_export_html_and_docx(app):
       return FS.exporter.toHtml(doc);
     }""", [html_path, docx_path])
     assert "<b>bold</b>" in html and 'class="obj"' in html and "ka-nuwa-mo" in html and "<u>-mo</u>" in html
-    assert "The dog slept." in html and "kabir" in html and "a domestic dog" in html
+    # the entry sits in a table cell as a CHIP, so it exports as a link into FLEx (Seth, 2026-10-18), not in full
+    assert "The dog slept." in html and 'href="silfw://' in html and "kabir" in html and "a domestic dog" not in html
     assert (h.tmp / "note.html").read_text(encoding="utf-8").startswith("<!doctype html>")
     import zipfile
     xml = zipfile.ZipFile(docx_path).read("word/document.xml").decode("utf-8")
-    assert "ka-nuwa-mo" in xml and "The dog slept." in xml and "a domestic dog" in xml and '<w:u w:val="single"/>' in xml
+    assert "ka-nuwa-mo" in xml and "The dog slept." in xml and '<w:u w:val="single"/>' in xml
+    assert '<w:tblStyle w:val="LingTeXInterlinear"/>' in xml and '<w:pStyle w:val="LingTeXFree"/>' in xml      # LingTeX-Word's shape
+    assert "<w:hyperlink " in xml and ">kabir" in xml
     assert not errors
 
 
@@ -622,7 +841,9 @@ def test_hide_markers_toggle(app):
     assert page.locator(".md-marker").first.is_visible()
     page.locator("#btn-markers").click()
     page.wait_for_function("() => document.body.classList.contains('md-hide')")
-    # the heading's "# " is not displayed, the text is intact
+    # the heading's "# " is not displayed (the caret is elsewhere), the text is intact
+    page.evaluate("() => { const b = document.querySelector('#editor .blk-p .blk-body'); FS.editor.setCaret(b, 0); b.focus(); }")
+    page.wait_for_timeout(150)
     assert not page.locator(".blk-h .md-marker").first.is_visible()
     assert page.locator(".blk-h .blk-body").first.inner_text().strip() == "Welcome to FLEx Scratchpad"
     assert h.api._nb.config["settings"]["hideMarkers"] is True
@@ -1400,10 +1621,11 @@ def test_outline_numbering_and_enter(app):
     paste(page, "1. Symmetrical\n  2. Examples:\n\n2. One-word\n  3. Examples:\n\n3. Argument sharing\n  4. All\n  5. Shared subject")
     page.wait_for_timeout(400)
     shown = page.evaluate("() => [...document.querySelectorAll('#editor .md-line[data-num]')].map((l) => l.dataset.num + ' ' + l.textContent.trim().replace(/^\\d+\\.\\s*/, ''))")
-    assert shown == ["1. Symmetrical", "1. Examples:", "2. One-word", "1. Examples:", "3. Argument sharing", "1. All", "2. Shared subject"], shown
+    # nested items are lettered (a. b.), the level below in roman (i. ii.) — Seth, 2026-10-18: "display it prettily"
+    assert shown == ["1. Symmetrical", "a. Examples:", "2. One-word", "a. Examples:", "3. Argument sharing", "a. All", "b. Shared subject"], shown
     # what is DRAWN: the computed number via ::before, the typed digits invisible
     drawn = page.evaluate("() => [...document.querySelectorAll('#editor .md-num[data-num]')].map((n) => [getComputedStyle(n, '::before').content, getComputedStyle(n).color])")
-    assert [d[0] for d in drawn] == ['"1."', '"1."', '"2."', '"1."', '"3."', '"1."', '"2."'], drawn
+    assert [d[0] for d in drawn] == ['"1."', '"a."', '"2."', '"a."', '"3."', '"a."', '"b."'], drawn
     assert all(d[1] == "rgba(0, 0, 0, 0)" for d in drawn), drawn
     # Enter after the last sub-item continues ITS level with the shown number + 1
     last = page.locator("#editor .blk-list .blk-body").last
@@ -1414,7 +1636,7 @@ def test_outline_numbering_and_enter(app):
     page.wait_for_timeout(600)
     assert "  3. Shared object" in body_of(h)
     shown = page.evaluate("() => [...document.querySelectorAll('#editor .md-line[data-num]')].map((l) => l.dataset.num)")
-    assert shown[-1] == "3."
+    assert shown[-1] == "c."
     # inserting an item at the top renumbers the blocks below
     first = page.locator("#editor .blk-list .blk-body").first
     first.click()
@@ -2005,13 +2227,26 @@ def test_table_insert_above_while_editing_and_paste_rows_from_the_menu(app):
     page.wait_for_timeout(900)
     b = body_of(h)
     assert "| p | q |\n| r | s |" in b, b
-    # "− Row" deletes the row SELECTED in the gutter, not the cell last edited
+    # the Row ▾ menu's Delete takes the row SELECTED in the gutter, not the cell last edited, and
+    # leaves a toast whose Undo brings it back (Seth, 2026-10-18: the bar's − buttons were "easy
+    # to click on accident (with drastic consequences)")
     page.locator("table.md-table th.gutter.row[data-gr='3']").click()          # the "a2 | b2+zz" row
     page.locator("table.md-table").hover()
-    tool(page, "− Row")
+    assert page.locator(".tbl-tools").first.locator("button", has_text="− Row").count() == 0
+    tool(page, "Row ▾")
+    page.locator("[data-test=row-delete]").click()
+    page.wait_for_selector(".toast:has-text('Row removed') [data-test=toast-action]")
     page.wait_for_timeout(900)
     b = body_of(h)
     assert "b2+zz" not in b and "| p | q |" in b, b
+    page.locator(".toast [data-test=toast-action]").click()
+    page.wait_for_timeout(900)
+    assert "b2+zz" in body_of(h), body_of(h)
+    page.locator("table.md-table th.gutter.row[data-gr='3']").click()
+    tool(page, "Row ▾")
+    page.locator("[data-test=row-delete]").click()
+    page.wait_for_timeout(900)
+    assert "b2+zz" not in body_of(h), body_of(h)
     assert not errors
 
 
@@ -2531,6 +2766,65 @@ def test_headings_have_levels_and_fold_their_sections(app):
     assert not errors
 
 
+def test_sticky_headings_follow_the_view_and_fold_in_place(app):
+    """Seth, 2026-10-17: "make whatever headings apply to the current viewport be sticky (optionally,
+    give the user the ability to turn this feature on and off)"; "they can collapse the sticky heading
+    even if they're not scrolled up to the top, in place"; "When they do collapse a sticky heading,
+    scroll to that heading, instead of skipping ahead or going to the start or end of the note"."""
+    h, page, errors = app
+    new_note(page, "Sticky")
+    page.locator("#editor .blk-body").first.click()
+    filler = lambda tag, n: "\n\n".join("%s paragraph %d, long enough to take a line of its own." % (tag, k) for k in range(n))   # noqa: E731
+    paste(page, "# Chapter\n\nintro\n\n## Part A\n\n" + filler("A", 14) + "\n\n### Deep\n\n" + filler("deep", 14) + "\n\n## Part B\n\n" + filler("B", 14) + "\n\n# Next\n\nlast")
+    page.wait_for_timeout(300)
+    blk = lambda t: page.locator("#editor .blk", has=page.locator(".blk-body", has_text=t)).first   # noqa: E731
+    strip = page.locator("#sticky-heads")
+    rows = lambda: page.evaluate("() => [...document.querySelectorAll('#sticky-heads .sh-title')].map((x) => x.textContent.trim())")   # noqa: E731
+    top_of = lambda t: page.evaluate("(t) => { const b = [...document.querySelectorAll('#editor .blk-body')].find((x) => x.textContent.includes(t)); return b.getBoundingClientRect().top - document.getElementById('editor').getBoundingClientRect().top; }", t)   # noqa: E731
+    # at the top nothing is stuck; scrolled into "### Deep", the chain Chapter › Part A › Deep is
+    page.evaluate("() => { document.getElementById('editor').scrollTop = 0; }")
+    page.wait_for_timeout(200)
+    assert strip.is_hidden()
+    page.evaluate("() => { const t = [...document.querySelectorAll('#editor .blk-body')].find((x) => x.textContent === 'deep paragraph 6, long enough to take a line of its own.'); t.scrollIntoView({ block: 'start' }); }")
+    page.wait_for_timeout(200)
+    assert rows() == ["Chapter", "Part A", "Deep"], rows()
+    # the strip never covers a block it names: the first block under it is a "deep" paragraph
+    assert page.evaluate("() => { const s = document.getElementById('sticky-heads').getBoundingClientRect(); const e = document.getElementById('editor').getBoundingClientRect(); return s.top === e.top && s.width === e.width; }")
+    # fold "Part A" from the strip: its section closes in place and the view moves to that heading,
+    # under the "Chapter" row (not to the start or the end of the note)
+    strip.locator(".sh-fold").nth(1).dispatch_event("mousedown")
+    page.wait_for_timeout(250)
+    assert not blk("deep paragraph 6").is_visible() and not blk("Deep").is_visible()
+    assert blk("Part A").locator(".fold-more").inner_text() == "⋯ 29 blocks"
+    assert rows() == ["Chapter"], rows()
+    strip_h = strip.bounding_box()["height"]
+    assert abs(top_of("## Part A") - strip_h) < 6, (top_of("## Part A"), strip_h)
+    page.wait_for_timeout(900)
+    assert "## Part A {collapsed}\n\nA paragraph 0" in body_of(h)
+    # a click on a sticky title goes to that heading
+    page.evaluate("() => { const t = [...document.querySelectorAll('#editor .blk-body')].find((x) => x.textContent === 'B paragraph 9, long enough to take a line of its own.'); t.scrollIntoView({ block: 'start' }); }")
+    page.wait_for_timeout(200)
+    assert rows() == ["Chapter", "Part B"], rows()
+    strip.locator(".sh-title").first.dispatch_event("mousedown")
+    page.wait_for_timeout(250)
+    assert strip.is_hidden() and page.evaluate("() => document.getElementById('editor').scrollTop") == 0   # the first block: the top of the note
+    # off in the H ▾ menu: no strip, remembered in the settings; on again from Settings
+    page.evaluate("() => { const t = [...document.querySelectorAll('#editor .blk-body')].find((x) => x.textContent === 'B paragraph 9, long enough to take a line of its own.'); t.scrollIntoView({ block: 'start' }); }")
+    page.wait_for_timeout(200)
+    assert rows() == ["Chapter", "Part B"]
+    page.locator("[data-test=tb-heading]").dispatch_event("mousedown")
+    page.locator("[data-test=sticky-toggle]").dispatch_event("mousedown")
+    page.wait_for_timeout(200)
+    assert strip.is_hidden()
+    assert h.api._nb.config["settings"]["stickyHeadings"] is False
+    page.click("#btn-settings")
+    page.locator("[data-test=setting-sticky]").check()
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(300)
+    assert rows() == ["Chapter", "Part B"], rows()
+    assert not errors
+
+
 def test_collection_groups_nest_by_level_and_fold(app):
     """Seth, 2026-10-16: collapsible headings of several levels in a collection too; they
     organise the view and are never exported."""
@@ -2733,6 +3027,7 @@ def test_the_view_stays_put_on_a_click_beside_a_table_and_on_table_tools(app):
     # a press on a tool whose release lands on the background (the table redrew under it) is
     # not a background click
     page.locator("table.md-table").hover()
+    page.locator("table.md-table").dispatch_event("mousedown")
     btn = page.locator(".tbl-tools").first.locator("button", has_text="+ Row")
     b = btn.bounding_box()
     page.mouse.move(b["x"] + 5, b["y"] + 5)
@@ -2743,6 +3038,7 @@ def test_the_view_stays_put_on_a_click_beside_a_table_and_on_table_tools(app):
     assert abs(st() - s0) <= 2, (s0, st())
     for label in ("+ Row", "+ Column"):
         page.locator("table.md-table").hover()
+        page.locator("table.md-table").dispatch_event("mousedown")
         page.locator(".tbl-tools").first.locator("button", has_text=label).click()
         page.wait_for_timeout(300)
         assert abs(st() - s0) <= 2, (label, s0, st())
@@ -3282,3 +3578,1685 @@ def test_one_backspace_or_delete_removes_a_whole_br(app):
     saved = h.api.get_note(n["id"])["body"]
     assert "onetwo" in saved and "| xy |" in saved and "<b" not in saved and "br>" not in saved, saved
     assert not [e for e in errors if "Failed to load resource" not in e], errors
+
+
+def test_flex_objects_get_a_readable_copy_in_the_file(app):
+    """Seth, 2026-10-17: the note's file carries a plain-text copy of each FLEx object ("so that a
+    markdown file IS actually readable elsewhere"), never shown in the app; a block after an object
+    on its own line, one link in a table cell, switching when the object moves; written when the
+    example changes, never just because a note was opened."""
+    import time
+    h, page, errors = app
+    tab = h.api.init()["config"]["tabs"][0]["dir"]
+    E1 = "6a5f3a2e-1b1e-4c2a-9f10-0d2c1a7e0001"
+    n = h.api.create_note(tab, "", "Readable", "Intro\n\n{{flex:text %s seg=1-2 at=0e1f2a3b1001-0e1f2a3b1002}}\n\n| a | b |\n|---|---|\n| x | {{flex:entry %s}} |\n" % (T_STORY, E1))
+    path = Path(h.api._nb.get_note(n["id"]).path)
+    page.reload()
+    page.wait_for_selector(".note-card")
+    page.locator(".note-card", has_text="Readable").click()
+    page.wait_for_selector("#editor .text-obj .segment")
+    page.wait_for_selector("table.md-table td .flex-collapsed, table.md-table td .entry-card")
+    before = path.read_text(encoding="utf-8")
+    page.wait_for_timeout(1500)
+    assert path.read_text(encoding="utf-8") == before and "flex-copy" not in before   # opening never rewrites
+    # an edit saves the note, and the file gets its copies
+    page.locator("#editor .blk-body").first.click()
+    page.keyboard.press("End")
+    page.keyboard.type(" here")
+    page.wait_for_function("() => document.getElementById('save-state').textContent === 'Saved'", timeout=5000)
+    body = path.read_text(encoding="utf-8")
+    block = body.split("{{flex:text %s seg=1-2" % T_STORY)[1].split("\n```\n")[0] + "\n```"
+    assert '\n[The dog and the river 1.1–1.2](silfw://localhost/link?' in block and '"flex-copy")\n```flex-copy\n1.1  Kabir' in block, block
+    assert "‘The dog slept.’" in block and block.rstrip().endswith("```"), block
+    row = next(l for l in body.split("\n") if l.startswith("| x |"))
+    assert re.search(r"\{\{flex:entry %s\}\}\[kabir.*\]\(silfw://[^ )]+ \"flex-copy\"\) \|$" % E1, row), row
+    # none of it is shown: the editor has the same blocks, and no copy text anywhere
+    shown = page.locator("#editor").inner_text()
+    assert "flex-copy" not in shown and "silfw://" not in shown
+    srcs = page.evaluate("() => window.__fsEditor.blocks.map((b) => b.src)")
+    assert not any("flex-copy" in s for s in srcs) and len(srcs) == 3, srcs
+    # reopened, still hidden, and the file untouched by the opening
+    saved = path.read_text(encoding="utf-8")
+    page.reload()
+    page.wait_for_selector(".note-card")
+    page.locator(".note-card", has_text="Readable").click()
+    page.wait_for_selector("#editor .text-obj .segment")
+    page.wait_for_timeout(1500)
+    assert path.read_text(encoding="utf-8") == saved
+    assert "flex-copy" not in page.locator("#editor").inner_text()
+    # the example changes in FLEx: ↻ redraws it, and the copy follows without an edit
+    h.api._flex.backend.texts[T_STORY]["segments"][0]["free"] = "The dog fell asleep."
+    page.locator("#editor .text-obj .flex-head .lnk[title='Reload from FLEx']").first.click()
+    deadline = time.time() + 6
+    while time.time() < deadline and "‘The dog fell asleep.’" not in path.read_text(encoding="utf-8"):
+        page.wait_for_timeout(200)
+    assert "‘The dog fell asleep.’" in path.read_text(encoding="utf-8")
+    # dragged out of its cell to below the table: the entry gets the block form, the cell none
+    tb = page.locator("#editor .blk-table").bounding_box()
+    dnd(page, "table.md-table td .flex-collapsed, table.md-table td .entry-card .drag-handle", tb["x"] + tb["width"] / 2, tb["y"] + tb["height"] - 3)
+    deadline = time.time() + 6
+    while time.time() < deadline and "| x | |" not in path.read_text(encoding="utf-8").replace("| x |  |", "| x | |"):
+        page.wait_for_timeout(200)
+    body = path.read_text(encoding="utf-8")
+    assert re.search(r"\n\{\{flex:entry %s\}\}\n\[kabir[^\n]*\]\(silfw://[^ )]+ \"flex-copy\"\)\n```flex-copy\n1\. " % E1, body), body
+    assert "flex-copy" not in next(l for l in body.split("\n") if l.startswith("| x |"))
+    assert not errors
+
+
+def test_flex_text_markup_tags_render_and_are_styled_by_scope(app):
+    """Seth, 2026-10-17: FLEx's TextMarkup tags drawn in examples, styled per project / tab /
+    folder / example (the most specific wins), each switchable on and off where it applies, and
+    searchable: the picker's "FLEx tags" finds every place a tag is used."""
+    h, page, errors = app
+    tab = h.api.init()["config"]["tabs"][0]["dir"]
+    n = h.api.create_note(tab, "", "Markup", "{{flex:text %s seg=1-2}}\n\n{{flex:text %s seg=4-6}}\n" % (T_STORY, T_STORY))
+    page.reload()
+    page.wait_for_selector(".note-card")
+    page.locator(".note-card", has_text="Markup").first.click()
+    page.wait_for_selector("#editor .text-obj .tagbar")
+    first = page.locator("#editor .text-obj").first
+    # the tags under the words, with FLEx's own colour on Subject and the palette on Verb
+    assert first.locator(".segment").first.locator(".tagbar").all_inner_texts() == ["S", "V"]
+    assert first.locator(".segment").nth(1).locator(".tagbar").all_inner_texts() == ["Foc", "S", "V", "O"]
+    subj = first.locator(".segment").first.locator(".tagbar").first
+    assert subj.evaluate("(e) => getComputedStyle(e).backgroundColor") == "rgb(219, 234, 254)"
+    # a tag over two segments: the second half says it continues
+    second = page.locator("#editor .text-obj").nth(1)
+    assert second.locator(".segment").nth(0).locator(".tagbar").all_inner_texts() == ["Top", " "]
+    assert second.locator(".segment").nth(2).locator(".tagbar.cont").first.inner_text() == "…Top"
+    assert first.locator("[data-test=tag-btn]").inner_text() == "⚑ 4"
+    # the ⚑ popover: where each tag's look comes from, and a toggle that writes the example's own rule
+    first.locator("[data-test=tag-btn]").click()
+    page.wait_for_selector("[data-test=tag-popover]")
+    rows = page.locator("[data-test=tag-popover] .tagrow")
+    # in FLEx's own hierarchy: Syntax › Arguments › Subject, Object; Syntax › Verb; Discourse › Focus
+    assert page.evaluate("() => [...document.querySelectorAll('[data-test=tag-popover] [data-test=tag-tree-group]')].map((h) => h.dataset.group + ':' + h.querySelector('.tag-tree-n').textContent)") == ["Syntax:3", "Arguments:2", "Discourse:1"]
+    assert [r.strip() for r in rows.locator(".tag-name > span:first-child").all_inner_texts()] == ["Subject (S) ×2", "Object (O)", "Verb (V) ×2", "Focus (Foc)"]
+    assert rows.locator("[data-test=tag-via]").all_inner_texts() == ["styled by FLEx’s own colours", "styled by FLEx’s own colours", "styled by the standard palette", "styled by the standard palette"]
+    page.locator("[data-test=tag-popover] [data-test=tag-tree-group][data-group=Arguments]").click()        # fold a group: its tags go, remembered
+    assert rows.count() == 2
+    page.locator("[data-test=tag-popover] [data-test=tag-tree-group][data-group=Arguments]").click()
+    assert rows.count() == 4
+    rows.nth(0).locator("[data-test=tag-toggle]").click()
+    page.wait_for_function("() => !document.querySelector('#editor .text-obj .segment .tagbar') || document.querySelector('#editor .text-obj .segment').querySelectorAll('.tagbar').length === 1")
+    page.wait_for_timeout(900)
+    body = body_of(h)
+    assert re.search(r"seg=1-2( at=[0-9a-f-]+)? tags=Subject:off\}\}", body), body
+    assert page.locator("[data-test=tag-popover] [data-test=tag-via]").first.inner_text() == "hidden by this example"
+    page.keyboard.press("Escape")
+    # a TAB rule: Verb in a colour of the tab's, from the tab's menu; the examples redraw with it
+    page.locator(".tab-item", has_text="Notes").click(button="right")
+    page.locator(".popover .menu-item", has_text="FLEx tag styles for this tab").click()
+    page.wait_for_selector("[data-test=tag-dialog]")
+    # the dialog starts EMPTY: tags are added one at a time from the list (Seth, 2026-10-18)
+    assert page.locator("[data-test=tag-dialog-empty]").count() == 1
+    page.locator("[data-test=tag-add]").click()
+    page.locator("[data-test=tag-pick][data-tag='Verb']").click()
+    verb = page.locator("[data-test=tag-dialog] .tagrow[data-tag='Verb']")
+    assert verb.count() == 1 and page.locator("[data-test=tag-dialog] .tagrow").count() == 1
+    verb.locator("[data-test=tag-bg]").nth(3).click()                 # the 4th palette colour, #bdb2ff
+    page.wait_for_function("() => document.querySelector('[data-test=tag-dialog] .tagrow[data-tag=\"Verb\"] [data-test=tag-via]').textContent === 'styled by the tab'")
+    assert verb.locator("[data-test=tag-rule-on]").is_checked()
+    page.locator(".modal .btn.primary", has_text="Done").click()
+    page.wait_for_function("() => { const b = [...document.querySelectorAll('#editor .text-obj .segment')][0].querySelector('.tagbar'); return b && getComputedStyle(b).backgroundColor === 'rgb(189, 178, 255)'; }")
+    assert h.api.init()["config"]["tagStyles"]["tab"][tab] == [{"tag": "Verb", "enabled": True, "bg": "#bdb2ff"}]
+    # the example's own style wins over the tab's
+    first.locator("[data-test=tag-btn]").click()
+    page.wait_for_selector("[data-test=tag-popover]")
+    page.locator("[data-test=tag-popover] .tagrow[data-tag='Verb'] [data-test=tag-style]").click()
+    page.locator("[data-test=tag-popover] .tag-style-box [data-test=tag-bg]").nth(0).click()        # #ffd6a5
+    page.wait_for_function("() => { const b = [...document.querySelectorAll('#editor .text-obj .segment')][0].querySelector('.tagbar'); return b && getComputedStyle(b).backgroundColor === 'rgb(255, 214, 165)'; }")
+    assert page.locator("[data-test=tag-popover] .tagrow[data-tag='Verb'] [data-test=tag-via]").inner_text() == "styled by this example"
+    # the same popover can aim its changes at another scope: the TEXT, wherever its examples appear
+    # (Seth, 2026-10-18: "specific texts anywhere they appear") — Object off for the text
+    sel = page.locator("[data-test=tag-scope-pick]")
+    labels = sel.locator("option").all_inner_texts()
+    assert labels[0] == "this example" and "this note" in labels and "this tab" in labels and "the whole notebook" in labels and any(l.startswith("the text “The dog") for l in labels), labels
+    sel.select_option(label=[l for l in labels if l.startswith("the text")][0])
+    page.locator("[data-test=tag-popover] .tagrow[data-tag='Object'] [data-test=tag-toggle]").click()
+    page.wait_for_function("() => document.querySelector('[data-test=tag-popover] .tagrow[data-tag=\"Object\"] [data-test=tag-via]').textContent.startsWith('hidden by the text')")
+    assert h.api.init()["config"]["tagStyles"]["text"][T_STORY] == [{"tag": "Object", "enabled": True, "hide": True}]
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(900)
+    assert "tags=Subject:off,Verb:bg#ffd6a5" in body_of(h), body_of(h)
+    assert "Object" not in body_of(h)                                         # a text rule lives in notebook.json, not in the embed
+    assert page.locator("#editor .text-obj .tagbar", has_text=re.compile(r"^O$")).count() == 0           # in every example of that text
+    # the picker's FLEx tags: Topic is used in two places; both inserted as examples
+    page.locator("#toolbar button", has_text="FLEx object").click()      # nothing focused: new blocks go after the last
+    page.locator(".picker-tabs button", has_text="FLEx tags").click()
+    page.wait_for_selector("[data-test=pick-tag]")
+    assert page.locator("[data-test=pick-tag] .hw").all_inner_texts() == ["Subject", "Object", "Verb", "Topic", "Focus"]
+    page.locator("[data-test=pick-tag]", has_text="Topic").click()
+    page.wait_for_selector("[data-test=pick-occurrence]")
+    occ = page.locator("[data-test=pick-occurrence]")
+    assert occ.count() == 2 and occ.nth(1).locator(".pos").inner_text() == "3.1–3.2" and occ.nth(0).locator(".gl").inner_text() == "Kabir pemu"
+    occ.nth(1).click()
+    page.wait_for_selector(".picker-preview .segment.in-range")
+    assert page.locator(".picker-preview .segment.in-range").count() == 2
+    page.locator("[data-test=insert-all-tagged]").click()
+    page.wait_for_timeout(1200)
+    body = body_of(h)
+    assert body.count("{{flex:text") == 4 and "seg=5-6 at=" in body and "seg=4 at=" in body, body
+    assert not errors
+
+
+def test_tag_styles_for_a_selection_of_examples(app):
+    """Seth, 2026-10-17: example-scoped tag styles "applyable to a group of examples by highlight" —
+    here the selected cards of a collection; the rule is written into each embed."""
+    h, page, errors = app
+    tab = h.api.init()["config"]["tabs"][0]["dir"]
+    c = h.api.create_note(tab, "", "Tagged set", "{{flex:text %s seg=1}}\n\n{{flex:text %s seg=2}}\n\n{{flex:text %s seg=4}}\n" % (T_STORY, T_STORY, T_STORY), "examples")
+    page.reload()
+    page.wait_for_selector(".note-card")
+    page.locator(".note-card", has_text="Tagged set").first.click()
+    page.wait_for_selector("#collection .coll-item .tagbar")
+    checks = page.locator("[data-test=coll-check]")
+    checks.nth(0).click()
+    checks.nth(1).click()
+    page.locator("[data-test=coll-sel-tags]").click()
+    page.wait_for_selector("[data-test=tag-dialog]")
+    assert "2 selected examples" in page.locator(".modal .modal-title, .modal h2, .modal header").first.inner_text()
+    for name in ("Subject", "Verb"):
+        page.locator("[data-test=tag-add]").click()
+        page.locator("[data-test=tag-pick-search]").fill(name[:3])
+        page.locator("[data-test=tag-pick][data-tag='%s']" % name).click()
+    page.locator("[data-test=tag-dialog] .tagrow[data-tag='Subject'] [data-test=tag-show]").select_option("hide")
+    page.locator("[data-test=tag-dialog] .tagrow[data-tag='Verb'] [data-test=tag-b]").click()
+    page.wait_for_function("() => document.querySelector('[data-test=tag-dialog] .tagrow[data-tag=\"Subject\"] [data-test=tag-via]').textContent === 'hidden by this example'")
+    page.locator(".modal .btn.primary", has_text="Done").click()
+    page.wait_for_timeout(1000)
+    body = without_flex_copies(h.api.get_note(c["id"])["body"])
+    assert body.count("tags=Subject:off,Verb:b") == 2 and "seg=4 " in body and "seg=4" in body.split("\n")[-2], body
+    assert "seg=4 at=" in body or "seg=4}}" in body
+    assert body.split("\n\n")[2].count("tags=") == 0            # the unselected example is untouched
+    # drawn accordingly: no S bar on the first two cards, bold words where Verb is
+    assert page.locator("#collection .coll-item").nth(0).locator(".tagbar", has_text="S").count() == 0
+    assert page.locator("#collection .coll-item").nth(0).locator(".il-txt.tag-b").count() == 1
+    assert page.locator("#collection .coll-item").nth(2).locator(".tagbar", has_text="Top").count() == 1
+    assert not errors
+
+
+def test_tags_style_the_text_and_visual_filters_and_the_rail_filters_by_tag(app):
+    """Seth, 2026-10-18: "the option to style the TEXT, not the tags … brackets around words …
+    highlight/background/border/tile", visual filters "like you can do with visual filters in
+    Logos", and "the ability also to search or filter notes and specific flex objects in notes by
+    text markup tags"."""
+    h, page, errors = app
+    tab = h.api.init()["config"]["tabs"][0]["dir"]
+    # the third example is a collapsed chip, the fourth a chip in a line of text: both count
+    h.api.create_note(tab, "", "Markup", "Intro.\n\n{{flex:text %s seg=1-2}}\n\n{{flex:text %s seg=4-6}}\n\n{{flex:text %s seg=5 collapsed}}\n\nSee {{flex:text %s seg=1}} here.\n" % (T_STORY, T_STORY, T_STORY, T_STORY))
+    h.api.create_note(tab, "", "Plain", "No examples here.")
+    h.api.set_tag_styles("tab", tab, [{"tag": "Subject", "br": "sq", "hl": True}, {"tag": "Verb", "box": True, "bs": "dashed", "bw": 3}, {"tag": "Topic", "tile": True, "bar": True, "tc": "#fde68a"}, {"tag": "Object", "c": "#b45309", "b": True}])
+    h.api.set_tag_filters([{"id": "f1", "name": "Discourse", "enabled": True, "rules": [{"tag": "group:Discourse", "br": "an"}]}])
+    page.reload()
+    page.wait_for_selector(".note-card")
+    page.locator(".note-card", has_text="Markup").first.click()
+    page.wait_for_selector("#editor .text-obj .tag-ov-box")
+    first = page.locator("#editor .text-obj").first
+    seg1 = first.locator(".segment").first
+    # Subject: brackets round the word with the abbreviation on the closing one, a marker behind it, NO bar
+    assert seg1.locator(".br-cell.br-open").inner_text() == "[" and seg1.locator(".br-cell.br-close").inner_text() == "]S"
+    assert seg1.locator(".tag-ov-hl").count() == 1 and seg1.locator(".tagbar", has_text="S").count() == 0
+    # Verb: a border round the word's column, drawn over its cells; Object: the word coloured and bold
+    box = seg1.locator(".tag-ov-box")
+    assert box.count() == 1
+    geo = page.evaluate("() => { const b = document.querySelector('#editor .text-obj .segment .tag-ov-box').getBoundingClientRect(); const c = document.querySelector('#editor .text-obj .segment .word-cell[data-w=\"2\"]').getBoundingClientRect(); return [b.left <= c.left, b.right >= c.right, b.top <= c.top, b.bottom >= c.bottom]; }")
+    assert geo == [True, True, True, True], geo
+    # the border's line style and thickness, the tile's own colour (Seth, 2026-10-18)
+    assert box.evaluate("(e) => [getComputedStyle(e).borderTopStyle, getComputedStyle(e).borderTopWidth]") == ["dashed", "3px"]
+    seg2 = first.locator(".segment").nth(1)
+    assert seg2.locator(".word-cell[data-w='4'] .il-txt").evaluate("(e) => [getComputedStyle(e).color, getComputedStyle(e).fontWeight]") == ["rgb(180, 83, 9)", "700"]
+    # the visual filter puts angle brackets round the Focus tag (by its FLEx group); Topic keeps its bar beside its tile
+    assert seg2.locator(".br-cell.br-open").all_inner_texts() == ["⟨", "["]
+    second = page.locator("#editor .text-obj").nth(1)
+    assert second.locator(".segment").first.locator(".tag-ov-tile").count() == 1 and second.locator(".segment").first.locator(".tagbar", has_text="Top").count() == 1
+    assert second.locator(".segment").first.locator(".tag-ov-tile").evaluate("(e) => getComputedStyle(e).backgroundColor") == "rgba(253, 230, 138, 0.55)"
+    # the controls: with "border" on, its line style and thickness; with "tile" on, its colour (aimed at the tab, where the rules are)
+    first.locator("[data-test=tag-btn]").click()
+    page.wait_for_selector("[data-test=tag-popover]")
+    page.locator("[data-test=tag-scope-pick]").select_option(label="this tab")
+    page.locator("[data-test=tag-popover] .tagrow[data-tag='Verb'] [data-test=tag-style]").click()
+    sb = page.locator("[data-test=tag-popover] .tag-style-box")
+    assert sb.locator("[data-test=tag-box]").first.evaluate("(e) => e.classList.contains('on')")
+    assert sb.locator("[data-test=tag-bs]").input_value() == "dashed" and sb.locator("[data-test=tag-bw]").input_value() == "3"
+    sb.locator("[data-test=tag-bw]").select_option("6")
+    page.wait_for_function("() => getComputedStyle(document.querySelector('#editor .text-obj .segment .tag-ov-box')).borderTopWidth === '6px'")
+    # …and the border's own colour (Seth, 2026-10-19: "I should be able to specify a border color")
+    sb.locator("[data-test=tag-bc]").evaluate("(e) => { e.value = '#1d4ed8'; e.dispatchEvent(new Event('change', {bubbles: true})); }")
+    page.wait_for_function("() => getComputedStyle(document.querySelector('#editor .text-obj .segment .tag-ov-box')).borderTopColor === 'rgb(29, 78, 216)'")
+    page.keyboard.press("Escape")
+    second.locator("[data-test=tag-btn]").click()                       # Topic is on the second example's lines
+    page.wait_for_selector("[data-test=tag-popover] .tagrow[data-tag='Topic']")
+    page.locator("[data-test=tag-scope-pick]").select_option(label="this tab")
+    page.locator("[data-test=tag-popover] .tagrow[data-tag='Topic'] [data-test=tag-style]").click()
+    assert page.locator("[data-test=tag-popover] .tag-style-box [data-test=tag-tc]").input_value() == "#fde68a"
+    page.locator("[data-test=tag-popover] .tag-style-box [data-test=tag-tc-auto]").click()
+    page.wait_for_function("() => getComputedStyle(document.querySelector('#editor .text-obj:nth-of-type(2) .segment .tag-ov-tile, #editor .text-obj .tag-ov-tile')).backgroundColor !== 'rgba(253, 230, 138, 0.55)'")
+    page.keyboard.press("Escape")
+    assert h.api.init()["config"]["tagStyles"]["tab"][tab][1] == {"tag": "Verb", "enabled": True, "box": True, "bs": "dashed", "bw": 6, "bc": "#1d4ed8"}
+    assert h.api.init()["config"]["tagStyles"]["tab"][tab][2] == {"tag": "Topic", "enabled": True, "tile": True, "bar": True}
+    # the toolbar's ⚑ Filters is a VIEW setting (Seth: "for the whole app or for notebook pages"):
+    # off for THIS NOTE first — the angle brackets go here, the filter stays on by default…
+    page.locator("#btn-filters").click()
+    page.wait_for_selector("[data-test=filters-mode]")
+    assert page.locator("[data-test=filters-mode] .seg-btn.on").inner_text() == "This note"
+    angles = "() => [...document.querySelectorAll('#editor .text-obj .br-cell.br-open')].filter((b) => b.textContent === '⟨').length"
+    assert page.evaluate(angles) > 0
+    page.locator("[data-test=filter-on][data-filter=f1]").click()
+    page.wait_for_function("(() => { const f = " + angles + "; return f() === 0; })()")
+    cfg = h.api.init()["config"]["tagStyles"]
+    assert cfg["note"][[n for n in h.api.list_notes() if n["title"] == "Markup"][0]["id"]] == [{"tag": "filter:f1", "enabled": True, "hide": True}] and cfg["filters"][0]["enabled"] is True
+    page.locator("[data-test=filter-reset]").click()                                # back to the default: on again
+    page.wait_for_function("(() => { const f = " + angles + "; return f() > 0; })()")
+    # …then off EVERYWHERE
+    page.locator("[data-test=filters-mode] .seg-btn[data-mode=all]").click()
+    page.locator("[data-test=filter-on][data-filter=f1]").click()
+    page.wait_for_function("(() => { const f = " + angles + "; return f() === 0; })()")
+    assert h.api.init()["config"]["tagStyles"]["filters"][0]["enabled"] is False
+    page.keyboard.press("Escape")
+    # the rail lists the FLEx tags the notes use; one click filters the list and dims the other examples
+    page.wait_for_selector("[data-test=ftag][data-tag='Topic']")
+    assert page.locator("[data-test=ftag]").count() == 5
+    page.locator("[data-test=ftag][data-tag='Topic']").click()
+    page.wait_for_selector("#tagfocus:not([hidden])")
+    page.wait_for_function("() => document.querySelectorAll('.note-card').length === 1")
+    assert "1 match with ⚑ Topic" in page.locator("#list-sub").inner_text()
+    page.wait_for_function("() => document.querySelector('[data-test=tagfocus-count]').textContent === '2 of 4 examples in this note'")
+    assert "tag-miss" in first.get_attribute("class") and "tag-hit" in second.get_attribute("class")
+    assert "tag-hit" in page.locator("#editor .flex-collapsed").first.get_attribute("class")      # the chip for 3.1 carries Topic
+    assert "tag-miss" in page.locator("#editor .md-embed").first.get_attribute("class")
+    page.locator("[data-test=tagfocus-clear]").click()
+    page.wait_for_function("() => document.querySelectorAll('.note-card').length === 3 && document.getElementById('tagfocus').hidden")
+    assert "tag-miss" not in first.get_attribute("class")
+    assert not errors
+
+
+def test_rail_parts_fold_and_resize_and_are_never_lost(app):
+    """Seth, 2026-10-18: "the left pane is now too crowded … the borders of each part can be
+    vertically dragged and collapsed/expanded. We don't ever want something hidden beyond recovery
+    in that pane"."""
+    h, page, errors = app
+    tab = h.api.init()["config"]["tabs"][0]["dir"]
+    for i in range(8):
+        h.api.create_folder(tab, "Folder %d" % i)
+    page.reload()
+    page.wait_for_selector(".folder-item")
+    height = lambda sel: page.evaluate("(s) => document.querySelector(s).getBoundingClientRect().height", sel)   # noqa: E731
+    visible_top = lambda sel: page.evaluate("(s) => { const r = document.querySelector(s).getBoundingClientRect(); const p = document.getElementById('rail').getBoundingClientRect(); return r.top >= p.top && r.bottom <= p.bottom; }", sel)   # noqa: E731
+    # every header is in the pane, and the FLEx tags part is hidden until the project is open or notes use tags
+    for sec in ("tabs", "folders", "tags"):
+        assert visible_top("#%s-section h4" % sec)
+    # fold Tags with its header: the body goes, the header stays, the state is remembered
+    page.locator("#tags-section h4").click()
+    assert page.locator("#tags-section.collapsed").count() == 1 and not page.locator("#tags").is_visible()
+    assert visible_top("#tags-section h4")
+    page.reload()
+    page.wait_for_selector(".folder-item")
+    assert page.locator("#tags-section.collapsed").count() == 1
+    page.locator("#tags-section h4").click()
+    assert page.locator("#tags-section.collapsed").count() == 0 and page.locator("#tags").is_visible()
+    # drag the divider under Folders down: Folders gains what Tags loses; double-click resets both
+    before_f, before_t = height("#folders-section"), height("#tags-section")
+    d = page.locator("[data-test=rail-divider]").nth(1).bounding_box()
+    page.mouse.move(d["x"] + 40, d["y"] + 3)
+    page.mouse.down()
+    page.mouse.move(d["x"] + 40, d["y"] + 43, steps=5)
+    page.mouse.up()
+    assert abs(height("#folders-section") - (before_f + 40)) < 3, (before_f, height("#folders-section"))
+    assert abs(height("#tags-section") - (before_t - 40)) < 3
+    st = page.evaluate("JSON.parse(localStorage.getItem('fs:rail'))")
+    assert set(st["sizes"]) == {"folders", "tags"}
+    # a part can never be dragged smaller than its header
+    page.mouse.move(d["x"] + 40, d["y"] + 43)
+    page.mouse.down()
+    page.mouse.move(d["x"] + 40, d["y"] + 900, steps=5)
+    page.mouse.up()
+    assert visible_top("#tags-section h4") and height("#tags-section") >= height("#tags-section h4")
+    page.locator("[data-test=rail-divider]").nth(1).dblclick()
+    assert "sizes" not in page.evaluate("JSON.parse(localStorage.getItem('fs:rail'))") or not page.evaluate("JSON.parse(localStorage.getItem('fs:rail')).sizes")
+    assert not errors
+
+
+def test_hidden_markers_type_to_the_right_of_a_prefix(app):
+    """Seth, 2026-10-18: with markup hidden, "add a heading or make a blank block into a heading
+    and then start typing, the cursor goes to the left of the ### and makes the ### appear. … text
+    should automatically start typing to the RIGHT of a heading or list markup tag"."""
+    h, page, errors = app
+    page.locator("#btn-markers").click()
+    page.wait_for_function("() => document.body.classList.contains('md-hide')")
+    new_note(page, "Hidden")
+    page.click(".blk-body")
+    # an empty block made a heading: its prefix shows faintly, the caret sits after it, typing follows it
+    page.locator("[data-test=tb-heading]").dispatch_event("mousedown")
+    page.locator("[data-test=heading-2]").dispatch_event("mousedown")
+    page.wait_for_selector("#editor .blk-h .md-line-empty")
+    assert page.locator("#editor .blk-h .md-line-empty .md-marker").first.is_visible()
+    page.keyboard.type("Title")
+    page.wait_for_timeout(900)
+    assert body_of(h).strip() == "## Title", body_of(h)
+    # the heading's own markup stays visible while the caret is on its line (Seth, 2026-10-18:
+    # "whatever … style markup applies to the current cursor position should be visible")
+    assert page.locator("#editor .blk-h .md-marker.reveal").first.is_visible()
+    # Home then typing: still after the prefix; a click at the far left of the line too
+    page.keyboard.press("Home")
+    page.keyboard.type("A ")
+    page.wait_for_timeout(900)
+    assert body_of(h).strip() == "## A Title", body_of(h)
+    box = page.locator("#editor .blk-h .blk-body").bounding_box()
+    page.mouse.click(box["x"] + 1, box["y"] + box["height"] / 2)
+    page.keyboard.type("B")
+    page.wait_for_timeout(900)
+    assert body_of(h).strip() == "## BA Title", body_of(h)
+    # Enter makes a paragraph under it; a list item started there keeps typing after its bullet
+    page.keyboard.press("End")
+    page.keyboard.press("Enter")
+    page.keyboard.type("- first")
+    page.keyboard.press("Enter")
+    page.keyboard.press("Home")
+    page.keyboard.type("second")
+    page.wait_for_timeout(900)
+    assert body_of(h).strip() == "## BA Title\n\n- first\n- second", body_of(h)
+    # the caret has left the heading: its ## is hidden again; the bullets stay glyphs, never text
+    assert not page.locator("#editor .blk-h .md-marker").first.is_visible()
+    assert page.locator("#editor .blk-list .md-marker.reveal").count() == 0
+    page.locator("#btn-markers").click()
+    page.wait_for_function("() => !document.body.classList.contains('md-hide')")
+    assert not errors
+
+
+def test_hidden_markers_reveal_only_the_markup_at_the_caret(app):
+    """Seth, 2026-10-18: "whatever character or style markup applies to the current cursor
+    position should be visible, but none of the rest of it. I think this is roughly how WhatsApp
+    works": the enclosing runs' markers (nested ones too) and the line's heading mark, nothing else."""
+    h, page, errors = app
+    page.locator("#btn-markers").click()
+    page.wait_for_function("() => document.body.classList.contains('md-hide')")
+    new_note(page, "Reveal")
+    page.click(".blk-body")
+    paste(page, "### Head **bold** and *it* here\n\nPlain **one *two* three** and `code` [a link](http://x.y) end")
+    page.wait_for_timeout(400)
+    revealed = lambda: page.evaluate("() => [...document.querySelectorAll('#editor .md-marker.reveal')].map((m) => m.textContent)")   # noqa: E731
+    put = lambda sel, text, off: page.evaluate("([sel, text, off]) => { const b = document.querySelector(sel); FS.editor.setCaret(b, b.textContent.indexOf(text) + off); b.focus(); }", [sel, text, off])   # noqa: E731
+    # on the heading line, in the plain word "and": the ### shows, the bold and italic marks do not
+    put("#editor .blk-h .blk-body", "and", 1)
+    page.wait_for_timeout(150)
+    assert revealed() == ["### "], revealed()
+    # inside "bold": the ### and that word's ** **, not the italic's
+    put("#editor .blk-h .blk-body", "bold", 2)
+    page.wait_for_timeout(150)
+    assert revealed() == ["### ", "**", "**"], revealed()
+    # in the paragraph, inside "two": the outer bold AND the inner italic; inside "three": the bold only
+    put("#editor .blk-p .blk-body", "two", 1)
+    page.wait_for_timeout(150)
+    assert revealed() == ["**", "*", "*", "**"], revealed()
+    put("#editor .blk-p .blk-body", "three", 2)
+    page.wait_for_timeout(150)
+    assert revealed() == ["**", "**"], revealed()
+    # right after the closing ** (touching) still shows it; in "and" nothing; in the code its ticks; in the link its brackets
+    put("#editor .blk-p .blk-body", "three**", len("three**"))
+    page.wait_for_timeout(150)
+    assert revealed() == ["**", "**"], revealed()
+    put("#editor .blk-p .blk-body", "and `", 1)
+    page.wait_for_timeout(150)
+    assert revealed() == [], revealed()
+    put("#editor .blk-p .blk-body", "code", 2)
+    page.wait_for_timeout(150)
+    assert revealed() == ["`", "`"], revealed()
+    put("#editor .blk-p .blk-body", "link", 2)
+    page.wait_for_timeout(150)
+    assert revealed() == ["[", "](http://x.y)"], revealed()
+    assert page.locator("#editor .md-marker.reveal").first.is_visible()
+    page.locator("#btn-markers").click()
+    page.wait_for_function("() => !document.body.classList.contains('md-hide')")
+    assert not errors
+
+
+def test_list_items_indent_and_outdent_and_nest_prettily(app):
+    """Seth, 2026-10-18: lists "need to include the ability to increase and decrease the indent
+    (and display it prettily)": Tab / Shift+Tab, Ctrl+] / Ctrl+[, the toolbar's ⇥ ⇤ and the block
+    menu step the selected items in and out; each level gets its own bullet, nested numbers are
+    lettered, then roman."""
+    h, page, errors = app
+    new_note(page, "Nested")
+    page.click(".blk-body")
+    paste(page, "- one\n- two\n- three\n- four")
+    page.wait_for_timeout(300)
+    bullet = lambda i: page.evaluate("(i) => getComputedStyle(document.querySelectorAll('#editor .md-bullet')[i], '::before').content", i)   # noqa: E731
+    # Tab on "two", then on "three" twice: levels 1 and 2 with their own bullets
+    body = page.locator("#editor .blk-list .blk-body")
+    page.evaluate("() => { const b = document.querySelector('#editor .blk-list .blk-body'); FS.editor.setCaret(b, '- one\\n- t'.length); b.focus(); }")
+    page.keyboard.press("Tab")
+    page.keyboard.press("ArrowDown")
+    page.keyboard.press("Tab")
+    page.keyboard.press("Control+]")
+    page.wait_for_timeout(700)
+    assert body_of(h).strip() == "- one\n  - two\n    - three\n- four", body_of(h)
+    assert [bullet(i) for i in range(4)] == ['"•"', '"◦"', '"▪"', '"•"']
+    # the items are single-spaced: four lines take four line heights, not eight (Seth, 2026-10-18:
+    # "we don't really want double-line spacing in our list items within a single block")
+    h_body, lh = page.evaluate("() => { const b = document.querySelector('#editor .blk-list .blk-body'); return [b.getBoundingClientRect().height, parseFloat(getComputedStyle(b).lineHeight)]; }")
+    assert 3.5 * lh < h_body < 5 * lh, (h_body, lh)
+    # Shift+Tab brings "three" back one; the toolbar's ⇤ once more; ⇥ in again
+    page.keyboard.press("Shift+Tab")
+    page.locator("[data-test=tb-outdent]").dispatch_event("mousedown")
+    page.locator("[data-test=tb-indent]").dispatch_event("mousedown")
+    page.wait_for_timeout(700)
+    assert body_of(h).strip() == "- one\n  - two\n  - three\n- four", body_of(h)
+    # a selection over several items moves them together, and stays on the same text
+    page.evaluate("() => { const b = document.querySelector('#editor .blk-list .blk-body'); FS.editor.setCaret(b, '- one\\n  - t'.length, '- one\\n  - two\\n  - th'.length); b.focus(); }")
+    page.keyboard.press("Control+[")
+    page.wait_for_timeout(700)
+    assert body_of(h).strip() == "- one\n- two\n- three\n- four", body_of(h)
+    assert page.evaluate("() => getSelection().toString()") == "wo\n- th"
+    # numbered items: a. b. one level in, i. ii. two levels in, shown over the typed digits
+    page.keyboard.press("Control+End")
+    page.keyboard.press("Enter")
+    page.keyboard.press("Enter")
+    paste(page, "1. first\n  1. sub a\n  2. sub b\n    1. deep\n    2. deeper\n2. second")
+    page.wait_for_timeout(500)
+    shown = page.evaluate("() => [...document.querySelectorAll('#editor .md-line[data-num]')].map((l) => l.dataset.num)")
+    assert shown == ["1.", "a.", "b.", "i.", "ii.", "2."], shown
+    # the block menu has the indent row for a list
+    grip = page.locator("#editor .blk-list").last.locator("[data-test=blk-grip]")
+    page.locator("#editor .blk-list").last.hover()
+    grip.dispatch_event("mousedown")
+    page.wait_for_selector("[data-test=list-indent]")
+    page.keyboard.press("Escape")
+    assert not errors
+
+
+def test_gap_bar_between_blocks_adds_and_removes(app):
+    """Seth, 2026-10-18: the empty line between blocks is "a convenient place for an add/remove
+    block bar similar to the bar at the end of our table": hovering the gap shows + Paragraph /
+    + Example / + Table / + More and − Above / − Below."""
+    h, page, errors = app
+    new_note(page, "Gaps")
+    page.click(".blk-body")
+    paste(page, "first\n\nsecond")
+    page.wait_for_timeout(300)
+    page.keyboard.press("Backspace")          # the empty paragraph the paste leaves after itself
+    page.wait_for_timeout(300)
+    assert page.locator("#editor .blk").count() == 2
+    bar = page.locator("[data-test=blk-gap]")
+    assert bar.is_hidden()
+    gap_y = page.evaluate("() => { const [a, b] = document.querySelectorAll('#editor .blk'); return (a.getBoundingClientRect().bottom + b.getBoundingClientRect().top) / 2; }")
+    x = page.evaluate("() => { const r = document.querySelector('#editor').getBoundingClientRect(); return r.left + r.width / 2; }")
+    page.mouse.move(x, gap_y - 30)
+    page.mouse.move(x, gap_y)
+    page.wait_for_timeout(120)
+    assert bar.is_hidden()                     # passing through shows nothing: the pointer has to REST in the gap
+    page.wait_for_selector("[data-test=blk-gap]:not([hidden])")
+    # the bar sits on the gap
+    top, bottom = page.evaluate("() => { const r = document.querySelector('#blk-gap').getBoundingClientRect(); return [r.top, r.bottom]; }")
+    assert top < gap_y < bottom
+    # + Paragraph puts a new block between the two, focused
+    bar.locator("[data-gap=p]").click()
+    page.wait_for_timeout(300)
+    assert bar.is_hidden()
+    assert page.locator("#editor .blk").count() == 3
+    assert page.evaluate("() => [...document.querySelectorAll('#editor .blk')].indexOf(document.activeElement.closest('.blk'))") == 1
+    page.keyboard.type("middle")
+    page.wait_for_timeout(700)
+    assert body_of(h).strip() == "first\n\nmiddle\n\nsecond", body_of(h)
+    # − Below from the gap under "first" removes "middle"; hovering the button marks it first
+    gap_y = page.evaluate("() => { const [a, b] = document.querySelectorAll('#editor .blk'); return (a.getBoundingClientRect().bottom + b.getBoundingClientRect().top) / 2; }")
+    page.mouse.move(x, gap_y + 40)
+    page.mouse.move(x, gap_y)
+    page.wait_for_selector("[data-test=blk-gap]:not([hidden])")
+    bar.locator("[data-gap=rm-below]").hover()
+    assert page.evaluate("() => document.querySelectorAll('#editor .blk')[1].classList.contains('del-hint')")
+    # one click only ARMS the button ("Remove?"); it disarms by itself; two clicks remove
+    bar.locator("[data-gap=rm-below]").click()
+    assert bar.locator("[data-gap=rm-below]").inner_text() == "Remove?" and page.locator("#editor .blk").count() == 3
+    page.wait_for_timeout(2300)
+    assert bar.locator("[data-gap=rm-below]").inner_text() == "− Below"
+    bar.locator("[data-gap=rm-below]").click()
+    bar.locator("[data-gap=rm-below]").click()
+    page.wait_for_timeout(700)
+    assert body_of(h).strip() == "first\n\nsecond", body_of(h)
+    assert page.locator("#editor .blk").count() == 2
+    assert page.locator("#editor .del-hint").count() == 0
+    # the toast's Undo brings the paragraph back
+    page.wait_for_selector(".toast:has-text('Paragraph removed') [data-test=toast-action]")
+    page.locator(".toast [data-test=toast-action]").click()
+    page.wait_for_timeout(700)
+    assert page.locator("#editor .blk").count() == 3 and body_of(h).strip() == "first\n\nmiddle\n\nsecond", body_of(h)
+    gap_y = page.evaluate("() => { const [a, b] = document.querySelectorAll('#editor .blk'); return (a.getBoundingClientRect().bottom + b.getBoundingClientRect().top) / 2; }")
+    page.mouse.move(x, gap_y + 40)
+    page.mouse.move(x, gap_y)
+    page.wait_for_selector("[data-test=blk-gap]:not([hidden])")
+    bar.locator("[data-gap=rm-below]").click()
+    bar.locator("[data-gap=rm-below]").click()
+    page.wait_for_timeout(700)
+    assert page.locator("#editor .blk").count() == 2
+    # below the last block: no "− Below"; + More ▾ lists every kind, each inserting here
+    last_bottom = page.evaluate("() => document.querySelector('#editor .blk:last-child').getBoundingClientRect().bottom")
+    page.mouse.move(x, last_bottom + 6)
+    page.wait_for_selector("[data-test=blk-gap]:not([hidden])")
+    assert bar.locator("[data-gap=rm-below]").count() == 0 and bar.locator("[data-gap=rm-above]").count() == 1
+    bar.locator("[data-gap=more]").click()
+    page.wait_for_selector(".popover .ins-grid")
+    assert page.locator(".popover .ins-grid [data-ins-where=before]").count() == 0
+    page.locator(".popover .ins-grid [data-ins-kind=hr]").click()
+    page.wait_for_timeout(700)
+    assert body_of(h).strip().endswith("second\n\n---"), body_of(h)
+    # the bar goes away when the pointer leaves the gap
+    page.mouse.move(x, 5)
+    page.wait_for_timeout(300)
+    assert bar.is_hidden()
+    # a table's bar shows once the table was clicked into, not on hover
+    page.locator("#editor .blk-body").first.click()
+    page.keyboard.press("Control+End")
+    page.locator("[data-ins=table]").dispatch_event("mousedown")
+    page.wait_for_selector("#editor table.md-table")
+    page.locator("#editor table.md-table").hover()
+    page.wait_for_timeout(200)
+    assert not page.locator("#editor .tbl-tools").is_visible()
+    page.locator("#editor table.md-table").dispatch_event("mousedown")
+    page.wait_for_selector("#editor .tbl-tools:visible")
+    page.locator("#editor .blk-body").first.click()
+    page.wait_for_timeout(200)
+    assert not page.locator("#editor .tbl-tools").is_visible()
+    # Settings can switch the bar between blocks off
+    page.locator("#btn-settings").click()
+    page.locator("[data-test=setting-gapbar]").uncheck()
+    page.keyboard.press("Escape")
+    gap_y = page.evaluate("() => { const [a, b] = document.querySelectorAll('#editor .blk'); return (a.getBoundingClientRect().bottom + b.getBoundingClientRect().top) / 2; }")
+    page.mouse.move(x, gap_y - 30)
+    page.mouse.move(x, gap_y)
+    page.wait_for_timeout(700)
+    assert bar.is_hidden()
+    assert h.api.init()["config"]["settings"]["gapBar"] is False
+    page.locator("#btn-settings").click()
+    page.locator("[data-test=setting-gapbar]").check()
+    page.keyboard.press("Escape")
+    assert not errors
+
+
+def test_collection_from_a_rule_and_find_new_lines(app):
+    """Seth, 2026-10-18: "create a collection with ALL lines that match a specific rule. And to be
+    able to have that collection add new matches found in the database that aren't already in
+    that collection"."""
+    h, page, errors = app
+    page.locator("#btn-new-menu").click()
+    page.locator("[data-test=new-rule-collection]").click()
+    page.wait_for_selector(".rule-dlg [data-test=rule-tags] [data-test=rule-tag]")
+    dlg = page.locator(".rule-dlg")
+    assert dlg.locator("[data-test=rule-count]").inner_text() == "Choose one or more tags."
+    # the tags come as FLEx's tree; a group's box stands for every tag under it
+    assert dlg.locator("[data-test=tag-tree-group][data-group=Arguments]").count() == 1
+    dlg.locator("[data-test=rule-tag][data-tag=Topic]").check()
+    page.wait_for_function("() => /^2 lines match/.test(document.querySelector('[data-test=rule-count]').textContent)")
+    assert dlg.locator("[data-test=rule-preview] div").count() == 2
+    dlg.locator("[data-test=rule-group][data-tag='group:Arguments']").check()
+    page.wait_for_function("() => /^4 lines match/.test(document.querySelector('[data-test=rule-count]').textContent)")
+    assert dlg.locator("[data-test=rule-tag][data-tag=Subject]").is_disabled()        # covered by its group
+    assert dlg.locator("[data-test=rule-title]").get_attribute("placeholder") == "Lines tagged Topic, Arguments"
+    dlg.locator("[data-test=rule-title]").fill("Topics and arguments")
+    dlg.locator("[data-test=rule-ok]").click()
+    page.wait_for_selector("#collection [data-test=coll-rule]")
+    page.wait_for_function("document.querySelectorAll('#collection .coll-item').length === 4")
+    assert page.locator("#note-title").input_value() == "Topics and arguments"
+    assert page.locator("[data-test=coll-rule]").inner_text().startswith("⚑ Topic, all of Arguments")
+    nid = h.api.list_collections()[0]["id"]
+    note = h.api.get_note(nid)
+    assert note["rule"] == {"tags": ["Topic", "group:Arguments"]} and note["body"].count("{{flex:text") == 4
+    assert "seg=5-6 at=" in note["body"]                                                   # the spanning Topic is one line
+    # nothing new yet
+    page.locator("[data-test=coll-rule-update]").click()
+    page.wait_for_selector(".toast:has-text('Nothing new')")
+    # remove two lines by hand, then "Find new lines" brings them back, at the end and selected
+    first = page.locator("#collection .coll-item").first
+    first.locator("[data-test=coll-check]").check()
+    page.locator("#collection .coll-item").nth(1).locator("[data-test=coll-check]").check()
+    page.locator("[data-test=coll-sel-delete]").click()
+    page.wait_for_function("document.querySelectorAll('#collection .coll-item').length === 2")
+    page.wait_for_timeout(900)
+    page.locator("[data-test=coll-rule-update]").click()
+    page.wait_for_selector(".toast:has-text('2 new lines added')")
+    page.wait_for_function("document.querySelectorAll('#collection .coll-item').length === 4")
+    assert page.locator("#collection .coll-item.selected").count() == 2
+    assert [c.inner_text() for c in page.locator("#collection .coll-num").all()] == ["(1)", "(2)", "(3)", "(4)"]
+    body = without_flex_copies(h.api.get_note(nid)["body"])
+    assert body.count("{{flex:text") == 4 and body.rstrip().endswith("}}")
+    # the rule is edited in place: the header follows, the file too
+    page.locator("[data-test=coll-rule-edit]").click()
+    page.wait_for_selector(".rule-dlg [data-test=rule-tag]")
+    assert page.locator(".rule-dlg [data-test=rule-title]").is_disabled()
+    page.locator(".rule-dlg [data-test=rule-group][data-tag='group:Arguments']").uncheck()
+    page.locator(".rule-dlg [data-test=rule-ok]").click()
+    page.wait_for_function("() => document.querySelector('[data-test=coll-rule] .coll-rule-tags').textContent.trim() === '⚑ Topic'")
+    assert h.api.get_note(nid)["rule"] == {"tags": ["Topic"]}
+    # the picker's tag view offers the same, pre-ticked
+    page.locator("#btn-new-menu").click()
+    page.locator("[data-test=new-collection]").click()
+    page.wait_for_selector("#collection .coll-add")
+    page.locator("#collection button", has_text="Add from FLEx").click()
+    page.wait_for_selector(".picker-tabs")
+    page.locator(".picker-tabs button", has_text="FLEx tags").click()
+    page.locator("[data-test=pick-tag]", has_text="Verb").click()
+    page.wait_for_selector("[data-test=collect-tagged]")
+    page.locator("[data-test=collect-tagged]").click()
+    page.wait_for_selector(".rule-dlg [data-test=rule-tag]")
+    assert page.locator(".rule-dlg [data-test=rule-tag][data-tag=Verb]").is_checked()
+    page.keyboard.press("Escape")
+    assert not errors
+
+
+def test_promote_and_demote_all_headings_in_the_note_or_a_selection(app):
+    """Seth, 2026-10-18: "the easy ability to promote and demote all headers in a note or within a
+    selected range"."""
+    h, page, errors = app
+    new_note(page, "Outline")
+    page.locator("#editor .blk-body").first.click()
+    paste(page, "# A\n\nx\n\n## B\n\ny\n\n### C\n\nz")
+    page.wait_for_timeout(300)
+    heads = lambda: page.evaluate("() => __fsEditor.blocks.filter((b) => b.type === 'h').map((b) => b.src)")   # noqa: E731
+    # the H menu: demote every heading in the note; Ctrl+Alt+[ promotes them again
+    page.locator("[data-test=tb-heading]").dispatch_event("mousedown")
+    assert page.locator("[data-test=demote-all]").inner_text().startswith("⇥ Demote all headings in the note")
+    page.locator("[data-test=demote-all]").dispatch_event("mousedown")
+    page.wait_for_function("() => __fsEditor.blocks[0].src === '## A'")
+    assert heads() == ["## A", "### B", "#### C"]
+    page.locator("#editor .blk-body").first.click()
+    page.keyboard.press("Control+Alt+[")
+    page.wait_for_function("() => __fsEditor.blocks[0].src === '# A'")
+    assert heads() == ["# A", "## B", "### C"]
+    # at the top already: promoting would merge two levels, so nothing moves
+    page.keyboard.press("Control+Alt+[")
+    page.wait_for_selector(".toast:has-text('already at level 1')")
+    assert heads() == ["# A", "## B", "### C"]
+    # a cross-block selection (B's block to C's block): only the headings in it move, and it stays selected
+    blk = lambda t: page.locator("#editor .blk", has=page.locator(".blk-body", has_text=t)).first   # noqa: E731
+    blk("B").locator(".blk-body").click()
+    blk("C").locator(".blk-body").click(modifiers=["Shift"])
+    page.wait_for_function("() => !!__fsEditor.msel")
+    page.locator("[data-test=tb-heading]").dispatch_event("mousedown")
+    assert page.locator("[data-test=demote-all]").inner_text().startswith("⇥ Demote all headings in the selection")
+    page.locator("[data-test=demote-all]").dispatch_event("mousedown")
+    page.wait_for_function("() => __fsEditor.blocks[2].src === '### B'")
+    assert heads() == ["# A", "### B", "#### C"]
+    assert page.evaluate("() => !!__fsEditor.msel")
+    page.keyboard.press("Control+Alt+[")
+    page.wait_for_function("() => __fsEditor.blocks[2].src === '## B'")
+    assert heads() == ["# A", "## B", "### C"]
+    # the ⋮ menu of a selected block has the same two rows
+    blk("B").hover()
+    blk("B").locator(".blk-handle button").dispatch_event("mousedown")
+    page.locator(".popover .menu-item", has_text="Demote the headings here").click()
+    page.wait_for_function("() => __fsEditor.blocks[2].src === '### B'")
+    assert heads() == ["# A", "### B", "#### C"]
+    page.wait_for_timeout(900)
+    assert body_of(h).startswith("# A\n\nx\n\n### B\n\ny\n\n#### C"), body_of(h)
+    # undo takes the whole step back
+    page.keyboard.press("Escape")
+    page.locator("#editor .blk-body").first.click()
+    page.keyboard.press("Control+z")
+    page.wait_for_function("() => __fsEditor.blocks[2].src === '## B'")
+    assert not errors
+
+
+def test_links_dialog_and_the_common_keyboard_shortcuts(app):
+    """Seth, 2026-10-18: "a hyperlink feature to our app (button and keyboard shortcut … what
+    common keyboard shortcuts we should add … Ctrl+Z, Ctrl+Y, Ctrl+K (hyperlink), Ctrl+I …)"."""
+    h, page, errors = app
+    new_note(page, "Links")
+    page.locator("#editor .blk-body").first.click()
+    page.keyboard.type("see docs here")
+    page.wait_for_timeout(200)
+    # Ctrl+K with "docs" selected: the selection is the text, the address gets https:// when it has no scheme
+    page.evaluate("() => { const b = document.querySelector('#editor .blk-body'); FS.editor.setCaret(b, 4, 8); b.focus(); }")
+    page.keyboard.press("Control+k")
+    page.wait_for_selector(".link-dlg")
+    assert page.locator("[data-test=link-text]").input_value() == "docs"
+    page.locator("[data-test=link-url]").fill("example.org/x")
+    page.locator("[data-test=link-ok]").click()
+    page.wait_for_timeout(900)
+    assert body_of(h) == "see [docs](https://example.org/x) here", body_of(h)
+    # the caret inside the link shows the pill under it: the address, Open · Edit · Copy · Unlink
+    # (Seth: "make it easy to click to follow or edit links")
+    page.evaluate("() => { const b = document.querySelector('#editor .blk-body'); FS.editor.setCaret(b, 7); b.focus(); }")
+    page.wait_for_selector("[data-test=link-pill]:not([hidden])")
+    assert page.locator("#link-pill .lp-href").inner_text() == "https://example.org/x"
+    page.locator("[data-test=lp-copy]").click()
+    page.wait_for_selector(".toast:has-text('Link copied')")
+    assert page.evaluate("() => document.activeElement.classList.contains('blk-body')")       # the caret stayed in the note
+    page.locator("[data-test=lp-edit]").click()
+    page.wait_for_selector(".link-dlg")
+    assert page.locator(".link-dlg .modal-title").inner_text() == "Edit link"
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(200)
+    # the caret inside the link: Ctrl+K edits it; Update rewrites it in place
+    page.evaluate("() => { const b = document.querySelector('#editor .blk-body'); FS.editor.setCaret(b, 7); b.focus(); }")
+    page.keyboard.press("Control+k")
+    page.wait_for_selector(".link-dlg")
+    assert page.locator(".link-dlg .modal-title").inner_text() == "Edit link"
+    assert page.locator("[data-test=link-url]").input_value() == "https://example.org/x" and page.locator("[data-test=link-text]").input_value() == "docs"
+    page.locator("[data-test=link-text]").fill("the docs")
+    page.locator("[data-test=link-ok]").click()
+    page.wait_for_timeout(900)
+    assert body_of(h) == "see [the docs](https://example.org/x) here", body_of(h)
+    # Remove link keeps the text; the toolbar button opens the same dialog; a note link is a wikilink
+    page.evaluate("() => { const b = document.querySelector('#editor .blk-body'); FS.editor.setCaret(b, 6); b.focus(); }")
+    page.locator("[data-test=tb-link]").dispatch_event("mousedown")
+    page.wait_for_selector("[data-test=link-remove]")
+    page.locator("[data-test=link-remove]").click()
+    page.wait_for_timeout(900)
+    assert body_of(h) == "see the docs here", body_of(h)
+    page.keyboard.press("End")
+    page.keyboard.type(" and ")
+    page.keyboard.press("Control+k")
+    page.wait_for_selector(".link-dlg")
+    page.locator("[data-test=link-kind]").select_option("note")
+    page.locator("[data-test=link-note]").fill("Welcome to FLEx Scratchpad")
+    page.locator("[data-test=link-ok]").click()
+    page.wait_for_timeout(900)
+    assert body_of(h) == "see the docs here and [[Welcome to FLEx Scratchpad]]", body_of(h)
+    # a note link's pill opens the note; back in the note, Unlink keeps the title as text
+    page.evaluate("() => { const b = document.querySelector('#editor .blk-body'); FS.editor.setCaret(b, b.textContent.length - 4); b.focus(); }")
+    page.wait_for_selector("[data-test=link-pill]:not([hidden])")
+    assert page.locator("[data-test=lp-open]").inner_text() == "Open note"
+    page.locator("[data-test=lp-open]").click()
+    page.wait_for_function("() => document.getElementById('note-title').value === 'Welcome to FLEx Scratchpad'")
+    assert page.locator("[data-test=link-pill]").is_hidden()
+    page.locator(".note-card", has_text="Links").first.click()
+    page.wait_for_function("() => document.getElementById('note-title').value === 'Links'")
+    page.evaluate("() => { const b = document.querySelector('#editor .blk-body'); FS.editor.setCaret(b, b.textContent.length - 4); b.focus(); }")
+    page.wait_for_selector("[data-test=link-pill]:not([hidden])")
+    page.locator("[data-test=lp-unlink]").click()
+    page.wait_for_timeout(900)
+    assert body_of(h) == "see the docs here and Welcome to FLEx Scratchpad", body_of(h)
+    assert page.locator("[data-test=link-pill]").is_hidden()
+    # the other common keys: Ctrl+E code, Ctrl+Shift+X strike, the lists, plain text, a paragraph above, duplicate
+    page.keyboard.press("Control+Enter")
+    page.keyboard.type("code strike")
+    page.evaluate("() => { const b = document.querySelectorAll('#editor .blk-body')[1]; FS.editor.setCaret(b, 0, 4); b.focus(); }")
+    page.keyboard.press("Control+e")
+    page.evaluate("() => { const b = document.querySelectorAll('#editor .blk-body')[1]; FS.editor.setCaret(b, 7, 13); b.focus(); }")
+    page.keyboard.press("Control+Shift+x")
+    page.wait_for_timeout(900)
+    assert body_of(h).endswith("`code` ~~strike~~"), body_of(h)
+    page.keyboard.press("Control+Shift+Digit8")
+    page.wait_for_timeout(300)
+    assert page.evaluate("() => __fsEditor.blocks[1].src") == "- `code` ~~strike~~"
+    page.keyboard.press("Control+Shift+Digit7")
+    page.wait_for_timeout(300)
+    assert page.evaluate("() => __fsEditor.blocks[1].src") == "1. `code` ~~strike~~"
+    page.keyboard.press("Control+Shift+Digit9")
+    page.wait_for_timeout(300)
+    assert page.evaluate("() => __fsEditor.blocks[1].src") == "- [ ] `code` ~~strike~~"
+    page.keyboard.press("Control+Alt+Digit0")
+    page.wait_for_timeout(300)
+    assert page.evaluate("() => __fsEditor.blocks[1].src") == "`code` ~~strike~~"
+    page.keyboard.press("Control+Shift+Enter")
+    page.keyboard.type("above")
+    page.wait_for_timeout(300)
+    assert page.evaluate("() => __fsEditor.blocks.map((b) => b.src)")[1:3] == ["above", "`code` ~~strike~~"]
+    page.keyboard.press("Control+d")
+    page.wait_for_timeout(300)
+    assert page.evaluate("() => __fsEditor.blocks.map((b) => b.src)")[1:3] == ["above", "above"]
+    # undo / redo still take the keys; Ctrl+/ lists everything; F2 goes to the title
+    page.keyboard.press("Control+z")
+    page.wait_for_timeout(200)
+    assert page.evaluate("() => __fsEditor.blocks.map((b) => b.src)")[1:3] == ["above", "`code` ~~strike~~"]
+    page.keyboard.press("Control+y")
+    page.wait_for_timeout(200)
+    assert page.evaluate("() => __fsEditor.blocks.map((b) => b.src)")[1:3] == ["above", "above"]
+    page.keyboard.press("Control+Slash")
+    page.wait_for_selector(".shortcuts-dlg")
+    assert page.locator(".shortcuts-dlg kbd", has_text="Ctrl+K").count() == 1
+    page.keyboard.press("Escape")
+    page.keyboard.press("F2")
+    assert page.evaluate("() => document.activeElement.id") == "note-title"
+    # a link in a table cell
+    page.locator("#editor .blk-body").first.click()
+    page.keyboard.press("Control+End")
+    page.locator("[data-ins=table]").dispatch_event("mousedown")
+    page.wait_for_selector("#editor table.md-table")
+    page.locator("#editor table.md-table td .cell-view").first.dispatch_event("mousedown")
+    page.wait_for_selector("#editor .cell-edit")
+    page.keyboard.press("Control+k")
+    page.wait_for_selector(".link-dlg")
+    page.locator("[data-test=link-text]").fill("site")
+    page.locator("[data-test=link-url]").fill("https://a.b")
+    page.locator("[data-test=link-ok]").click()
+    page.wait_for_timeout(900)
+    assert "| [site](https://a.b) |" in body_of(h) or "[site](https://a.b)" in body_of(h), body_of(h)
+    # the hidden readable copy of a FLEx object (Seth: "needs to not accidentally expose our hidden md flex
+    # hyperlinks, the ones that end with flex-copy") is never the link under the caret, and survives a link next to it
+    tab = h.api.init()["config"]["tabs"][0]["dir"]
+    n = h.api.create_note(tab, "", "Copies", "See {{flex:text %s seg=1}}[DOG 1.1: \u2018x\u2019](silfw://localhost/link?app=flex&guid=%s \"flex-copy\") after." % (T_STORY, T_STORY))
+    page.reload()
+    page.wait_for_selector(".note-card")
+    page.locator(".note-card", has_text="Copies").first.click()
+    page.wait_for_selector("#editor .md-embed")
+    page.evaluate("() => { const b = document.querySelector('#editor .blk-body'); FS.editor.setCaret(b, b.textContent.indexOf(' after')); b.focus(); }")
+    page.keyboard.press("Control+k")
+    page.wait_for_selector(".link-dlg")
+    assert page.locator(".link-dlg .modal-title").inner_text() == "Insert link"          # not "Edit link" on the hidden copy
+    page.locator("[data-test=link-text]").fill("ref")
+    page.locator("[data-test=link-url]").fill("https://x.y")
+    page.locator("[data-test=link-ok]").click()
+    page.wait_for_timeout(1200)
+    assert body_of(h) == "See {{flex:text %s seg=1}}[ref](https://x.y) after." % T_STORY, body_of(h)
+    raw = h.api.get_note(n["id"])["body"]
+    assert raw.count('"flex-copy")') == 1 and "[ref](https://x.y)" in raw, raw
+    assert not errors
+
+
+# ---------------------------------------------------------------------------------- text charts
+CHART = "d15c0000-0000-4000-8000-00000000c001"
+
+
+def test_text_chart_rows_from_the_picker_with_headings_markers_and_translations(app):
+    """Seth, 2026-10-18: a text chart, a range of its rows (the column headings always included),
+    FLEx's markers drawn, the free translations spliced in."""
+    h, page, errors = app
+    new_note(page, "Charted")
+    page.click(".blk-body")
+    page.keyboard.press("Control+Shift+L")
+    page.locator(".picker-tabs button", has_text="Text charts").click()
+    page.wait_for_selector("[data-test=pick-chart]")
+    page.locator("[data-test=pick-chart]").first.click()
+    page.wait_for_selector(".picker-preview tr.crow")
+    rows = page.locator(".picker-preview tr.crow")
+    rows.nth(1).click()
+    rows.nth(3).click()
+    page.locator("[data-test=insert-chart-rows]").click()
+    page.wait_for_selector("#editor .chart-obj tr.crow")
+    saved = lambda: page.wait_for_function("() => document.getElementById('save-state').textContent === 'Saved'", timeout=5000)  # noqa: E731
+    saved()
+    body = body_of(h)
+    assert "{{flex:chart %s rows=2-4 at=" % CHART in body, body
+    obj = page.locator("#editor .chart-obj")
+    assert obj.locator("thead th.th-group").evaluate_all("els => els.map((e) => e.textContent)") == ["Prenuclear", "Nucleus", "Postnuclear"]
+    assert "Subject" in obj.locator("thead th.th-col").all_inner_texts()
+    assert obj.locator("tbody tr.crow th.rlab").evaluate_all("els => els.map((e) => [...e.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join(''))") == ["1b", "2a", "2b"]   # the ▶ buttons aside
+    assert "rows 1b–2b of 7" in obj.locator("[data-test=chart-range]").inner_text()
+    assert obj.locator(".cmoved").inner_text() == "‹‹" and obj.locator(".cclause").inner_text() == "[2a]"
+    # the free translations: one row after each segment's rows, naming them (2a and 2b share a segment)
+    frees = obj.locator("tr.cfree-row")
+    assert frees.count() == 2
+    assert "Yesterday the child saw the river." in frees.nth(0).inner_text() and frees.nth(0).locator(".cfree-rows").inner_text() == "1b"
+    assert frees.nth(1).locator(".cfree-rows").inner_text() == "2a–2b"
+    assert obj.locator("tr.cl-speech th.rlab").inner_text().strip().lstrip("▶§¶") == "2a"
+    # a word styled from its popover; a column from its heading
+    obj.locator("tr.crow[data-label='1b'] td[data-col='3'] .cw").first.click()
+    page.locator(".popover button.tog", has_text="Bold").click()
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(300)
+    saved()
+    assert "b=r2c3.1" in body_of(h), body_of(h)
+    page.locator("#editor .chart-obj thead th.th-col", has_text="Verb").click()
+    page.locator(".popover .sw").nth(1).click()
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(300)
+    saved()
+    assert "hl[#ffd6a5]=c4" in body_of(h), body_of(h)
+    assert page.locator("#editor .chart-obj td[data-col='4'].st-hl").count() == 3
+    # the ⋯ menu: the free translations as a column spanning the rows of one segment
+    page.locator("#editor .chart-obj [data-test=chart-menu]").click()
+    page.locator(".popover select").first.select_option("col")
+    page.wait_for_selector("#editor .chart-obj td.cfree")
+    assert page.locator("#editor .chart-obj td.cfree").nth(1).get_attribute("rowspan") == "2"
+    saved()
+    assert "free=col" in body_of(h)
+    # collapsed: a chip naming the chart and its rows
+    page.locator("#editor .chart-obj [data-test=collapse-obj]").click()
+    page.wait_for_selector("#editor .flex-collapsed.kind-chart")
+    chip = page.locator("#editor .flex-collapsed.kind-chart")
+    page.wait_for_function("() => document.querySelector('#editor .flex-collapsed.kind-chart .cttl').textContent.includes('Story chart')")
+    assert chip.locator(".crange").inner_text() == "rows 1b–2b"
+    assert not errors
+
+
+def test_a_chart_gets_a_readable_copy_and_exports(app):
+    h, page, errors = app
+    new_note(page, "Chart export")
+    page.keyboard.type("Intro")
+    page.keyboard.press("Enter")
+    page.keyboard.type("{{flex:chart %s rows=1-2}}" % CHART)
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#editor .chart-obj tr.crow")
+    page.wait_for_function("() => document.getElementById('save-state').textContent === 'Saved'", timeout=5000)
+    page.locator("#editor .blk-body").first.click()
+    page.keyboard.press("End")
+    page.keyboard.type(" more")
+    page.wait_for_function("() => document.getElementById('save-state').textContent === 'Saved'", timeout=5000)
+    page.wait_for_timeout(600)
+    notes = [n for n in h.api._nb.list_notes() if n["title"] == "Chart export"]
+    raw = h.api.get_note(notes[0]["id"])["body"]
+    assert '[Story chart — The dog and the river, rows 1a–1b](silfw://' in raw and '"flex-copy")' in raw, raw
+    fence = raw.split("```flex-copy\n")[1].split("\n```")[0]
+    assert fence.splitlines()[0].strip().startswith("Prenuclear") and "1b  Haŋa/yesterday" in fence and "‹‹1b" in fence, fence
+    html_path, docx_path = str(h.tmp / "chart.html"), str(h.tmp / "chart.docx")
+    html = page.evaluate("""async ([hp, dp]) => {
+      const api = window.pywebview.api;
+      const notes = await api.list_notes(); const note = (await Promise.all(notes.map((n) => api.get_note(n.id)))).find((n) => n.title === 'Chart export');
+      const editor = new FS.Editor(document.createElement('div'), {}); editor.load(FS.flexcopy.strip(note.body));
+      const doc = await FS.exporter.buildDoc(note, editor);
+      await api.export_note_html(note.id, FS.exporter.toHtml(doc), hp);
+      await api.export_note_docx(note.id, doc, dp);
+      return FS.exporter.toHtml(doc);
+    }""", [html_path, docx_path])
+    assert 'class="tchart"' in html and "Prenuclear" in html and "Haŋa" in html and "The dog slept." in html and "‹‹1b" in html, html[:400]
+    import zipfile
+    xml = zipfile.ZipFile(docx_path).read("word/document.xml").decode("utf-8")
+    assert "Prenuclear" in xml and "Haŋa" in xml and "The dog slept." in xml and '<w:gridSpan w:val="3"/>' in xml
+    # FLEx's own chart XML, from the object's menu
+    out = h.api.export_chart(CHART, "xml", [1, 2], path=str(h.tmp / "c.xml"))
+    assert '<row type="normal" id="1a"' in Path(out).read_text(encoding="utf-8")
+    assert not errors
+
+
+def test_a_chart_note_with_custom_columns(app):
+    """Seth, 2026-10-18: a chart note — one text chart with the user's own columns (a choice list
+    shared by the notebook, notes, a rule from the markers and columns) and styles, all saved in the
+    note's file as tables and found by search."""
+    h, page, errors = app
+    page.locator("#btn-new-menu").click()
+    page.locator("[data-test=new-chart-note]").click()
+    page.wait_for_selector("[data-test=pick-chart-note]")
+    page.locator("[data-test=pick-chart-note]").first.click()
+    page.wait_for_selector("#chartnote .tchart tr.crow")
+    assert page.locator("#chartnote tr.crow").count() == 7
+    # the view scrolls (Seth, 2026-10-18: "I can't scroll down" — a 65-row chart ran off the pane)
+    assert page.evaluate("getComputedStyle(document.getElementById('chartnote')).overflowY") == "auto"
+    assert page.evaluate("() => { const e = document.getElementById('chartnote'); return e.clientHeight > 0 && e.clientHeight <= document.getElementById('editor-pane').clientHeight; }")
+    assert page.input_value("#note-title") == "Story chart — The dog and the river"
+    saved = lambda: page.wait_for_function("() => document.getElementById('save-state').textContent === 'Saved'", timeout=5000)  # noqa: E731
+    # a notes column, typed into
+    page.locator("[data-test=cn-add-col]").click()
+    page.fill("[data-test=cn-col-name]", "Comment")
+    page.select_option("[data-test=cn-col-kind]", "notes")
+    page.locator("[data-test=cn-col-save]").click()
+    page.wait_for_selector("#chartnote th.th-x")
+    page.locator("#chartnote tr.crow[data-label='1b'] td.xcell .xval").click()
+    page.wait_for_selector("[data-test=xedit]")
+    page.keyboard.type("Subject fronted")
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#chartnote tr.crow[data-label='1b'] td.xcell .xval")
+    saved()
+    # a choice-list column with a new project-wide list
+    page.locator("[data-test=cn-add-col]").click()
+    page.fill("[data-test=cn-col-name]", "Status")
+    page.select_option("[data-test=cn-col-kind]", "list")
+    page.wait_for_selector("[data-test=cn-list-name]")
+    page.fill("[data-test=cn-list-name]", "Information status")
+    page.fill("[data-test=cn-list-opts]", "new\ngiven\ncontrast")
+    page.locator("[data-test=cn-col-save]").click()
+    page.wait_for_function("() => document.querySelectorAll('#chartnote th.th-x').length === 2")
+    page.locator("#chartnote tr.crow[data-label='1a'] td.xcell-list .xval").click()
+    page.wait_for_selector("#chartnote select.xsel")
+    page.select_option("#chartnote select.xsel", "given")
+    page.wait_for_function("() => document.querySelector(\"#chartnote tr.crow[data-label='1a'] td.xcell-list .xval\").textContent === 'given'")
+    saved()
+    assert h.api.chart_lists() == {"Information status": {"options": ["new", "given", "contrast"], "open": True}}
+    # a rule column: text per row, a row style from a marker, a list column's value as a term
+    page.locator("[data-test=cn-add-col]").click()
+    page.fill("[data-test=cn-col-name]", "Role")
+    page.select_option("[data-test=cn-col-kind]", "rule")
+    page.wait_for_selector("[data-test=cn-builder]")
+    # THE BUILDER (Seth, 2026-10-19: "a UI for building formulas rather than just a query language"): a new
+    # rule opens in it; conditions are picked from the chart's markers and columns and it writes the text
+    assert page.locator("[data-test=cn-rule-mode] .seg-btn.on").inner_text() == "Builder"
+    page.locator("[data-test=rb-add-cond]").click()
+    page.select_option("[data-test=rb-cond] [data-test=rb-what]", "marker")
+    page.select_option("[data-test=rb-cond] [data-test=rb-val]", "New")
+    page.fill("[data-test=rb-out]", "N")
+    page.select_option("[data-test=rb-scope]", "row")
+    page.locator("[data-test=rb-hl]").check()
+    page.wait_for_function("() => document.querySelector('[data-test=cn-rule]').value === 'marker:New → N [row hl]'")
+    # a second case: the words of ONE column against a pattern, in a chosen writing system when the chart has one
+    page.locator("[data-test=rb-add-case]").click()
+    page.locator("[data-test=rb-case]").nth(1).locator("[data-test=rb-add-cond]").click()
+    cond2 = page.locator("[data-test=rb-case]").nth(1).locator("[data-test=rb-cond]")
+    cond2.locator("[data-test=rb-what]").select_option("txt")
+    cond2.locator("[data-test=rb-how]").select_option("regex")
+    cond2.locator("[data-test=rb-val]").fill("^kabir$")
+    cond2.locator("[data-test=rb-incol]").select_option("Subject")
+    page.locator("[data-test=rb-case]").nth(1).locator("[data-test=rb-out]").fill("K")
+    page.wait_for_function("() => document.querySelector('[data-test=cn-rule]').value === 'marker:New → N [row hl]; col:Subject[txt:/^kabir$/] → K'")
+    page.wait_for_function("() => (document.querySelector('.cn-preview') || {}).textContent.includes('“K”: 2 rows')")
+    # the text tab shows the same rule; typing there is read back into the builder
+    page.locator("[data-test=cn-rule-text]").click()
+    assert page.locator("[data-test=cn-rule]").input_value() == "marker:New → N [row hl]; col:Subject[txt:/^kabir$/] → K"
+    page.fill("[data-test=cn-rule]", "marker:new → N [row hl#fde68a]; Status:given → G; col:Subject → S")
+    page.locator("[data-test=cn-rule-builder]").click()
+    page.wait_for_function("() => document.querySelectorAll('[data-test=rb-case]').length === 3")
+    assert page.locator("[data-test=rb-case]").nth(1).locator("[data-test=rb-what]").input_value() == "list"
+    assert page.locator("[data-test=cn-rule]").input_value() == "marker:new → N [row hl#fde68a]; Status:given → G; col:Subject → S"
+    page.wait_for_function("() => (document.querySelector('.cn-preview') || {}).textContent.includes('row')")
+    page.locator("[data-test=cn-col-save]").click()
+    page.wait_for_function("() => document.querySelectorAll('#chartnote th.th-x').length === 3")
+    roles = page.locator("#chartnote tr.crow td.xcell-rule").all_inner_texts()
+    assert roles == ["N", "S", "", "", "S", "S", "S"], roles          # 1a: the marker case comes first; 2a / 2b have no Subject
+    # MARKER CHIPS AND A JOINED ROW (Seth, 2026-10-19): a column that shows the row's markers as chips, and a
+    # `join` case that takes the line away between the row and the one above (a ^ShdArg-style continuation)
+    page.locator("[data-test=cn-add-col]").click()
+    page.fill("[data-test=cn-col-name]", "Shared")
+    page.select_option("[data-test=cn-col-kind]", "rule")
+    page.wait_for_selector("[data-test=cn-builder]")
+    page.locator("[data-test=cn-rule-text]").click()
+    page.fill("[data-test=cn-rule]", "marker:/^(New|Given)$/ → @markers [join row hl#fde68a]")
+    page.wait_for_function("() => (document.querySelector('.cn-preview') || {}).textContent.includes('2 rows')")
+    page.locator("[data-test=cn-col-save]").click()
+    page.wait_for_function("() => document.querySelectorAll('#chartnote th.th-x').length === 4")
+    chips = page.locator("#chartnote tr.crow td.xcell-rule .ctag.xmark")
+    assert chips.all_inner_texts() == ["new", "giv"], chips.all_inner_texts()
+    assert page.locator("#chartnote tr.crow[data-label='2c']").evaluate("(e) => e.classList.contains('join-up')")
+    assert page.locator("#chartnote tr.crow[data-label='2b']").evaluate("(e) => e.classList.contains('join-down')")
+    assert page.locator("#chartnote tr.crow[data-label='2c'] td.ccell").first.evaluate("(e) => getComputedStyle(e).borderTopColor") == "rgba(0, 0, 0, 0)"
+    assert page.locator("#chartnote tr.crow[data-label='2b']").evaluate("(e) => e.style.background") != ""   # the row style covers both rows
+    assert page.locator("#chartnote tr.crow[data-label='1a']").evaluate("(e) => e.classList.contains('join-up')") is False   # the first row has nothing above
+    saved()
+    body = page.evaluate("() => window.__fsChartNote.markdown()")
+    assert "## Custom columns" in body and "| Status | list | Information status |" in body and "| Role | rule | marker:new" in body
+    assert "| 1b #" in body and "| Subject fronted |" in body and "| 1a #" in body and "| given |" in body, body
+    # the exports carry the custom columns and the rule's row style (Seth, 2026-10-18: "pretty exports for chart-type notes")
+    html_path, docx_path = str(h.tmp / "cn.html"), str(h.tmp / "cn.docx")
+    html = page.evaluate("""async ([hp, dp]) => {
+      const api = window.pywebview.api; const id = document.querySelector('.note-card.active').dataset.id; const note = await api.get_note(id);
+      const doc = await FS.exporter.buildDoc(note, window.__fsChartNote.asEditor());
+      await api.export_note_html(id, FS.exporter.toHtml(doc), hp); await api.export_note_docx(id, doc, dp); await api.export_note_xlsx(id, doc, dp.replace('.docx', '.xlsx')); return FS.exporter.toHtml(doc);
+    }""", [html_path, docx_path])
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(str(h.tmp / "cn.xlsx"))
+        assert wb.sheetnames == ["Note", "Chart", "Chart rows"], wb.sheetnames
+        ws = wb["Chart rows"]; head = [c.value for c in ws[1]]
+        rows = [{k: v for k, v in zip(head, [c.value for c in r])} for r in ws.iter_rows(min_row=2)]
+        assert [r["Role"] for r in rows] == ["N", "S", None, None, "S", "S", "S"] and rows[1]["Comment"] == "Subject fronted" and rows[0]["Status"] == "given", rows
+        assert rows[0]["Nucleus/Subject"] == "Kabir" and rows[0]["Markers"] == "New"
+    except ImportError:
+        pass
+    assert '<th class="xh" rowspan="2">Role</th>' in html and "Subject fronted" in html and "background:#fde68a" in html and ">given<" in html, html[:600]
+    import zipfile
+    xml = zipfile.ZipFile(docx_path).read("word/document.xml").decode("utf-8")
+    assert "Subject fronted" in xml and ">Role<" in xml and 'w:fill="FDE68A"' in xml.upper().replace('W:FILL', 'w:fill'), xml[:300]
+    # found by search, and still there after a reload
+    nid = page.evaluate("() => window.__fsChartNote && document.querySelector('.note-card.active').dataset.id")
+    assert any(hit["id"] == nid for hit in h.api.search("fronted"))
+    page.reload()
+    page.wait_for_selector(".note-card")
+    page.locator(".note-card", has_text="Story chart").click()
+    page.wait_for_selector("#chartnote th.th-x")
+    assert page.locator("#chartnote tr.crow[data-label='1b'] td.xcell .xval").first.inner_text() == "Subject fronted"
+    # the row labels (with the ▶ buttons) are frozen on the left by default (Seth, 2026-10-18)
+    assert page.locator("#chartnote .tchart tr.crow th.rlab[data-frz='l']").count() == 7
+    assert page.evaluate("getComputedStyle(document.querySelector('#chartnote .tchart tr.crow th.rlab')).position") == "sticky"
+    # a custom column moved to the LEFT of the chart and FROZEN (Seth: "freeze columns … for custom columns, on either or both sides")
+    page.locator("#chartnote th.th-x", has_text="Comment").locator("button").click()
+    page.locator(".popover .menu-item", has_text="Move to the left of the chart").click()
+    page.wait_for_selector("#chartnote th.th-x-left")
+    heads = [t.split("\n")[0] for t in page.locator("#chartnote .tchart thead tr").first.locator("th").all_inner_texts()]
+    assert heads[:7] == ["▶#", "Comment", "PRENUCLEAR", "NUCLEUS", "POSTNUCLEAR", "Status", "Role"], heads
+    page.locator("#chartnote th.th-x-left button").click()
+    page.locator(".popover .menu-item", has_text="Freeze").click()
+    page.wait_for_selector("#chartnote td.xcell-left[data-frz='l']")
+    saved()
+    body = page.evaluate("() => window.__fsChartNote.markdown()")
+    assert "| Column | Kind | Settings | Place |" in body and "| Comment | notes | | left frozen |" in body, body
+    assert page.evaluate("document.querySelector('#chartnote td.xcell-left').style.left") not in ("", "0px")   # placed after the label column
+    # the dialog shows the place too
+    page.locator("#chartnote th.th-x-left button").click()
+    page.locator(".popover .menu-item", has_text="Rename / settings").click()
+    assert page.input_value("[data-test=cn-col-side]") == "left" and page.is_checked("[data-test=cn-col-frozen]")
+    page.keyboard.press("Escape")
+    # the exports put a left-side column before the FLEx columns
+    html = page.evaluate("async () => { const api = window.pywebview.api; const id = document.querySelector('.note-card.active').dataset.id; const note = await api.get_note(id); return FS.exporter.toHtml(await FS.exporter.buildDoc(note, window.__fsChartNote.asEditor())); }")
+    assert html.index('<th class="xh" rowspan="2">Comment</th>') < html.index(">Prenuclear<") < html.index('<th class="xh" rowspan="2">Status</th>'), html[:800]
+    # another chart in the same note (Seth: "change the text chart source for a text chart note"): the front matter and the view embed follow
+    page.locator("#chartnote [data-test=chart-menu]").click()
+    page.locator("[data-test=chart-change]").click()
+    page.wait_for_selector("[data-test=pick-chart-change]")
+    assert page.locator("[data-test=pick-chart-change]", has_text="this one").count() == 1
+    page.locator("[data-test=pick-chart-change]", has_text="Topic-Comment").click()
+    page.wait_for_function("() => document.querySelectorAll('#chartnote tr.crow').length === 2")
+    saved()
+    note = h.api.get_note(nid)
+    assert note["chart"] == "d15c0000-0000-4000-8000-00000000c002" and note["body"].startswith("{{flex:chart d15c0000-0000-4000-8000-00000000c002"), note["body"][:120]
+    assert "| Comment | notes | | left frozen |" in note["body"]        # the custom columns stay
+    assert page.locator("#chartnote th.th-col").all_inner_texts() == ["Topic", "Comment", "Tail"]
+    assert not errors
+
+
+def test_chart_options_one_column_hide_empty_zoom_and_the_boundary_under_the_free_row(app):
+    """Seth, 2026-10-18: ⚑ on every chart; "Hide this column" from its heading; "hide empty
+    columns"; zoom; the one-column view with column labels and visual filters; the sentence /
+    paragraph boundary drawn under the free translation row."""
+    h, page, errors = app
+    new_note(page, "Chart options")
+    page.keyboard.type("{{flex:chart d15c0000-0000-4000-8000-00000000c002}}")
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#editor .chart-obj tr.crow")
+    obj = page.locator("#editor .chart-obj")
+    src = lambda: page.evaluate("() => window.__fsEditor.getMarkdown()")  # noqa: E731
+    # the ⚑ button is there although this chart has no markers (its text's tags and the visual filters are switched from it)
+    assert obj.locator("[data-test=marker-btn]").count() == 1
+    obj.locator("[data-test=marker-btn]").click()
+    page.wait_for_selector(".popover [data-test=tag-scope-pick]")
+    assert "What this chart draws" in page.locator(".popover").inner_text()
+    page.keyboard.press("Escape")
+    # the boundary: row 2 ends a paragraph; its free translation row follows it, so the double rule is under THAT row
+    assert obj.locator("tr.crow[data-label='2'].end-para").count() == 0
+    assert obj.locator("tr.cfree-row.end-para").count() == 1 and obj.locator("tr.cfree-row.end-sent").count() == 2
+    # hide the EMPTY columns (nobody filled Tail): the menu's checkbox, `empty=off` in the note
+    assert obj.locator("th.th-col").all_inner_texts() == ["Topic", "Comment", "Tail"]
+    obj.locator("[data-test=chart-menu]").click()
+    page.locator("[data-test=chart-hide-empty]").check()
+    page.wait_for_function("() => document.querySelectorAll('#editor .chart-obj th.th-col').length === 2")
+    assert "empty=off" in src()
+    page.keyboard.press("Escape")
+    obj.locator("[data-test=chart-menu]").click()
+    page.locator("[data-test=chart-hide-empty]").uncheck()
+    page.wait_for_function("() => document.querySelectorAll('#editor .chart-obj th.th-col').length === 3")
+    assert "empty=off" not in src()
+    page.keyboard.press("Escape")
+    # hide a column from its heading (the "hide columns" feature, now one click away)
+    obj.locator("th.th-col", has_text="Comment").click()
+    page.locator(".popover [data-test=hide-col]").click()
+    page.wait_for_function("() => document.querySelectorAll('#editor .chart-obj th.th-col').length === 2")
+    assert "cols=c33,c35" in src(), src()
+    assert obj.locator("th.th-col").all_inner_texts() == ["Topic", "Tail"]
+    # zoom
+    obj.locator("[data-test=chart-menu]").click()
+    page.locator("[data-test=chart-zoom-in]").click()
+    page.wait_for_function("() => document.querySelector('#editor .chart-obj').style.getPropertyValue('--cz') === '1.1'")
+    assert "zoom=110" in src()
+    assert page.locator("[data-test=chart-zoom]").inner_text() == "110%"
+    page.keyboard.press("Escape")
+    size = lambda: page.evaluate("parseFloat(getComputedStyle(document.querySelector('#editor .chart-obj .cw .il-txt')).fontSize)")  # noqa: E731
+    assert abs(size() - 15.5 * 1.1) < 0.2, size()
+    # every column back (the menu's column checkboxes), then the one-column view: one "Text" column,
+    # each row in one cell, word groups labelled with their column
+    obj.locator("[data-test=chart-menu]").click()
+    page.locator(".popover label.chart-col", has_text="Comment").locator("input").check()
+    page.wait_for_function("() => document.querySelectorAll('#editor .chart-obj th.th-col').length === 3")
+    page.keyboard.press("Escape")
+    obj.locator("[data-test=chart-view]").click()
+    page.wait_for_selector("#editor .chart-obj.flat")
+    assert "view=flat" in src()
+    assert obj.locator("th.th-col").all_inner_texts() == ["Text"]
+    r1 = obj.locator("tr.crow[data-label='1'] td.ccell")
+    assert r1.count() == 1 and r1.locator(".cflat-g").count() == 2
+    assert r1.locator(".cflat-lab").all_inner_texts() == ["Top", "Com"]
+    assert r1.locator(".cflat-g").nth(0).get_attribute("title") == "Topic"
+    # a column visual-filter rule styles the group (the same `column:` rules as on examples)
+    page.evaluate("async () => { const c = await window.pywebview.api.set_tag_styles('project', FS.tagstyles.context().project, [{tag: 'column:Topic', br: 'sq', b: true}]); FS.tagstyles.setConfig(c); FS.emit('tagstyles'); }")
+    page.wait_for_selector("#editor .chart-obj .cflat-br")
+    assert r1.locator(".cflat-g").nth(0).locator(".cflat-br").all_inner_texts() == ["[", "]"]
+    # and back
+    obj.locator("[data-test=chart-view]").click()
+    page.wait_for_function("() => !document.querySelector('#editor .chart-obj.flat')")
+    assert "view=flat" not in src()
+    # the parts of ONE chart cell share a box: in the story chart, row 1a's Post-I cell is a marker on its own,
+    # and a cell holding words AND a marker keeps them together (Seth: "inside the same border as the cell")
+    new_note(page, "Flat markers")
+    page.keyboard.type("{{flex:chart %s rows=1 view=flat}}" % CHART)
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#editor .chart-obj.flat tr.crow")
+    g = page.locator("#editor .chart-obj.flat tr.crow[data-label='1a'] .cflat-g")
+    assert g.evaluate_all("els => els.map((e) => e.title)") == ["Nucleus › Subject", "Nucleus › Verb", "Postnuclear › Inner"]
+    assert g.nth(2).locator(".ctag").count() == 1 and g.nth(2).locator(".cflat-lab").inner_text() == "Post-I"
+    # MARKERS IN CELLS WITH NO WORDS (Seth, 2026-10-19): the ⋯ switch hides them (`emptymarkers=off`), and a
+    # one-column box whose every chip is hidden draws nothing — no tile, border or label
+    flat = page.locator("#editor .chart-obj.flat")
+    flat.locator("[data-test=chart-menu]").click()
+    page.locator("[data-test=chart-empty-markers]").uncheck()
+    page.wait_for_function("() => document.querySelectorAll('#editor .chart-obj.flat .ctag.hidden[data-empty]').length === 1")
+    page.keyboard.press("Escape")
+    assert "emptymarkers=off" in src(), src()
+    assert flat.locator("tr.crow[data-label='1a'] .cflat-g.cflat-void").count() == 1
+    assert flat.locator("tr.crow[data-label='1a'] .cflat-g.cflat-void").evaluate("(e) => getComputedStyle(e).display") == "none"
+    assert flat.locator("tr.crow[data-label='1a'] .cflat-g:not(.cflat-void)").count() == 2
+    # a marker's own rule overrides the chart's switch: New shown in an empty cell
+    flat.locator("[data-test=marker-btn]").click()
+    page.wait_for_selector("[data-test=tag-popover] .tagrow[data-tag='New']")
+    page.locator("[data-test=tag-popover] .tagrow[data-tag='New'] [data-test=tag-style]").click()
+    page.locator("[data-test=tag-popover] [data-test=tag-empty]").select_option("show")
+    page.wait_for_function("() => document.querySelectorAll('#editor .chart-obj.flat .ctag:not(.hidden)').length === 1")
+    page.keyboard.press("Escape")
+    assert flat.locator("tr.crow[data-label='1a'] .cflat-g.cflat-void").count() == 0
+    page.wait_for_function("() => window.__fsEditor.getMarkdown().includes('marker%3ANew:empty')")
+    assert not errors
+
+
+def test_a_column_is_styled_from_the_charts_flag_popover(app):
+    """Seth, 2026-10-18: "apply specific styles to specific columns … and configure them myself":
+    the ⚑ popover lists the chart's columns; a column's style tints its cells (and heading), its
+    box hides the column; the same column: rules the one-column view and examples use."""
+    h, page, errors = app
+    new_note(page, "Column styles")
+    page.keyboard.type("{{flex:chart d15c0000-0000-4000-8000-00000000c002}}")
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#editor .chart-obj tr.crow")
+    obj = page.locator("#editor .chart-obj")
+    src = lambda: page.evaluate("() => window.__fsEditor.getMarkdown()")  # noqa: E731
+    obj.locator("[data-test=marker-btn]").click()
+    page.wait_for_selector(".popover .tagrow[data-tag='Comment']")
+    names = page.locator(".popover .tagrow").evaluate_all("els => els.map((e) => e.dataset.tag)")
+    assert all(c in names for c in ["Topic", "Comment", "Tail"]) and "Subject" in names, names   # the text's tags and the chart's columns
+    # the look is written at the chosen scope: this chart by default (its embed)
+    page.locator(".popover .tagrow[data-tag='Comment'] [data-test=tag-style]").click()
+    page.locator(".popover [data-test=tag-tile]").click()
+    page.wait_for_function("() => document.querySelector(\"#editor .chart-obj tr.crow[data-label='1'] td[data-col='34']\").classList.contains('col-styled')")
+    assert "column" in src() and "tile" in src(), src()
+    cell = obj.locator("tr.crow[data-label='1'] td[data-col='34']")
+    assert cell.evaluate("e => e.style.background") != ""
+    assert obj.locator("th.th-col", has_text="Comment").evaluate("e => e.classList.contains('col-styled')")
+    assert obj.locator("tr.crow[data-label='1'] td[data-col='33']").evaluate("e => e.classList.contains('col-styled')") is False
+    # bold too; then hidden: the column leaves the table
+    page.locator(".popover [data-test=tag-b]").click()
+    page.wait_for_function("() => document.querySelector(\"#editor .chart-obj tr.crow[data-label='1'] td[data-col='34']\").style.fontWeight === '700'")
+    page.locator(".popover .tagrow[data-tag='Comment'] [data-test=tag-toggle]").click()
+    page.wait_for_function("() => document.querySelectorAll('#editor .chart-obj th.th-col').length === 2")
+    assert obj.locator("th.th-col").all_inner_texts() == ["Topic", "Tail"]
+    page.locator(".popover .tagrow[data-tag='Comment'] [data-test=tag-toggle]").click()
+    page.wait_for_function("() => document.querySelectorAll('#editor .chart-obj th.th-col').length === 3")
+    page.keyboard.press("Escape")
+    # the export model carries the tint and the bold
+    doc = page.evaluate("async () => { const api = window.pywebview.api; const id = document.querySelector('.note-card.active').dataset.id; const note = await api.get_note(id); const d = await FS.exporter.buildDoc(note, window.__fsEditor); return d.blocks.find((b) => b.type === 'chart').rows[0].cells; }")
+    c34 = [c for c in doc if c["col"] == 34][0]
+    assert c34["hl"] and c34["b"] and not [c for c in doc if c["col"] == 33][0]["b"]
+    assert not errors
+
+
+def test_chart_markers_style_their_whole_row(app):
+    """Seth, 2026-10-18: visual filters on chart markers, with row-level markers that style the
+    whole row they are in — through the same scoped rules as the text tags."""
+    h, page, errors = app
+    new_note(page, "Marker rows")
+    page.keyboard.type("{{flex:chart %s}}" % CHART)
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#editor .chart-obj tr.crow")
+    assert page.locator("#editor .chart-obj .ctag").count() == 2
+    page.locator("#editor .chart-obj [data-test=marker-btn]").click()
+    page.wait_for_selector("[data-test=tag-popover] .tagrow")
+    row = page.locator("[data-test=tag-popover] .tagrow[data-tag='New']")
+    row.locator("[data-test=tag-style]").click()
+    page.locator("[data-test=tag-popover] [data-test=tag-bg]").first.click()
+    page.locator("[data-test=tag-popover] [data-test=tag-row]").click()
+    page.keyboard.press("Escape")
+    page.wait_for_selector("#editor .chart-obj tr.crow.marker-row")
+    tr = page.locator("#editor .chart-obj tr.crow.marker-row")
+    assert tr.count() == 1 and tr.get_attribute("data-label") == "1a" and tr.get_attribute("data-marker-row") == "New"
+    page.wait_for_function("() => document.getElementById('save-state').textContent === 'Saved'", timeout=5000)
+    body = body_of(h)
+    assert "tags=marker%3ANew:bg#ffd6a5+row" in body, body
+    # hidden for the whole notebook from the popover's scope select: the chip goes, the row stays plain
+    page.locator("#editor .chart-obj [data-test=marker-btn]").click()
+    page.wait_for_selector("[data-test=tag-popover] .tagrow")
+    page.select_option("[data-test=tag-scope-pick]", label="the whole notebook")
+    page.wait_for_timeout(200)
+    page.locator("[data-test=tag-popover] .tagrow[data-tag='Given'] [data-test=tag-toggle]").click()
+    page.wait_for_function("() => document.querySelectorAll('#editor .chart-obj .ctag:not(.hidden)').length === 1")
+    page.keyboard.press("Escape")
+    rules = h.api._nb.config["tagStyles"]["project"]
+    assert any(r.get("tag") == "marker:Given" and r.get("hide") for rs in rules.values() for r in rs), rules
+    assert not errors
+
+
+def test_chart_search_rows_profile_and_a_collection_of_rows(app):
+    """Seth, 2026-10-18: search the charts — rows by words, column, marker, lexical item — insert
+    the hits, see which columns an item sits in, and collect the rows into a collection that can
+    take in new rows later."""
+    h, page, errors = app
+    new_note(page, "Chart search")
+    page.click(".blk-body")
+    page.keyboard.press("Control+Shift+L")
+    page.locator(".picker-tabs button", has_text="Text charts").click()
+    page.fill(".picker-left input[type=text]", "col:Subject lex:kabir")
+    page.wait_for_selector("[data-test=pick-chart-row]")
+    rows = page.locator("[data-test=pick-chart-row]")
+    assert rows.count() == 3 and "1a" in rows.first.inner_text() and "Subject: Kabir" in rows.first.inner_text()
+    # a hit opens the chart at that row; Insert rows writes an anchored one-row embed
+    rows.nth(1).click()
+    page.wait_for_selector(".picker-preview tr.crow.in-range")
+    assert page.locator(".picker-preview tr.crow.in-range").get_attribute("data-label") == "2c"
+    page.locator("[data-test=insert-chart-rows]").click()
+    page.wait_for_selector("#editor .chart-obj tr.crow")
+    page.wait_for_function("() => document.getElementById('save-state').textContent === 'Saved'", timeout=5000)
+    assert "{{flex:chart %s rows=5 at=" % CHART in body_of(h)
+    assert [x.lstrip("▶§¶") for x in page.locator("#editor .chart-obj tr.crow th.rlab").all_inner_texts()] == ["2c"]
+    assert page.locator("#editor .chart-obj thead th.th-col").count() == 7            # the headings always come along
+    # the column profile
+    page.keyboard.press("Control+Shift+L")
+    page.locator(".picker-tabs button", has_text="Text charts").click()
+    page.fill(".picker-left input[type=text]", "lex:kabir")
+    page.wait_for_selector("[data-test=chart-profile]")
+    page.locator("[data-test=chart-profile]").click()
+    page.wait_for_selector(".profile-table")
+    assert page.locator(".profile-table").count() == 2        # one per template: Default, and the Topic-Comment chart
+    assert "Subject" in page.locator(".profile-table").first.inner_text() and page.locator("[data-test=profile-count]").all_inner_texts() == ["3", "1", "1"]   # Subject 3, Verb 1 (3b's merged cell counts for both), Topic 1
+    page.keyboard.press("Escape")
+    # a collection of the rows a search matches, with a rule that finds new rows
+    page.keyboard.press("Control+Shift+L")
+    page.locator(".picker-tabs button", has_text="Text charts").click()
+    page.fill(".picker-left input[type=text]", "marker:*")
+    page.wait_for_selector("[data-test=collect-chart-rows]")
+    page.locator("[data-test=collect-chart-rows]").click()
+    page.wait_for_selector("[data-test=chart-rule-create]")
+    page.wait_for_function("() => (document.querySelector('[data-test=chart-rule-count]') || {}).textContent.startsWith('2 rows')")
+    page.fill("[data-test=chart-rule-title]", "Marked rows")
+    page.locator("[data-test=chart-rule-create]").click()
+    page.wait_for_selector("#collection .coll-item .chart-obj tr.crow")
+    assert page.locator("#collection .coll-item").count() == 2
+    bar = page.locator("[data-test=coll-rule]")
+    assert "marker:*" in bar.inner_text() and "Find new rows" in bar.inner_text()
+    page.locator("[data-test=coll-rule-update]").click()
+    page.wait_for_selector(".toast", state="visible")
+    assert "Nothing new" in page.locator(".toast").last.inner_text()
+    notes = [n for n in h.api._nb.list_notes() if n["title"] == "Marked rows"]
+    assert notes and h.api.get_note(notes[0]["id"])["rule"] == {"charts": "marker:*"}
+    assert not errors
+
+
+def test_chart_columns_on_an_example_text_tags_in_a_chart_pivot_and_entry_profile(app):
+    """Seth, 2026-10-18 (phase 3): the text's chart columns drawn on an interlinear example like
+    tags; the text's markup tags inside a chart's cells; a markers × columns pivot; where a lexical
+    item sits in the charts, from its entry card."""
+    h, page, errors = app
+    new_note(page, "Columns as tags")
+    page.keyboard.type("{{flex:text %s seg=1-2 lines=txt,gls,cols}}" % T_STORY)
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#editor .text-obj .tagbar")
+    bars = page.locator("#editor .text-obj .segment[data-n='1'] .tagbar.first")
+    assert sorted(bars.all_inner_texts()) == ["Com", "S", "Top", "V"], bars.all_inner_texts()   # both charts on the story: Default (S, V) and Topic-Comment (Top, Com)
+    assert page.locator("#editor .text-obj .il-tag[data-tag='Nucleus/Subject']").count() >= 1
+    page.locator("#editor .text-obj [data-test=tag-btn]").click()
+    page.wait_for_selector("[data-test=tag-popover] .tagrow[data-tag='Nucleus/Subject']")
+    page.keyboard.press("Escape")
+    # the text's FLEx tags inside a chart's cells, on request (typed in the paragraph after the example)
+    page.locator("#editor .blk-body").last.click()
+    page.keyboard.type("{{flex:chart %s rows=1-2 lines=txt,gls,tag}}" % CHART)
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#editor .chart-obj .ctexttag")
+    chips = page.locator("#editor .chart-obj tr.crow[data-label='1a'] .ctexttag").all_inner_texts()
+    assert chips == ["S", "V"], chips
+    # the pivot
+    page.locator("#editor .chart-obj [data-test=chart-menu]").click()
+    page.locator("[data-test=chart-pivot]").click()
+    page.wait_for_selector(".pivot-table")
+    txt = page.locator(".pivot-table").inner_text()
+    assert "⚐ New" in txt and "moved text, preposed" in txt and "rows with words" in txt
+    page.keyboard.press("Escape")
+    # the entry card: where kabir sits in the charts
+    page.locator("#editor .blk-body").last.click()
+    page.keyboard.type("{{flex:entry 6a5f3a2e-1b1e-4c2a-9f10-0d2c1a7e0001}}")
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#editor .entry-card [data-test=entry-chart-profile]")
+    page.locator("#editor .entry-card [data-test=entry-chart-profile]").click()
+    page.wait_for_selector(".profile-table")
+    assert "Subject" in page.locator(".profile-table").first.inner_text()      # one table per template (Default first)
+    assert not errors
+
+
+def test_the_rule_list_keeps_its_place_when_a_rule_changes(app):
+    """Seth, 2026-10-19: adding a border made "the current rule line I'm working on in visual filter
+    jump to the top of the list". The list is its own scroller and every change redraws it whole,
+    which let it fall back to the top; the place is kept now — and the border has a colour of its own."""
+    h, page, _errors = app
+    rules = [{"tag": "Topic", "bg": "#ffd6a5"}, {"tag": "Subject", "b": True}, {"tag": "Verb", "i": True}, {"tag": "Object", "b": True}]
+    rules += [{"tag": "marker:M%d" % i, "bg": "#ffd6a5"} for i in range(60)]
+    h.api.set_tag_filters([{"id": "f1", "name": "Probe", "enabled": True, "rules": rules}])
+    page.reload()
+    page.wait_for_selector(".note-card")
+    page.evaluate("() => FS.tagstyles.dialog({kind: 'filter', key: 'f1', label: 'the filter'})")
+    page.wait_for_selector("[data-test=tag-dialog]")
+    order = lambda: page.evaluate("() => [...document.querySelectorAll('[data-test=tag-dialog] .tagrow')].map((r) => r.dataset.tag)")
+    assert order()[:5] == ["Topic", "Subject", "Object", "Verb", "M0"]           # FLEx's own order within a group, then the markers
+    page.evaluate("() => { document.querySelector('[data-test=tag-dialog]').scrollTop = 120; }")
+    page.wait_for_timeout(100)
+    page.locator("[data-test=tag-dialog] .tagrow[data-tag='Object'] [data-test=tag-box]").click()
+    page.wait_for_selector("[data-test=tag-dialog] .tagrow[data-tag='Object'] [data-test=tag-bc]")
+    page.wait_for_timeout(300)
+    assert page.evaluate("() => document.querySelector('[data-test=tag-dialog]').scrollTop") == 120
+    assert order()[:5] == ["Topic", "Subject", "Object", "Verb", "M0"]
+    page.locator("[data-test=tag-dialog] .tagrow[data-tag='Object'] [data-test=tag-bc]").evaluate("(e) => { e.value = '#b91c1c'; e.dispatchEvent(new Event('change', {bubbles: true})); }")
+    page.wait_for_selector("[data-test=tag-dialog] .tagrow[data-tag='Object'] [data-test=tag-bc-auto]")
+    assert page.evaluate("() => document.querySelector('[data-test=tag-dialog]').scrollTop") == 120
+    saved = h.api.init()["config"]["tagStyles"]["filters"][0]["rules"]
+    assert {"tag": "Object", "enabled": True, "b": True, "box": True, "bc": "#b91c1c"} in saved, saved
+
+
+def test_the_chart_search_is_a_button_and_a_builder(app):
+    """Seth, 2026-10-19: the chart search "easy to find and also as GUI/visually creatable as possible
+    without requiring the user to use a query language", with a regex help link naming the flavour."""
+    h, page, errors = app
+    new_note(page, "Chart search")
+    page.locator("[data-test=btn-chart-search]").click()                       # the toolbar button opens the picker on Text charts
+    page.wait_for_selector("[data-test=chart-search-build]:not([hidden])")
+    assert page.locator(".picker-tabs button.on").inner_text() == "Text charts"
+    page.locator("[data-test=chart-search-build]").click()
+    page.wait_for_selector("[data-test=search-builder]")
+    cond = page.locator("[data-test=sb-cond]").first
+    assert cond.locator("[data-test=sb-what]").input_value() == "marker"      # a first condition to start from
+    cond.locator("[data-test=sb-how]").select_option("is")
+    cond.locator("[data-test=sb-val]").select_option("New")
+    page.locator("[data-test=sb-add]").click()
+    cond2 = page.locator("[data-test=sb-cond]").nth(1)
+    cond2.locator("[data-test=sb-what]").select_option("gloss")
+    cond2.locator("[data-test=sb-how]").select_option("regex")
+    cond2.locator("[data-test=sb-val]").fill("sleep")
+    page.fill("[data-test=sb-col]", "Verb")
+    page.wait_for_function("() => document.querySelector('[data-test=search-q]').textContent === 'col:Verb marker:New gloss:/sleep/'")
+    page.wait_for_function("() => document.querySelector('[data-test=search-count]').textContent === '1 row match'")
+    assert page.locator("[data-test=search-builder] [data-test=regex-help]").get_attribute("data-flavour") == "py"
+    page.locator("[data-test=sb-apply]").click()
+    page.wait_for_selector("[data-test=pick-chart-row]")
+    assert page.locator(".picker input[type=text]").first.input_value() == "col:Verb marker:New gloss:/sleep/"
+    assert page.locator("[data-test=pick-chart-row]").count() == 1 and "1a" in page.locator("[data-test=pick-chart-row]").inner_text()
+    # the query reads back into the builder
+    page.locator("[data-test=chart-search-build]").click()
+    page.wait_for_selector("[data-test=search-builder]")
+    assert page.locator("[data-test=sb-col]").input_value() == "Verb"
+    assert page.locator("[data-test=sb-cond]").count() == 2 and page.locator("[data-test=sb-cond]").nth(1).locator("[data-test=sb-how]").input_value() == "regex"
+    page.keyboard.press("Escape")
+    page.keyboard.press("Escape")
+    # Ctrl+Shift+K from a chart note browses too (the rows go into a new note)
+    page.evaluate("() => FS.newChartNote('%s')" % CHART)
+    page.wait_for_selector("#chartnote tr.crow")
+    page.keyboard.press("Control+Shift+K")
+    page.wait_for_selector("[data-test=chart-search-build]:not([hidden])")
+    page.keyboard.press("Escape")
+    # the rule dialog's help names the JavaScript flavour
+    page.locator("[data-test=cn-add-col]").click()
+    page.select_option("[data-test=cn-col-kind]", "rule")
+    page.wait_for_selector("[data-test=cn-builder] [data-test=regex-help]")
+    assert page.locator("[data-test=cn-builder] [data-test=regex-help]").get_attribute("data-flavour") == "js"
+    assert not errors
+
+
+def test_the_groups_view_and_lining_up_on_a_column(app):
+    """Seth, 2026-10-19: "a major-column view … just the 3 parent columns (and then style text from sub
+    columns within each cell per visual filter rules)", and in the one-column view "align elements
+    from one or more specific columns so that they do line up … center arrange/align"."""
+    h, page, errors = app
+    new_note(page, "Groups view")
+    page.keyboard.type("{{flex:chart %s}}" % CHART)
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#editor .chart-obj tr.crow")
+    obj = page.locator("#editor .chart-obj")
+    src = lambda: page.evaluate("() => window.__fsEditor.getMarkdown()")  # noqa: E731
+    obj.locator("[data-test=chart-view-groups]").click()
+    page.wait_for_function("() => document.querySelectorAll('#editor .chart-obj th.th-col').length === 3")
+    assert "view=groups" in src()
+    assert obj.locator("th.th-col").all_inner_texts() == ["Prenuclear", "Nucleus", "Postnuclear"]
+    r1b = obj.locator("tr.crow[data-label='1b'] td.ccell")
+    assert r1b.count() == 3
+    assert r1b.nth(1).locator(".cflat-g").evaluate_all("els => els.map((e) => e.title)") == ["Nucleus › Subject", "Nucleus › Verb", "Nucleus › Object"]
+    assert r1b.nth(1).locator(".cflat-lab").all_inner_texts() == ["S", "V", "O"]
+    assert obj.locator("[data-test=chart-view-groups]").count() == 0           # already there
+    # a sub-column's rule styles its words inside the group cell
+    page.evaluate("async () => { const c = await window.pywebview.api.set_tag_styles('project', FS.tagstyles.context().project, [{tag: 'column:Nucleus/Verb', br: 'sq', b: true}]); FS.tagstyles.setConfig(c); FS.emit('tagstyles'); }")
+    page.wait_for_selector("#editor .chart-obj tr.crow[data-label='1b'] td.ccell[data-col='1001'] .cflat-br")
+    # LINE UP ON Verb in the one-column view: the Verb runs sit centred on one axis across the rows
+    obj.locator("[data-test=chart-menu]").click()
+    page.select_option("[data-test=chart-view-select]", "flat")
+    page.wait_for_selector("#editor .chart-obj.flat")
+    page.locator("#editor .chart-obj [data-test=chart-menu]").click()
+    page.locator("[data-test=chart-align-col][data-col='4']").check()
+    page.wait_for_function("() => document.querySelectorAll('#editor .chart-obj .al-grid').length > 2")
+    page.keyboard.press("Escape")
+    assert "align=c4" in src(), src()
+    page.wait_for_function("() => /px$/.test(document.querySelector('#editor .chart-obj table.tchart').style.getPropertyValue('--al-a'))")
+    centres = page.evaluate("() => [...document.querySelectorAll(\"#editor .chart-obj tr.crow .al-a\")].filter((a) => a.textContent.trim()).map((a) => { const r = a.getBoundingClientRect(); return [a.closest('tr').dataset.label, Math.round(r.left + r.width / 2)]; })")
+    assert len(centres) >= 4, centres
+    assert max(c[1] for c in centres) - min(c[1] for c in centres) <= 1, centres
+    # the words before the Verb sit to its left (right-aligned to the axis), the rest to its right
+    r1a = page.locator("#editor .chart-obj tr.crow[data-label='1a'] .al-grid")
+    assert "Kabir" in r1a.locator(".al-l").inner_text() and "nuwa" in r1a.locator(".al-a").inner_text()
+    # a row without the column flows as before
+    assert page.locator("#editor .chart-obj tr.crow[data-label='2a'] .al-grid").count() == 0
+    # the left edges instead of the centres (Seth, 2026-10-19: "left edge, right edge, or center")
+    page.locator("#editor .chart-obj [data-test=chart-menu]").click()
+    page.select_option("[data-test=chart-align-edge]", "left")
+    page.wait_for_selector("#editor .chart-obj table.tchart.al-left")
+    page.keyboard.press("Escape")
+    assert "alignat=left" in src()
+    page.wait_for_function("() => /px$/.test(document.querySelector('#editor .chart-obj table.tchart').style.getPropertyValue('--al-a'))")
+    lefts = page.evaluate("() => [...document.querySelectorAll(\"#editor .chart-obj tr.crow .al-a\")].filter((a) => a.textContent.trim()).map((a) => Math.round(a.getBoundingClientRect().left))")
+    assert len(lefts) >= 4 and max(lefts) - min(lefts) <= 1, lefts
+    page.locator("#editor .chart-obj [data-test=chart-menu]").click()
+    page.select_option("[data-test=chart-align-edge]", "center")
+    page.wait_for_function("() => !window.__fsEditor.getMarkdown().includes('alignat=')")
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(200)
+    # MARKER CHIPS on a line of their own, no wider than the words (Seth, 2026-10-19): row 1a's New marker shares the
+    # Postnuclear › Inner box with nothing, 2c's Given sits in Postnuclear › Outer; in the columns view a cell that holds
+    # words AND a marker keeps the chip under the words
+    page.locator("#editor .chart-obj [data-test=chart-menu]").click()
+    page.select_option("[data-test=chart-chips-select]", "wrap")
+    page.wait_for_selector("#editor .chart-obj .chips-line.wrap")
+    page.keyboard.press("Escape")
+    assert "chips=wrap" in src()
+    page.wait_for_function("() => [...document.querySelectorAll('#editor .chart-obj .chips-line.wrap')].every((l) => /px$/.test(l.style.maxWidth))")
+    assert page.locator("#editor .chart-obj tr.crow[data-label='1a'] .chips-line .ctag").count() == 1
+    page.locator("#editor .chart-obj [data-test=chart-menu]").click()
+    page.select_option("[data-test=chart-chips-select]", "inline")
+    page.wait_for_function("() => !window.__fsEditor.getMarkdown().includes('chips=')")
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(200)
+    # a header GROUP lines up as one block: the group's box ticks its columns
+    page.locator("#editor .chart-obj [data-test=chart-menu]").click()
+    page.locator("[data-test=chart-align-group][data-group='Nucleus']").check()
+    page.wait_for_function("() => window.__fsEditor.getMarkdown().includes('align=c3,c4,c5')")
+    page.locator("[data-test=chart-align-group][data-group='Nucleus']").uncheck()
+    page.wait_for_function("() => !window.__fsEditor.getMarkdown().includes('align=')")
+    page.keyboard.press("Escape")                                                  # a redraw leaves the open menu behind
+    page.wait_for_timeout(200)
+    page.locator("#editor .chart-obj [data-test=chart-menu]").click()
+    page.locator("[data-test=chart-align-col][data-col='4']").check()
+    page.wait_for_function("() => window.__fsEditor.getMarkdown().includes('align=c4')")
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(200)
+    # MERGED CELLS (Seth, 2026-10-19: "it could be either"): 3b's group is owned by Subject and merged into Verb, so
+    # in the one-column view it is labelled S+V, wears Verb's brackets round Subject's box, and lines up on Verb
+    w3b = page.locator("#editor .chart-obj tr.crow[data-label='3b'] .cflat-outer")
+    assert w3b.count() == 1 and w3b.locator(".cflat-lab").inner_text() == "S+V" and w3b.locator(".cflat-br").all_inner_texts() == ["[", "]"]
+    assert page.locator("#editor .chart-obj tr.crow[data-label='3b'] .al-a .cflat-outer").count() == 1
+    # the chart's ⋯ menu offers the choice; owner only drops the second label and the outer look
+    page.locator("#editor .chart-obj [data-test=chart-menu]").click()
+    page.select_option("[data-test=chart-merge-select]", "owner")
+    page.wait_for_function("() => document.querySelector(\"#editor .chart-obj tr.crow[data-label='3b'] .cflat-lab\").textContent === 'S'")
+    page.keyboard.press("Escape")
+    assert "merge=owner" in src() and page.locator("#editor .chart-obj tr.crow[data-label='3b'] .cflat-outer").count() == 0
+    assert page.locator("#editor .chart-obj tr.crow[data-label='3b'] .al-grid").count() == 0        # Subject alone is not lined up
+    # back in the columns view the merged cell spans both and takes Verb's look as the outer layer
+    page.locator("#editor .chart-obj [data-test=chart-menu]").click()
+    page.select_option("[data-test=chart-merge-select]", "both")
+    page.wait_for_function("() => !window.__fsEditor.getMarkdown().includes('merge=')")
+    page.keyboard.press("Escape")                                                  # the menu stays open after a select
+    page.wait_for_timeout(200)
+    page.locator("#editor .chart-obj [data-test=chart-menu]").click()
+    page.select_option("[data-test=chart-view-select]", "cols")
+    page.wait_for_function("() => !document.querySelector('#editor .chart-obj.flat')")
+    td = page.locator("#editor .chart-obj tr.crow[data-label='3b'] td.ccell[data-col='3']")
+    assert td.get_attribute("colspan") == "2" and td.evaluate("(e) => e.classList.contains('cmerged')") and td.locator(".cmerge-in").count() == 1
+    assert not errors
+
+
+def test_chart_structure_and_header_groups_as_visual_filters(app):
+    """Seth, 2026-10-19: visual filters for dependent / speech / song clauses and their markers, for
+    moved (preposed / postposed) text with a choice of look and label, and for a header group's
+    columns styled as ONE unit — in both chart layouts."""
+    h, page, errors = app
+    new_note(page, "Structure filters")
+    page.keyboard.type("{{flex:chart %s}}" % CHART)
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#editor .chart-obj tr.crow")
+    obj = page.locator("#editor .chart-obj")
+    # the ⚑ popover lists the chart's structure and its header groups
+    obj.locator("[data-test=marker-btn]").click()
+    page.wait_for_selector(".popover .tagrow[data-tag='moved:preposed']")
+    names = page.locator(".popover .tagrow").evaluate_all("els => els.map((e) => e.dataset.tag)")
+    assert "clause:speech" in names and "clauseref" in names and "moved:*" in names and "group:Nucleus" in names, names
+    page.keyboard.press("Escape")
+    # rules at the project scope: a speech row tinted, the [2a] markers hidden, moved text boxed and
+    # labelled with the column it came from, the Nucleus group tiled as one
+    page.evaluate("""async () => {
+      const c = await window.pywebview.api.set_tag_styles('project', FS.tagstyles.context().project, [
+        {tag: 'clause:speech', bg: '#fde68a'}, {tag: 'clauseref', hide: true},
+        {tag: 'moved:*', box: true, bg: '#c0392b'}, {tag: 'column:group:Nucleus', tile: true, bg: '#bdb2ff'}]);
+      FS.tagstyles.setConfig(c); FS.emit('tagstyles');
+    }""")
+    page.wait_for_selector("#editor .chart-obj tr.clause-styled")
+    assert obj.locator("tr.crow[data-label='2a']").evaluate("e => e.classList.contains('clause-styled') && e.style.background !== ''")
+    assert obj.locator("tr.crow[data-label='2b'] .cclause.hidden").count() == 1 and obj.locator(".cclause:not(.hidden)").count() == 0
+    moved = obj.locator(".cwords.moved-styled")
+    assert moved.count() == 1 and moved.locator(".moved-lab").inner_text() == "‹‹ Post-O"     # row 1b: Haŋa, preposed from Postnuclear › Outer
+    assert moved.evaluate("e => e.style.outline !== ''")
+    # the Nucleus group: one box over Subject · Verb · Object in each row, the group heading styled, the leaf headings not
+    r1a = obj.locator("tr.crow[data-label='1a']")
+    assert r1a.locator("td.cgrp").count() == 3
+    assert r1a.locator("td[data-col='3']").evaluate("e => e.classList.contains('cgrp-first') && !e.classList.contains('cgrp-last')")
+    assert r1a.locator("td[data-col='5']").evaluate("e => e.classList.contains('cgrp-last')")
+    assert obj.locator("th.th-group", has_text="Nucleus").evaluate("e => e.classList.contains('col-styled')")
+    assert obj.locator("th.th-col", has_text="Verb").evaluate("e => e.classList.contains('col-styled')") is False
+    # the label follows the choice: the column the words sit in
+    page.evaluate("""async () => {
+      const c = await window.pywebview.api.set_tag_styles('project', FS.tagstyles.context().project, [
+        {tag: 'clause:speech', bg: '#fde68a'}, {tag: 'clauseref', hide: true},
+        {tag: 'moved:*', box: true, bg: '#c0392b', ml: 'to'}, {tag: 'column:group:Nucleus', tile: true, bg: '#bdb2ff'}]);
+      FS.tagstyles.setConfig(c); FS.emit('tagstyles');
+    }""")
+    page.wait_for_function("() => (document.querySelector('#editor .chart-obj .moved-lab') || {}).textContent === '‹‹ Pre-O'")
+    # the one-column view: the Nucleus parts share one box labelled with the group, columns labelled inside
+    obj.locator("[data-test=chart-view]").click()
+    page.wait_for_selector("#editor .chart-obj.flat")
+    g = page.locator("#editor .chart-obj.flat tr.crow[data-label='1a'] .cflat-g")
+    assert g.evaluate_all("els => els.map((e) => e.dataset.group || e.dataset.col)") == ["Nucleus", "6"]
+    assert g.first.locator(".cflat-lab").all_inner_texts() == ["S", "V", "Nucleus"]      # each column's label after its words, the group's last
+    # the "null" that followed every row (a missing 🔍 appended as text) is gone, and a group heading's box
+    # switches its tags off, back on, and back to a mix (Seth, 2026-10-19)
+    obj.locator("[data-test=marker-btn]").click()
+    page.wait_for_selector(".popover .tagrow")
+    assert "null" not in page.locator(".popover [data-test=tag-popover]").inner_text()
+    grp = page.locator(".popover .tag-tree-head[data-group='Arguments'] [data-test=tag-group-toggle]")
+    assert grp.count() == 1 and grp.is_checked()
+    page.locator(".popover .tagrow[data-tag='Subject'] [data-test=tag-toggle]").click()          # a mix: Subject off, Object on
+    page.wait_for_function("() => document.querySelector(\".popover .tag-tree-head[data-group='Arguments'] [data-test=tag-group-toggle]\").indeterminate")
+    page.locator(".popover .tag-tree-head[data-group='Arguments'] [data-test=tag-group-toggle]").click()   # mix → all on (mix remembered)
+    page.wait_for_function("() => { const b = document.querySelector(\".popover .tag-tree-head[data-group='Arguments'] [data-test=tag-group-toggle]\"); return b.checked && !b.indeterminate; }")
+    page.locator(".popover .tag-tree-head[data-group='Arguments'] [data-test=tag-group-toggle]").click()   # all on → all off
+    page.wait_for_function("() => { const b = document.querySelector(\".popover .tag-tree-head[data-group='Arguments'] [data-test=tag-group-toggle]\"); return !b.checked && !b.indeterminate; }")
+    page.locator(".popover .tag-tree-head[data-group='Arguments'] [data-test=tag-group-toggle]").click()   # all off → the mix again
+    page.wait_for_function("() => document.querySelector(\".popover .tag-tree-head[data-group='Arguments'] [data-test=tag-group-toggle]\").indeterminate")
+    assert page.locator(".popover .tagrow[data-tag='Subject'] [data-test=tag-toggle]").is_checked() is False
+    assert page.locator(".popover .tagrow[data-tag='Object'] [data-test=tag-toggle]").is_checked()
+    page.keyboard.press("Escape")
+    assert page.locator("#editor .chart-obj.flat .moved-lab").inner_text() == "‹‹ Pre-O"
+    # SENTENCE / PARAGRAPH BOUNDARIES (Seth, 2026-10-19): the lines FLEx's last-row boxes draw take a style of their own
+    page.evaluate("async () => { const c = await window.pywebview.api.set_tag_styles('project', FS.tagstyles.context().project, [{tag: 'boundary:paragraph', bs: 'dashed', bw: 4, bc: '#1d4ed8'}, {tag: 'boundary:sentence', hide: true}]); FS.tagstyles.setConfig(c); FS.emit('tagstyles'); }")
+    page.wait_for_selector("#editor .chart-obj tr.end-para.bnd-styled")
+    para = page.locator("#editor .chart-obj tr.end-para").first.locator("td").first
+    assert para.evaluate("(e) => [getComputedStyle(e).borderBottomStyle, getComputedStyle(e).borderBottomWidth, getComputedStyle(e).borderBottomColor]") == ["dashed", "4px", "rgb(29, 78, 216)"]
+    sent = page.locator("#editor .chart-obj tr.end-sent:not(.end-para)").first
+    assert sent.evaluate("(e) => e.classList.contains('bnd-off')") and sent.locator("td").first.evaluate("(e) => getComputedStyle(e).borderBottomWidth") == "1px"
+    page.locator("#editor .chart-obj [data-test=marker-btn]").first.click()
+    page.wait_for_selector("[data-test=tag-popover] .tagrow[data-tag='boundary:paragraph']")
+    page.locator("[data-test=tag-popover] .tagrow[data-tag='boundary:paragraph'] [data-test=tag-style]").click()
+    assert page.locator("[data-test=tag-popover] .tag-style-box [data-test=tag-bs]").count() == 1 and page.locator("[data-test=tag-popover] .tag-style-box [data-test=tag-bg]").count() == 0
+    page.keyboard.press("Escape")
+    assert not errors

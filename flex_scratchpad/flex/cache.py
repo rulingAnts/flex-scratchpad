@@ -8,8 +8,11 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 import time
 from pathlib import Path
+
+from ..fsutil import replace_file
 
 _SAFE = re.compile(r"[^\w.\-~]+", re.UNICODE)
 
@@ -20,6 +23,7 @@ def _safe(s: str) -> str:
 
 class SnapshotCache:
     def __init__(self, root: str | Path):
+        self._lock = threading.RLock()
         self.root = Path(root)
 
     def project_dir(self, project: str) -> Path:
@@ -29,14 +33,20 @@ class SnapshotCache:
         return self.project_dir(project) / f"{kind}-{_SAFE.sub('_', (guid or '').lower())}.json"
 
     def put(self, project: str, kind: str, guid: str, obj: dict) -> None:
+        """Write a snapshot atomically. ONE writer at a time (pywebview calls the Api on many
+        threads at once: a note with twelve examples of one text wrote the same file from twelve
+        threads, and on Windows the second `os.replace` failed with "Access is denied" while the
+        first still had the file open — Seth, 2026-10-19); the replace is retried a few times for
+        a reader that has the file open at that moment."""
         p = self._path(project, kind, guid)
-        p.parent.mkdir(parents=True, exist_ok=True)
         payload = dict(obj)
         payload["cachedAt"] = time.strftime("%Y-%m-%dT%H:%M:%S")
-        tmp = p.with_suffix(".json.tmp")
-        with open(tmp, "w", encoding="utf-8", newline="\n") as f:
-            json.dump(payload, f, ensure_ascii=False)
-        os.replace(tmp, p)
+        with self._lock:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            tmp = p.with_name(p.name + f".{threading.get_ident()}.tmp")
+            with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+                json.dump(payload, f, ensure_ascii=False)
+            replace_file(tmp, p)
 
     def get(self, project: str, kind: str, guid: str) -> dict | None:
         p = self._path(project, kind, guid)
@@ -66,6 +76,10 @@ class SnapshotCache:
     def merge_text(self, project: str, guid: str, page: dict) -> dict:
         """Texts are fetched a segment range at a time; the snapshot accumulates every range
         seen so far (keyed by segment number) so a note with several embeds stays whole."""
+        with self._lock:                      # read-modify-write as one step
+            return self._merge_text(project, guid, page)
+
+    def _merge_text(self, project: str, guid: str, page: dict) -> dict:
         existing = self.get(project, "text", guid) or {}
         segs = {s["n"]: s for s in existing.get("segments", [])}
         # after FLEx renumbered the text, an old snapshot's segment 5 is not the new segment 5:

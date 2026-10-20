@@ -17,23 +17,45 @@ from pathlib import Path
 import sys
 
 
+def console_safe(*streams) -> None:
+    """A console that cannot encode a character (a Windows console in cp1252 meeting the "→" and
+    "…" of our messages) must never end a command (the VM's run of --doubled-morphs, 2026-10-20:
+    UnicodeEncodeError after the summary). Unencodable characters are replaced with "?"; the text
+    files we write are UTF-8 regardless."""
+    for stream in streams or (sys.stdout, sys.stderr):
+        try:
+            if stream is not None and getattr(stream, "errors", None) not in (None, "replace", "backslashreplace"):
+                stream.reconfigure(errors="replace")
+        except Exception:  # noqa: BLE001 — a stream that cannot be reconfigured is left as it is
+            pass
+
+
 def main(argv: list[str] | None = None) -> int:
+    console_safe()
     ap = argparse.ArgumentParser(prog="flex-scratchpad", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--notebook", help="notebook folder (markdown files)")
     ap.add_argument("--demo", action="store_true", help="use the built-in demo project")
-    ap.add_argument("--debug", action="store_true", help="open WebView2 devtools")
+    ap.add_argument("--devtools", "--debug", dest="debug", action="store_true", help="turn the browser developer tools on for the page (WebView2 opens them in their own window: press F12 in the app, or right-click → Inspect); off without this flag")
+    ap.add_argument("-v", "--verbose", action="store_true", help="log everything to the terminal (the default when run from a pip install in a terminal; the windowed exe only writes the log file)")
+    ap.add_argument("-q", "--quiet", action="store_true", help="only warnings and errors on the terminal")
     ap.add_argument("--list-projects", action="store_true")
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--selftest", metavar="OUT", help="check the installed program and write a JSON report to OUT, then exit (0 = all good)")
     ap.add_argument("--version", action="store_true", help="print the version and build fingerprint and exit")
     ap.add_argument("--project", help="FieldWorks project name (with --dump)")
     ap.add_argument("--dump", metavar="TEXT", help="print the first segments of a text (title, part of a title, or GUID) as JSON and exit — for diagnosing what flexicon returns")
+    ap.add_argument("--seg", metavar="LINE", help="with --dump: the line(s) to print instead of the first three — FLEx's own number (11.1, or 11.1-11.3) or the running count (42, 42-44)")
     ap.add_argument("--locate", metavar="SOURCE", help="explain where pasted FLEx rows land: SOURCE is 'clip' (the clipboard, Windows) or a text file; writes a JSON report (--out) and exits")
-    ap.add_argument("--out", default="flex-scratchpad-locate.json", help="report file for --locate")
+    ap.add_argument("--dump-tags", nargs="?", const="", metavar="TEXT", help="write what the project's text markup tags look like raw (the list, and the tags of the first texts that have any, or of TEXT) to a JSON report (--out) and exit")
+    ap.add_argument("--dump-charts", nargs="?", const="", metavar="TEXT", help="write what the project's text charts look like raw (every chart, the Chart Markers list, and the rows of one chart as read: the first with rows, or the one whose text title, template or GUID holds every word of TEXT, e.g. \"Siakai SVC\") to a JSON report (--out) and exit")
+    ap.add_argument("--doubled-morphs", nargs="?", const="", metavar="TEXT", help="list every wordform analysis whose Morphemes line repeats the same unlinked form (\"budu budu\", \"*** ***\" — what FieldWorks' import makes of a word glossed in two languages with no morphemes), with the texts and lines using it: the texts whose title holds every word of TEXT (e.g. \"Tosokai\"), or with no TEXT the whole project (slower: every wordform); writes a JSON report (--out) and exits. Read-only: fix them in FLEx's Word Analyses")
+    ap.add_argument("--out", default=None, help="report file for --locate (flex-scratchpad-locate.json), --dump-tags (flex-scratchpad-tags.json) or --dump-charts (flex-scratchpad-charts.json)")
     ap.add_argument("--backup", action="store_true", help="back the notebook up to the place set in Settings (what closing the app starts), then exit (0 = backed up)")
     ap.add_argument("--register-links", action="store_true", help="register flexscratchpad:// links for this user (Windows) and exit")
     ap.add_argument("url", nargs="?", help="a flexscratchpad://note/<id> link to open (what Windows passes when such a link is clicked)")
     args = ap.parse_args(argv)
+    from .log import setup as log_setup
+    log_setup(verbose=True if args.verbose else None, quiet=args.quiet)
 
     if args.register_links:
         from .links import register_scheme
@@ -52,9 +74,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.backup:
         return backup_once(args.notebook)
     if args.dump:
-        return dump(args.project, args.dump)
+        return dump(args.project, args.dump, args.seg)
     if args.locate:
-        return locate_report(args.project, args.locate, args.out, demo=args.demo)
+        return locate_report(args.project, args.locate, args.out or "flex-scratchpad-locate.json", demo=args.demo)
+    if args.doubled_morphs is not None:
+        return doubled_report(args.project, args.doubled_morphs, args.out or "flex-scratchpad-doubled.json")
+    if args.dump_tags is not None:
+        return tags_report(args.project, args.dump_tags, args.out or "flex-scratchpad-tags.json")
+    if args.dump_charts is not None:
+        return charts_report(args.project, args.dump_charts, args.out or "flex-scratchpad-charts.json", demo=args.demo)
     if args.list_projects:
         from .flex.lcm import FlexError, FlexiconBackend
         be = FlexiconBackend()
@@ -74,9 +102,11 @@ def main(argv: list[str] | None = None) -> int:
     return code
 
 
-def dump(project: str | None, which: str) -> int:
-    """Open the project read-only and print one text's first three segments plus the writing
-    systems, so a rendering problem can be diagnosed from the raw data."""
+def dump(project: str | None, which: str, seg: str | None = None) -> int:
+    """Open the project read-only and print one text's first three segments (or the lines `seg`
+    names: FLEx's own numbers such as 11.1-11.3, or the running count) plus the writing systems,
+    so a rendering problem can be diagnosed from the raw data (Seth, 2026-10-19: a Morphemes line
+    showing every morph twice — the dump shows the bundles exactly as the project returns them)."""
     import json
     from .flex.lcm import FlexError, FlexiconBackend
     from .flex.model import is_guid
@@ -97,8 +127,128 @@ def dump(project: str | None, which: str) -> int:
                 print("No text title contains " + repr(which) + ". Texts: " + ", ".join(t["title"] for t in be.list_texts()[:30]), file=sys.stderr)
                 return 2
             guid = hits[0]["guid"]
-        page = be.get_text(guid, 1, 3, diag=True)
+        a, b = dump_range(be, guid, seg)
+        page = be.get_text(guid, a, b, diag=True)
         print(json.dumps(page, ensure_ascii=False, indent=1))
+        return 0
+    except FlexError as e:
+        print(e.message, file=sys.stderr)
+        if e.detail:
+            print(e.detail, file=sys.stderr)
+        return 2
+    finally:
+        be.close()
+
+
+def tags_report(project: str | None, which: str, out: str) -> int:
+    """Write the project's text markup tags as read raw (FlexiconBackend.explain_tags) to a UTF-8
+    JSON file — the first thing to ask for when tags come out nameless or on the wrong words."""
+    import json
+    from pathlib import Path
+    from . import __version__, build_id
+    from .flex.lcm import FlexError, FlexiconBackend
+    be = FlexiconBackend(progress=lambda m: print(m, file=sys.stderr))
+    try:
+        if not project:
+            names = be.list_projects()
+            if len(names) != 1:
+                print("Several projects; pass --project NAME. Found: " + ", ".join(names), file=sys.stderr)
+                return 2
+            project = names[0]
+        be.open(project)
+        report = {"app": f"FLEx Scratchpad {__version__} (build {build_id()})", "project": project}
+        report.update(be.explain_tags(which))
+        Path(out).write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
+        print(f"{len(report['list'])} tag(s) in the list, {sum(t['tagCount'] for t in report['texts'])} use(s) in {len(report['texts'])} text(s) → {out}")
+        return 0
+    except FlexError as e:
+        print(e.message, file=sys.stderr)
+        if e.detail:
+            print(e.detail, file=sys.stderr)
+        return 2
+    finally:
+        be.close()
+
+
+def doubled_report(project: str | None, which: str, out: str) -> int:
+    """Every analysis with repeated unlinked morph bundles (FlexiconBackend.explain_doubled_bundles)
+    to a JSON file, and a readable list on the terminal: wordform, its bundles, where it is used."""
+    import json
+    from pathlib import Path
+    from . import __version__, build_id
+    from .flex.lcm import FlexError, FlexiconBackend
+    be = FlexiconBackend(progress=lambda m: print(m, file=sys.stderr) if m else None)
+    try:
+        if not project:
+            names = be.list_projects()
+            if len(names) != 1:
+                print("Several projects; pass --project NAME. Found: " + ", ".join(names), file=sys.stderr)
+                return 2
+            project = names[0]
+        be.open(project)
+        report = {"app": f"FLEx Scratchpad {__version__} (build {build_id()})", "project": project}
+        report.update(be.explain_doubled_bundles(which))
+        Path(out).write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
+        print_doubled(report)
+        print(f"→ {out}")
+        return 0
+    except FlexError as e:
+        print(e.message, file=sys.stderr)
+        if e.detail:
+            print(e.detail, file=sys.stderr)
+        return 2
+    finally:
+        be.close()
+
+
+def print_doubled(report: dict, limit: int = 200) -> None:
+    rows = report.get("analyses") or []
+    texts = report.get("texts") or []
+    scope = f"{len(texts)} text(s)" + (f" and {report['wordformsChecked']} wordforms" if report.get("wordformsChecked") else "")
+    print(f"{scope} checked ({report.get('analysesChecked', 0)} analyses); {len(rows)} analyses repeat an unlinked morph bundle"
+          + (f", used in {len(report.get('textsHit') or {})} text(s)" if rows else ""))
+    for title, n in sorted((report.get("textsHit") or {}).items(), key=lambda kv: -kv[1]):
+        print(f"  {n:5d} word(s) in {title}")
+    for r in rows[:limit]:
+        uses = r.get("uses") or []
+        where = ", ".join(f"{u['text']} {u['line']}" for u in uses[:4]) + (f" … (+{len(uses) - 4})" if len(uses) > 4 else "")
+        shape = "" if r.get("looksLikeBaseline") and r["extra"] + 1 == len(r["bundles"]) else "  ⚠ not the import's shape (a real analysis with a repeated morph): leave it"
+        print(f"- {r['wordform']}: [{' | '.join(r['bundles'])}]  {r['extra']} extra" + (f"  — {where}" if where else "  — not used in any text") + shape)
+    if len(rows) > limit:
+        print(f"  … {len(rows) - limit} more in the report")
+
+
+def charts_report(project: str | None, which: str, out: str, demo: bool = False) -> int:
+    """Write the project's text charts as read raw (FlexiconBackend.explain_charts) to a UTF-8
+    JSON file — the first thing to ask for when a chart comes out wrong (--demo: the fixture)."""
+    import json
+    from pathlib import Path
+    from . import __version__, build_id
+    from .flex.lcm import FlexError, FlexiconBackend
+    if demo:
+        from .flex.demo import DemoBackend
+        be = DemoBackend()
+        report = {"app": f"FLEx Scratchpad {__version__} (build {build_id()})", "project": be.project_name, "charts": be.list_charts(),
+                  "markers": be.list_chart_markers(), "chart": be.get_chart(be.list_charts()[0]["guid"]) if be.list_charts() else None}
+        Path(out).write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
+        print(f"{len(report['charts'])} chart(s) → {out}")
+        return 0
+    be = FlexiconBackend(progress=lambda m: print(m, file=sys.stderr))
+    try:
+        if not project:
+            names = be.list_projects()
+            if len(names) != 1:
+                print("Several projects; pass --project NAME. Found: " + ", ".join(names), file=sys.stderr)
+                return 2
+            project = names[0]
+        be.open(project)
+        report = {"app": f"FLEx Scratchpad {__version__} (build {build_id()})", "project": project}
+        report.update(be.explain_charts(which))
+        Path(out).write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
+        ch = report.get("chart") or {}
+        print(f"{len(report['charts'])} chart(s), {len(report['markers'])} marker(s) in the list"
+              + (f"; {ch.get('name') or 'chart'} on “{ch.get('title') or '?'}” ({(ch.get('template') or {}).get('name') or 'no template'}): {ch.get('rowCount', 0)} row(s), {len((ch.get('template') or {}).get('columns') or [])} column(s)" if ch else "; no chart matches " + repr(which) if which else "")
+              + f" → {out}")
         return 0
     except FlexError as e:
         print(e.message, file=sys.stderr)
@@ -131,6 +281,35 @@ def _clipboard_text() -> str:
             kernel32.GlobalUnlock(h)
     finally:
         user32.CloseClipboard()
+
+
+def dump_range(be, guid: str, seg: str | None) -> tuple[int, int]:
+    """(first, last) running segment numbers for --seg: `42` / `42-44` as they are; a FLEx number
+    (`11.1`, `11.1-11.3`) found by walking the text's pages for the segments carrying those labels."""
+    from .flex.lcm import FlexError
+    if not seg:
+        return 1, 3
+    parts = [x.strip() for x in str(seg).split("-", 1)]
+    if all(x.isdigit() for x in parts):
+        a = int(parts[0])
+        return a, int(parts[-1])
+    want = {x: None for x in parts}
+    start, total = 1, None
+    while any(v is None for v in want.values()) and (total is None or start <= total):
+        page = be.get_text(guid, start, start + 59)
+        segs = page.get("segments") or []
+        total = page.get("segmentCount") or total or 0
+        for sg in segs:
+            if sg.get("label") in want and want[sg["label"]] is None:
+                want[sg["label"]] = int(sg["n"])
+        if not segs:
+            break
+        start += 60
+    missing = [k for k, v in want.items() if v is None]
+    if missing:
+        raise FlexError("No line numbered " + ", ".join(missing) + " in that text.", "", "no-object")
+    ns = [want[x] for x in parts]
+    return min(ns), max(ns)
 
 
 def locate_report(project: str | None, source: str, out: str, demo: bool = False) -> int:
@@ -329,10 +508,19 @@ def backup_once(notebook: str | None) -> int:
     from .backup import Backup, BackupError
     from .config import AppConfig
     from .secrets_store import default_store
+    import time
     cfg = AppConfig()
     root = Path(notebook) if notebook else cfg.notebook_dir
     try:
-        r = Backup(cfg, default_store(), lambda: root).run("close")
+        b = Backup(cfg, default_store(), lambda: root)
+        t0 = time.monotonic()
+        while True:
+            r = b.run("close")
+            # the window that started this process may still be letting go of its own cancelled
+            # run (its lock): wait for it, up to two minutes, rather than give up at once
+            if not r.get("busy") or time.monotonic() - t0 > 120:
+                break
+            time.sleep(2)
     except BackupError as e:
         print(e)
         return 2

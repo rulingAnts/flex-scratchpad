@@ -21,17 +21,26 @@
       <span class="ico">&#128269;</span>
       <input id="search" type="text" placeholder="Search notebook  (Ctrl+Shift+F)" autocomplete="off" spellcheck="false">
     </div>
-    <div class="rail-section" id="tabs-section">
-      <h4>Tabs <span class="spacer"></span><button id="btn-add-tab" title="New tab">+</button></h4>
-      <div id="tabs"></div>
-    </div>
-    <div class="rail-section" id="folders-section">
-      <h4>Folders <span class="spacer"></span><button id="btn-add-folder" title="New folder">+</button></h4>
-      <div id="folders"></div>
-    </div>
-    <div class="rail-section" id="tags-section" style="flex:1">
-      <h4>Tags <span class="spacer"></span><button id="btn-edit-tags" title="Edit tags">&#9998;</button></h4>
-      <div id="tags"></div>
+    <div class="rail-body" id="rail-body">
+      <div class="rail-section" id="tabs-section" data-sec="tabs">
+        <h4><span class="caret">&#9662;</span>Tabs <span class="spacer"></span><button id="btn-add-tab" title="New tab">+</button></h4>
+        <div class="sec-body" id="tabs"></div>
+      </div>
+      <div class="rail-divider" data-test="rail-divider" title="Drag to give this part more or less room; double-click to reset"></div>
+      <div class="rail-section" id="folders-section" data-sec="folders">
+        <h4><span class="caret">&#9662;</span>Folders <span class="spacer"></span><button id="btn-add-folder" title="New folder">+</button></h4>
+        <div class="sec-body" id="folders"></div>
+      </div>
+      <div class="rail-divider" data-test="rail-divider" title="Drag to give this part more or less room; double-click to reset"></div>
+      <div class="rail-section" id="tags-section" data-sec="tags">
+        <h4><span class="caret">&#9662;</span>Tags <span class="spacer"></span><button id="btn-edit-tags" title="Edit tags">&#9998;</button></h4>
+        <div class="sec-body" id="tags"></div>
+      </div>
+      <div class="rail-divider" data-test="rail-divider" title="Drag to give this part more or less room; double-click to reset"></div>
+      <div class="rail-section" id="ftags-section" data-sec="ftags" hidden>
+        <h4><span class="caret">&#9662;</span>FLEx tags <span class="spacer"></span></h4>
+        <div class="sec-body" id="ftags"></div>
+      </div>
     </div>
     <div class="rail-foot">
       <div class="flex-pill" id="flex-pill" title="FieldWorks connection"><span class="led"></span><span class="label">FLEx: not connected</span></div>
@@ -68,17 +77,22 @@
     </div>
     <div class="toolbar" id="toolbar">
       <button class="tb primary" id="btn-insert-flex" title="Insert a FLEx entry or text (Ctrl+Shift+L)">&#10133; FLEx object</button>
+      <button class="tb" id="btn-chart-search" data-test="btn-chart-search" title="Search every text chart of the project: words, glosses, markers, columns, clause types — built from lists or typed (Ctrl+Shift+K)">&#9638; Search charts</button>
       <button class="tb" id="btn-attach" data-test="btn-attach" title="Attach a file: a copy goes into the notebook's attachments folder. ▾ (or Alt+click) to link to the file where it is instead.">&#128206; Attach</button><button class="tb tb-more" id="btn-attach-more" data-test="btn-attach-more" title="Copy the file into the notebook, or link to it where it is">&#9662;</button>
       <button class="tb" id="btn-refresh-all" title="Reload every FLEx example in every note of this notebook from the project">&#8635; Refresh all</button>
+      <button class="tb" id="btn-filters" data-test="tb-filters" title="Visual filters: named sets of FLEx tag styles, switched on and off for this note or everywhere">&#9873; Filters</button>
       <span class="sep"></span>
       <button class="tb" data-ins="h" data-test="tb-heading" title="Heading levels 1–6 (Ctrl+Alt+1…6), and collapsing them"><b>H</b> ▾</button>
       <button class="tb" data-ins="bold" title="Bold (Ctrl+B)"><b>B</b></button>
       <button class="tb" data-ins="italic" title="Italic (Ctrl+I)"><i>I</i></button>
       <button class="tb" data-ins="mark" title="Highlight (Ctrl+Shift+H)"><span style="background:var(--hl);padding:0 3px;border-radius:2px">ab</span></button>
-      <button class="tb" data-ins="code" title="Code">&lt;/&gt;</button>
+      <button class="tb" data-ins="code" title="Code (Ctrl+E)">&lt;/&gt;</button>
+      <button class="tb" data-ins="link" data-test="tb-link" title="Link (Ctrl+K)">&#128279;</button>
       <span class="sep"></span>
       <button class="tb" data-ins="list" title="Bulleted list">&#8226; List</button>
       <button class="tb" data-ins="task" title="Checklist">&#9745; Checklist</button>
+      <button class="tb" data-ins="outdent" data-test="tb-outdent" title="Decrease the list indent (Shift+Tab, Ctrl+[)">&#8676;</button>
+      <button class="tb" data-ins="indent" data-test="tb-indent" title="Increase the list indent (Tab, Ctrl+])">&#8677;</button>
       <button class="tb" data-ins="quote" title="Quote">&#10077; Quote</button>
       <span class="sep"></span>
       <button class="tb" data-ins="table" title="Table">&#9638; Table</button>
@@ -92,6 +106,7 @@
       <span class="spacer"></span>
       <button class="tb" id="btn-markers" title="Show or hide the Markdown markers (**bold**, # heading, - list) while editing">&#42;&#42; Markup</button>
     </div>
+    <div class="tagfocus" id="tagfocus" hidden></div>
     <div class="findbar" id="findbar" hidden>
       <input id="find-input" type="text" placeholder="Find in note" autocomplete="off">
       <span class="cnt" id="find-count"></span>
@@ -101,6 +116,7 @@
     </div>
     <div id="editor"></div>
     <div id="collection" hidden></div>
+    <div id="chartnote" hidden></div>
     <div class="note-foot">
       <span id="note-updated"></span>
       <span id="note-location"></span>
@@ -116,6 +132,9 @@
 <script src="js/flexref.js"></script>
 <script src="js/markdown.js"></script>
 <script src="js/interlinear.js"></script>
+<script src="js/tagstyles.js"></script>
+<script src="js/chart.js"></script>
+<script src="js/flexcopy.js"></script>
 <script src="js/files.js"></script>
 <script src="js/backup.js"></script>
 <script src="js/charts.js"></script>
@@ -124,6 +143,7 @@
 <script src="js/picker.js"></script>
 <script src="js/export.js"></script>
 <script src="js/collection.js"></script>
+<script src="js/chartnote.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

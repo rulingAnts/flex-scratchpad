@@ -15,10 +15,12 @@ import os
 import queue
 import re
 import threading
+import time
 from concurrent.futures import Future
 from pathlib import Path
 
 from . import model
+from ..log import LOG
 
 OPEN_TIMEOUT = 600      # a big project can take minutes to open
 CALL_TIMEOUT = 180
@@ -37,6 +39,7 @@ def _friendly(exc: BaseException, project: str = "") -> FlexError:
     text = str(exc)
     if isinstance(exc, FlexError):
         return exc
+    LOG.warning("flexicon raised %s: %s", name, text[:600].replace("\n", " | "))
     if isinstance(exc, ImportError) or name == "ModuleNotFoundError":
         return FlexError(
             "flexicon is not installed, so the FLEx project cannot be read directly. "
@@ -82,9 +85,22 @@ class LcmWorker(threading.Thread):
                     fut.set_exception(e)
 
     def call(self, fn, timeout: float = CALL_TIMEOUT):
+        label = getattr(fn, "__qualname__", "?").replace(".<locals>.go", "").replace(".<locals>", "")
+        t0 = time.perf_counter()
+        if threading.current_thread() is self:
+            # Already on the worker (a backend method calling another, e.g. a scan calling
+            # list_texts): run it here. Queued, it would wait for a thread that is waiting for it —
+            # Seth's --doubled-morphs sat at 0 % CPU for minutes (2026-10-19) until the 600 s timeout.
+            return fn()
         fut: Future = Future()
         self.q.put((fn, fut))
-        return fut.result(timeout=timeout)
+        try:
+            out = fut.result(timeout=timeout)
+        except BaseException as e:
+            LOG.debug("lcm %s failed after %.0f ms: %s: %s", label, (time.perf_counter() - t0) * 1000, type(e).__name__, str(e)[:300])
+            raise
+        LOG.debug("lcm %s (%.0f ms)", label, (time.perf_counter() - t0) * 1000)
+        return out
 
     def stop(self) -> None:
         self.q.put(None)
@@ -145,6 +161,23 @@ def _ms(v) -> int | None:
         return int(float(s))
     except ValueError:
         return None
+
+
+def pick_chart(summaries: list[dict], which: str = "") -> int | None:
+    """Which chart `--dump-charts [WHICH]` reports in full: every word of WHICH must appear in the
+    chart's text title, name, template name or GUID (so `Siakai SVC` picks the SVC chart on
+    Siakai), and among the matches a chart WITH rows comes first (Seth, 2026-10-18: `Siakai`
+    picked an empty chart — the first of five on that text), then the one with most rows.
+    None when nothing matches."""
+    words = [w for w in (which or "").casefold().split() if w]
+    best = None
+    for i, summ in enumerate(summaries):
+        hay = " ".join(str(summ.get(k) or "") for k in ("title", "name", "template", "guid")).casefold()
+        if all(w in hay for w in words):
+            key = (int(summ.get("rows") or 0) > 0, int(summ.get("rows") or 0), -i)
+            if best is None or key > best[0]:
+                best = (key, i)
+    return None if best is None else best[1]
 
 
 class FlexiconBackend:
@@ -347,6 +380,26 @@ class FlexiconBackend:
                 return s
         return ""
 
+    def _best(self, multi) -> str:
+        """The best alternative of an IMultiUnicode / IMultiString: analysis, then vernacular,
+        then whatever is stored. NOT flexicon's BestStr (Seth's project, 2026-10-18: every text
+        markup tag came back as "?"): that one validates its argument with isinstance() against
+        the IMultiUnicode / IMultiString interfaces, and pythonnet types the object it hands out
+        by its runtime class (liblcm's internal MultiUnicodeAccessor), whose Python bases do not
+        include the interfaces — so BestStr raises FP_ParameterError for every real multistring,
+        while the properties themselves work (the glosses were always read through them)."""
+        if multi is None:
+            return ""
+        for fn in (lambda: multi.BestAnalysisVernacularAlternative, lambda: multi.BestAnalysisAlternative,
+                   lambda: multi.BestVernacularAlternative):
+            s = _s(_t(fn, ""))
+            if s and s != "***":
+                return s
+        for v in self._ws_alternatives(multi).values():
+            if v:
+                return v
+        return ""
+
     def _anal_text(self, multi, ws_handle=None) -> str:
         if multi is None:
             return ""
@@ -520,7 +573,7 @@ class FlexiconBackend:
         mt = self._c(_t(lambda: self._c(e.LexemeFormOA).MorphTypeRA, None))
         if mt is None:
             return ""
-        return _s(_t(lambda: self.project.BestStr(mt.Name), ""))
+        return _s(_t(lambda: self._best(mt.Name), ""))
 
     def search_entries(self, q: str, limit: int = 30) -> list[dict]:
         def go():
@@ -847,6 +900,276 @@ class FlexiconBackend:
                 out.append({"n": n, "label": f"{pi}.{k}", "guid": _guid(seg)})
         return out
 
+    # -- text markup tags (Seth, 2026-10-17) -----------------------------------------
+    # IStText.TagsOC holds the text's ITextTags: BeginSegmentRA / EndSegmentRA, BeginAnalysisIndex /
+    # EndAnalysisIndex (0-based over the segment's analyses, punctuation included) and TagRA, an
+    # item of LangProject.TextMarkupTagsOA (a two-level list: a group, its tags). Unverified
+    # against a real project, like the rest of this file: every access is behind _t().
+    def _poss_dict(self, poss, path=None) -> dict:
+        poss = self._c(poss)
+        name = _s(_t(lambda: self._best(poss.Name), ""))
+        abbr = _s(_t(lambda: self._best(poss.Abbreviation), ""))
+        if path is None:
+            path = self._tag_path(poss)
+        elif isinstance(path, str):
+            path = [path] if path else []
+        return model.tag_item(_guid(poss), name, abbr, "",
+                              model.fw_color(_t(lambda: poss.ForeColor, -1)), model.fw_color(_t(lambda: poss.BackColor, -1)), path=path)
+
+    def _tag_path(self, poss) -> list[str]:
+        """The names of an item's ancestors in its possibility list, top first (the list may nest
+        deeper than FLEx's usual two levels)."""
+        out: list[str] = []
+        cur = self._c(_t(lambda: poss.Owner, None))
+        for _ in range(12):
+            if cur is None or _t(lambda: cur.ClassName, "") != "CmPossibility":
+                break
+            out.append(_s(_t(lambda: self._best(cur.Name), "")))
+            cur = self._c(_t(lambda: cur.Owner, None))
+        return [x for x in reversed(out) if x]
+
+    def _tag_group(self, poss) -> str:
+        path = self._tag_path(poss)
+        return path[-1] if path else ""
+
+    def _text_tags(self, text, seg_n: dict) -> list[dict]:
+        out = []
+        st = self._c(_t(lambda: text.ContentsOA, None))
+        if st is None:
+            return out
+        for tt in _t(lambda: list(st.TagsOC), []):
+            tt = self._c(tt)
+            poss = _t(lambda: tt.TagRA, None)
+            a = seg_n.get(_guid(_t(lambda: tt.BeginSegmentRA, None)))
+            b = seg_n.get(_guid(_t(lambda: tt.EndSegmentRA, None)))
+            if poss is None or a is None or b is None:
+                continue
+            out.append(model.make_tag(_guid(tt), self._poss_dict(poss), a,
+                                      int(_t(lambda: tt.BeginAnalysisIndex, 0) or 0), b, int(_t(lambda: tt.EndAnalysisIndex, 0) or 0)))
+        out.sort(key=lambda t: (t["from"]["seg"], t["from"]["w"], t["to"]["seg"], t["to"]["w"]))
+        return out
+
+    def list_text_tags(self) -> list[dict]:
+        """The project's TextMarkupTags list, flat: each tag with its group (the picker, the
+        style editors). Counts come from tag_occurrences, not here (that walks every text)."""
+        def go():
+            self._need()
+            lst = _t(lambda: self.project.lp.TextMarkupTagsOA, None)
+            out = []
+
+            def walk(items, path):
+                # an item with sub-items is a GROUP (FLEx tags with the leaves); the leaves carry the path
+                for it in items:
+                    it = self._c(it)
+                    subs = _t(lambda: list(it.SubPossibilitiesOS), [])
+                    if subs:
+                        walk(subs, path + [_s(_t(lambda: self._best(it.Name), ""))])
+                    else:
+                        out.append(self._poss_dict(it, path))
+            walk(_t(lambda: list(lst.PossibilitiesOS), []), [])
+            return out
+        try:
+            return self.worker.call(go)
+        except BaseException as e:
+            raise _friendly(e, self.project_name)
+
+    def tag_occurrences(self, tag_guid: str) -> list[dict]:
+        """Every place one tag is used, across the project's texts (the picker's Tags search)."""
+        g = (tag_guid or "").lower()
+
+        def go():
+            self._need()
+            p = self.project
+            out = []
+            for text in _t(lambda: list(p.Texts.GetAll()), []):
+                text = self._c(text)
+                st = self._c(_t(lambda: text.ContentsOA, None))
+                tags = [self._c(tt) for tt in _t(lambda: list(st.TagsOC), []) if st is not None]
+                tags = [tt for tt in tags if _guid(_t(lambda: tt.TagRA, None)) == g]
+                if not tags:
+                    continue
+                segs = {}
+                n = 0
+                for pi, para in enumerate(_t(lambda: list(p.Paragraphs.GetAll(text)), []), 1):
+                    for k, seg in enumerate(_t(lambda: list(p.Segments.GetAll(para)), []), 1):
+                        n += 1
+                        segs[_guid(seg)] = (n, f"{pi}.{k}", seg)
+                title = self._text_title(text, "", self._baseline_ws(text)[1])
+                for tt in tags:
+                    a = segs.get(_guid(_t(lambda: tt.BeginSegmentRA, None)))
+                    b = segs.get(_guid(_t(lambda: tt.EndSegmentRA, None)))
+                    if not a or not b:
+                        continue
+                    wa, wb = int(_t(lambda: tt.BeginAnalysisIndex, 0) or 0), int(_t(lambda: tt.EndAnalysisIndex, 0) or 0)
+                    toks = model.tokenize(_s(_t(lambda: p.Segments.GetBaselineText(a[2]), "")))
+                    last = wb if a is b else len(toks) - 1
+                    words = " ".join(t["txt"] for t in toks[wa:last + 1] if not t["punct"])
+                    out.append({"text": _guid(text), "title": title, "seg": a[0], "segTo": b[0], "label": a[1], "labelTo": b[1],
+                                "at": [model.anchor_of(_guid(a[2])), model.anchor_of(_guid(b[2]))], "words": words + ("…" if a is not b else "")})
+            out.sort(key=lambda r: (r["title"].casefold(), r["seg"]))
+            return out
+        try:
+            return self.worker.call(go, timeout=OPEN_TIMEOUT)
+        except BaseException as e:
+            raise _friendly(e, self.project_name)
+
+    def explain_doubled_bundles(self, which: str = "") -> dict:
+        """Every wordform analysis whose morph bundles repeat the same unlinked form (Seth,
+        2026-10-19: "budu budu" with "*** ***" under it — FieldWorks' importer makes one bundle per
+        gloss LANGUAGE for a word with no <morphemes>), with the texts and lines that use each
+        analysis. TEXTS FIRST (Seth: the whole-project wordform walk sat on one number for
+        minutes): the analyses of the texts named by `which` (every word of it in the title;
+        '' = every text) are checked as they are met, line by line, with a progress line per
+        text; only a run over EVERY text goes on to the wordforms no text uses, 100 at a time.
+        Read-only; for `flex-scratchpad --doubled-morphs [TEXT]`."""
+        def go():
+            self._need()
+            p = self.project
+            rows: list[dict] = []
+            checked: dict[str, dict | None] = {}        # analysis guid → row (None: fine)
+            words = [w.casefold() for w in (which or "").split() if w.strip()]
+
+            def check(an, an_guid: str):
+                if an_guid in checked:
+                    return checked[an_guid]
+                checked[an_guid] = None
+                bundles = []
+                for b in _t(lambda: list(p.WfiMorphBundles.GetAll(an)), []):
+                    b = self._c(b)
+                    bundles.append({
+                        "guid": _guid(b),
+                        "forms": self._ws_alternatives(_t(lambda: b.Form, None)) or {},
+                        "sense": _guid(_t(lambda: b.SenseRA, None)),
+                        "msa": _guid(_t(lambda: b.MsaRA, None)),
+                        "morph": _guid(_t(lambda: b.MorphRA, None)),
+                    })
+                if len(bundles) < 2:
+                    return None
+                groups = model.doubled_bundles(bundles)
+                if not groups:
+                    return None
+                wf = self._c(_t(lambda: an.Wordform, None)) or self._c(_t(lambda: an.Owner, None))
+                form = self._vern_text(_t(lambda: wf.Form, None)) if wf is not None else ""
+                row = {
+                    "wordform": form, "wordformGuid": _guid(wf) if wf is not None else "", "analysis": an_guid,
+                    "bundles": [" ".join(v for v in b["forms"].values()) for b in bundles],
+                    "bundleGuids": [b["guid"] for b in bundles],
+                    "duplicates": [[bundles[i]["guid"] for i in g] for g in groups],
+                    "extra": sum(len(g) - 1 for g in groups),
+                    "looksLikeBaseline": bool(form) and all(any(v == form for v in bundles[i]["forms"].values()) for g in groups for i in g),
+                    "uses": [],
+                }
+                rows.append(row)
+                checked[an_guid] = row
+                return row
+
+            texts = [t for t in self.list_texts() if all(w in t["title"].casefold() for w in words)]
+            texts_hit: dict[str, int] = {}
+            for ti, t in enumerate(texts):
+                self.progress(f"Checking texts… {ti + 1}/{len(texts)}: {t['title']}")
+                text = self._owning_text(self._c(p.Object(t["guid"])))
+                if text is None:
+                    continue
+                for pi, para in enumerate(_t(lambda: list(p.Paragraphs.GetAll(text)), [])):
+                    for si, seg in enumerate(_t(lambda: list(p.Segments.GetAll(para)), [])):
+                        for tok in _t(lambda: list(p.Segments.GetAnalyses(seg)), []):
+                            an = self._c(_t(lambda: self._c(tok).Analysis, None))
+                            if an is None:
+                                continue
+                            row = check(an, _guid(an))
+                            if row is not None:
+                                row["uses"].append({"text": t["title"], "textGuid": t["guid"], "line": f"{pi + 1}.{si + 1}"})
+                                texts_hit[t["title"]] = texts_hit.get(t["title"], 0) + 1
+            n_wf = 0
+            if not words:                                # the whole project: the analyses no text uses, too
+                import time as _time
+                for wf in _t(lambda: list(p.Wordforms.GetAll()), []):
+                    n_wf += 1
+                    t0 = _time.monotonic()
+                    if n_wf % 100 == 0:
+                        self.progress(f"Checking wordforms no text uses… {n_wf}")
+                    wf = self._c(wf)
+                    for an in _t(lambda: list(p.WfiAnalyses.GetAll(wf)), []):
+                        an = self._c(an)
+                        check(an, _guid(an))
+                    if _time.monotonic() - t0 > 3:
+                        self.progress(f"  (slow wordform: {self._vern_text(_t(lambda: wf.Form, None))!r} took {_time.monotonic() - t0:.0f} s)")
+            self.progress("")
+            return {"texts": [t["title"] for t in texts], "wordformsChecked": n_wf, "analysesChecked": len(checked),
+                    "analyses": rows, "textsHit": texts_hit}
+        try:
+            return self.worker.call(go, timeout=OPEN_TIMEOUT * 8)
+        except BaseException as e:
+            raise _friendly(e, self.project_name)
+
+    def explain_tags(self, which: str = "", max_texts: int = 3, max_tags: int = 12) -> dict:
+        """What the project's text markup tags look like RAW, for `flex-scratchpad --dump-tags`:
+        the list (each item's name through every accessor, its colours as stored) and, for the
+        first texts that carry tags (or the one named), each tag's segments, analysis indexes and
+        the analyses of its first segment — so a tag drawn on the wrong words can be traced."""
+        def go():
+            self._need()
+            p = self.project
+            rep: dict = {"list": [], "texts": []}
+            lst = _t(lambda: p.lp.TextMarkupTagsOA, None)
+            rep["listClass"] = _t(lambda: lst.ClassName, "") if lst is not None else None
+
+            def raw_poss(poss, depth=0):
+                c = self._c(poss)
+                return {"guid": _guid(c), "class": _t(lambda: c.ClassName, ""), "depth": depth,
+                        "name": {"bestAnalVern": _s(_t(lambda: c.Name.BestAnalysisVernacularAlternative, "")),
+                                 "bestAnal": _s(_t(lambda: c.Name.BestAnalysisAlternative, "")),
+                                 "alternatives": self._ws_alternatives(_t(lambda: c.Name, None)),
+                                 "flexiconBestStr": _s(_t(lambda: p.BestStr(c.Name), "⚠ raised"))},
+                        "abbr": self._ws_alternatives(_t(lambda: c.Abbreviation, None)),
+                        "foreColor": _t(lambda: int(c.ForeColor), None), "backColor": _t(lambda: int(c.BackColor), None),
+                        "underColor": _t(lambda: int(c.UnderColor), None), "asRead": self._poss_dict(c)}
+            for top in _t(lambda: list(lst.PossibilitiesOS), []):
+                rep["list"].append(raw_poss(top))
+                for sub in _t(lambda: list(self._c(top).SubPossibilitiesOS), []):
+                    rep["list"].append(raw_poss(sub, 1))
+            want = (which or "").casefold()
+            for text in _t(lambda: list(p.Texts.GetAll()), []):
+                if len(rep["texts"]) >= max_texts:
+                    break
+                text = self._c(text)
+                title = self._text_title(text, "", self._baseline_ws(text)[1])
+                st = self._c(_t(lambda: text.ContentsOA, None))
+                tags = [self._c(tt) for tt in _t(lambda: list(st.TagsOC), [])] if st is not None else []
+                if want and want not in title.casefold() and want != _guid(text):
+                    continue
+                if not tags and not want:
+                    continue
+                segs, n = {}, 0
+                for pi, para in enumerate(_t(lambda: list(p.Paragraphs.GetAll(text)), []), 1):
+                    for k, seg in enumerate(_t(lambda: list(p.Segments.GetAll(para)), []), 1):
+                        n += 1
+                        segs[_guid(seg)] = (n, f"{pi}.{k}", seg)
+                tx = {"guid": _guid(text), "title": title, "segments": n, "tagCount": len(tags), "tags": []}
+                for tt in tags[:max_tags]:
+                    ga, gb = _guid(_t(lambda: tt.BeginSegmentRA, None)), _guid(_t(lambda: tt.EndSegmentRA, None))
+                    a, b = segs.get(ga), segs.get(gb)
+                    row = {"guid": _guid(tt), "class": _t(lambda: tt.ClassName, ""), "tag": _guid(_t(lambda: tt.TagRA, None)),
+                           "tagName": self._best(_t(lambda: self._c(tt.TagRA).Name, None)),
+                           "beginSegment": {"guid": ga, "n": a[0] if a else None, "label": a[1] if a else None},
+                           "endSegment": {"guid": gb, "n": b[0] if b else None, "label": b[1] if b else None},
+                           "beginAnalysisIndex": _t(lambda: int(tt.BeginAnalysisIndex), None), "endAnalysisIndex": _t(lambda: int(tt.EndAnalysisIndex), None)}
+                    if a:
+                        seg = a[2]
+                        row["beginSegmentBaseline"] = _s(_t(lambda: p.Segments.GetBaselineText(seg), ""))
+                        anals = []
+                        for an in _t(lambda: list(self._c(seg).AnalysesRS), []):
+                            an = self._c(an)
+                            anals.append({"class": _t(lambda: an.ClassName, ""), "form": self._vern_text(_t(lambda: an.Wordform.Form, None)) or self._vern_text(_t(lambda: an.Form, None))})
+                        row["beginSegmentAnalyses"] = anals
+                    tx["tags"].append(row)
+                rep["texts"].append(tx)
+            return rep
+        try:
+            return self.worker.call(go, timeout=OPEN_TIMEOUT)
+        except BaseException as e:
+            raise _friendly(e, self.project_name)
+
     def _text_dict(self, text, seg_from, seg_to, max_segments: int = 60, ws_sel: dict | None = None, diag: bool = False, at=None) -> dict:
         p = self.project
         ws = self._writing_systems()
@@ -885,12 +1208,14 @@ class FlexiconBackend:
         d["anchorsLost"] = bool(r["lost"])
         n = 0
         pi = 0
+        seg_n: dict[str, int] = {}              # every segment's guid → running number (the tags)
         for para in _t(lambda: list(p.Paragraphs.GetAll(text)), []):
             pi += 1
             k = 0
             for seg in _t(lambda: list(p.Segments.GetAll(para)), []):
                 n += 1
                 k += 1
+                seg_n[_guid(seg)] = n
                 if n < a or (b is not None and n > b) or (n - a) >= max_segments:
                     continue
                 try:
@@ -901,6 +1226,7 @@ class FlexiconBackend:
         d["segmentCount"] = n
         d["range"] = [a, min(n, b or n)] if n else [0, 0]
         d["anchors"] = model.anchors_for(d["segments"])
+        d["tags"] = self._text_tags(text, seg_n)
         if getattr(self, "_alts", False):
             model.fill_alts(d)          # whatever LCM gave no alternative for keeps its one value
         return d
@@ -914,6 +1240,8 @@ class FlexiconBackend:
                 words.append(self._word_dict(tok))
             except Exception as exc:  # noqa: BLE001 — a word that cannot be read shows as "?" with the reason
                 words.append(model.make_word("?", gls=f"⚠ {exc}", guid=_guid(tok)))
+        for i, w in enumerate(words):
+            w["ai"] = i                 # FLEx's analysis index: what a text markup tag's begin / end count
         baseline = _s(_t(lambda: p.Segments.GetBaselineText(seg), ""))
         words = model.fill_punctuation(words, baseline)
         baseline = baseline or model.baseline_from_words(words)
@@ -930,7 +1258,7 @@ class FlexiconBackend:
         notes = []
         for note in _t(lambda: list(p.Segments.GetNotes(seg)), []):
             note = self._c(note)
-            s = _s(_t(lambda: p.BestStr(note.Content), ""))
+            s = _s(_t(lambda: self._best(note.Content), ""))
             if s:
                 notes.append(s)
         media_guid = _guid(_t(lambda: seg.MediaURIRA, None)) or (next(iter(media_by_guid), None))
@@ -1072,6 +1400,261 @@ class FlexiconBackend:
         # flexicon's BuildGotoURL returned a percent-encoded query (`database%3d…%26tool%3d…`)
         # on Seth's first run (2026-10-12).
         return model.goto_url(self.project_name, kind, _guid(obj))
+
+    # -- text charts (Seth, 2026-10-18) ---------------------------------------------------
+    # A constituent chart is an IDsConstChart in LangProject.DiscourseDataOA.ChartsOC: BasedOnRA
+    # (the text's IStText), TemplateRA (a CmPossibility whose sub-items are the column GROUPS and
+    # their COLUMNS), RowsOS of IConstChartRow (Label, Notes, ClauseType, EndSentence, EndParagraph,
+    # Start/EndDependentClauseGroup, CellsOS). A cell part (IConstituentChartCellPart: ColumnRA,
+    # MergesAfter, MergesBefore) is one of IConstChartWordGroup (BeginSegmentRA, EndSegmentRA,
+    # BeginAnalysisIndex, EndAnalysisIndex — the shape of a text markup tag), IConstChartMovedTextMarker
+    # (WordGroupRA, Preposed), IConstChartClauseMarker (DependentClausesRS) or IConstChartTag (TagRA,
+    # an item of DiscourseDataOA.ChartMarkersOA). flexicon 4.12 has ConstCharts / ConstChartRows /
+    # Discourse.GetCells, but not the analysis indexes, the row flags or the template tree, so the
+    # fields are read directly here (read-only, behind _t(), like the tags). Not yet run against a
+    # real project: `flex-scratchpad --project NAME --dump-charts` writes what it sees.
+    def _discourse(self):
+        return self._c(_t(lambda: self.project.lp.DiscourseDataOA, None))
+
+    def _chart_objects(self) -> list:
+        dd = self._discourse()
+        out = []
+        for ch in _t(lambda: list(dd.ChartsOC), []) if dd is not None else []:
+            ch = self._c(ch)
+            if _t(lambda: ch.ClassName, "") == "DsConstChart":
+                out.append(ch)
+        return out
+
+    def _chart_text(self, ch):
+        """The IText a chart is based on (BasedOnRA is its StText)."""
+        st = self._c(_t(lambda: ch.BasedOnRA, None))
+        return self._owning_text(st) if st is not None else None
+
+    def _template_columns(self, tmpl) -> list[dict]:
+        """The template's leaves in order, each with the names of its groups above it."""
+        cols: list[dict] = []
+
+        def walk(items, path):
+            for it in items:
+                it = self._c(it)
+                subs = _t(lambda: list(it.SubPossibilitiesOS), [])
+                name = _s(_t(lambda: self._best(it.Name), ""))
+                if subs:
+                    walk(subs, path + [name])
+                else:
+                    cols.append(model.make_column(_guid(it), name, _s(_t(lambda: self._best(it.Abbreviation), "")), path, len(cols) + 1))
+        if tmpl is not None:
+            walk(_t(lambda: list(tmpl.SubPossibilitiesOS), []), [])
+        return cols
+
+    def _chart_summary(self, ch) -> dict:
+        text = self._chart_text(ch)
+        tmpl = self._c(_t(lambda: ch.TemplateRA, None))
+        tname = _s(_t(lambda: self._best(tmpl.Name), "")) if tmpl is not None else ""
+        name = _s(_t(lambda: self._best(ch.Name), ""))
+        return {"guid": _guid(ch), "name": name or (tname + " chart" if tname else ""), "named": bool(name),
+                "text": _guid(text) if text is not None else "", "title": self._text_title(text) if text is not None else "",
+                "rows": int(_t(lambda: ch.RowsOS.Count, 0) or 0),
+                "template": tname,
+                "columns": len(self._template_columns(tmpl))}
+
+    def list_charts(self, text_guid: str | None = None) -> list[dict]:
+        g = (text_guid or "").lower()
+
+        def go():
+            self._need()
+            out = [self._chart_summary(ch) for ch in self._chart_objects()]
+            return [c for c in out if not g or c["text"] == g]
+        try:
+            return self.worker.call(go, timeout=OPEN_TIMEOUT)
+        except BaseException as e:
+            raise _friendly(e, self.project_name)
+
+    def list_chart_markers(self) -> list[dict]:
+        """The project's Chart Markers list (the items a ConstChartTag names), with hierarchy."""
+        def go():
+            self._need()
+            return self.list_chart_markers_on_worker()
+        try:
+            return self.worker.call(go)
+        except BaseException as e:
+            raise _friendly(e, self.project_name)
+
+    def get_chart(self, guid: str) -> dict:
+        """The whole chart (charts are small; the service slices rows)."""
+        def go():
+            self._need()
+            ch = self._c(self.project.Object(guid))
+            if _t(lambda: ch.ClassName, "") != "DsConstChart":
+                raise FlexError("That GUID is not a text chart.", "", "no-object")
+            return self._chart_dict(ch)
+        try:
+            return self.worker.call(go, timeout=OPEN_TIMEOUT)
+        except BaseException as e:
+            raise _friendly(e, self.project_name)
+
+    def _chart_dict(self, ch) -> dict:
+        p = self.project
+        text = self._chart_text(ch)
+        if text is None:
+            raise FlexError("This chart's text could not be found.", "", "no-object")
+        ws = self._writing_systems()
+        vern_handle, vern_tag = self._baseline_ws(text)
+        self._sel = self._selection(None, vern_handle)
+        self._cur_vern_handle = vern_handle
+        self._diag = False
+        self._alts = False
+        tmpl = self._c(_t(lambda: ch.TemplateRA, None))
+        cols = self._template_columns(tmpl)
+        by_col = {c["guid"]: c for c in cols}
+        d = model.make_chart(_guid(ch), _s(_t(lambda: self._best(ch.Name), "")), _guid(text), self._text_title(text, "", vern_tag),
+                             self._ws_info(vern_tag, "") if vern_tag else ws["vern"], ws["anal"],
+                             {"guid": _guid(tmpl), "name": _s(_t(lambda: self._best(tmpl.Name), "")) if tmpl is not None else "", "columns": cols},
+                             _t(lambda: self.list_chart_markers_on_worker(), []))
+        d["abbrev"] = _s(_t(lambda: p.Texts.GetAbbreviation(text), ""))
+        d["url"] = self._goto(text, "text")
+        d["media"] = self._media(text)                       # the text's recordings: a chart plays its lines (Seth, 2026-10-18)
+        media_by_guid = {m["guid"]: m for m in d["media"]}
+        # every segment of the text by guid → (n, paragraph, k, object); read only the ones the rows touch
+        segs: dict[str, tuple] = {}
+        n = 0
+        for pi, para in enumerate(_t(lambda: list(p.Paragraphs.GetAll(text)), []), 1):
+            for k, seg in enumerate(_t(lambda: list(p.Segments.GetAll(para)), []), 1):
+                n += 1
+                segs[_guid(seg)] = (n, pi, k, seg)
+        d["textSegmentCount"] = n
+        d["textIndex"] = [{"n": v[0], "label": f"{v[1]}.{v[2]}", "guid": g} for g, v in segs.items()]
+        # the text's markup tags too, so a chart can draw them inside its cells (Seth, 2026-10-18)
+        d["tags"] = _t(lambda: self._text_tags(text, {g: v[0] for g, v in segs.items()}), [])
+        read: dict[int, dict] = {}
+
+        def seg_dict(sg):
+            v = segs.get(sg)
+            if not v:
+                return None
+            if v[0] not in read:
+                try:
+                    read[v[0]] = self._segment_dict(v[3], v[0], v[1], media_by_guid, v[2])
+                except Exception as exc:  # noqa: BLE001
+                    read[v[0]] = model.make_segment(sg, v[0], v[1], "", [], notes=[f"⚠ could not read this segment: {exc}"], k=v[2])
+            return read[v[0]]
+
+        def col_of(part):
+            return by_col.get(_guid(_t(lambda: part.ColumnRA, None)))
+
+        rows = []
+        for i, row in enumerate(_t(lambda: list(ch.RowsOS), []), 1):
+            row = self._c(row)
+            cells = []
+            for part in _t(lambda: list(row.CellsOS), []):
+                part = self._c(part)
+                cls = _t(lambda: part.ClassName, "")
+                col = col_of(part)
+                ma, mb = bool(_t(lambda: part.MergesAfter, False)), bool(_t(lambda: part.MergesBefore, False))
+                try:
+                    if cls == "ConstChartWordGroup":
+                        a = seg_dict(_guid(_t(lambda: part.BeginSegmentRA, None)))
+                        b = seg_dict(_guid(_t(lambda: part.EndSegmentRA, None))) or a
+                        if a is None:
+                            cells.append(model.make_marker_cell("words", _guid(part), col, merge_after=ma, merge_before=mb, seg=0, segTo=0, words=[], lost=True))
+                            continue
+                        cells.append(model.make_word_cell(_guid(part), col, a, int(_t(lambda: part.BeginAnalysisIndex, 0) or 0), b,
+                                                          int(_t(lambda: part.EndAnalysisIndex, 0) or 0), ma, mb))
+                    elif cls == "ConstChartMovedTextMarker":
+                        cells.append(model.make_marker_cell("moved", _guid(part), col, merge_after=ma, merge_before=mb,
+                                                            target=_guid(_t(lambda: part.WordGroupRA, None)), preposed=bool(_t(lambda: part.Preposed, False))))
+                    elif cls == "ConstChartClauseMarker":
+                        cells.append(model.make_marker_cell("clause", _guid(part), col, merge_after=ma, merge_before=mb,
+                                                            rows=[_guid(r) for r in _t(lambda: list(part.DependentClausesRS), [])]))
+                    elif cls == "ConstChartTag":
+                        tag = _t(lambda: part.TagRA, None)
+                        cells.append(model.make_marker_cell("tag", _guid(part), col, merge_after=ma, merge_before=mb,
+                                                            tag=self._poss_dict(tag) if tag is not None else None))
+                    else:
+                        cells.append(model.make_marker_cell("other", _guid(part), col, merge_after=ma, merge_before=mb, className=cls))
+                except Exception as exc:  # noqa: BLE001 — one odd cell degrades, never the chart
+                    cells.append(model.make_marker_cell("other", _guid(part), col, className=cls, error=str(exc)))
+            rows.append(model.make_row(_guid(row), i, _s(_t(lambda: row.Label, "")) or str(i), int(_t(lambda: row.ClauseType, 0) or 0),
+                                       bool(_t(lambda: row.EndSentence, False)), bool(_t(lambda: row.EndParagraph, False)),
+                                       _s(_t(lambda: row.Notes, "")), cells,
+                                       bool(_t(lambda: row.StartDependentClauseGroup, False)), bool(_t(lambda: row.EndDependentClauseGroup, False))))
+        d["rows"] = rows
+        return model.finish_chart(d, read)
+
+    def list_chart_markers_on_worker(self) -> list[dict]:
+        """list_chart_markers' body for a caller already ON the worker."""
+        dd = self._discourse()
+        lst = self._c(_t(lambda: dd.ChartMarkersOA, None)) if dd is not None else None
+        out: list[dict] = []
+
+        def walk(items, path):
+            for it in items:
+                it = self._c(it)
+                subs = _t(lambda: list(it.SubPossibilitiesOS), [])
+                if subs:
+                    walk(subs, path + [_s(_t(lambda: self._best(it.Name), ""))])
+                else:
+                    out.append(self._poss_dict(it, path))
+        if lst is not None:
+            walk(_t(lambda: list(lst.PossibilitiesOS), []), [])
+        return out
+
+    def explain_charts(self, which: str = "", max_rows: int = 40) -> dict:
+        """What the project's charts look like RAW, for `--dump-charts`: every chart's summary
+        (with every stored alternative of its name), the markers list, and for ONE chart — the
+        one `pick_chart` chooses for `which` — the rows with each cell part's class and fields
+        as read, plus the chart as this app builds it. The first thing to ask for when a chart
+        comes out wrong."""
+        def go():
+            self._need()
+            charts = self._chart_objects()
+            rep: dict = {"charts": [], "markers": self.list_chart_markers_on_worker(), "chart": None, "raw": []}
+            for ch in charts:
+                try:
+                    rep["charts"].append(self._chart_summary(ch))
+                except Exception as exc:  # noqa: BLE001
+                    rep["charts"].append({"guid": _guid(ch), "error": str(exc)})
+            for ch, summ in zip(charts, rep["charts"]):
+                summ["nameAlts"] = self._ws_alternatives(_t(lambda: ch.Name, None))      # every stored alternative: is it really nameless?
+            i = pick_chart(rep["charts"], which)
+            rep["picked"] = i
+            if i is None:
+                return rep
+            pick = charts[i]
+            for i, row in enumerate(_t(lambda: list(pick.RowsOS), []), 1):
+                if i > max_rows:
+                    break
+                row = self._c(row)
+                raw = {"n": i, "label": _s(_t(lambda: row.Label, "")), "notes": _s(_t(lambda: row.Notes, "")),
+                       "clauseType": _t(lambda: int(row.ClauseType), None), "endSentence": _t(lambda: row.EndSentence, None),
+                       "endParagraph": _t(lambda: row.EndParagraph, None), "cells": []}
+                for part in _t(lambda: list(row.CellsOS), []):
+                    part = self._c(part)
+                    c = {"class": _t(lambda: part.ClassName, ""), "guid": _guid(part),
+                         "column": _s(_t(lambda: self._best(self._c(part.ColumnRA).Name), "")), "columnGuid": _guid(_t(lambda: part.ColumnRA, None)),
+                         "mergesAfter": _t(lambda: part.MergesAfter, None), "mergesBefore": _t(lambda: part.MergesBefore, None)}
+                    for attr in ("BeginAnalysisIndex", "EndAnalysisIndex", "Preposed"):
+                        v = _t(lambda a=attr: getattr(part, a), None)
+                        if v is not None:
+                            c[attr] = v if isinstance(v, (int, bool)) else _s(v)
+                    for attr in ("BeginSegmentRA", "EndSegmentRA", "WordGroupRA", "TagRA"):
+                        v = _t(lambda a=attr: getattr(part, a), None)
+                        if v is not None:
+                            c[attr] = _guid(v)
+                    deps = _t(lambda: list(part.DependentClausesRS), None)
+                    if deps is not None:
+                        c["DependentClausesRS"] = [_guid(x) for x in deps]
+                    raw["cells"].append(c)
+                rep["raw"].append(raw)
+            try:
+                rep["chart"] = self._chart_dict(pick)
+            except Exception as exc:  # noqa: BLE001
+                rep["chartError"] = f"{type(exc).__name__}: {exc}"
+            return rep
+        try:
+            return self.worker.call(go, timeout=OPEN_TIMEOUT)
+        except BaseException as e:
+            raise _friendly(e, self.project_name)
 
     def resolve_guid(self, guid: str) -> dict | None:
         """What is this GUID? → {kind, guid, title, seg?, sense?} for the kinds the UI can embed."""

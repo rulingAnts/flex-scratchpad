@@ -180,6 +180,84 @@ import. Embeds keep working through `{{flex:text <guid> …}}`; "Open in FLEx" i
 SFM / UFM (standard-format interlinear, Toolbox-style `\\tx \\mb \\gl \\ft`) later, by the same
 route (Seth, 2026-10-13: "Or SFM/UFM eventually. Later.").
 
+## Examples from FlexText Editor files, until FLEx has the text (Seth, 2026-10-18 — "to do soon")
+
+> *"I'd like to add a feature to copy examples from FLExText Editor apps (including text
+> title/flextext file name, which will get added to our text corpus audio segment timing and audio
+> file name, which we can browse for). Also, I'd like a way for it to recognize when that text has
+> been imported into FLEx and no longer needs to be kept as a separate flextext file embedded in
+> our notebook."*
+
+The situation: a text is transcribed, glossed and time-aligned in FlexText Editor (or the Audio
+Segmenter / Recorder) days or weeks before anyone imports it into FieldWorks. Its examples should
+be quotable in notes NOW, from the `.flextext` the editor saved, with the audio; and once the text
+is in FLEx the notebook should notice, switch the examples over to the project and let go of its
+private copy. The ELAN / SFM half of the older "Import .flextext and ELAN files as extra texts"
+entry above stays separate; this one is the FlexText-Editor path, which has the most to gain.
+
+**What the editor hands us** (read 2026-10-18 in flextext-editor's `docs/js/flextext.js`,
+`serializeFlextext`, and `app.js`):
+- The file is named after the title (`sanitizeBase(title) + '.flextext'`, app.js ~5929) and the
+  recording is paired with it BY BASENAME (`satBase`, app.js ~9008) — so "the flextext file name"
+  Seth mentions is also how we find the audio, and the title is `<item type="title">`.
+- `<interlinear-text>` carries `doc.textAttrs` — a `guid` ONLY when the document came out of FLEx
+  (an authored text has no text GUID); `<paragraph guid>` always; `<phrase>` keeps `seg.attrs`
+  (a GUID only for imported phrases) plus `begin-time-offset` / `end-time-offset` and `media-file`
+  → the `<media-files><media guid location="<audio name>"/>` block the editor mints; `<word guid>`.
+- No clipboard format exists: the editor offers no "copy example", and a web app cannot hand us a
+  file path. So "copy examples from the editor" = drop / browse the `.flextext` (and its audio)
+  into the notebook, then pick lines from it exactly like a FLEx text. (A real copy-paste from the
+  editor's page would need a text format we define on both sides — a `flextext-editor/` item in
+  its CLAUDE.md later, not a blocker: the file route gives everything, timing included.)
+
+**Design**
+1. **A corpus of embedded texts** in the notebook: `<notebook>/texts/<base>/` holding the
+   `.flextext` as dropped, the audio beside it (copied by default, linked on request — the same
+   choice as attachments; "browse for it" when the basename pairing finds nothing), and
+   `texts.json` (or front matter in a `<base>.md` note card) with: title, the text GUID (from the
+   file, or MINTED and WRITTEN BACK into our copy of the file as `<interlinear-text guid>` so the
+   notes' `{{flex:text <guid>}}` are stable and FLEx will keep it on import), segment GUIDs (same:
+   minted into our copy when the phrases have none — the importer reuses a phrase GUID when the
+   project has it and creates the segment WITH it when not, `BIRDInterlinearImporter.cs` ~108–120
+   / ~280), the audio file, when it was added, `inFlex: null | {project, seenAt}`.
+2. **A composite FLEx source.** `FlexService` today opens ONE backend (`lcm` | `flextext` | `demo`).
+   The corpus becomes a second, always-on backend layered under the project: `get_object('text',
+   guid)` asks the project first, then the corpus (`FlextextBackend` over the folder's files —
+   `flex/flextext.py` already parses media, offsets, alternatives); the picker's Texts tab lists
+   corpus texts with a badge ("from FlexText Editor · not in FLEx yet"); `all_baselines` /
+   `locate` include them so pasted rows from the editor's preview land; `texts_used`, snapshots,
+   the clip cutter and the `.flextext` export all work unchanged because they see plain text
+   dicts. "Open in FLEx ↗" is hidden for a corpus text until it is in FLEx.
+3. **Audio & timing**: the phrases' offsets drive ▶ and the clips as now (the fallback reader
+   already fills `begin/end/media`); the media record resolves to the file in the text's folder.
+   A text whose audio is missing shows the existing "media file not found — Browse…" affordance,
+   and the chosen file is copied into the folder.
+4. **Recognising the import.** On project open, after "Refresh all", and when a corpus text is
+   drawn: ask the project for the text GUID (`Object(guid)` → an `IText`). Found ⇒ mark
+   `inFlex = {project, seenAt}`, redraw the examples from the project (tracking.py's ledger maps
+   the segments: same GUIDs when the import kept them, else "found again by TEXT"), and show a
+   one-line notice on the text's card and in the picker: "This text is now in FLEx (imported
+   <date>). Keep the embedded copy? [Move to trash] [Keep]". Nothing is deleted on its own — the
+   copy goes to `.scratchpad/trash/` like a note. Fallback when the GUID was not kept (a text
+   re-created rather than imported): a title + first-baseline match offered as "This looks like
+   ‘<title>’ in FLEx — link them?", written as `inFlex.guid` so later lookups go straight there.
+   ⚠ Verify on a real project: whether FLEx's import keeps the `<interlinear-text guid>` for a NEW
+   text (the importer merges into an existing text by GUID, `MergeTextWithBIRDDoc`; what creates
+   the `IText` for a new one lives in the caller — read `LinguaLinksImport.ImportInterlinear` in
+   `Src/LexText/Interlinear/` before relying on it) and whether phrase GUIDs survive.
+5. **UI**: drop a `.flextext` (and its `.wav` / `.mp3`) on the note or the rail → "Add to the
+   notebook's texts" (vs. attach as a file); Settings › Texts (the corpus list: title, lines, audio
+   ✓/✗ Browse…, "in FLEx since …", Remove); the picker's Texts tab shows them; a text card note
+   (`kind: text`?) is optional — the folder is enough.
+6. **Tests**: a fixture `.flextext` written by the editor's own `serializeFlextext` (run in node, as
+   the Segmenter cross-check does) with timing and a `media-files` block; e2e: drop it, insert a
+   line, play its clip, "import" it into the demo backend (a test hook that adds the text to the
+   demo project under the same GUID) and see the notice + the switch-over.
+
+**Open questions for Seth**: copy the audio into the notebook (safe, bigger backups) or link it by
+default? Should a corpus text be exportable again (it is a source now, so the `.flextext` export
+of a collection quoting it just works)? Several notebooks sharing one corpus folder — later.
+
 ## Edit a table in Excel, round-trip in place (Seth, 2026-10-13, "a later feature")
 
 > *"open a table in Excel and then when they save it the results update in place (and using an
@@ -211,6 +289,167 @@ a download into `%LOCALAPPDATA%\FLEx Scratchpad\ffmpeg` on first use, with the S
 already there for a custom path. Decide at release time; nothing in the code assumes either.
 
 
+## Readable without the app: a plain-text copy of every FLEx object IN the note (Seth, 2026-10-17 — "near future … soon")
+
+**DONE 2026-10-17** (`ui/js/flexcopy.js`; see CLAUDE.md "READABLE WITHOUT THE APP"). Kept below as the record of the decisions.
+
+> *"Make sure that our FLEx links save cached interlinear text (and text reference) so that a
+> markdown file IS actually readable elsewhere. So that it doesn't 100% require our app to make
+> heads or tails out of (though it would be enclosed in brackets such that our app won't render
+> literal tab separated text lines, but rather just save them on refresh so that markdown readers
+> or text editors see meaningful data)."*
+
+Today a note holds only `{{flex:text <guid> seg=3-5 …}}`; the words live in the snapshot cache
+(`.scratchpad/flex-cache/`), which only the app reads. The idea: beside each object, the note keeps
+a plain-text COPY: the text title and FLEx number (e.g. *The dog and the river 1.2*), its
+`silfw://` link, and the interlinear lines (Word / Morphemes / Gloss / Free), so that a text editor,
+GitHub, Obsidian or a Markdown export shows the example without the app. The app treats the copy as
+OUTPUT ONLY: it never draws it and never reads it back (the embed stays the one source), and it
+rewrites it whenever the object is fetched fresh from FLEx and the result has changed.
+
+A sketch, to be settled by the questions below: a fenced block right after the embed,
+
+    {{flex:text 9b1c… seg=3-4 at=… ex}}
+    ```flex-copy
+    The dog and the river 1.2 · silfw://localhost/link?…
+    Haŋa       tiket   ka-sila-mo     pemu
+    yesterday  child   3SG-see-PST    river
+    ‘Yesterday the child saw the river.’
+    ```
+
+It is visible in renderers and editors, keeps its columns (monospace, padded with spaces; tabs do
+not line up in most renderers), and is one unit the app can find, hide and replace.
+`ui/js/flexref.js` would treat the block as part of the embed (hidden, carried along on drag, cut
+and copy), and excerpts and search would skip it (search already reads the snapshot).
+
+DECIDED (Seth, 2026-10-17):
+
+1. **A ` ```flex-copy ` fence right after the embed**, and the app NEVER paints it: "the inverse of
+   the old convention of putting JavaScript inside HTML comment tags so that older browsers
+   wouldn't print it … here it's the newer, higher tech thing that needs to not render the
+   backward-compatible bit". Only a fence whose info string is exactly `flex-copy` is hidden; any
+   other code block a user types draws as usual. In the app the unit is the `{{flex …}}` object
+   alone: the copy is hidden, carried with it (drag, cut, copy, delete, undo) and never edited
+   by hand.
+2. **One line inside a table cell (and inside a line of text):** the reference and the free
+   translation. The convention FOLLOWS THE OBJECT: dragged out of a cell into a block of its own,
+   it gets the full fence; dragged into a cell, the fence becomes the one-line form. ("Our app
+   should be smart enough though that if we move it OUT of a table cell, then it should switch to
+   the other convention. And vice versa.")
+3. **Only the lines the example shows** (`lines=`).
+4. **Entries too**, and both entries and IGT examples carry a Markdown link to their `silfw://`
+   address, so a Markdown reader can open the object in FLEx. All of it is invisible in the app,
+   which draws the `{{ }}` object instead.
+5. **Written when the example has changed**, and when it moves into or out of a table (the form
+   changes). Opening a note never rewrites it.
+
+Design points that follow, to check when this is built:
+- A link does not work inside a code fence (it is shown as text there), so the fenced unit is
+  three parts: the embed, ONE reference line that is a Markdown link
+  (`[The dog and the river 1.2](silfw://localhost/link?…)`), then the `flex-copy` fence with the
+  aligned lines. The app hides the link line and the fence, and treats all three as one object.
+- The one-line form (cells, running text) needs a marker the app can recognise and readers ignore,
+  e.g. a link right after the embed whose title is `flex-copy`:
+  `{{flex:text …}}[The dog and the river 1.2: ‘Yesterday the child saw the river.’](silfw://… "flex-copy")`.
+  Pipes in a cell are escaped as usual.
+- Entries: `[ka-sila (v) ‘see’](silfw://…)`, plus the senses on lines of their own in the fenced
+  form.
+- Highlights are not marked in the copy (plain text) unless asked for later.
+- `flexref.js` stays the only parser (the embed grammar contract); the copy is written from the same
+  object model as the TSV copy (`interlinear.flexTsv`) and the exports. Excerpts, search, the
+  Markdown export and the TSV / LaTeX copies must not see the copy twice. The note's Markdown export
+  could keep the copies as they are (they are what a reader without the app sees).
+
+## Text Charts in notes (Seth, 2026-10-17 — "that's for later. Much later"; moved up 2026-10-18)
+
+**Phase 1 shipped 2026-10-18** (CLAUDE.md › TEXT CHARTS): the reader, `{{flex:chart …}}` with rows /
+columns / lines / free translations / styles, the renderer with headings, the readable copy, the
+HTML / Word exports, FLEx's chart XML + JSON, `--dump-charts`, `marker:` search. Still to build, in
+order (Seth, 2026-10-18, "go ahead and start building all this"):
+
+1. ~~A chart note type~~ — DONE 2026-10-18 (CLAUDE.md › CHART NOTES).
+2. ~~Custom columns~~ — DONE 2026-10-18 (list / notes / rule columns, project-wide lists, rules
+   with row styles; since the same day the columns and row colours are in every export — HTML,
+   Word, Excel, PDF, slides, PowerPoint). Still open: the custom columns in the TSV copy; counts in
+   rule outputs; filtering the rows by a rule.
+3. ~~Visual filters on chart markers~~ — DONE 2026-10-18 (marker rules with `row`). Still open:
+   pseudo-markers (clause:dependent, moved:preposed) as filter targets.
+4. ~~Search and collect~~ — DONE 2026-10-18 (`chart_search`, the column profile, chart collections
+   with Find new rows). Still open: lexeme / sense GUIDs in the index (the search is by form and
+   gloss text today); the profile on the entry card; filter-in-place in a chart note (rows by
+   marker / column content / clause type, fold column groups — chart order always kept; "group by
+   marker" as a compiled view, never a sort; hide EMPTY columns is done, 2026-10-18); pivots
+   (marker × column, category × column) to a table block or CSV.
+7. Done 2026-10-18 (CLAUDE.md › TEXT CHARTS): frozen row labels and frozen / left-or-right custom
+   columns, hide a column from its heading, hide empty columns, zoom, the one-column layout with
+   column labels and column / marker visual filters, ▶§ / ▶¶, boundaries under the free row,
+   "Change the chart…". Still open from that round: the one-column layout in the Word / Excel /
+   PowerPoint writers keeps the column labels only as the plain `‹abbr›` text of the TSV copy (the
+   HTML and the page draw them); a frozen column in the exports means nothing (print has no
+   scrolling); zoom is a view setting and is not exported; a paragraph ▶¶ needs FLEx's end-paragraph
+   flags on the rows (a chart without them has only ▶§).
+8. Done 2026-10-19: column styles from the ⚑ popover, header groups as one unit, the chart's
+   structure (clause types, [2a] markers, moved text with ms / ml) as filter targets, the group
+   on/off/previous box. Still open: the moved-text look in the exports (the page and Word show the
+   ‹‹ marker and the column tint, not the moved group's own look or label).
+9. A PARAGRAPH ANALYSIS COLUMN (Seth, 2026-10-19, "soon"): a custom column of a chart note that
+   draws a horizontal, right-angle tree over the rows — its terminal branches facing inward toward
+   the chart lines — from a grouping the user builds (which rows form a unit, which units a larger
+   one, labelled); the paragraph engine in flextext-editor (`paragraph-model.js`, the `.fxpa` file)
+   is the model for the data; drawn as an SVG in a frozen column, exported as a picture.
+5. ~~Text markup tags inside chart cells, and chart columns on examples~~ — DONE 2026-10-18 (the
+   `cols` line turns the text's chart spans into column tags; `lines=…,tag` on a chart; the pivot;
+   the entry card's profile). Still open: choosing ONE template / chart when a text has several
+   (every chart's spans are drawn today); the pivot by category × column.
+6. The chart XML re-import belongs in flexicon (`plans/flexicon-requests.md` §4).
+
+Original note:
+
+> *"Later on, I'll want to add the ability to pull in a Text Chart, part of a text chart (including
+> the headers), a range of rows from a text chart, and styling for text chart markers (and also our
+> own custom system of row and word level text chart markers or collapsible custom columns)."*
+
+Not started. What FLEx holds (liblcm): a text's charts are `IDsConstChart` objects
+(`LangProject.DiscourseDataOA.ChartsOC`, each `BasedOnRA` a text), with a column template
+(`TemplateRA`, a CmPossibility tree — the headers and their groups) and `RowsOS` of `IConstChartRow`
+(label, `CellsOS`: `ConstChartWordGroup` spanning analyses `BeginSegmentRA / BeginAnalysisIndex …`
+like a text tag, `ConstChartMovedTextMarker`, `ConstChartClauseMarker`, `ConstChartTag` — the
+markers). The text markup tags (done 2026-10-17: `tags` on a text, `ui/js/tagstyles.js`) are the
+model to follow: read into plain dicts on the worker, a new embed kind (`{{flex:chart <guid>
+rows=3-7 cols=…}}`) drawn as a table of word groups under the template's headers, the markers
+styled through the same scoped rules (project / tab / folder / example), our own row- and
+word-level markers and collapsible columns as additive keys on the embed. FDAT
+(rulingAnts/fdat) already renders FLEx charts from the project XML and is the reference for the
+layout.
+
+## Exports (Seth, 2026-10-18 — shipped the same day: HTML with embedded audio, Word, Excel, PDF, slideshow, PowerPoint)
+
+Open after the first build (CLAUDE.md › EXPORTS):
+
+- **The direct PDF on Windows** (`pdf_print.py`, WebView2's `PrintToPdfAsync` through a hidden
+  pywebview window) has not run on a real machine; the print dialog is the fallback. When it works,
+  consider a page-size / margin choice in the dialog, and headers / footers (note title, page n).
+- **PowerPoint audio**: the clips could be embedded as PowerPoint media (a `p:pic` with
+  `a:audioFile`, a media relationship and a `p:timing` tree); the slideshow page carries them today.
+- **Nested examples in table cells** are plain text in Excel and PowerPoint (their text; the HTML
+  and Word exports draw them).
+- **An export settings dialog** (which lines, fonts, paper size, "one example per page", a cover
+  page) instead of the one audio question; remember the last choices.
+- **Export a folder or a tab** as one document / deck / workbook (today: one note at a time; the
+  notebook zip holds everything).
+- **Print preview and print ranges** (Seth, 2026-10-18: "We may need some advanced print
+  preview/print range editing later for the pretty export to PDF or DOCX. But later."): a preview
+  of the pages before the PDF / Word export, choosing the blocks or the page range, page breaks
+  by hand, a chart's columns split over pages.
+- **LingTeX-Word parity in the Word export**: our tables carry the add-in's styles and shape (CLAUDE.md
+  › EXPORTS); still to do when the add-in's repo settles: the document variables it reads its
+  settings from (number hang, gaps), the `LingTeX Left/Shared Boundary` character styles on
+  morpheme boundaries (ours are word-aligned, so no boundary is split), a column per MORPHEME
+  when the Morphemes line is shown (LingTeX's "a column is an alignment slot"), and charts in the
+  same style family. The reference clone is read-only: `/home/user/rulingants/lingtex-tools`.
+- **The slideshow's speaker notes** (a note's `> quote` block under an example as the presenter's
+  note; `S` to show them) and a "section" slide per H1 with its sub-headings as an agenda.
+
 ## Dekereke objects in notes (Seth, 2026-10-17 — "near future")
 
 > *"I'd also like our app to be able to have Dekereke objects (linked to Dekereke XML line/ref
@@ -228,3 +467,25 @@ playable from the chip/card, and snapshots the record into the cache like a FLEx
 still reads when the database is elsewhere. Open questions for Seth before building: which
 columns matter by default, how the suffix list is configured (per database or per notebook), and
 whether a range of records (a word list) is one embed or many.
+
+
+## Known issue elsewhere: FieldWorks doubles the morph bundle of a two-language-glossed word on import (Seth, 2026-10-19)
+
+Seen on texts imported from FlexText Editor (`Tosokai`: every word; `Wahuka Arsen incident`: a few): the
+Morphemes line shows the word twice (`budu budu`) with `*** ***` under it. Not the editor's data and not
+this app (read-only): FieldWorks' `BIRDInterlinearImporter.UpgradeToWordGloss` creates "a single morpheme
+for the word" when the word has no `<morphemes>` block — INSIDE its loop over the word's `gls` items, so a
+word glossed in English and Indonesian gets two identical, sense-less bundles on one analysis. Such texts
+were never morpheme-glossed, so nothing is lost: one bundle too many per word.
+- `flex-scratchpad --project NAME --doubled-morphs` (lcm `explain_doubled_bundles`, `model.doubled_bundles`)
+  lists them with their uses; the fix is in FLEx's Word Analyses (or a FLExTools script that removes the
+  duplicate bundles), never here.
+- DONE 2026-10-20 on fau-iya-flex by a FLExTools module (`RemoveDoubledMorphBundles.py`, kept in the session's
+  scratchpad): 5833 analyses checked, 174 bundles removed, `hodidi` / `bedidide` (genuinely repeated morphs)
+  skipped; a byte-verified copy of the project folder taken first. Lessons for the next FLExTools script:
+  `cache.ServiceLocator.GetService(IRepo)` (pythonnet cannot resolve `GetInstance<T>()`), and NO unit of work of
+  its own (FLExTools / the MCP runner hold a session-long one: "Nested tasks are not supported").
+- FlexText Editor side (to look into later, Seth: "a possible bug known issue"): its export writes every
+  gloss language it holds (`w.gls` + the preserved other-language `gls` items) and no `<morphemes>`, which is
+  correct .flextext — the importer is at fault. Options if it keeps hurting: a note in the editor's import
+  guide, or an FLEx issue (sillsdev/FieldWorks) pointing at the loop.

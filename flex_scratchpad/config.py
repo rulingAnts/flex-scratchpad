@@ -10,9 +10,13 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
 from pathlib import Path
 
 from . import APP_NAME
+from .fsutil import replace_file
+
+_SAVE_LOCK = threading.RLock()
 
 
 def config_dir() -> Path:
@@ -60,11 +64,14 @@ class AppConfig:
             pass
 
     def save(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(".json.tmp")
-        with open(tmp, "w", encoding="utf-8", newline="\n") as f:
-            json.dump(self.data, f, indent=2, ensure_ascii=False)
-        os.replace(tmp, self.path)
+        # one writer at a time (the page's settings, the backup's record and the window's size
+        # can all save within the same second, each on its own thread), a temp name per thread
+        with _SAVE_LOCK:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.path.with_name(self.path.name + f".{threading.get_ident()}.tmp")
+            with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+                json.dump(self.data, f, indent=2, ensure_ascii=False)
+            replace_file(tmp, self.path)
 
     @property
     def notebook_dir(self) -> Path:

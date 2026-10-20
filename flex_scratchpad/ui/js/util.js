@@ -15,7 +15,7 @@
         if (k === 'class') e.className = v;
         else if (k === 'style' && typeof v === 'object') Object.assign(e.style, v);
         else if (k.startsWith('on') && typeof v === 'function') e.addEventListener(k.slice(2), v);
-        else if (k === 'dataset') Object.assign(e.dataset, v);
+        else if (k === 'dataset') { for (const [dk, dv] of Object.entries(v)) if (dv != null && dv !== false) e.dataset[dk] = dv; }
         else if (k === 'html') e.innerHTML = v;
         else if (k === 'text') e.textContent = v;
         else e.setAttribute(k, v === true ? '' : v);
@@ -60,6 +60,24 @@
     } catch (e) { return s.toLowerCase(); }
   };
 
+  /* A web page in the user's browser (the page itself is file://, so a plain link would navigate the app). */
+  FS.openWeb = function (url) {
+    try { if (FS.api && FS.api.open_web) { FS.api.open_web(url).catch(() => { try { window.open(url, '_blank', 'noopener'); } catch (e) { /* ignore */ } }); return; } } catch (e) { /* fall through */ }
+    try { window.open(url, '_blank', 'noopener'); } catch (e) { /* ignore */ }
+  };
+  /* Wherever a pattern can be typed (Seth, 2026-10-19: "a link to a regex builder site with instructions
+   * for which type of regex to use there"): which flavour this place runs, and a link to regex101 set to it.
+   * 'js' = the page's own JavaScript RegExp (rule columns, the builders); 'py' = Python's re module (the
+   * chart search, which runs in Python). Both are Perl-style; see README › Query languages for the differences. */
+  FS.REGEX_FLAVOURS = {
+    js: { name: 'JavaScript regular expressions', note: 'the page’s own JavaScript (ECMAScript) regular expressions, as in web browsers — flags i m s u', url: 'https://regex101.com/?flavor=javascript' },
+    py: { name: 'Python regular expressions', note: 'Python’s re module (the search runs in Python) — flags i m s', url: 'https://regex101.com/?flavor=python' },
+  };
+  FS.regexHelp = function (flavour) {
+    const f = FS.REGEX_FLAVOURS[flavour] || FS.REGEX_FLAVOURS.js;
+    return FS.el('a', { href: '#', class: 'regex-help', 'data-test': 'regex-help', dataset: { flavour }, title: 'Patterns here are ' + f.note + '. Opens regex101.com in your browser, set to that flavour, to build and test one.', onclick: (e) => { e.preventDefault(); FS.openWeb(f.url); } }, f.name + ' — build and test one ↗');
+  };
+
   FS.fmtTime = function (ms) {
     if (ms == null || isNaN(ms)) return '';
     const s = Math.max(0, ms) / 1000;
@@ -95,13 +113,34 @@
   FS.emit = (ev, data) => { for (const fn of listeners[ev] || []) { try { fn(data); } catch (e) { console.error(e); } } };
 
   /* Toasts. */
-  FS.toast = function (msg, kind) {
+  /* opts.action = {label, fn}: a button in the toast (an Undo after a removal — Seth, 2026-10-18:
+   * the bars are "easy to click on accident (with drastic consequences)"); opts.ms: how long. */
+  FS.toast = function (msg, kind, opts) {
+    opts = opts || {};
     let host = document.getElementById('toasts');
     if (!host) { host = FS.el('div', { id: 'toasts' }); document.body.appendChild(host); }
-    const t = FS.el('div', { class: 'toast ' + (kind || '') }, msg);
+    const t = FS.el('div', { class: 'toast ' + (kind || '') + (opts.action ? ' has-action' : '') }, msg);
+    const gone = () => { t.classList.remove('show'); setTimeout(() => t.remove(), 300); };
+    if (opts.action) t.appendChild(FS.el('button', { class: 'toast-act', 'data-test': 'toast-action', onclick: () => { gone(); opts.action.fn(); } }, opts.action.label));
     host.appendChild(t);
     setTimeout(() => t.classList.add('show'), 10);
-    setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 300); }, kind === 'error' ? 6000 : 2600);
+    setTimeout(gone, opts.ms || (kind === 'error' ? 6000 : opts.action ? 6000 : 2600));
+    return t;
+  };
+  /* A destructive button that must be clicked TWICE: the first click arms it ("Remove?", for
+   * 2 s), the second fires. A pointer passing through can never delete anything. */
+  FS.armed = function (btn, fn, armedLabel) {
+    const label = btn.textContent;
+    let t = 0;
+    const disarm = () => { clearTimeout(t); btn.classList.remove('armed'); btn.textContent = label; btn._armed = false; };
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (btn._armed) { disarm(); fn(e); return; }
+      btn._armed = true; btn.classList.add('armed'); btn.textContent = armedLabel || 'Remove?';
+      clearTimeout(t); t = setTimeout(disarm, 2000);
+    });
+    btn.addEventListener('mouseleave', () => { if (btn._armed) { clearTimeout(t); t = setTimeout(disarm, 1200); } });
+    return btn;
   };
 
   /* A "working on it" pill with a spinner, for a wait the user caused (a paste being looked up
@@ -177,8 +216,12 @@
     let left = r.left, top = r.bottom + 6;
     if (left + pw > window.innerWidth - 8) left = Math.max(8, window.innerWidth - pw - 8);
     if (top + ph > window.innerHeight - 8) top = Math.max(8, r.top - ph - 6);
+    // taller than the window: pin it to the top and let it scroll (Seth, 2026-10-19: settings "running
+    // off the screen … including close buttons. That should never happen")
+    if (ph > window.innerHeight - 16) top = 8;
     pop.style.left = left + 'px';
     pop.style.top = top + 'px';
+    pop.style.maxHeight = (window.innerHeight - top - 8) + 'px';
     function onDown(e) { if (!pop.contains(e.target) && e.target !== anchor && !anchor.contains(e.target)) close(); }
     function onKey(e) { if (e.key === 'Escape') close(); }
     setTimeout(() => { document.addEventListener('mousedown', onDown); document.addEventListener('keydown', onKey); }, 0);
