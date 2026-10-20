@@ -44,7 +44,7 @@ talking to Python through pywebview's exposed API only.
 ## Download (Windows)
 
 **The easiest way: the Setup .exe or the portable zip from the
-[latest release](https://github.com/rulingAnts/flex-scratchpad/releases)** (a pre-release for now).
+[latest release](https://github.com/rulingAnts/flex-scratchpad/releases/latest)**, 0.1.0.
 Nothing else to install: Python, flexicon and ffmpeg are inside. It needs Windows 10/11 (64-bit),
 FieldWorks 9 on the same computer to read a project, and the Edge WebView2 runtime (Windows 11 has
 it; Setup says when it is missing). It isn't signed yet: on "Windows protected your PC" choose
@@ -354,10 +354,6 @@ insert.
 
 ## Known issues
 
-- **A web page export with recordings can freeze the window** in 0.1.0-beta.3 and earlier: with the recordings embedded, the
-  window may stop responding until the export is done (minutes for a long note). Let it finish, or export without the
-  recordings. Fixed for the next version, where exports run in the background with a progress bar
-  ([#20](https://github.com/rulingAnts/flex-scratchpad/issues/20)).
 - **Some export formats are still rough.** Word, PDF and the web page come out well. The slideshow and PowerPoint less so:
   in PowerPoint some examples' tables are crowded or overlap, and where a note breaks into slides is not settled yet. In
   Word the examples are LingTeX-Word tables and look right, but re-rendering them with the LingTeX-Word add-in does not

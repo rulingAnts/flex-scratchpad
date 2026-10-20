@@ -1419,9 +1419,8 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   scrolling carousel is immediately visible on page load" — the kicker, the title, ONE sentence and three buttons, no
   claim pills or link row; the carousel's top sits at ~440px on a 768px-tall screen), the carousel, three steps with
   stills, features, install, a pre-release band. `assets/release.js` moves every download link and the
-  version to the newest RELEASE (not marked pre-release) that has BOTH files, and the `data-pre` buttons to the newest
-  PRE-release published after it (`pre-exe` / `pre-zip` / `pre-version`; hidden when none is newer; Seth, 2026-10-20:
-  "the buttons should offer both") (`tests/js/site-release.test.js`). The video
+  version to the newest RELEASE (not marked pre-release) that has BOTH files (`tests/js/site-release.test.js`); since
+  0.1.0 the page has no pre-release buttons (ONE RELEASE, NO FLAGS below). The video
   and stills are filmed from the REAL UI by `tools/record_demo.py`; THE HERO IS A CAROUSEL (Seth, 2026-10-20: first
   "mouseover generated screenshots for each feature", then "what I'd rather have is just one scrolling carousel of
   screenshots and the video all where the video is now, auto scrolling and also easy for people to navigate … each
@@ -1454,27 +1453,22 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   (or a picture nobody shows), when an in-page link has no target, when a section or sub-heading is missing from the
   contents, or when the home page stops linking to `guide/`. The README's how-to table and the guide say the same
   things: change both.
-  HOW TO GET EACH VERSION (Seth, 2026-10-20: "how to get each of them (links). 'Next' requires pip install … a link to the
-  latest Python installer, and a pip install command that would work with that version"): the legend links the release and
-  the pre-release, and `#get-next` is a `<dialog>` (also opened by any `.rel-next` flag; a `.rel-pre` flag goes to the
-  pre-release page) with Python 3.13 (the newest the pinned pythonnet range supports; `requires-python >=3.10`), and
-  copy buttons for `py -3.13 -m pip install "flex-scratchpad[flex] @ <main.zip>"` — GitHub's archive of main, so no Git —
-  `py -3.13 -m flex_scratchpad`, and the `--force-reinstall --no-deps` update. Checked: that zip form installs the package
-  with its ui/ into a clean venv. Change the Python version there when pythonnet's range moves.
-  IT DESCRIBES THE CURRENT RELEASE (Seth, 2026-10-20: "have the documentation match the most recent full release …
-  you can have documentation for features on the pre-release, but have them flagged as such"): the guide names the
-  release it describes (0.1.0-beta.2, the GitHub release NOT marked pre-release) in its head and legend; anything only
-  in the pre-release wears `<span class="rel rel-pre">beta.3</span>`, anything finished but in no download yet
-  `<span class="rel rel-next">next</span>` (on a heading when the whole part is new, on the sentence or table row
-  otherwise, and in both contents lists for a whole section); the test checks the legend, the flag classes and that
-  sections 8–10 are flagged in the body and the contents. WHEN A RELEASE IS PROMOTED OR CUT: move the flags — a
-  promoted beta.3 drops every `beta.3` flag and renames the legend; a new pre-release turns `next` into its number.
-  What was in beta.2 was settled by `git show 0d84fd2:<file>` (no tagstyles.js / chart.js / log.py / xlsx, pptx,
-  pdf writers; no Ctrl+K, nested lists, gap bar, sticky headings, promote/demote, rule collections, flexcopy).
+  ONE RELEASE, NO FLAGS (Seth, 2026-10-20, with 0.1.0, the first full release: "make this one a full release and have just
+  one download button that points to it … no need for version chips now, all version are just the current release, with
+  no beta in the tag"): the guide names the release it describes ("Describes FLEx Scratchpad <b>0.1.0</b>", written
+  by hand, never `data-dl` — the guide describes a version, not whatever is newest) and carries no version flags, no
+  legend and no install-the-development-version dialog (the `.rel` / `#get-next` CSS is kept in guide.css for a later
+  pre-release); the home page has ONE download button in the hero and the installer + portable zip of that release in
+  Install, no pre-release links (`data-pre`). `tests/js/site-guide.test.js` / `site-release.test.js` check all of it.
+  WHEN A LATER PRE-RELEASE COMES: ask Seth whether it gets flags again (the beta.2 → beta.3 era used
+  `<span class="rel rel-pre">beta.N</span>` / `rel-next`, a legend and `#get-next`; `git show aaf3485:docs/guide/index.html`
+  has them all) or stays off the site until it is the release. `release.js` still knows a pre-release (`pickReleases`),
+  but the page shows none.
 - KNOWN ISSUES FOR USERS (Seth, 2026-10-20: "log as known issues for now, not to pursue further tonight or this week"):
   README › Known issues, the guide's `#tr-known` (under When something goes wrong) and the release notes' Known issues say
-  the same things, each with its GitHub issue (#20 the beta.3 export freeze, fixed since; #21 slideshow / PowerPoint /
-  LingTeX re-render). Add a known issue to all three; take it out of all three when a release fixes it.
+  the same things, each with its GitHub issue (#21 slideshow / PowerPoint / LingTeX re-render; #20, the beta.3 export
+  freeze, was fixed by 0.1.0 and is said only in the release notes). Add a known issue to all three; take it out of the
+  README and the guide when a release fixes it.
 - NAMING LOGOS (Seth, 2026-10-20: the comparison "is actually helpful for our users, because they might be familiar
   with Logos"): user-facing text may say a visual filter works "like a highlighting filter in Logos" — a true
   comparison, in words, never Faithlife's logo or styling, never a hint of partnership. The site footers and the

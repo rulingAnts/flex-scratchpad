@@ -35,18 +35,13 @@ test('every in-page link lands on an id, and the contents name the sections', ()
   for (const s of sections) assert.ok(mob.includes(`href="#${s}"`), `section ${s} is not in the mobile contents`);
 });
 
-test('what is newer than the current release is flagged, and the flags are explained', () => {
-  // Seth, 2026-10-20: "have the documentation match the most recent full release … have documentation for
-  // features on the pre-release, but have them flagged as such"
-  assert.ok(html.includes('id="legend"') && html.includes('0.1.0-beta.2'));
-  const flags = [...html.matchAll(/<span class="rel ([^"]+)"/g)].map((m) => m[1]);
-  assert.ok(flags.length > 60, `only ${flags.length} flags`);
-  assert.deepEqual(flags.filter((c) => c !== 'rel-pre' && c !== 'rel-next'), []);
-  // the whole-section flags in the body are the ones the contents show
-  for (const id of ['charts', 'chartnotes', 'chartsearch']) {
-    assert.match(html, new RegExp(`<section id="${id}">\\s*<h2>[^\\n]*rel-pre`), `${id} is pre-release`);
-    assert.match(html, new RegExp(`href="#${id}">[^<]*<span class="rel rel-pre"`), `${id} flagged in the contents`);
-  }
+test('the guide describes the one current release, with no version flags', () => {
+  // Seth, 2026-10-20 (0.1.0, the first full release): "no need for version chips now, all version are just the
+  // current release, with no beta in the tag"
+  assert.ok(html.includes('Describes FLEx Scratchpad <b>0.1.0</b>, the current release'));
+  assert.ok(!/<span class="rel /.test(html), 'a version flag is left');
+  assert.ok(!/id="legend"|id="get-next"/.test(html), 'the legend or the development-version dialog is left');
+  assert.ok(!/beta|pre-release/i.test(html.replace(/class="beta-band"/g, '')), 'a beta or pre-release is still mentioned');
   assert.ok(!/data-dl="version"/.test(html), 'the guide names its version itself, not the newest download');
 });
 

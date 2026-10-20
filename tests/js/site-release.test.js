@@ -45,12 +45,12 @@ test('the current release and the pre-release newer than it are both offered (Se
   assert.equal(pickReleases([]), null);
 });
 
-test('the home page carries both sets of links, and only known keys', () => {
+test('the home page carries one release\'s links, and only known keys', () => {
+  // Seth, 2026-10-20: "have just one download button that points to it" (0.1.0, a full release)
   const html = fs.readFileSync(path.join(__dirname, '..', '..', 'docs', 'index.html'), 'utf8');
   const keys = [...html.matchAll(/data-dl="([^"]+)"/g)].map((m) => m[1]);
-  const known = ['exe', 'zip', 'notes', 'version', 'pre-exe', 'pre-zip', 'pre-notes', 'pre-version'];
-  assert.deepEqual(keys.filter((k) => !known.includes(k)), []);
-  for (const k of ['exe', 'zip', 'pre-exe', 'pre-zip']) assert.ok(keys.includes(k), k);
-  // every pre-release element can be hidden when there is no pre-release newer than the release
-  for (const m of html.matchAll(/<a [^>]*data-dl="pre-(exe|zip)"[^>]*>/g)) assert.ok(/ data-pre[ >]/.test(m[0]), m[0]);
+  assert.deepEqual(keys.filter((k) => !['exe', 'zip', 'notes', 'version'].includes(k)), []);
+  for (const k of ['exe', 'zip']) assert.ok(keys.includes(k), k);
+  assert.ok(!/ data-pre[ >]/.test(html) && !/beta/i.test(html.replace(/class="beta-band"/g, '')), 'a pre-release link or a beta is left');
+  assert.equal([...html.matchAll(/<section class="hero">[\s\S]*?<\/section>/g)][0][0].match(/data-dl="exe"/g).length, 1, 'one download button in the hero');
 });

@@ -1,8 +1,10 @@
-**A pre-release of FLEx Scratchpad for Windows.** It works, it is tested by hand on real FieldWorks projects, and it will still have rough edges. Please report what breaks.
+**FLEx Scratchpad 0.1.0 for Windows, the first full release.** It works, it is tested by hand on real FieldWorks projects, and it will still have rough edges. Please report what breaks.
 
 FLEx Scratchpad is a notebook for FieldWorks: notes in tabs and folders that show live FLEx lexical entries and interlinear examples, read straight from your project (never written to). Highlight words in an example, put examples in tables, number them, collect them into an example collection and export that as a FLEx text.
 
-### New in this pre-release
+### New since 0.1.0-beta.2
+
+Everything below arrived in the pre-release 0.1.0-beta.3 or since.
 
 - **Recordings kept in lameta.** Picking a missing recording inside a [lameta](https://lameta.org/) project now makes the program remember the whole project, so every session's recordings are found. The guide and the export dialog now advise keeping whole-text recordings out of the FLEx project's own LinkedFiles folder, where FieldWorks' Send/Receive fails on files of more than a few megabytes.
 - **The bar / line / pie chart block is gone.** It was never what a linguist's notebook needed and it muddled the word "chart", which here means FieldWorks' text charts. A note that still holds a ```chart block shows it as a code block; a picture made in another program can be attached instead. Text charts and tables stay.
@@ -39,7 +41,7 @@ FLEx Scratchpad is a notebook for FieldWorks: notes in tabs and folders that sho
 
 ### Known issues
 
-- A **web page export with the recordings embedded** can make the window stop responding until it is done (minutes for a long note) in 0.1.0-beta.3 and earlier; let it finish, or export without the recordings. Fixed in this version: exports run in the background with a progress bar ([#20](https://github.com/rulingAnts/flex-scratchpad/issues/20)).
+- A **web page export with the recordings embedded** can make the window stop responding until it is done (minutes for a long note) in 0.1.0-beta.3 and earlier; let it finish, or export without the recordings. Fixed in 0.1.0: exports run in the background with a progress bar ([#20](https://github.com/rulingAnts/flex-scratchpad/issues/20)).
 - **Slideshow and PowerPoint** exports are still rough: some examples' tables are crowded or overlap in PowerPoint, and where a note breaks into slides is not settled. Word's LingTeX example tables look right but do not yet re-render correctly with the LingTeX-Word add-in. Word, PDF and web page exports come out well ([#21](https://github.com/rulingAnts/flex-scratchpad/issues/21)).
 
 ### Download
