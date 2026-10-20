@@ -1388,7 +1388,7 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   `flex_projects` with three invented names through the bridge (Seth, 2026-10-20: "users need to see a screenshot where
   FLEx projects are listed as a source"; this machine has no FieldWorks). The guide's section 15 is a FAQ (`#faq`); its first
   question, audio matching the lines, says where FLEx's segment times come from (ELAN's FLEx export, a FlexText Editor
-  file, the FlexText Audio Segmenter) — FLEx cannot align a recording itself (Seth, 2026-10-20). Re-run it after a UI
+  suite file, the FlexText Audio Segmenter; NOT SayMore — Seth, 2026-10-20: "I don't know that it does") — FLEx cannot align a recording itself (Seth, 2026-10-20). Re-run it after a UI
   change and LOOK at the pictures. `tests/js/site-guide.test.js` fails when the page names a picture that is not there
   (or a picture nobody shows), when an in-page link has no target, when a section or sub-heading is missing from the
   contents, or when the home page stops linking to `guide/`. The README's how-to table and the guide say the same
