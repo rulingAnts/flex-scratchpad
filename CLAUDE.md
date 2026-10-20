@@ -416,7 +416,9 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   FLEx's paragraph.segment number, Occurrence = the whole paragraph's baseline with `§` between segments, a
   row PER MATCH (a line matched twice is there twice). `flex/concordance.py` (pure, stdlib csv): `parse(text)`,
   `match(rows, texts, index)` places each row in the per-session index (the text by `abbrev` / title / title
-  prefix, the line by `label_key`, the baseline checked against the `§` pieces — `how` number | number? | text,
+  prefix — in EVERY writing system: `list_texts` rows carry `names`, every title and abbreviation alternative
+  (`lcm._text_names`; Seth, 2026-10-20: texts titled in the vernacular were not found), and `search_texts` reads
+  them too — the line by `label_key`, the baseline checked against the `§` pieces — `how` number | number? | text,
   the last found by its baseline when the number is not in the text), one row per distinct line (`hits`) in
   file order, the misses with a `why`. `FlexService.concordance_rows(text)`, `Api.read_concordance_file()`
   (the CSV dialog → {path, name, text}; BOM / UTF-16 / cp1252 tolerated), `Api.concordance_preview({text|path})`,

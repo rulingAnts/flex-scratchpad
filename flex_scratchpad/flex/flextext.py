@@ -249,6 +249,7 @@ class FlextextBackend:
 
     def list_texts(self) -> list[dict]:
         return [{"guid": t["guid"], "title": t["title"], "abbrev": t["abbrev"],
+                 "names": list(dict.fromkeys(x for x in [t["title"], t["abbrev"]] + list((t.get("titleAlternatives") or {}).values()) if x)),
                  "segmentCount": t["segmentCount"], "hasMedia": any(m["found"] for m in t["media"])}
                 for t in self.texts.values()]
 
@@ -261,7 +262,7 @@ class FlextextBackend:
 
     def search_texts(self, q: str) -> list[dict]:
         ql = (q or "").casefold()
-        return [t for t in self.list_texts() if ql in t["title"].casefold()]
+        return [t for t in self.list_texts() if any(ql in n.casefold() for n in t.get("names") or [t["title"]])]
 
     def search_entries(self, q: str, limit: int = 30) -> list[dict]:
         return []

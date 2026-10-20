@@ -68,3 +68,17 @@ def test_api_preview_and_collection(tmp_path):
     p = tmp_path / "c.csv"
     p.write_bytes(b"\xef\xbb\xbf" + CSV.encode("utf-8"))
     assert api.concordance_preview({"path": str(p)})["matched"] == 4
+
+
+def test_a_vernacular_title_names_the_text():
+    """Seth, 2026-10-20: "concordance export is not finding texts that have a title in the vernacular
+    writing system". The demo story is "The dog and the river" in English and "Kabir pemu" in Kalu:
+    a Ref in either names it, so does the Kalu title cut to eight letters, and the picker's text
+    search finds it by either too."""
+    be = DemoBackend()
+    assert "Kabir pemu" in be.list_texts()[0]["names"]
+    csv = "Ref,Occurrence\nKabir pemu 1.1,Kabir ka-nuwa-mo lo.\nKabir pe 1.2,Haŋa tiket ka-sila-mo pemu.\n"
+    res = concordance.match(concordance.parse(csv), be.list_texts(), be.all_baselines())
+    assert [(r["label"], r["how"]) for r in res["rows"]] == [("1.1", "number"), ("1.2", "number")]
+    assert res["texts"] == ["The dog and the river"]
+    assert [t["guid"] for t in be.search_texts("kabir pemu")] == [be.list_texts()[0]["guid"]]

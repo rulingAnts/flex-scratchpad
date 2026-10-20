@@ -77,15 +77,32 @@ def pieces(occurrence: str) -> list[str]:
     return [p for p in (norm(x) for x in (occurrence or "").split(SEG_SEP)) if p]
 
 
+def text_names(t: dict) -> tuple[list[str], list[str]]:
+    """(abbreviations, titles) a text goes by — in every writing system the backend knows
+    (`names`), since FLEx's export names a text in the system its concordance showed, often the
+    vernacular (Seth, 2026-10-20: "texts that have a title in the vernacular writing system …
+    it's not finding")."""
+    abbrevs = [t.get("abbrev") or ""]
+    titles = [t.get("title") or ""] + [x for x in (t.get("names") or []) if x]
+    return [a for a in abbrevs if a], [x for x in dict.fromkeys(titles) if x]
+
+
 def _texts_named(name: str, texts: list[dict]) -> list[dict]:
-    """The texts a Ref's name can mean, best first: the abbreviation, then the title, then a title
-    that starts with the name (FLEx shows eight letters of the title when no abbreviation is set)."""
+    """The texts a Ref's name can mean, best first: an abbreviation, then a title (in any writing
+    system), then a title that starts with the name (FLEx shows eight letters of the title when no
+    abbreviation is set)."""
     n = norm(name)
     if not n:
         return []
-    exact = [t for t in texts if norm(t.get("abbrev") or "") == n]
-    title = [t for t in texts if norm(t.get("title") or "") == n and t not in exact]
-    head = [t for t in texts if len(n) >= 3 and norm(t.get("title") or "").startswith(n) and t not in exact and t not in title]
+    exact, title, head = [], [], []
+    for t in texts:
+        abbrevs, titles = text_names(t)
+        if any(norm(a) == n for a in abbrevs):
+            exact.append(t)
+        elif any(norm(x) == n for x in titles):
+            title.append(t)
+        elif len(n) >= 3 and any(norm(x).startswith(n) for x in titles):
+            head.append(t)
     return exact + title + head
 
 

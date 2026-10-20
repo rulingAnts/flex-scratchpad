@@ -266,7 +266,8 @@
         const out = [], misses = [], seen = new Map();
         for (const r of rows) {
           const n = norm(r.name);
-          const cands = texts.filter((t) => norm(t.abbrev) === n).concat(texts.filter((t) => norm(t.title) === n), texts.filter((t) => n.length >= 3 && norm(t.title).startsWith(n))).filter((t, i, a) => a.indexOf(t) === i);
+          const titles = (t) => [t.title].concat(Object.values(t.titleAlternatives || {}));   // every writing system's title (vernacular titles too)
+          const cands = texts.filter((t) => norm(t.abbrev) === n).concat(texts.filter((t) => titles(t).some((x) => norm(x) === n)), texts.filter((t) => n.length >= 3 && titles(t).some((x) => norm(x).startsWith(n)))).filter((t, i, a) => a.indexOf(t) === i);
           if (!cands.length) { misses.push({ ref: r.ref, found: false, why: 'no text named “' + r.name + '”', line: r.line }); continue; }
           const occ = r.occurrence.split('§').map(norm).filter(Boolean);
           let placed = null;
