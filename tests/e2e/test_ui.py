@@ -4318,6 +4318,9 @@ def test_links_dialog_and_the_common_keyboard_shortcuts(app):
     page.evaluate("() => { const b = document.querySelector('#editor .blk-body'); FS.editor.setCaret(b, 7); b.focus(); }")
     page.wait_for_selector("[data-test=link-pill]:not([hidden])")
     assert page.locator("#link-pill .lp-href").inner_text() == "https://example.org/x"
+    # without clipboard permission (CI's Chromium) the copy falls back to a selected textarea: the
+    # caret must come back to the link afterwards, or Edit finds no link under it (CI, 2026-10-20)
+    page.evaluate("() => { navigator.clipboard.writeText = () => Promise.reject(new Error('no permission')); }")
     page.locator("[data-test=lp-copy]").click()
     page.wait_for_selector(".toast:has-text('Link copied')")
     assert page.evaluate("() => document.activeElement.classList.contains('blk-body')")       # the caret stayed in the note
@@ -5524,8 +5527,9 @@ def test_deleting_the_open_collection_leaves_nothing_under_the_placeholder(app):
     page.locator("[data-test=new-collection]").click()
     page.wait_for_selector("#collection")
     assert page.locator("#collection").is_visible()
+    page.wait_for_selector(".note-card.active")          # the new collection's own card, whatever the list order
     page.once("dialog", lambda d: d.accept())
-    page.locator(".note-card").first.click(button="right")
+    page.locator(".note-card.active").click(button="right")
     page.locator(".popover .menu-item", has_text="Delete (to trash)").click()
     page.wait_for_selector("#editor-pane.no-note")
     assert page.locator(".no-note-msg").is_visible()
