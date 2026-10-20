@@ -1207,11 +1207,14 @@ class FlexService:
             return {"clipUrl": dst.resolve().as_uri(), "clipPath": str(dst)}
 
     def set_media_path(self, media_guid: str, path: str) -> dict:
-        """The user browsed for the real media file: remember it (and its folder for siblings)."""
+        """The user browsed for the real media file: remember it, and its folder for its siblings —
+        or, when it lives in a lameta project, the PROJECT's folder, so one Browse… finds every
+        session's recordings (Seth, 2026-10-20: keep whole-text recordings out of FLEx's own
+        project tree, "suggest using lameta for this … and linking lameta folders")."""
         with self.lock:
             mc = self.media_config
             mc.setdefault("byGuid", {})[media_guid] = path
-            folder = str(Path(path).parent)
+            folder = str(lameta_root(path) or Path(path).parent)
             if folder not in mc.setdefault("folders", []):
                 mc["folders"].append(folder)
             self.nb.save_config()
@@ -1220,6 +1223,23 @@ class FlexService:
                 if hasattr(self.backend, "media_folders"):
                     self.backend.media_folders = list(mc["folders"])
             return mc
+
+
+def lameta_root(path: str | Path) -> Path | None:
+    """The lameta (or SayMore) project folder a file lives in: the nearest ancestor holding a
+    `.sprj` project file, looked for no more than six levels up (lameta keeps a session's files in
+    `<project>/Sessions/<session>/`). None when the file is not in one."""
+    p = Path(path).parent
+    for _ in range(6):
+        try:
+            if any(c.suffix.lower() == ".sprj" and c.is_file() for c in p.iterdir()):
+                return p
+        except OSError:
+            return None
+        if p.parent == p:
+            break
+        p = p.parent
+    return None
 
 
 # --------------------------------------------------------------------------- chart search helpers
