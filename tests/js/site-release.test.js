@@ -1,7 +1,9 @@
 // The site's download links (docs/assets/release.js): the newest release that has BOTH files.
 const test = require('node:test');
 const assert = require('node:assert');
-const { pickRelease } = require('../../docs/assets/release.js');
+const fs = require('node:fs');
+const path = require('node:path');
+const { pickRelease, pickReleases } = require('../../docs/assets/release.js');
 
 const R = 'https://github.com/rulingAnts/flex-scratchpad/releases/';
 const rel = (tag, d, files, extra) => Object.assign({ tag_name: tag, published_at: d, html_url: R + 'tag/' + tag,
@@ -20,4 +22,35 @@ test('the newest release with both downloads wins; drafts, half-empty and foreig
   assert.ok(l.zip.endsWith('-windows-portable.zip') && l.notes.endsWith('/tag/v0.1.0-beta.1'));
   assert.equal(pickRelease([]), null);
   assert.equal(pickRelease({ message: 'rate limited' }), null);
+});
+
+test('the current release and the pre-release newer than it are both offered (Seth, 2026-10-20: "the buttons should offer both")', () => {
+  const both = (tag) => ['FLEx-Scratchpad-Setup-' + tag.slice(1) + '.exe', 'FLEx-Scratchpad-' + tag.slice(1) + '-windows-portable.zip'];
+  const list = [
+    rel('v0.1.0-beta.1', '2026-10-17T02:00:00Z', both('v0.1.0-beta.1'), { prerelease: true }),
+    rel('v0.1.0-beta.2', '2026-10-17T11:00:00Z', both('v0.1.0-beta.2'), { prerelease: false }),
+    rel('v0.1.0-beta.3', '2026-10-19T23:00:00Z', both('v0.1.0-beta.3'), { prerelease: true }),
+    rel('v0.1.0-beta.4', '2026-10-20T23:00:00Z', ['FLEx-Scratchpad-Setup-0.1.0-beta.4.exe'], { prerelease: true }),   // the zip is missing
+  ];
+  const r = pickReleases(list);
+  assert.equal(r.release.version, '0.1.0-beta.2');
+  assert.equal(r.pre.version, '0.1.0-beta.3');
+  assert.ok(r.pre.exe.endsWith('/v0.1.0-beta.3/FLEx-Scratchpad-Setup-0.1.0-beta.3.exe') && r.pre.notes.endsWith('/tag/v0.1.0-beta.3'));
+  assert.equal(pickRelease(list).version, '0.1.0-beta.2');
+  // a pre-release older than the release is not offered; with no full release the newest pre-release stands in
+  assert.equal(pickReleases(list.slice(0, 2)).pre, null);
+  const onlyPre = pickReleases([list[0], list[2]]);
+  assert.equal(onlyPre.release.version, '0.1.0-beta.3');
+  assert.equal(onlyPre.pre, null);
+  assert.equal(pickReleases([]), null);
+});
+
+test('the home page carries both sets of links, and only known keys', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', '..', 'docs', 'index.html'), 'utf8');
+  const keys = [...html.matchAll(/data-dl="([^"]+)"/g)].map((m) => m[1]);
+  const known = ['exe', 'zip', 'notes', 'version', 'pre-exe', 'pre-zip', 'pre-notes', 'pre-version'];
+  assert.deepEqual(keys.filter((k) => !known.includes(k)), []);
+  for (const k of ['exe', 'zip', 'pre-exe', 'pre-zip']) assert.ok(keys.includes(k), k);
+  // every pre-release element can be hidden when there is no pre-release newer than the release
+  for (const m of html.matchAll(/<a [^>]*data-dl="pre-(exe|zip)"[^>]*>/g)) assert.ok(/ data-pre[ >]/.test(m[0]), m[0]);
 });

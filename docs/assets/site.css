@@ -252,6 +252,7 @@ footer { margin-top: 64px; border-top: 1px solid var(--slate-200); background: #
 .req-list { display: grid; gap: 6px; color: var(--slate-700); font-size: 0.94rem; padding-left: 1.2rem; }
 .kbd { font: 600 0.8rem var(--mono); background: var(--slate-100); border: 1px solid var(--slate-200); border-bottom-width: 2px; border-radius: 5px; padding: 0 5px; }
 .hero .ver { font-variant-numeric: tabular-nums; }
+.btn .ver, .btn [data-dl$="version"] { font-weight: 500; opacity: .8; margin-left: 2px; font-variant-numeric: tabular-nums; }
 
 /* The comparison table (Seth, 2026-10-20: "show and explain right up front what it can do that you
    can't do with just FLEx or with just a word document"). */

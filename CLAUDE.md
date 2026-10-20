@@ -1358,7 +1358,9 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   scrolling carousel is immediately visible on page load" — the kicker, the title, ONE sentence and three buttons, no
   claim pills or link row; the carousel's top sits at ~440px on a 768px-tall screen), the carousel, three steps with
   stills, features, install, a pre-release band. `assets/release.js` moves every download link and the
-  version to the newest release that has BOTH files (`tests/js/site-release.test.js`). The video
+  version to the newest RELEASE (not marked pre-release) that has BOTH files, and the `data-pre` buttons to the newest
+  PRE-release published after it (`pre-exe` / `pre-zip` / `pre-version`; hidden when none is newer; Seth, 2026-10-20:
+  "the buttons should offer both") (`tests/js/site-release.test.js`). The video
   and stills are filmed from the REAL UI by `tools/record_demo.py`; THE HERO IS A CAROUSEL (Seth, 2026-10-20: first
   "mouseover generated screenshots for each feature", then "what I'd rather have is just one scrolling carousel of
   screenshots and the video all where the video is now, auto scrolling and also easy for people to navigate … each
