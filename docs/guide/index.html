@@ -74,7 +74,7 @@
     <h2>Contents</h2>
     <ol>
       <li><a href="#start">Getting started</a>
-        <ol><li><a href="#start-project">Pick your project</a></li><li><a href="#start-window">The window</a></li><li><a href="#start-readonly">Read-only, offline, no server</a></li></ol></li>
+        <ol><li><a href="#start-project">Pick your project</a></li><li><a href="#start-window">The window</a></li><li><a href="#start-readonly">Read-only and offline</a></li></ol></li>
       <li><a href="#notebook">The notebook</a>
         <ol><li><a href="#nb-tabs">Tabs, folders, tags</a></li><li><a href="#nb-notes">Notes and the list</a></li><li><a href="#nb-search">Search</a></li><li><a href="#nb-rail">The left pane <span class="rel rel-pre">beta.3</span></a></li></ol></li>
       <li><a href="#writing">Writing</a>
@@ -99,7 +99,7 @@
         <ol><li><a href="#se-settings">Settings</a></li><li><a href="#se-keys">Keyboard shortcuts</a></li></ol></li>
       <li><a href="#files">Your notes are files</a></li>
       <li><a href="#faq">Questions people ask</a>
-        <ol><li><a href="#faq-audio">Audio that matches the lines</a></li><li><a href="#faq-safe">Can it change my project?</a></li><li><a href="#faq-open">FieldWorks open at the same time</a></li><li><a href="#faq-files">Where are my notes?</a></li><li><a href="#faq-nofw">Without FieldWorks</a></li><li><a href="#faq-which">Release or pre-release?</a></li><li><a href="#faq-snapshot">Why "snapshot"?</a></li><li><a href="#faq-paste">A paste landed wrong</a></li><li><a href="#faq-offline">Internet, servers</a></li></ol></li>
+        <ol><li><a href="#faq-audio">Audio that matches the lines</a></li><li><a href="#faq-safe">Can it change my project?</a></li><li><a href="#faq-open">FieldWorks open at the same time</a></li><li><a href="#faq-files">Where are my notes?</a></li><li><a href="#faq-nofw">Without FieldWorks</a></li><li><a href="#faq-which">Release or pre-release?</a></li><li><a href="#faq-snapshot">Why "snapshot"?</a></li><li><a href="#faq-paste">A paste landed wrong</a></li><li><a href="#faq-offline">Internet</a></li></ol></li>
       <li><a href="#trouble">When something goes wrong</a></li>
     </ol>
   </nav>
@@ -127,8 +127,8 @@
     </ul>
     <p>A new notebook opens with a <em>Welcome</em> note that is a short tour you can delete.</p>
 
-    <h3 id="start-readonly">Read-only, offline, no server</h3>
-    <p>The program asks FieldWorks for read-only access, every time. It has no code path that writes to a project, and its own test suite fails if one appears. Its exports are new files that you import yourself. It never needs the internet, and it runs no server of any kind (not even on this computer), which matters on a field laptop with cautious anti-malware software.</p>
+    <h3 id="start-readonly">Read-only and offline</h3>
+    <p>The program asks FieldWorks for read-only access, every time. It has no code path that writes to a project, and its own test suite fails if one appears. Its exports are new files that you import yourself. It never needs the internet: everything it uses comes in the download.</p>
   </section>
 
   <!-- ============================================================ 2 -->
@@ -653,8 +653,8 @@
     <h3 id="faq-paste">A pasted example landed on the wrong line, or nowhere.</h3>
     <p>Copy with the <em>Word</em> line showing: the program finds lines by their baseline first, then by morphemes and glosses, and by FLEx's own line numbers when the copy carries them. When it still lands wrong, the dialog lets you insert the paste as text, and <a href="#trouble">When something goes wrong</a> says how to send what the program read.</p>
 
-    <h3 id="faq-offline">Does it need the internet? Does it run a server?</h3>
-    <p>No and no. Everything comes in the download, audio tools included; it never fetches anything, and it starts no server of any kind, not even on this computer, which is what cautious anti-malware software watches for.</p>
+    <h3 id="faq-offline">Does it need the internet?</h3>
+    <p>No. Everything comes in the download, audio tools included, and it never fetches anything while it runs. It works the same on a field laptop with no connection.</p>
   </section>
 
   <!-- ============================================================ 16 -->
