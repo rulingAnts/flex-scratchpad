@@ -51,7 +51,8 @@ jobs:
         run: gh release edit "${{ inputs.promote }}" --repo "$GITHUB_REPOSITORY" --prerelease=false --latest
 
   version:
-    if: ${{ !inputs.promote }}
+    # a pushed tag, or a manual run with a tag; a bare manual run (neither tag nor promote) only syncs main
+    if: ${{ !inputs.promote && !(github.event_name == 'workflow_dispatch' && inputs.tag == '') }}
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.v.outputs.version }}
