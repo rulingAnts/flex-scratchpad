@@ -352,6 +352,17 @@ one to see only those notes, with the examples that carry the tag marked and the
 the FLEx object dialog's *FLEx tags* lists every place a tag is used in the project, ready to
 insert.
 
+## Known issues
+
+- **A web page export with recordings can freeze the window** in 0.1.0-beta.3 and earlier: with the recordings embedded, the
+  window may stop responding until the export is done (minutes for a long note). Let it finish, or export without the
+  recordings. Fixed for the next version, where exports run in the background with a progress bar
+  ([#20](https://github.com/rulingAnts/flex-scratchpad/issues/20)).
+- **Some export formats are still rough.** Word, PDF and the web page come out well. The slideshow and PowerPoint less so:
+  in PowerPoint some examples' tables are crowded or overlap, and where a note breaks into slides is not settled yet. In
+  Word the examples are LingTeX-Word tables and look right, but re-rendering them with the LingTeX-Word add-in does not
+  work correctly yet ([#21](https://github.com/rulingAnts/flex-scratchpad/issues/21)).
+
 ## What is planned
 
 The features that are asked for but not built yet are the GitHub issues labelled

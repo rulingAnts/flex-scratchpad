@@ -1471,6 +1471,10 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   promoted beta.3 drops every `beta.3` flag and renames the legend; a new pre-release turns `next` into its number.
   What was in beta.2 was settled by `git show 0d84fd2:<file>` (no tagstyles.js / chart.js / log.py / xlsx, pptx,
   pdf writers; no Ctrl+K, nested lists, gap bar, sticky headings, promote/demote, rule collections, flexcopy).
+- KNOWN ISSUES FOR USERS (Seth, 2026-10-20: "log as known issues for now, not to pursue further tonight or this week"):
+  README › Known issues, the guide's `#tr-known` (under When something goes wrong) and the release notes' Known issues say
+  the same things, each with its GitHub issue (#20 the beta.3 export freeze, fixed since; #21 slideshow / PowerPoint /
+  LingTeX re-render). Add a known issue to all three; take it out of all three when a release fixes it.
 - NAMING LOGOS (Seth, 2026-10-20: the comparison "is actually helpful for our users, because they might be familiar
   with Logos"): user-facing text may say a visual filter works "like a highlighting filter in Logos" — a true
   comparison, in words, never Faithlife's logo or styling, never a hint of partnership. The site footers and the

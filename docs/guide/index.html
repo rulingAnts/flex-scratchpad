@@ -119,7 +119,8 @@
       <li><a href="#files">Your notes are files</a></li>
       <li><a href="#faq">Questions people ask</a>
         <ol><li><a href="#faq-audio">Audio that matches the lines</a></li><li><a href="#faq-safe">Can it change my project?</a></li><li><a href="#faq-open">FieldWorks open at the same time</a></li><li><a href="#faq-files">Where are my notes?</a></li><li><a href="#faq-nofw">Without FieldWorks</a></li><li><a href="#faq-which">Release or pre-release?</a></li><li><a href="#faq-snapshot">Why "snapshot"?</a></li><li><a href="#faq-paste">A paste landed wrong</a></li><li><a href="#faq-offline">Internet</a></li></ol></li>
-      <li><a href="#trouble">When something goes wrong</a></li>
+      <li><a href="#trouble">When something goes wrong</a>
+        <ol><li><a href="#tr-known">Known issues</a></li></ol></li>
     </ol>
   </nav>
 
@@ -528,7 +529,7 @@
   <section id="exports">
     <h2><span class="num">11</span>Exports</h2>
     <figure class="shot half"><img src="../media/guide/export-menu.webp" loading="lazy" alt="The note menu: Markdown, web page, Word, Excel, PDF, slideshow, PowerPoint"><figcaption>The note's ⋯ menu.</figcaption></figure>
-    <div class="wip">The pretty exports are a work in progress: they improve with every release, and some layouts still need a hand afterwards. If something comes out wrong, <a href="https://github.com/rulingAnts/flex-scratchpad/issues">tell us</a> with the note that produced it.</div>
+    <div class="wip">The pretty exports are a work in progress: they improve with every release, and some layouts still need a hand afterwards (see <a href="#tr-known">Known issues</a>). If something comes out wrong, <a href="https://github.com/rulingAnts/flex-scratchpad/issues">tell us</a> with the note that produced it.</div>
     <p>An export asks its questions first (embed the recordings? where to save?) and then runs in the background <span class="rel rel-next" title="Finished and tested, not in any download yet; in the next pre-release">next</span>: a bar under the FLEx status in the sidebar shows what it is doing (reading the examples from FLEx, preparing the recordings, writing the file), the program stays usable meanwhile, and a second export waits its turn. Click the bar for the list, to stop the running export or take a waiting one out. The note is exported as it was when you clicked.</p>
 
     <h3 id="xp-formats">The formats</h3>
@@ -689,6 +690,12 @@
       <tr><td>Tags or a chart look wrong <span class="rel rel-pre" title="In the pre-release 0.1.0-beta.3; not in 0.1.0-beta.2, the current release">beta.3</span></td><td><code>--dump-tags</code> and <code>--dump-charts [TEXT]</code> write what the project returns, to attach to an issue.</td></tr>
       <tr><td>Anything else</td><td>In the pre-release <span class="rel rel-pre" title="In the pre-release 0.1.0-beta.3; not in 0.1.0-beta.2, the current release">beta.3</span>, run <code>flex-scratchpad -v</code> from a terminal: every call the page makes, every FLEx read and every file written, with times, and the same goes to <code>%LOCALAPPDATA%\FLEx Scratchpad\log\flex-scratchpad.log</code> for the installed program. Nothing in the log is ever a secret. <code>--devtools</code> (or F12 in the program; <code>--debug</code> in beta.2) opens the browser developer tools. <code>FLEx Scratchpad.exe --selftest report.json</code> checks the installation and writes a report to attach.</td></tr>
     </table>
+
+    <h3 id="tr-known">Known issues</h3>
+    <ul>
+      <li><b>A web page export with recordings can freeze the window</b> (0.1.0-beta.3 and earlier). With the recordings embedded, the window may stop responding until the export is done, which takes minutes for a long note. Let it finish, or export without the recordings. Fixed for the next version <span class="rel rel-next" title="Finished and tested, not in any download yet; in the next pre-release">next</span>, where exports run in the background with a progress bar (<a href="https://github.com/rulingAnts/flex-scratchpad/issues/20">issue&nbsp;20</a>).</li>
+      <li><b>Some export formats are still rough.</b> Word, PDF and the web page come out well. The slideshow and PowerPoint less so: in PowerPoint some examples' tables are crowded or overlap, and where a note breaks into slides is not settled yet. In Word the examples are LingTeX-Word tables and look right, but asking the LingTeX-Word add-in to re-render them does not work correctly yet (<a href="https://github.com/rulingAnts/flex-scratchpad/issues/21">issue&nbsp;21</a>).</li>
+    </ul>
     <p>Please <a href="https://github.com/rulingAnts/flex-scratchpad/issues">report what you find</a>; the planned features are the issues labelled <em>planned</em>.</p>
     <a class="back-top" href="#top">↑ Back to the top</a>
   </section>

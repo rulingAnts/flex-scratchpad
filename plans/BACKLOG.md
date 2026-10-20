@@ -585,6 +585,25 @@ what the column did instead. The code is `colWidths` / `setColWidths` and the `r
 4. The ghost header and the frozen columns' offsets (`placeFrozen`) are measured after a frame; a drag
    that changes a frozen column may leave them a frame behind.
 
+## Known issue: a web page export with recordings froze the window — 0.1.0-beta.3 and earlier (Seth, 2026-10-20)
+
+> *"HTML exports on beta.3 and earlier can freeze the UI if audio clips are involved. That's been fixed since."*
+
+Fixed in 94b62de (CLAUDE.md › NO BIG DATA THROUGH THE BRIDGE / A CLICK ALWAYS ANSWERS). Logged so users of those
+builds are told (README › Known issues, the guide's `#tr-known`, the release notes). Close
+[#20](https://github.com/rulingAnts/flex-scratchpad/issues/20) when a release carries the fix, and drop the guide's and README's line then.
+
+## Known issue: export formats leave room for improvement (Seth, 2026-10-20 — "to log as known issues for now, not to pursue further tonight or this week")
+
+> *"PDF and Word are pretty good, HTML pretty good. Slideshow formats iffy yet (PowerPoint some table examples can be
+> crowded or overlapping, how to break slides not yet clearly worked out), and Word LingTeX tables render correctly on
+> export, but do not re-render correctly."*
+
+[#21](https://github.com/rulingAnts/flex-scratchpad/issues/21). Where to look when it is taken up: PowerPoint tables `pptx_writer.py` (`fit_widths`, the
+font shrinking); slide breaking `export.js` `slidesOf` / `toSlides`; the LingTeX re-render `docx_writer.py` against the
+add-in's `src/modStyles.bas`, `modRender.bas`, `modFlexParse.bas` (reference clone `/home/user/rulingants/lingtex-tools`) —
+what the add-in reads back from a table it did not write itself (its tags, document variables, the tier paragraphs).
+
 ## Known issue elsewhere: FieldWorks doubles the morph bundle of a two-language-glossed word on import (Seth, 2026-10-19)
 
 Seen on texts imported from FlexText Editor (`Tosokai`: every word; `Wahuka Arsen incident`: a few): the

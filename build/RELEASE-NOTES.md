@@ -37,6 +37,11 @@ FLEx Scratchpad is a notebook for FieldWorks: notes in tabs and folders that sho
 - Examples in a collection fold to chips; empty FLEx lines (left by Shift+Enter) are left out; **Texts used** lists the FLEx texts a note, a selection or a folder draws on.
 - Fixes: "Close now, finish in the background" on the backup-before-closing screen now closes the window at once (the backup used to have to reach a point where it could be stopped first); a chart's sticky header no longer stays behind when you open another note; the FLEx object dialog's text preview loads the rest of a long text as you scroll (it stopped at 60 lines); a note with many examples of one text no longer shows some of them "from the snapshot" on Windows (two of them wrote the snapshot at the same moment), and a finished backup is no longer reported as failed when its record could not be written at that instant — every file the program writes now waits a moment for Windows to let go of it; with Markdown markers hidden, typing after making a heading or a list item lands after the hidden marker, never before it; one Backspace removes a whole line break; styling inside a preview no longer jumps to the top; closing the program no longer ends in an error message.
 
+### Known issues
+
+- A **web page export with the recordings embedded** can make the window stop responding until it is done (minutes for a long note) in 0.1.0-beta.3 and earlier; let it finish, or export without the recordings. Fixed in this version: exports run in the background with a progress bar ([#20](https://github.com/rulingAnts/flex-scratchpad/issues/20)).
+- **Slideshow and PowerPoint** exports are still rough: some examples' tables are crowded or overlap in PowerPoint, and where a note breaks into slides is not settled. Word's LingTeX example tables look right but do not yet re-render correctly with the LingTeX-Word add-in. Word, PDF and web page exports come out well ([#21](https://github.com/rulingAnts/flex-scratchpad/issues/21)).
+
 ### Download
 
 - **FLEx-Scratchpad-Setup-…exe**: the installer. Per user, no administrator rights; it adds a Start menu entry and appears in Settings › Apps. Running a newer Setup upgrades in place; your notebooks and settings are kept.
