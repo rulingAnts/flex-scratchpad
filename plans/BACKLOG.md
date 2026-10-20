@@ -512,6 +512,13 @@ whether a range of records (a word list) is one embed or many.
 > *"sometimes shorter examples continuously misalign with their original source and require
 > re-pointing every time I visit them."* — *"One example in particular."*
 
+Minor (Seth: "it doesn't happen with most examples, just one in particular I've noticed. One or two"),
+and both are examples that came in as a TSV PASTE (the locator), not from the picker — so the first
+suspect is what the locator wrote: `seg=` / `at=` from the per-session index (`all_baselines`), whose
+segment GUIDs or numbering may differ from what `get_text` then fetches (a re-read text, a blank segment
+counted by one side only), leaving anchors the tracker cannot find and a short line it re-finds by text
+on every visit.
+
 Not reproduced here yet. What to collect when it is looked at, from that one example:
 
 1. Its embed source before and after a visit (⋯ → Edit source): does it carry `at=` anchors, and
