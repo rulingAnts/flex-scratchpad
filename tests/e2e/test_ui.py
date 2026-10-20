@@ -4318,6 +4318,9 @@ def test_links_dialog_and_the_common_keyboard_shortcuts(app):
     page.evaluate("() => { const b = document.querySelector('#editor .blk-body'); FS.editor.setCaret(b, 7); b.focus(); }")
     page.wait_for_selector("[data-test=link-pill]:not([hidden])")
     assert page.locator("#link-pill .lp-href").inner_text() == "https://example.org/x"
+    # without clipboard permission (CI's Chromium) the copy falls back to a selected textarea: the
+    # caret must come back to the link afterwards, or Edit finds no link under it (CI, 2026-10-20)
+    page.evaluate("() => { navigator.clipboard.writeText = () => Promise.reject(new Error('no permission')); }")
     page.locator("[data-test=lp-copy]").click()
     page.wait_for_selector(".toast:has-text('Link copied')")
     assert page.evaluate("() => document.activeElement.classList.contains('blk-body')")       # the caret stayed in the note

@@ -254,10 +254,18 @@
 
   FS.copyText = async function (text) {
     try { await navigator.clipboard.writeText(text); return true; } catch (e) { /* fall through */ }
+    // the execCommand fallback (no clipboard permission: CI's Chromium, some WebView2 set-ups) has to
+    // select a textarea, which would take the caret out of the note — the link pill then found no link
+    // under it and its Edit did nothing (CI, 2026-10-20) — so the selection and the focus are put back
+    const sel = window.getSelection();
+    const ranges = sel ? Array.from({ length: sel.rangeCount }, (_, i) => sel.getRangeAt(i).cloneRange()) : [];
+    const active = document.activeElement;
     const ta = FS.el('textarea', { style: { position: 'fixed', left: '-1000px' } }, text);
     document.body.appendChild(ta); ta.select();
     try { document.execCommand('copy'); } catch (e) { /* ignore */ }
     ta.remove();
+    if (active && active !== document.body && active.focus) active.focus();
+    if (sel && ranges.length) { sel.removeAllRanges(); ranges.forEach((r) => sel.addRange(r)); }
     return true;
   };
 })();
