@@ -20,6 +20,7 @@
     <a href="../#charts">Charts</a>
     <a href="../#features">Features</a>
     <a class="active" href="./">User guide</a>
+    <a href="#faq">FAQ</a>
     <a href="../#install">Install</a>
     <a data-dl="notes" href="https://github.com/rulingAnts/flex-scratchpad/releases/tag/v0.1.0-beta.2">Release notes</a>
     <a class="nav-gh" href="https://github.com/rulingAnts/flex-scratchpad" target="_blank" rel="noopener">GitHub</a>
@@ -30,7 +31,7 @@
 <div class="guide-wrap">
   <header class="guide-head" id="top">
     <h1>User guide</h1>
-    <p class="lead">Everything FLEx Scratchpad does, in the order you will meet it: the notebook, writing, examples read live from your FieldWorks project, styling and visual filters, audio, collections, text charts and chart notes, searching the charts, exports, backup, and the settings and shortcuts. Every picture is the real program showing its built-in demo project, an invented language.</p>
+    <p class="lead">Everything FLEx Scratchpad does, in the order you will meet it: the notebook, writing, examples read live from your FieldWorks project, styling and visual filters, audio, collections, text charts and chart notes, searching the charts, exports, backup, the settings and shortcuts, and the <a href="#faq">questions people ask</a>. Every picture is the real program showing its built-in demo project, an invented language.</p>
     <div class="meta">
       <span>Describes <b>0.1.0-beta.2</b>, the current release</span>
       <a href="../#install">Install</a>
@@ -64,6 +65,7 @@
       <li><a href="#backup">Backup and storage</a></li>
       <li><a href="#settings">Settings and keyboard shortcuts</a></li>
       <li><a href="#files">Your notes are files</a></li>
+      <li><a href="#faq">Questions people ask</a></li>
       <li><a href="#trouble">When something goes wrong</a></li>
     </ol>
   </details>
@@ -96,6 +98,8 @@
       <li><a href="#settings">Settings and shortcuts</a>
         <ol><li><a href="#se-settings">Settings</a></li><li><a href="#se-keys">Keyboard shortcuts</a></li></ol></li>
       <li><a href="#files">Your notes are files</a></li>
+      <li><a href="#faq">Questions people ask</a>
+        <ol><li><a href="#faq-audio">Audio that matches the lines</a></li><li><a href="#faq-safe">Can it change my project?</a></li><li><a href="#faq-open">FieldWorks open at the same time</a></li><li><a href="#faq-files">Where are my notes?</a></li><li><a href="#faq-nofw">Without FieldWorks</a></li><li><a href="#faq-which">Release or pre-release?</a></li><li><a href="#faq-snapshot">Why "snapshot"?</a></li><li><a href="#faq-paste">A paste landed wrong</a></li><li><a href="#faq-offline">Internet, servers</a></li></ol></li>
       <li><a href="#trouble">When something goes wrong</a></li>
     </ol>
   </nav>
@@ -109,7 +113,7 @@
 
     <h3 id="start-project">Pick your project</h3>
     <p>Install it from the <a href="../#install">download on the home page</a> (an installer or a portable zip; both are the same program) and start it. Open <span class="ui">Settings</span> (the ⚙ button, or <kbd>Ctrl+,</kbd>) and choose the <span class="ui">FLEx project</span>: the list shows the projects FieldWorks has on this computer. The project is opened for reading only. FieldWorks may be open on the same project at the same time; if it refuses to share, the status pill at the top right says so and what to do (in FLEx: <em>Project Properties › Sharing › Share project contents with programs on this computer</em>).</p>
-    <figure class="shot"><img src="../media/guide/settings.webp" loading="lazy" alt="The Settings dialog: the notebook folder, the FLEx project, options, and the links to the tag styles, visual filters and backup"><figcaption>Settings: where the notes live, which project to read, and the doors to tag styles, visual filters and backup.</figcaption></figure>
+    <figure class="shot"><img src="../media/guide/settings.webp" loading="lazy" alt="The Settings dialog: the notebook folder, the FLEx project, options, and the links to the tag styles, visual filters and backup"><figcaption>Settings: where the notes live, the FieldWorks project to read (the source select also takes a <code>.flextext</code> file or the demo), and the doors to tag styles, visual filters and backup. The project names here are invented.</figcaption></figure>
     <p>Two other sources exist for when there is no FieldWorks on the computer: a <code>.flextext</code> file exported from FLEx (texts only), and the built-in <span class="ui">demo</span> project, an invented language used for the pictures in this guide and for trying things out.</p>
     <p>The <span class="ui">notebook</span> is a folder of your choosing (by default <em>Documents\FLEx Scratchpad</em>). Everything you write goes there and nowhere else; see <a href="#files">Your notes are files</a>.</p>
 
@@ -325,7 +329,8 @@
   <section id="audio">
     <h2><span class="num">6</span>Hearing an example</h2>
     <figure class="shot"><img src="../media/guide/audio.webp" loading="lazy" alt="An example playing: ▶ on each line, the playing line lit, and the transport strip with pause, loop and the position"><figcaption>▶ on a line plays that line from the text's recording; the playing line is lit.</figcaption></figure>
-    <p>When a text in FLEx is time-aligned (its lines have begin and end times and a media file), each line of an example has ▶, a range has <span class="ui">Play 1–3</span>, and a transport strip offers pause, loop and scrubbing. The playing line is lit and the note scrolls to it unless you are scrolling yourself; the player stays at the bottom of the view while the example runs on below it. Whenever something plays and its player is not on screen, a <b>Now playing</b> bar at the bottom of the window has pause, stop and the position; <kbd>Esc</kbd> stops.</p>
+    <p>When a text in FLEx is time-aligned (its lines have begin and end times and a media file; <a href="#audio-timing">where that comes from</a>), each line of an example has ▶, a range has <span class="ui">Play 1–3</span>, and a transport strip offers pause, loop and scrubbing. The playing line is lit and the note scrolls to it unless you are scrolling yourself; the player stays at the bottom of the view while the example runs on below it. Whenever something plays and its player is not on screen, a <b>Now playing</b> bar at the bottom of the window has pause, stop and the position; <kbd>Esc</kbd> stops.</p>
+    <div class="note" id="audio-timing"><b>Where the timing comes from.</b> FieldWorks keeps a start and an end time on each line of a text, but has no tool of its own to set them, so a text typed or imported as text alone has no ▶ here. The times arrive with an import: a text exported from <b>ELAN</b> as a FLEx file (SayMore has a FieldWorks export too), or a <b>FlexText Editor</b> file; FieldWorks' interlinear text import keeps the times each line carries. To add them to a text that is already in FLEx as text only, use the <a href="https://audio-segmenter.flextext.app/" target="_blank" rel="noopener">FlexText Audio Segmenter</a>: it aligns a recording to the text's lines and writes a file FLEx imports with the times; a release that works inside FLEx directly is coming soon.</div>
     <p>The first time a line plays, its stretch of the recording is cut and kept in the notebook, so it still plays when the recording is somewhere else. When a text's media file cannot be found, the example says so with <span class="ui">Browse…</span>; the file you pick is remembered for that text and its folder for the others. Charts play too (<a href="#ch-play">Playback</a>) <span class="rel rel-pre" title="In the pre-release 0.1.0-beta.3; not in 0.1.0-beta.2, the current release">beta.3</span>, and the web page and slideshow exports carry the players (<a href="#xp-audio">Audio in the exports</a>) <span class="rel rel-pre" title="In the pre-release 0.1.0-beta.3; not in 0.1.0-beta.2, the current release">beta.3</span>.</p>
   </section>
 
@@ -616,8 +621,45 @@
   </section>
 
   <!-- ============================================================ 15 -->
+  <section id="faq">
+    <h2><span class="num">15</span>Questions people ask</h2>
+    <h3 id="faq-audio">How do I get audio to match the interlinear text lines in my FLEx database?</h3>
+    <p>FieldWorks stores a start and an end time on each line of a text, but it cannot set them itself: it has no tool for aligning a recording to the lines. The times come in with an import. Three ways in:</p>
+    <ul>
+      <li><b>From ELAN.</b> In ELAN, <em>File › Export As › FLEx file</em> writes the text with each annotation's times; FieldWorks' interlinear text import keeps them on the lines. SayMore has a FieldWorks export of its sessions that goes the same way.</li>
+      <li><b>From the FlexText Editor.</b> A <code>.flextext</code> written by the FlexText Editor or the Recorder carries each line's times and the name of the recording; the same import keeps them.</li>
+      <li><b>A text that is already in FLEx, as text only.</b> Use the <a href="https://audio-segmenter.flextext.app/" target="_blank" rel="noopener">FlexText Audio Segmenter</a>: export the text from FLEx, align the recording to its lines there, and import the result; the lines keep their analyses and gain their times. A release that works inside FLEx directly, without the round trip, is coming soon.</li>
+    </ul>
+    <p>Put the recording where FLEx looks for it (the project's <code>LinkedFiles\AudioVisual</code>), and FLEx Scratchpad's ▶ appears on every line of that text; when the file is elsewhere, the example offers <span class="ui">Browse…</span> once and remembers the folder. An <a href="#co-flextext">example collection exported as a FLEx text</a> comes with one recording stitched from its examples, named to pair with it in the Segmenter.</p>
+
+    <h3 id="faq-safe">Can it change my FLEx project?</h3>
+    <p>No. It opens the project for reading only, has no code that writes to one, and its own tests fail if any appears. Everything you write lives in your notebook folder. The only files it makes for FLEx are exports you import yourself, as new texts.</p>
+
+    <h3 id="faq-open">Can FieldWorks be open at the same time?</h3>
+    <p>Yes, when the project is shared: in FLEx, <em>Project Properties › Sharing › Share project contents with programs on this computer</em>. Otherwise FLEx holds the project and the status pill says so; the notes then show their snapshots until it is free. What FieldWorks saves while both are open appears after ↻ on an example or <span class="ui">Refresh all</span>.</p>
+
+    <h3 id="faq-files">Where are my notes, and can I read them without the program?</h3>
+    <p>In the notebook folder you chose (by default <em>Documents\FLEx Scratchpad</em>): a Markdown file per note in a folder per tab. Every example in them is also written as plain text with a link into FLEx, so the files read in any editor, on GitHub, or in ten years. See <a href="#files">Your notes are files</a>.</p>
+
+    <h3 id="faq-nofw">Can I use it on a computer without FieldWorks?</h3>
+    <p>The program needs FieldWorks' own libraries to read a project, so a live project needs Windows and FieldWorks 9. Without them it can open a <code>.flextext</code> file (texts only) or the built-in demo, and a notebook made elsewhere still shows every example from its snapshots. The notes themselves are plain files you can read anywhere.</p>
+
+    <h3 id="faq-which">Should I install the release or the pre-release?</h3>
+    <p>The release is the steadier one; the pre-release has the newest features, which this guide flags <span class="rel rel-pre">beta.3</span>, and the roughest edges. Both are the same program and keep your notebooks; a newer Setup upgrades in place. If you report a problem, say which you are on (Settings shows the version and build).</p>
+
+    <h3 id="faq-snapshot">Why does an example say <em>snapshot</em>?</h3>
+    <p>The project could not be read at that moment (FLEx holds it unshared, it is on another computer, or no project is set), so the example is drawn from the copy kept in the notebook the last time it was read. It is the same lines as last seen; ↻ reads the project again once it is reachable.</p>
+
+    <h3 id="faq-paste">A pasted example landed on the wrong line, or nowhere.</h3>
+    <p>Copy with the <em>Word</em> line showing: the program finds lines by their baseline first, then by morphemes and glosses, and by FLEx's own line numbers when the copy carries them. When it still lands wrong, the dialog lets you insert the paste as text, and <a href="#trouble">When something goes wrong</a> says how to send what the program read.</p>
+
+    <h3 id="faq-offline">Does it need the internet? Does it run a server?</h3>
+    <p>No and no. Everything comes in the download, audio tools included; it never fetches anything, and it starts no server of any kind, not even on this computer, which is what cautious anti-malware software watches for.</p>
+  </section>
+
+  <!-- ============================================================ 16 -->
   <section id="trouble">
-    <h2><span class="num">15</span>When something goes wrong</h2>
+    <h2><span class="num">16</span>When something goes wrong</h2>
     <table class="ref wrap">
       <tr><th>What you see</th><th>What to do</th></tr>
       <tr><td>The window says <em>Waiting for the app…</em> <span class="rel rel-pre" title="In the pre-release 0.1.0-beta.3; not in 0.1.0-beta.2, the current release">beta.3</span></td><td>The page is open but the program behind it has not answered yet; it waits, reloads itself twice, and never shows the sample data in place of your notebook. Your notes are on disk and untouched. If it stays, start the program from a terminal with <code>flex-scratchpad -v</code> and send the log.</td></tr>

@@ -327,10 +327,24 @@ def main(argv: list[str]) -> int:
         step("window", s_window)
 
         def s_settings():
+            # This machine has no FieldWorks, so the project list would be empty and the source "demo"; the
+            # picture has to show what a Windows user sees (Seth, 2026-10-20: "users need to see a screenshot
+            # where FLEx projects are listed as a source"): three invented project names stand in.
+            page.evaluate("""() => { window.__realBridge = window.__flexBridge;
+              window.__flexBridge = (req) => JSON.parse(req).method === 'flex_projects'
+                ? Promise.resolve(JSON.stringify({ result: ['Kalu', 'Kalu Texts 2024', 'Sandbox'] })) : window.__realBridge(req); }""")
             page.locator("#btn-settings").click()
             m = modal()
+            block = m.locator(".setting-block", has_text="FieldWorks project")
+            block.locator("select").first.select_option("lcm")
+            block.locator("button", has_text="List").click()
+            page.wait_for_function("() => [...document.querySelectorAll('.modal .setting-block select')].some((s) => [...s.options].some((o) => o.value === 'Kalu Texts 2024'))")
+            block.locator("select").nth(1).select_option("Kalu")
+            block.evaluate("(e) => e.scrollIntoView({ block: 'start' })")
+            page.wait_for_timeout(300)
             shot("settings", m)
             esc()
+            page.evaluate("() => { window.__flexBridge = window.__realBridge; }")
         step("settings", s_settings)
 
         def s_shortcuts():
