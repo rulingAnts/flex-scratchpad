@@ -1159,7 +1159,7 @@ class FlexService:
                 "needsCapture": bool(found and not clip),
             }
 
-    def export_clips(self, items: list[dict]) -> list[dict]:
+    def export_clips(self, items: list[dict], progress=None) -> list[dict]:
         """The recordings an HTML export embeds (Seth, 2026-10-18: "audio players and base64
         embedded audio where audio files and segmentation data are available and match"): per
         item {id, text, media?, begin, end} — ONE clip per example or chart, its first timed line's
@@ -1168,13 +1168,24 @@ class FlexService:
         (`audio.encode_for_embed`), returned as {id, mime, base64, bytes, begin, end}; an item
         whose audio cannot be had says `error` instead and the page shows that example without
         a player. The compressed copies live beside the clips (`<text>_<b>-<e>.export.ogg`) so a
-        second export is instant."""
-        import base64
+        second export is instant.
+
+        Each answer carries the encoded file's `path`, NEVER its bytes (Seth, 2026-10-20: an export
+        "froze the UI until the export is done"): pywebview parses every call's arguments and pushes
+        every answer into the page on the WINDOW's thread, so megabytes of base64 there stopped the
+        window. Api.export_clips hands the page a token per clip and Api.export_note_html writes the
+        recording into the file itself. `progress(done, total, text)` is called before each clip."""
         from .audio import encode_for_embed, find_ffmpeg
         exe = find_ffmpeg(self.nb.config.get("settings", {}).get("ffmpegPath", ""))
         out = []
-        for it in items or []:
+        todo = list(items or [])
+        for i, it in enumerate(todo):
             rid = it.get("id")
+            if progress:
+                try:
+                    progress(i, len(todo), it.get("label") or "")
+                except Exception:  # noqa: BLE001 — a progress report never fails the export
+                    pass
             try:
                 begin, end = int(it.get("begin", 0)), int(it.get("end", 0))
                 if end <= begin or not it.get("text"):
@@ -1190,13 +1201,17 @@ class FlexService:
                 if not enc:
                     out.append({"id": rid, "error": "The clip could not be encoded."})
                     continue
-                data = Path(enc[0]).read_bytes()
-                out.append({"id": rid, "mime": enc[1], "base64": base64.b64encode(data).decode("ascii"), "bytes": len(data), "begin": begin, "end": end})
+                out.append({"id": rid, "mime": enc[1], "path": str(enc[0]), "bytes": Path(enc[0]).stat().st_size, "begin": begin, "end": end})
             except FlexError as e:
                 out.append({"id": rid, "error": e.message})
             except Exception as e:  # noqa: BLE001
                 LOG.warning("export_clips: %s", e)
                 out.append({"id": rid, "error": str(e)})
+        if progress:
+            try:
+                progress(len(todo), len(todo), "")
+            except Exception:  # noqa: BLE001
+                pass
         return out
 
     def store_captured_clip(self, text_guid: str, begin: int, end: int, data_base64: str, mime: str = "audio/webm") -> dict:

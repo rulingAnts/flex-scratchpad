@@ -32,6 +32,27 @@ Built 2026-10-12 with Seth; the decisions below are his.
   attribute that raises leaves the page with NO api), so never give `Api` a public attribute or property;
   `log.adopt_logger("pywebview")` puts pywebview's own log lines in our log. `tests/test_bridge.py` and the e2e
   `test_inside_the_app_the_page_waits_for_the_api…` keep all of it.
+- **NO BIG DATA THROUGH THE BRIDGE** (Seth, 2026-10-20: an export "froze the UI until the export is done … I'm not
+  entirely sure it isn't frozen altogether"). pywebview runs each `js_api` call on a thread of its own, but both ends of
+  the call cross the WINDOW's thread: WebView2's `WebMessageReceived` json-parses the arguments there
+  (`edgechromium.on_script_notify`), and the answer is pushed back with `evaluate_js` (`util.js_bridge_call`), a script
+  of the whole JSON run on that thread. Megabytes either way (base64 audio in an export's page, sent back to be
+  written) stop the window. So bytes stay in Python: an export's recordings come to the page as TOKENS
+  (`Api.export_clips` → `fs-clip:<token>`, the encoded file kept in `Api._clips`) and `export_note_html` streams each
+  into the file as a data: URL (`_write_with_clips`); media plays from `file://` URLs. Any new feature that moves a
+  file's contents goes the same way: a path or a token across the bridge, never the bytes.
+- **A CLICK ALWAYS ANSWERS; LONG WORK IS A JOB** (same day: "Any time the user clicks a button and something takes
+  awhile … it should register a click and there should be some kind of status indicator"; "queue that and have
+  progress bars … similar to the FLEx project connection and backup status"). `ui/js/jobs.js`: `FS.jobs.run(label,
+  fn(job))` queues work (one at a time), `#jobs-pill` in the rail foot shows it AT ONCE (a stripe, then a bar from
+  `job.step(text, done, total)` and Python's `py:job` events — `Api._job(job, …)` for the job id the page passed), a
+  click lists running / waiting / finished jobs (Stop, Remove). Exports are jobs (`export.js exportNote`: the
+  questions and the save dialog FIRST — `Api.export_target`, `export_pdf_direct` — then the note's blocks COPIED
+  (`snapshot`) and `runExport` in the queue; `buildDoc(note, editor, job)` reports each FLEx object and `breathe()`s
+  every 25 ms so the page never holds the thread; Stop is checked between steps). And any API call still waiting
+  after 400 ms shows `#working-pill` "Working…" + a progress cursor (`api.js` → `FS.working`), except the ones with a
+  bar of their own (`export_*`, `backup_*`, the log). e2e `test_exports_run_as_queued_jobs_with_a_progress_pill`,
+  `tests/test_export.py::test_html_export_writes_the_recordings_from_python`.
 - **FLEx is read directly, read-only.** `OpenProject(name, writeEnabled=False)`. The app never
   writes to a project, and none is planned (Seth, 2026-10-17: "Read-only is good for this
   project" — the media-source correction once planned is SHELVED in `plans/BACKLOG.md`); the site
@@ -75,7 +96,7 @@ flex_scratchpad/
   docx_writer.py xlsx_writer.py pptx_writer.py  Word / Excel / PowerPoint from the page's export model, stdlib only
   pdf_print.py  a PDF written by WebView2 itself on Windows (the print dialog elsewhere)
   ui/index.html, ui/css/app.css, ui/js/
-    util.js api.js(+mock) flexref.js markdown.js interlinear.js files.js backup.js tables.js editor.js picker.js
+    util.js api.js(+mock) jobs.js (the queue + progress pill) flexref.js markdown.js interlinear.js files.js backup.js tables.js editor.js picker.js
     export.js collection.js (example collections) flexcopy.js (the readable copies in the file)
     tagstyles.js (FLEx text markup tags: scoped styles, the ⚑ popover, the editors) app.js
     chart.js (FieldWorks text charts: the table, markers, free translations, the style popover)

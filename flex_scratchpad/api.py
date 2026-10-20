@@ -21,6 +21,7 @@ from . import APP_NAME, __version__, build_id
 from .config import AppConfig
 from .flex import FlexService
 from .flex.lcm import FlexError
+from .fsutil import replace_file
 from .log import LOG, logged as _logged
 from .notebook import ATTACH_DIR, Notebook, clean_rule, example_keys, inline_tags, match_embed, match_keys
 
@@ -82,6 +83,7 @@ class Api:
         self._backup_obj = None
         self._close_choice: str | None = None   # the answer while backing up before closing (app.py)
         self._close_evt = threading.Event()
+        self._clips: dict[str, tuple[str, str]] = {}   # export clip token → (encoded file, mime): the audio stays in Python
         self._open_notebook(notebook_dir or config.notebook_dir)
 
 
@@ -103,6 +105,12 @@ class Api:
         if message:
             LOG.info("progress: %s", message)
         self._emit("progress", {"message": message})
+
+    def _job(self, job: str | None, **data) -> None:
+        """A step of a queued job in the page (Seth, 2026-10-20: "queue that and have progress bars
+        … similar to the FLEx project connection and backup status"): ui/js/jobs.js shows it."""
+        if job:
+            self._emit("job", {"job": job, **data})
 
     def _emit(self, event: str, data: dict) -> None:
         """Push an event into the page (window.FS.onEvent). Safe to call from any thread."""
@@ -428,15 +436,50 @@ class Api:
             return d
         return None
 
-    def export_note_html(self, note_id: str, html: str, path: str | None = None, suffix: str = "") -> str | None:
+    def export_target(self, note_id: str, ext: str, suffix: str = "") -> str | None:
+        """Where an export goes, asked FIRST (Seth, 2026-10-20: a click must answer at once, and the
+        work then runs in the background with a progress bar): the save dialog for the note's title
+        + `suffix` + `ext`; None when cancelled."""
+        n = self._nb.get_note(note_id)
+        ext = ext if ext.startswith(".") else "." + ext
+        return self._save_dialog((n.title or "note") + (suffix or "") + ext)
+
+    def export_note_html(self, note_id: str, html: str, path: str | None = None, suffix: str = "", job: str | None = None) -> str | None:
         """Save a self-contained HTML export (built by the page) through a save dialog; `suffix`
-        is added to the suggested name (" slides" for a slideshow)."""
+        is added to the suggested name (" slides" for a slideshow). Every `fs-clip:<token>` the
+        page wrote (Api.export_clips) becomes that recording as a data: URL here, streamed into the
+        file, so the audio never crosses into the page and back."""
         n = self._nb.get_note(note_id)
         target = path or self._save_dialog((n.title or "note") + (suffix or "") + ".html")
         if not target:
             return None
-        Path(target).write_text(html, encoding="utf-8", newline="\n")
+        self._job(job, step="write", text="Writing the page…")
+        self._write_with_clips(Path(target), html)
         return target
+
+    _CLIP_RE = re.compile(r"fs-clip:([0-9a-f]{16})")
+
+    def _write_with_clips(self, target: Path, html: str) -> None:
+        import base64
+        tmp = target.with_name(target.name + ".part")
+        with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+            pos = 0
+            for m in self._CLIP_RE.finditer(html):
+                f.write(html[pos:m.start()])
+                pos = m.end()
+                clip = self._clips.get(m.group(1))
+                if not clip or not Path(clip[0]).is_file():
+                    f.write("")                 # a recording that went away: the player stays silent
+                    continue
+                f.write("data:" + clip[1] + ";base64,")
+                with open(clip[0], "rb") as a:
+                    while True:
+                        chunk = a.read(3 * 65536)    # a multiple of 3: the pieces join into one base64 text
+                        if not chunk:
+                            break
+                        f.write(base64.b64encode(chunk).decode("ascii"))
+            f.write(html[pos:])
+        replace_file(tmp, target)
 
     def export_note_markdown(self, note_id: str, path: str | None = None) -> str | None:
         n = self._nb.get_note(note_id)
@@ -480,17 +523,24 @@ class Api:
                 continue
         return n
 
-    def export_note_docx(self, note_id: str, doc: dict, path: str | None = None) -> str | None:
+    def export_note_docx(self, note_id: str, doc: dict, path: str | None = None, job: str | None = None) -> str | None:
         """Word document from the page's export model (zero-dependency writer)."""
         from .docx_writer import build_docx
         n = self._nb.get_note(note_id)
         target = path or self._save_dialog((n.title or "note") + ".docx")
         if not target:
             return None
+        self._job(job, step="write", text="Writing the Word file…")
         Path(target).write_bytes(build_docx(doc))
         return target
 
-    def export_note_pdf(self, note_id: str, html: str, path: str | None = None, landscape: bool = False) -> dict:
+    def export_pdf_direct(self) -> bool:
+        """Whether this window can write a PDF itself (WebView2 on Windows): then the page asks for
+        the file first; otherwise the print dialog has its own."""
+        from . import pdf_print
+        return bool(pdf_print.available(self._window))
+
+    def export_note_pdf(self, note_id: str, html: str, path: str | None = None, landscape: bool = False, job: str | None = None) -> dict:
         """A PDF of the page's HTML export, written directly through WebView2 on Windows
         (pdf_print.py); {"fallback": True} tells the page to use the browser's print dialog
         instead (any other platform, or a WebView2 we cannot reach — the save dialog is then
@@ -502,20 +552,22 @@ class Api:
         target = path or self._save_dialog((n.title or "note") + ".pdf")
         if not target:
             return {"cancelled": True}
+        self._job(job, step="write", text="Writing the PDF…")
         ok = pdf_print.print_to_pdf(html, target, self._nb.private_dir / "export-tmp", landscape=landscape)
         return {"path": target} if ok else {"fallback": True, "failed": True, "path": target}
 
-    def export_note_pptx(self, note_id: str, deck: dict, path: str | None = None) -> str | None:
+    def export_note_pptx(self, note_id: str, deck: dict, path: str | None = None, job: str | None = None) -> str | None:
         """PowerPoint from the page's slide model (export.js slidesOf; zero-dependency writer)."""
         from .pptx_writer import build_pptx
         n = self._nb.get_note(note_id)
         target = path or self._save_dialog((n.title or "note") + ".pptx")
         if not target:
             return None
+        self._job(job, step="write", text="Writing the PowerPoint file…")
         Path(target).write_bytes(build_pptx(deck))
         return target
 
-    def export_note_xlsx(self, note_id: str, doc: dict, path: str | None = None) -> str | None:
+    def export_note_xlsx(self, note_id: str, doc: dict, path: str | None = None, job: str | None = None) -> str | None:
         """Excel workbook from the page's export model (zero-dependency writer): the note, an
         Examples sheet, a rows sheet per chart."""
         from .xlsx_writer import build_xlsx
@@ -523,6 +575,7 @@ class Api:
         target = path or self._save_dialog((n.title or "note") + ".xlsx")
         if not target:
             return None
+        self._job(job, step="write", text="Writing the Excel file…")
         Path(target).write_bytes(build_xlsx(doc))
         return target
 
@@ -1189,9 +1242,20 @@ class Api:
         except FlexError as e:
             raise RuntimeError(e.message)
 
-    def export_clips(self, items: list[dict]) -> list[dict]:
-        """The recordings an HTML export embeds, one compressed clip per example (base64)."""
-        return self._flex.export_clips(items or [])
+    def export_clips(self, items: list[dict], job: str | None = None) -> list[dict]:
+        """The recordings an HTML export embeds, one compressed clip per example: cut and encoded
+        here (or taken from the cache), kept here, and handed to the page as a TOKEN — the page writes
+        `fs-clip:<token>` where the audio goes and export_note_html puts the recording in the file."""
+        import secrets
+        prog = (lambda done, total, label: self._job(job, step="audio", done=done, total=total, text=("Preparing the recordings " + str(min(done + 1, total)) + " of " + str(total) + (" — " + label if label else "")) if done < total else "Recordings ready")) if job else None
+        out = self._flex.export_clips(items or [], progress=prog)
+        for r in out:
+            p = r.pop("path", None)
+            if p:
+                token = secrets.token_hex(8)
+                self._clips[token] = (p, r.get("mime") or "application/octet-stream")
+                r["token"] = token
+        return out
 
     def audio_store_clip(self, text_guid: str, begin: int, end: int, data_base64: str, mime: str = "audio/webm") -> dict:
         return self._flex.store_captured_clip(text_guid, begin, end, data_base64, mime)

@@ -786,6 +786,29 @@ table.md-table td.drop-target, table.md-table th.drop-target { outline: 2px soli
 
 /* ------------------------------------------------------------------ backup & storage (backup.js) */
 .backup-pill { margin-top: 6px; }
+/* the queue of long work (jobs.js; Seth, 2026-10-20): a pill with a bar, beside the FLEx and backup pills */
+.jobs-pill, .working-pill { margin-top: 6px; }
+.jobs-pill[hidden], .working-pill[hidden] { display: none; }
+.jobs-pill .jb-ico { color: var(--accent); font-size: 14px; line-height: 1; flex: none; }
+.jobs-pill.ok .jb-ico { color: #22a06b; }
+.jobs-pill.bad .jb-ico { color: var(--danger); }
+.jobs-pill .jb-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.jobs-pill .jb-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.jobs-pill .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jobs-pill .jb-wait { flex: none; font-size: 11px; font-weight: 600; color: var(--accent); background: var(--accent-soft); border-radius: 999px; padding: 0 6px; }
+.jobs-pill .jb-wait[hidden] { display: none; }
+.jb-track { position: relative; display: block; height: 5px; border-radius: 4px; background: var(--border-soft); overflow: hidden; }
+.jb-fill { display: block; height: 100%; width: 0; background: var(--accent); border-radius: 4px; transition: width 0.25s ease; }
+.jb-track.indeterminate .jb-fill { width: 35%; position: absolute; left: -35%; animation: bk-slide 1.3s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .jb-track.indeterminate .jb-fill { animation: none; left: 0; width: 100%; opacity: 0.35; } }
+.jobs-pill.ok .jb-fill, .job-row.done .jb-fill { background: #22a06b; }
+.jobs-pill.bad .jb-fill, .job-row.bad .jb-fill { background: var(--danger); }
+.jobs-list { display: grid; gap: 10px; min-width: 300px; max-width: 420px; }
+.job-row { display: grid; gap: 4px; }
+.job-head { display: flex; align-items: center; gap: 8px; }
+.job-head .spacer { flex: 1; }
+.working-pill .spinner { width: 12px; height: 12px; }
+body.fs-working, body.fs-working button { cursor: progress; }
 .backup-pill[hidden] { display: none; }
 .backup-pill .bk-ico { color: #22a06b; font-size: 14px; line-height: 1; }
 .backup-pill.bad .bk-ico { color: var(--danger); }

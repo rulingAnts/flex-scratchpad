@@ -282,7 +282,12 @@ def test_html_export_embeds_the_recordings_as_players(app):
     }""", html_path)
     assert res["timed"] == 2 and res["stats"]["count"] == 2 and res["stats"]["missing"] == 0, res["stats"]
     html = res["html"]
-    assert html.count('<audio data-a=') == 2 and 'src="data:audio/' in html and '<div id="np"' in html
+    assert html.count('<audio data-a=') == 2 and '<div id="np"' in html
+    # the recordings never cross into the page (Seth, 2026-10-20: an export "froze the UI"): the page carries a
+    # token per clip and Python writes the audio into the file
+    assert html.count('src="fs-clip:') == 2 and 'data:audio/' not in html
+    written = Path(html_path).read_text(encoding="utf-8")
+    assert written.count('src="data:audio/') == 2 and "fs-clip:" not in written
     assert '<button class="play" data-a="a1" data-segs="1"' in html and 'data-segs="1 2"' in html      # a line, the whole example
     assert 'class="tchart"' in html and '<td data-segs="1">' in html.split('class="tchart"')[1]      # the cells a line lights
     assert '@page { size: landscape' in html and 'header class="doc"' in html
@@ -332,6 +337,64 @@ def test_html_export_embeds_the_recordings_as_players(app):
         assert pg.locator(".playing").count() == 0
     finally:
         pg.close()
+    assert not errors
+
+
+def test_exports_run_as_queued_jobs_with_a_progress_pill(app):
+    """Seth, 2026-10-20: "Any time the user clicks a button and something takes awhile … it should register a
+    click and there should be some kind of status indicator"; "building an export could take a long time. Our
+    app should queue that and have progress bars … similar to the Flex project connection and backup status";
+    "the UI just hangs while it works". The save dialog comes first, then the export is a job: the sidebar's
+    pill shows it at once, several wait their turn, and the recordings are written into the file by Python."""
+    h, page, errors = app
+    saved = []
+    h.api._save_dialog = lambda name: (saved.append(name) or str(h.tmp / name))
+    new_note(page, "Queued")
+    page.keyboard.type("{{flex:text %s seg=1-2}}" % T_STORY)
+    page.keyboard.press("Enter")
+    page.keyboard.type("{{flex:chart %s rows=1-2}}" % CHART)
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#editor .chart-obj tr.crow")
+    page.wait_for_function("() => document.getElementById('save-state').textContent === 'Saved'", timeout=5000)
+    # every step the job reports is kept, so the test sees what the pill said along the way
+    page.evaluate("""() => { window.__jobSteps = []; const o = FS.jobs.run; FS.jobs.run = (label, fn) => o(label, (job) => { const st = job.step; job.step = (t, d, n) => { window.__jobSteps.push(t); return st(t, d, n); }; return fn(job); }); }""")
+    assert page.locator("#jobs-pill").is_hidden()
+    # two exports straight after each other: the Word one runs, the web page waits its turn
+    page.locator("#btn-note-menu").click()
+    page.locator(".popover .menu-item", has_text="Word (.docx)").click()
+    page.wait_for_selector("#jobs-pill:not([hidden])", timeout=2000)            # the click registers at once
+    page.locator("#btn-note-menu").click()
+    page.locator(".popover .menu-item", has_text="Web page (.html)").click()
+    page.locator("[data-test=export-html-go]").click()                           # the recordings: yes
+    page.wait_for_function("() => { const l = FS.jobs.list(); return !l.running && !l.queue.length && l.finished.length === 2; }", timeout=20000)
+    fin = page.evaluate("() => FS.jobs.list().finished.map((j) => [j.label, j.error || '', j.result || ''])")
+    assert [f[0] for f in fin] == ["Export \u201cQueued\u201d to a web page", "Export \u201cQueued\u201d to Word"], fin
+    assert all(not f[1] for f in fin) and saved == ["Queued.docx", "Queued.html"], (fin, saved)
+    assert (h.tmp / "Queued.docx").is_file()
+    written = (h.tmp / "Queued.html").read_text(encoding="utf-8")
+    assert written.count('src="data:audio/') == 2 and "fs-clip:" not in written
+    steps = page.evaluate("() => window.__jobSteps")
+    assert any(s.startswith("Reading the examples from FLEx") for s in steps) and "Preparing the recordings…" in steps and "Writing the page…" in steps, steps
+    assert "Exported" in page.locator("#jobs-pill .label").inner_text()
+    # the pill opens the list: what ran, what it made
+    page.locator("#jobs-pill").click()
+    page.wait_for_selector("[data-test=jobs-list] [data-test=job-row]")
+    assert page.locator("[data-test=jobs-list] [data-test=job-row]").count() == 2 and "Queued.html" in page.locator("[data-test=jobs-list]").inner_text()
+    page.keyboard.press("Escape")
+    # a cancelled save dialog starts nothing
+    h.api._save_dialog = lambda name: None
+    page.locator("#btn-note-menu").click()
+    page.locator(".popover .menu-item", has_text="Excel (.xlsx)").click()
+    page.wait_for_timeout(300)
+    assert page.evaluate("() => FS.jobs.list().finished.length") == 2
+    # a call that keeps the program busy shows the sidebar's "Working…" sign until it answers
+    import time
+    orig = h.api.list_notes
+    h.api.list_notes = lambda *a, **k: (time.sleep(0.7), orig(*a, **k))[1]
+    page.evaluate("() => { window.__slow = FS.api.list_notes(); }")
+    page.wait_for_selector("#working-pill:not([hidden])", timeout=2000)
+    page.wait_for_selector("#working-pill", state="hidden", timeout=4000)
+    h.api.list_notes = orig
     assert not errors
 
 

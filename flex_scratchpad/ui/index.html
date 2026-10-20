@@ -45,6 +45,8 @@
     <div class="rail-foot">
       <div class="flex-pill" id="flex-pill" title="FieldWorks connection"><span class="led"></span><span class="label">FLEx: not connected</span></div>
       <div class="flex-pill backup-pill" id="backup-pill" data-test="backup-pill" hidden title="Backup & storage"><span class="bk-ico">&#9729;</span><span class="label">Backup</span></div>
+      <div class="flex-pill jobs-pill" id="jobs-pill" data-test="jobs-pill" hidden role="status" aria-live="polite"><span class="jb-ico">&#8681;</span><span class="jb-main"><span class="jb-line"><span class="label">Working…</span><span class="jb-wait" hidden></span></span><span class="jb-track"><span class="jb-fill"></span></span></span></div>
+      <div class="flex-pill working-pill" id="working-pill" data-test="working-pill" hidden role="status" title="Waiting for an answer from the program"><span class="spinner"></span><span class="label">Working…</span></div>
     </div>
   </aside>
   <div class="splitter" id="split-rail" title="Drag to resize; double-click to collapse"></div>
@@ -128,6 +130,7 @@
 <script src="js/util.js"></script>
 <script src="js/demo-data.js"></script>
 <script src="js/api.js"></script>
+<script src="js/jobs.js"></script>
 <script src="js/flexref.js"></script>
 <script src="js/markdown.js"></script>
 <script src="js/interlinear.js"></script>

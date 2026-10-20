@@ -250,21 +250,26 @@
     walk(doc.blocks);
     return out;
   }
-  async function embedAudio(doc) {
+  async function embedAudio(doc, job) {
     const blocks = timedBlocks(doc);
     if (!blocks.length) return { count: 0, bytes: 0, missing: 0 };
     const items = blocks.map((b, i) => {
       const timed = b.segments.filter((sg) => sg.begin != null && sg.end != null && sg.end > sg.begin);
-      return { id: 'a' + (i + 1), text: b.text || b.guid, media: timed[0].media || (b.media && b.media[0] && b.media[0].guid) || null, begin: Math.min(...timed.map((sg) => sg.begin)), end: Math.max(...timed.map((sg) => sg.end)) };
+      return { id: 'a' + (i + 1), text: b.text || b.guid, label: (b.title || '') + (b.label ? ' ' + b.label : ''), media: timed[0].media || (b.media && b.media[0] && b.media[0].guid) || null, begin: Math.min(...timed.map((sg) => sg.begin)), end: Math.max(...timed.map((sg) => sg.end)) };
     });
-    const got = await FS.api.export_clips(items);
+    if (job) job.step('Preparing the recordings…', 0, items.length);
+    // the recordings stay in Python (Seth, 2026-10-20: "audio stays in python is a good idea"): each clip
+    // comes back as a TOKEN, written into the page as `fs-clip:<token>`, and Api.export_note_html puts the
+    // recording itself into the file — megabytes of base64 through the bridge froze the window
+    const got = await FS.api.export_clips(items, job ? job.id : null);
     let bytes = 0, count = 0, missing = 0;
     blocks.forEach((b, i) => {
       const r = (got || []).find((x) => x.id === items[i].id);
-      if (!r || !r.base64) { missing++; b.audioMissing = (r && r.error) || 'no recording'; return; }
+      if (!r || r.error) { missing++; b.audioMissing = (r && r.error) || 'no recording'; return; }
       const segs = {};
       for (const sg of b.segments) if (sg.begin != null && sg.end != null && sg.end > sg.begin) segs[sg.n] = [sg.begin, sg.end];
-      b.audio = { id: items[i].id, src: 'data:' + r.mime + ';base64,' + r.base64, begin: items[i].begin, end: items[i].end, segs, bytes: r.bytes };
+      if (!r || (!r.token && !r.base64)) { missing++; b.audioMissing = 'no recording'; return; }
+      b.audio = { id: items[i].id, src: r.token ? 'fs-clip:' + r.token : 'data:' + r.mime + ';base64,' + r.base64, begin: items[i].begin, end: items[i].end, segs, bytes: r.bytes };
       bytes += r.bytes; count++;
     });
     return { count, bytes, missing };
@@ -400,11 +405,20 @@
   }
 
   /* ------------------------------------------------------------------ note → model */
-  async function buildDoc(note, editor) {
+  /* Give the window a moment: a long export never holds the page for more than a frame or two (Seth,
+   * 2026-10-20: "the UI just hangs while it works and I'm not entirely sure it isn't frozen"). */
+  let lastYield = 0;
+  const breathe = async (force) => { const t = performance.now(); if (!force && t - lastYield < 25) return; await new Promise((r) => setTimeout(r, 0)); lastYield = performance.now(); };
+  async function buildDoc(note, editor, job) {
     const blocks = [];
     const numCtx = { counters: [] };                        // outline numbering carried across blocks
     let exNum = 0;                                          // (1), (2)… for embeds flagged `ex`
-    for (const b of editor.blocks) {
+    const all = editor.blocks || [];
+    const objects = all.filter((b) => b.type === 'flex' || b.type === 'table' || ((b.type === 'p' || b.type === 'quote') && /\{\{\s*flex:/.test(b.src || ''))).length;
+    let seen = 0;
+    for (const b of all) {
+      await breathe();
+      if (job) { if (job.cancelled) throw new Error('cancelled'); if (b.type === 'flex' || b.type === 'table' || /\{\{\s*flex:/.test(b.src || '')) { seen++; job.step('Reading the examples from FLEx… ' + seen + ' of ' + objects, seen - 1, objects); } }
       if (b.type !== 'list' && b.type !== 'p') numCtx.counters = [];
       if (b.type === 'p' || b.type === 'quote') {
         // a quote's lines carry their `> ` in the note; the exports draw the block as a quotation
@@ -778,56 +792,81 @@
       row.appendChild(el('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'));
       row.appendChild(el('button', { class: 'btn primary', onclick: async () => {
         const opts = { title: title.value.trim(), includeLink: link.checked, includeMarkdown: md.checked, sourceNotes: src.checked, wordGuids: wg.checked, onlyWs: only.value || '', audio: audio.value, audioFolder: folder.value.trim(), oneFile: oneFile.checked };
-        try {
+        // the work is a queued job with the sidebar's progress pill (the audio bundle can take a while)
+        m.close();
+        resolve(FS.jobs.run('Export \u201c' + (note.title || 'collection') + '\u201d to a FLEx text', async (job) => {
+          job.step('Writing the FLEx text' + (opts.audio && opts.audio !== 'none' ? ' and its audio' : '') + '…');
           const r = await FS.api.export_note_flextext(note.id, items, opts);
           if (r) FS.toast('Saved ' + (r.paths || [r.path]).join('; ') + ' — ' + r.examples + ' example' + (r.examples === 1 ? '' : 's') + (r.texts.length > 1 ? ' in ' + r.texts.length + ' texts' : '') + (r.skipped ? ', ' + r.skipped + ' skipped' : '') + (r.audio ? '; audio: ' + r.audioMatched + ' line' + (r.audioMatched === 1 ? '' : 's') + (opts.audio === 'bundle' ? ' in ' : ' clipped in ') + r.audio + (r.audioMissing ? ' (' + r.audioMissing + ' segment' + (r.audioMissing === 1 ? '' : 's') + ' without a playable clip)' : '') : ''), 'ok');
-          m.close(); resolve(r);
-        } catch (e) { FS.toast('Export failed: ' + e.message, 'error'); }
+          return job.done(r && (r.paths ? r.paths.join('; ') : r.path));
+        }));
       } }, 'Export…'));
       m.body.appendChild(row);
       title.focus();
     });
   }
 
-  /* ------------------------------------------------------------------ actions */
+  /* ------------------------------------------------------------------ actions
+   * AN EXPORT IS A QUEUED JOB (Seth, 2026-10-20: "queue that and have progress bars … similar to the FLEx
+   * project connection and backup status"; "the UI shouldn't just do nothing … it should register a
+   * click"): the questions come first while the user is there (the recordings? where to save?), then the
+   * note as it is NOW is copied and the work runs in FS.jobs with a progress bar in the sidebar, the
+   * window free to use; several exports wait their turn. */
+  const KIND = { html: 'a web page', docx: 'Word', xlsx: 'Excel', pptx: 'PowerPoint', slides: 'a slideshow', pdf: 'PDF', md: 'Markdown' };
+  const EXT = { html: '.html', docx: '.docx', xlsx: '.xlsx', pptx: '.pptx', slides: '.html', pdf: '.pdf', md: '.md' };
+  // the note's blocks as they are at the click: an edit made while the export runs does not reach it
+  const snapshot = (editor) => Object.assign({}, editor, { blocks: (editor.blocks || []).map((b) => Object.assign({}, b)) });
+  // the objects that may carry recordings, without fetching them (the question is asked before the work)
+  const mayHaveAudio = (editor) => (editor.blocks || []).filter((b) => b.type === 'flex' && /\{\{\s*flex:(text|chart)\b/.test(b.src || '') && !/\bcollapsed\b/.test(b.src || '')).length;
+  async function chooseTarget(note, format) {
+    try { return await FS.api.export_target(note.id, EXT[format], format === 'slides' ? ' slides' : ''); } catch (e) { return undefined; }   // no such method (an old mock): the writer asks
+  }
   async function exportNote(note, editor, format) {
     if (format === 'flextext') return exportFlextext(note, editor);
     if (format === 'md') { const p = await FS.api.export_note_markdown(note.id); if (p) FS.toast('Saved ' + p, 'ok'); return p; }
-    const doc = await buildDoc(note, editor);
-    if (format === 'html') {
-      const timed = timedBlocks(doc);
-      let embed = false;
-      if (timed.length && !(FS.isMock && FS.isMock())) embed = await askEmbedAudio(timed.length);
-      if (embed === null) return null;
+    const snap = snapshot(editor);
+    let embed = false;
+    if ((format === 'html' || format === 'slides') && !(FS.isMock && FS.isMock())) {
+      const n = mayHaveAudio(snap);
+      if (n) { embed = await askEmbedAudio(n, format === 'slides' ? 'Slideshow export' : null); if (embed === null) return null; }
+    }
+    let direct = format !== 'pdf';
+    if (format === 'pdf') { try { direct = !!(await FS.api.export_pdf_direct()); } catch (e) { direct = false; } }
+    let target = null;
+    if (direct && !(FS.isMock && FS.isMock())) { target = await chooseTarget(note, format); if (target === null) return null; if (target === undefined) target = null; }
+    const title = note.title || 'note';
+    return FS.jobs.run('Export \u201c' + title + '\u201d to ' + KIND[format], (job) => runExport(job, note, snap, format, embed, target));
+  }
+  async function runExport(job, note, editor, format, embed, target) {
+    const stop = () => { if (job.cancelled) throw new Error('cancelled'); };   // Stop in the jobs list: between steps
+    const doc = await buildDoc(note, editor, job);
+    stop();
+    job.step('Laying out the ' + (format === 'xlsx' ? 'workbook' : format === 'pptx' || format === 'slides' ? 'slides' : 'document') + '…');
+    await breathe(true);
+    if (format === 'html' || format === 'slides') {
       let stats = null;
-      if (embed) { try { stats = await embedAudio(doc); } catch (e) { FS.toast('The recordings could not be embedded: ' + e.message, 'warn'); } }
-      const p = await FS.api.export_note_html(note.id, toHtml(doc));
+      if (embed) { try { stats = await embedAudio(doc, job); } catch (e) { FS.toast('The recordings could not be embedded: ' + e.message, 'warn'); } }
+      stop();
+      job.step('Writing the page…');
+      await breathe(true);
+      const p = await FS.api.export_note_html(note.id, format === 'slides' ? toSlides(doc) : toHtml(doc), target, format === 'slides' ? ' slides' : '', job.id);
       if (p) FS.toast('Saved ' + p + (stats && stats.count ? ' \u2014 ' + stats.count + ' recording' + (stats.count > 1 ? 's' : '') + ' embedded (' + (FS.files ? FS.files.fmtSize(stats.bytes) : stats.bytes + ' B') + ')' + (stats.missing ? ', ' + stats.missing + ' not available' : '') : ''), 'ok');
-      return p;
+      return job.done(p);
     }
-    if (format === 'docx') { const p = await FS.api.export_note_docx(note.id, doc); if (p) FS.toast('Saved ' + p, 'ok'); return p; }
-    if (format === 'xlsx') { const p = await FS.api.export_note_xlsx(note.id, doc); if (p) FS.toast('Saved ' + p, 'ok'); return p; }
-    if (format === 'pptx') { const p = await FS.api.export_note_pptx(note.id, slidesOf(doc)); if (p) FS.toast('Saved ' + p, 'ok'); return p; }
-    if (format === 'slides') {
-      const timed = timedBlocks(doc);
-      let embed = false;
-      if (timed.length && !(FS.isMock && FS.isMock())) embed = await askEmbedAudio(timed.length, 'Slideshow export');
-      if (embed === null) return null;
-      let stats = null;
-      if (embed) { try { stats = await embedAudio(doc); } catch (e) { FS.toast('The recordings could not be embedded: ' + e.message, 'warn'); } }
-      const p = await FS.api.export_note_html(note.id, toSlides(doc), null, ' slides');
-      if (p) FS.toast('Saved ' + p + (stats && stats.count ? ' \u2014 ' + stats.count + ' recording' + (stats.count > 1 ? 's' : '') + ' embedded' : ''), 'ok');
-      return p;
-    }
+    stop();
+    if (format === 'docx') { const p = await FS.api.export_note_docx(note.id, doc, target, job.id); if (p) FS.toast('Saved ' + p, 'ok'); return job.done(p); }
+    if (format === 'xlsx') { const p = await FS.api.export_note_xlsx(note.id, doc, target, job.id); if (p) FS.toast('Saved ' + p, 'ok'); return job.done(p); }
+    if (format === 'pptx') { const p = await FS.api.export_note_pptx(note.id, slidesOf(doc), target, job.id); if (p) FS.toast('Saved ' + p, 'ok'); return job.done(p); }
     if (format === 'pdf') {
       const html = toHtml(doc);
       // Windows: WebView2 writes the PDF itself (Api.export_note_pdf → pdf_print.py), landscape
       // when the note holds a chart; anywhere else, or when that fails, the browser's print
       // dialog offers "Save as PDF" on the same page
       let r = { fallback: true };
-      try { r = (await FS.api.export_note_pdf(note.id, html, null, html.includes('@page { size: landscape'))) || r; } catch (e) { r = { fallback: true, failed: true, error: e.message }; }
-      if (r.cancelled) return null;
-      if (r.path && !r.fallback) { FS.toast('Saved ' + r.path, 'ok'); return r.path; }
+      if (target) { try { r = (await FS.api.export_note_pdf(note.id, html, target, html.includes('@page { size: landscape'), job.id)) || r; } catch (e) { r = { fallback: true, failed: true, error: e.message }; } }
+      if (r.cancelled) return job.done(null);
+      if (r.path && !r.fallback) { FS.toast('Saved ' + r.path, 'ok'); return job.done(r.path); }
+      job.step('Opening the print dialog…');
       if (r.failed) FS.toast('The PDF could not be written directly' + (r.error ? ' (' + r.error + ')' : '') + ' — choose “Save as PDF” in the print dialog.', 'warn');
       // the HTML rendering in a hidden frame, printed: the print dialog offers "Save as PDF"
       const frame = document.createElement('iframe');
@@ -837,9 +876,9 @@
       await new Promise((res) => { frame.onload = res; setTimeout(res, 1500); });
       try { frame.contentWindow.focus(); frame.contentWindow.print(); } catch (e) { FS.toast('Print failed: ' + e.message, 'error'); }
       setTimeout(() => frame.remove(), 60000);
-      return true;
+      return job.done(true);
     }
-    return null;
+    return job.done(null);
   }
 
   /* "Embed the recordings?" — a page with N players is bigger (about 300 KB a minute compressed,
@@ -849,7 +888,7 @@
       let answered = false;
       const m = FS.modal({ title: title || 'Web page export', class: 'narrow', onClose: () => { if (!answered) resolve(null); } });
       const cb = el('input', { type: 'checkbox', checked: true, 'data-test': 'embed-audio' });
-      m.body.appendChild(el('label', { class: 'row', style: { gap: '8px' } }, cb, el('span', {}, 'Embed the recordings as players (' + n + ' example' + (n > 1 ? 's' : '') + ' with audio)')));
+      m.body.appendChild(el('label', { class: 'row', style: { gap: '8px' } }, cb, el('span', {}, 'Embed the recordings as players (' + n + ' example' + (n > 1 ? 's' : '') + ' that may have audio)')));
       m.body.appendChild(el('p', { class: 'small muted' }, 'Each example gets one clip, compressed with ffmpeg when it is available (about 300 KB a minute), written INTO the page as base64 so the file plays anywhere on its own. A ▶ per line plays that line and lights it while it plays.'));
       m.body.appendChild(el('div', { class: 'btn-row' },
         el('button', { class: 'btn', onclick: () => { answered = true; m.close(); resolve(null); } }, 'Cancel'),

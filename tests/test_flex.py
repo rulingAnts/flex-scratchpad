@@ -552,7 +552,6 @@ def test_export_clips_gives_one_compressed_clip_per_example(tmp_path, monkeypatc
     """Seth, 2026-10-18: the HTML export embeds the audio as base64 — one clip per example, cut
     like the playback clip and compressed through ffmpeg when there is one, the WAV slice itself
     otherwise; an example without a recording gets an error instead of a player."""
-    import base64
     from flex_scratchpad.flex import audio
     nb = Notebook(tmp_path / "nb")
     svc = FlexService(nb)
@@ -563,7 +562,8 @@ def test_export_clips_gives_one_compressed_clip_per_example(tmp_path, monkeypatc
     monkeypatch.setattr(audio, "find_ffmpeg", lambda configured="": None)
     out = svc.export_clips(items)
     assert [o["id"] for o in out] == ["a", "b", "c"]
-    assert out[0]["mime"] == "audio/wav" and out[0]["bytes"] > 1000 and base64.b64decode(out[0]["base64"])[:4] == b"RIFF"
+    assert out[0]["mime"] == "audio/wav" and out[0]["bytes"] > 1000 and open(out[0]["path"], "rb").read(4) == b"RIFF"
+    assert "base64" not in out[0]          # the bytes never travel: the page gets a token (Api.export_clips)
     assert out[1]["error"] == "no timing" and "error" in out[2]
     # ffmpeg (when this machine has one) → Opus in Ogg, kept beside the clip for the next export
     import shutil

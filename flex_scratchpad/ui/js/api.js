@@ -73,6 +73,10 @@
     return ready;
   }
 
+  /* A call still waiting after 400 ms shows the sidebar's "Working…" sign (FS.working, jobs.js; Seth,
+   * 2026-10-20: "Any time the user clicks a button and something takes awhile … it should register a
+   * click"), except the ones with a progress bar of their own (exports run as jobs, backups) and the log. */
+  const QUIET = /^(client_log|backup_|export_|bridge_|close_)/;
   FS.api = new Proxy({}, {
     get(_, method) {
       if (method === 'then') return undefined;
@@ -80,6 +84,8 @@
         const api = await bridge();
         const fn = api[method];
         if (typeof fn !== 'function') throw new Error('No API method ' + method);
+        let slow = 0;
+        const timer = QUIET.test(String(method)) ? 0 : setTimeout(() => { slow = 1; if (FS.working) FS.working(true); }, 400);
         try {
           return await fn.apply(api, args);
         } catch (e) {
@@ -88,6 +94,9 @@
           const err = new Error(msg.replace(/^RuntimeError: /, ''));
           err.name = (e && e.name) || 'ApiError';
           throw err;
+        } finally {
+          clearTimeout(timer);
+          if (slow && FS.working) FS.working(false);
         }
       };
     },

@@ -144,3 +144,33 @@ def test_fingerprint_and_change_detection(tmp_path):
     assert api.export_note_markdown(n["id"], str(tmp_path / "x.md")).endswith("x.md")
     assert api.export_note_html(n["id"], "<p>hi</p>", str(tmp_path / "x.html")) and (tmp_path / "x.html").read_text() == "<p>hi</p>"
     assert api.export_note_docx(n["id"], DOC, str(tmp_path / "x.docx")) and zipfile.is_zipfile(tmp_path / "x.docx")
+
+
+def test_html_export_writes_the_recordings_from_python(tmp_path, monkeypatch):
+    """Seth, 2026-10-20: an export "froze the UI until the export is done". The recordings never cross
+    into the page and back: export_clips hands out a token per clip, the page writes `fs-clip:<token>`,
+    and export_note_html streams each recording into the file as a data: URL. Progress goes to the
+    page as `job` events."""
+    import base64 as b64
+    import re
+    from flex_scratchpad.api import Api
+    from flex_scratchpad.flex import audio
+    monkeypatch.setattr(audio, "find_ffmpeg", lambda configured="": None)      # the WAV slice itself, whatever this machine has
+    from flex_scratchpad.config import AppConfig
+    from flex_scratchpad.flex.demo import T_STORY
+    api = Api(AppConfig(tmp_path / "config.json"), notebook_dir=tmp_path / "nb", demo=True)
+    events = []
+    api._emit = lambda event, data: events.append((event, data))
+    out = api.export_clips([{"id": "a1", "text": T_STORY, "begin": 1500, "end": 3200, "label": "Story 1.2"}], job="j1")
+    assert out[0].get("token") and "path" not in out[0] and "base64" not in out[0], out
+    steps = [d for e, d in events if e == "job"]
+    assert steps and steps[0]["job"] == "j1" and steps[0]["step"] == "audio" and "1 of 1" in steps[0]["text"], steps
+    note = api.create_note(None, "", "Players", "x")
+    target = tmp_path / "out.html"
+    html = '<audio src="fs-clip:%s"></audio><audio src="fs-clip:0123456789abcdef"></audio>' % out[0]["token"]
+    assert api.export_note_html(note["id"], html, str(target), "", "j1") == str(target)
+    written = target.read_text(encoding="utf-8")
+    m = re.search(r'src="data:audio/[a-z]+;base64,([A-Za-z0-9+/=]+)"', written)
+    assert m and b64.b64decode(m.group(1))[:4] == b"RIFF", written[:200]
+    assert 'src=""' in written and "fs-clip:" not in written       # an unknown token: a silent player, never a broken URL
+    assert any(d.get("step") == "write" for e, d in events if e == "job")
