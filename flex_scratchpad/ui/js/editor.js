@@ -331,7 +331,7 @@
     wireMultiSelect(root) {
       this.msel = null;
       let drag = null;
-      const skip = (t) => t.closest && t.closest('.blk-handle, .widget-bar, .drag-handle, .col-resizer, .row-resizer, .tbl-grip, th.gutter, button, a, input, select, textarea, .popover, .flex-overlay, .modal');
+      const skip = (t) => t.closest && t.closest('.blk-handle, .widget-bar, .drag-handle, .col-resizer, .row-resizer, .tbl-grip, th.gutter, th.rlab, .segnum, button, a, input, select, textarea, .popover, .flex-overlay, .modal');
       root.addEventListener('mousedown', (e) => {
         if (e.button !== 0 || skip(e.target)) return;
         const pt = this.pointAtEvent(e);
@@ -1450,6 +1450,10 @@
         if (asBlock && this.embedInline(el2, b, md)) return;
         if (asBlock) this.insertBlockSourceAtCaret(el2, b, md); else this.insertTextAtCaret(el2, b, md);
       };
+      // lines or rows copied out of an example or a chart (their reference on the first line, FLEx's
+      // tab-separated rows under it): the reference alone is the new example; the rows are for sheets
+      const refRows = /^\s*(\{\{flex:(?:text|chart)\s[^}]*\}\})[ \t]*\n[\s\S]*\t/.exec(text);
+      if (refRows) { insert(refRows[1], true); return; }
       if (this.opts.onPasteLink && (/^silfw:\/\//i.test(trimmed) || FS.flexref.GUID.test(trimmed))) {
         this.opts.onPasteLink(trimmed, insert);
         return;

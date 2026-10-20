@@ -5448,3 +5448,69 @@ def test_a_chart_becomes_an_example_and_an_example_a_chart(app):
     md = page.evaluate("() => window.__fsEditor.getMarkdown()")
     assert "{{flex:chart %s rows=2-4 at=000000000020-000000000040 \"My chart\"}}" % CHART in md, md
     assert page.locator("#editor .chart-obj tr.crow").count() == 3
+
+
+def test_selected_lines_and_rows_copy_and_paste_as_a_new_example(app):
+    """Seth, 2026-10-20: "copy TSV for individual or multiple selected rows in flex objects (either
+    table or IGT) … paste them in a notes document elsewhere as a new example (and of course for FLEx
+    text chart objects, headers always show)". Lines 1–2 of an example, selected by their numbers,
+    copy as their reference plus FLEx's rows; pasted into the note they are a new example of those two
+    lines. Chart rows 1b–2a, Ctrl+clicked, copy with the header rows and paste the same way."""
+    h, page, errors = app
+    new_note(page, "Rows")
+    page.keyboard.type("{{flex:text %s seg=1-3}}" % TEXT)
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#editor .text-obj .segment[data-n='3']")
+    page.evaluate("() => { window.__copied = null; FS.copyText = (t) => { window.__copied = t; return Promise.resolve(true); }; }")
+    page.locator("#editor .text-obj .segment[data-n='1'] [data-test=segnum]").click()
+    page.locator("#editor .text-obj .segment[data-n='2'] [data-test=segnum]").click(modifiers=["Shift"])
+    assert page.locator("#editor .text-obj .segment.line-sel").count() == 2
+    assert page.locator("[data-test=sel-count]").inner_text() == "2 lines selected"
+    page.locator("[data-test=sel-copy]").click()
+    copied = page.evaluate("window.__copied")
+    assert copied.startswith("{{flex:text %s seg=1-2 at=0e1f2a3b1001-0e1f2a3b1002}}\n" % TEXT), copied
+    assert "Word\tKabir" in copied and "Ha\u014ba" in copied and "Tiket" not in copied
+    # pasted at the end of the note: a new example of lines 1–2 (the rows under the reference are left out)
+    page.locator("#editor .blk-body").last.click()
+    page.keyboard.press("End")
+    paste(page, copied)
+    page.wait_for_function("() => document.querySelectorAll('#editor .text-obj').length === 2")
+    md = page.evaluate("() => window.__fsEditor.getMarkdown()")
+    assert "{{flex:text %s seg=1-2 at=0e1f2a3b1001-0e1f2a3b1002}}" % TEXT in md and "Word\t" not in md
+    page.locator("#editor .text-obj").nth(1).locator(".segment[data-n='2']").wait_for()
+    assert page.locator("#editor .text-obj").nth(1).locator(".segment").count() == 2
+    # the note's redraw after the paste drew the first example afresh: no selection, no bar
+    assert page.locator("[data-test=sel-bar]").count() == 0
+    # Clear takes a selection and its bar away
+    page.locator("#editor .text-obj").first.locator(".segment[data-n='3'] [data-test=segnum]").click()
+    assert page.locator("[data-test=sel-count]").inner_text() == "1 line selected"
+    page.locator("[data-test=sel-clear]").click()
+    assert page.locator("[data-test=sel-bar]").count() == 0 and page.locator("#editor .segment.line-sel").count() == 0
+    # chart rows: Ctrl+click two labels
+    page.locator("#editor .blk-body").last.click()
+    page.keyboard.press("End")
+    page.keyboard.press("Enter")
+    page.keyboard.type("{{flex:chart %s free=col}}" % CHART)
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#editor .chart-obj tr.crow[data-row='3']")
+    def rlab(n):   # the row's number sits at the right edge of its label cell, after the ▶ buttons
+        th = page.locator("#editor .chart-obj tr.crow[data-row='%d'] th.rlab" % n)
+        b = th.bounding_box()
+        return th, {"x": b["width"] - 8, "y": b["height"] / 2}
+    th, pos = rlab(2)
+    th.click(modifiers=["Control"], position=pos)
+    th, pos = rlab(3)
+    th.click(modifiers=["Shift"], position=pos)
+    assert page.locator("#editor .chart-obj tr.crow.row-sel").count() == 2
+    assert page.locator("#editor .chart-obj [data-test=sel-count]").inner_text() == "2 rows selected"
+    page.evaluate("() => { window.__copied = null; }")
+    page.locator("#editor .chart-obj [data-test=sel-copy]").click()
+    copied = page.evaluate("window.__copied")
+    assert copied.startswith("{{flex:chart %s rows=2-3 at=000000000020-000000000030 free=col}}\n" % CHART), copied
+    lines = copied.split("\n")
+    assert "Subject" in lines[2] or "Subject" in lines[1]          # the header rows ride along
+    assert any(l.startswith("1b\t") for l in lines) and any(l.startswith("2a\t") for l in lines) and not any(l.startswith("1a\t") for l in lines)
+    # Ctrl+C from the page (the focus is on the chart's label, not in an editable)
+    page.evaluate("() => { window.__copied = null; document.activeElement && document.activeElement.blur(); }")
+    page.keyboard.press("Control+c")
+    assert page.evaluate("window.__copied") == copied

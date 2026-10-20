@@ -815,7 +815,19 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   rows with timed lines gets ▶§ / ▶¶ (`.chart-play-sent` / `.chart-play-para`) before its line ▶,
   playing the group's lines through the same `playRange`. BOUNDARIES (Seth: "draw that boundary
   UNDERNEATH the free translation row"): a row's `end-sent` / `end-para` class moves to the
-  `cfree-row` that follows it when `free=row` puts one there. A CHART AS AN EXAMPLE AND BACK (Seth, 2026-10-20: "convert a flex text-chart object to a regular
+  `cfree-row` that follows it when `free=row` puts one there. SELECTED LINES AND ROWS (Seth, 2026-10-20: "copy TSV for individual or multiple selected rows in flex objects
+  (either table or IGT) … paste them in a notes document elsewhere as a new example"): a click on a `.segnum`
+  (Shift: a range; `toggleLineSel`, `.segment.line-sel`) or Ctrl/Shift+click on a chart row's `.rlab` (or "Select
+  this row" in its popover; `chart.toggleRowSel`, `tr.crow.row-sel`) shows `interlinear.selectionBar` above the
+  lines / the chart (`sel-bar`: count, ⎘ Copy, Clear). The copy is the selection's OWN reference on the first
+  line (`{{flex:text g seg=a-b at=…}}` with the example's lines / ws; `{{flex:chart g rows=a-b at=…}}` with the
+  view keys, not cw / ex / indent / collapsed) and `flexTsv` / `chartTsv` of just those lines or rows under it
+  (a chart's header rows always); a gap in the selection still pastes as the whole range. `editor.pasteText`
+  takes a text whose first line is such a reference followed by tab-separated rows as the reference alone
+  (the collection's paste box too); a sheet gets the rows. Ctrl+C (document capture) copies `R.lastSel` when
+  nothing editable has the focus and no text is selected. e2e
+  `test_selected_lines_and_rows_copy_and_paste_as_a_new_example`.
+  A CHART AS AN EXAMPLE AND BACK (Seth, 2026-10-20: "convert a flex text-chart object to a regular
   interlinear example object (including the lines that chart rows touch) or vice versa (text chart touching all
   the lines in the example). They won't line up perfectly, either direction should be inclusive"): the chart's ⋯
   → "Show these lines as an interlinear example" (`to-example`: the lowest `seg` to the highest `segTo` of the

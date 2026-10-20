@@ -465,6 +465,34 @@
   const lineText = (w, line) => line === 'txt' ? (w.txt || '') : line === 'gls' ? (w.gls || '') : line === 'pos' ? (w.pos || '') : line === 'morph' ? (w.morphs || []).map((m) => m.form || '').join(' ') : line === 'mgls' ? (w.morphs || []).map((m) => m.gls || '').join(' ') : line === 'cf' ? (w.morphs || []).map((m) => m.cf || '').join(' ') : '';
 
   /* ------------------------------------------------------------------ the table */
+  /* ROW SELECTION (Seth, 2026-10-20: "copy TSV for individual or multiple selected rows … for FLEx
+   * text chart objects, headers always show"): Ctrl+click (Shift+click: a range) on a row's label,
+   * or "Select this row" in its popover; the bar above the chart copies the rows' reference
+   * (`{{flex:chart … rows=a-b at=…}}`, the view settings kept) and the grid with its header rows. */
+  const selectedRows = (table) => [...table.querySelectorAll('tr.crow.row-sel')].map((tr) => +tr.dataset.row).sort((a, b) => a - b);
+  function toggleRowSel(table, tr, shift, spec, obj) {
+    const st = table._rsel || (table._rsel = { anchor: null });
+    const n = +tr.dataset.row;
+    if (shift && st.anchor != null) {
+      const a = Math.min(st.anchor, n), b = Math.max(st.anchor, n);
+      table.querySelectorAll('tr.crow').forEach((r) => { const k = +r.dataset.row; if (k >= a && k <= b) r.classList.add('row-sel'); });
+    } else { tr.classList.toggle('row-sel'); st.anchor = n; }
+    FS.interlinear.dropTextSelection();
+    const box = table.closest('.chart-obj');
+    if (!box) return;
+    FS.interlinear.selectionBar(box, box.querySelector(':scope > .chart-scroll, :scope > .tchart'), () => selectedRows(table), (ns) => rowsCopyText(spec, obj, ns), 'row',
+      () => table.querySelectorAll('tr.crow.row-sel').forEach((r) => r.classList.remove('row-sel')));
+  }
+  function rowsCopyText(spec, obj, ns) {
+    const rows = (obj.rows || []).filter((r) => ns.includes(r.n));
+    const a = rows[0], b = rows[rows.length - 1];
+    const extra = Object.assign({}, spec.extra || {});
+    for (const k of ['ex', 'indent', 'collapsed', 'cw']) delete extra[k];
+    const ref = { kind: 'chart', guid: spec.guid, seg: [a.n, b.n], at: a.guid && b.guid ? [FS.interlinear.anchor12(a.guid), FS.interlinear.anchor12(b.guid)] : null, lines: spec.lines, fields: null, senses: null, ws: spec.ws, styles: [], label: '', extra };
+    const sub = Object.assign({}, obj, { rows }, spec.extra && spec.extra.headers === 'off' ? {} : {});
+    return R.serialize(ref) + '\n' + chartTsv(Object.assign({}, spec, { extra: Object.assign({}, spec.extra || {}, { headers: undefined }) }), sub);
+  }
+
   function renderChart(obj, spec, opts) {
     opts = opts || {};
     const full = obj;                       // the chart as fetched (the menu's column list, the pivot)
@@ -677,7 +705,10 @@
         g.para ? playBtn(g.para.segs, 'Play the paragraph (rows ' + g.para.label + ')', 'chart-play-para', '¶') : null,
         g.sent ? playBtn(g.sent.segs, 'Play sentence ' + g.sent.name + ' (rows ' + g.sent.label + ')', 'chart-play-sent', '§') : null,
         (starts.get(ri) || []).map((sg) => playBtn([sg], 'Play line ' + (sg.label || sg.n) + ' (' + FS.fmtTime(sg.begin) + '–' + FS.fmtTime(sg.end) + ')', 'chart-play')), row.label);
-      if (opts.editable) lab.addEventListener('click', (e) => stylePopover(e.currentTarget, spec, { row: row.n }, opts, 'row ' + row.label));
+      if (opts.editable) lab.addEventListener('click', (e) => {
+        if (e.ctrlKey || e.metaKey || e.shiftKey) { toggleRowSel(table, tr, e.shiftKey, spec, obj); return; }
+        stylePopover(e.currentTarget, spec, { row: row.n }, opts, 'row ' + row.label, null, [{ label: 'Select this row (to copy rows)', test: 'row-select', fn: () => toggleRowSel(table, tr, false, spec, obj) }]);
+      });
       tr.appendChild(frz(lab, 'lab'));
       for (const xc of xL) tr.appendChild(frz(el('td', { class: 'xcell xcell-' + xc.kind + ' xcell-left', dataset: { x: xc.key, row: row.n } }, xc.cell(row, obj)), 'x' + xc.xi));
       for (const slot of layoutRow(row, cols, flat ? null : allCols)) {

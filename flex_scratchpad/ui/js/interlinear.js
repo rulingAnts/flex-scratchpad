@@ -506,9 +506,65 @@
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(draw);
   }
 
+  /* LINE SELECTION (Seth, 2026-10-20: "the ability to copy TSV for individual or multiple selected
+   * rows in flex objects (either table or IGT) would be helpful. So I can copy rows from one example
+   * and paste them in a notes document elsewhere as a new example"): a click on a line's number
+   * selects it (Shift+click: the range from the last click), a bar in the object offers the copy —
+   * the lines' own reference (`{{flex:text … seg=a-b at=…}}`) on the first line, FLEx's TSV rows
+   * under it — so a paste into a note is a new example of exactly those lines (the editor takes
+   * the reference and leaves the rows) and a paste into a sheet is the rows. Ctrl+C copies the
+   * selection when nothing editable has the focus. The chart does the same with its rows
+   * (chart.js); `R.lastSel` is whichever object was selected in last. */
+  const anchor12 = (g) => (g || '').replace(/-/g, '').slice(-12);
+  const dropTextSelection = () => { const s = window.getSelection(); if (s && !s.isCollapsed) s.removeAllRanges(); };
+  const selectedLines = (box) => [...box.querySelectorAll(':scope > .segment.line-sel')].map((r) => +r.dataset.n).sort((a, b) => a - b);
+  function toggleLineSel(box, row, shift, spec, obj) {
+    const st = box._lsel || (box._lsel = { anchor: null });
+    const n = +row.dataset.n;
+    if (shift && st.anchor != null) {
+      const a = Math.min(st.anchor, n), b = Math.max(st.anchor, n);
+      box.querySelectorAll(':scope > .segment').forEach((r) => { const k = +r.dataset.n; if (k >= a && k <= b) r.classList.add('line-sel'); });
+    } else { row.classList.toggle('line-sel'); st.anchor = n; }
+    dropTextSelection();
+    selectionBar(box, box.querySelector(':scope > .segment'), () => selectedLines(box), (ns) => linesCopyText(spec, obj, ns), 'line',
+      () => box.querySelectorAll(':scope > .segment.line-sel').forEach((r) => r.classList.remove('line-sel')));
+  }
+  function linesCopyText(spec, obj, ns) {
+    const segs = (obj.segments || []).filter((s) => ns.includes(s.n));
+    const a = segs[0], b = segs[segs.length - 1];
+    const ref = { kind: 'text', guid: spec.guid, seg: [a.n, b.n], at: a.guid && b.guid ? [anchor12(a.guid), anchor12(b.guid)] : null, lines: spec.lines, fields: null, senses: null, ws: spec.ws, styles: [], label: '', extra: {} };
+    return R.serialize(ref) + '\n' + flexTsv(spec, Object.assign({}, obj, { segments: segs }));
+  }
+  /* The bar above the first line / row: "N selected · Copy · Clear"; shared by examples and charts. */
+  function selectionBar(box, before, selected, copyText, unit, clear) {
+    let bar = box.querySelector(':scope > .sel-bar');
+    const sel = selected();
+    if (!sel.length) { if (bar) bar.remove(); if (R.lastSel && R.lastSel.box === box) R.lastSel = null; return; }
+    if (!bar) { bar = el('div', { class: 'sel-bar', 'data-test': 'sel-bar' }); box.insertBefore(bar, before && before.parentElement === box ? before : null); }
+    const copy = () => { const s = selected(); if (!s.length) return; FS.copyText(copyText(s)); FS.toast(s.length + ' ' + unit + (s.length === 1 ? '' : 's') + ' copied — paste into a note for a new example of ' + (s.length === 1 ? 'it' : 'them') + ', or into a sheet', 'ok'); };
+    const gap = sel.length !== sel[sel.length - 1] - sel[0] + 1;
+    bar.innerHTML = '';
+    bar.append(el('b', { 'data-test': 'sel-count' }, sel.length + ' ' + unit + (sel.length === 1 ? '' : 's') + ' selected'),
+      el('button', { class: 'btn small', 'data-test': 'sel-copy', title: 'Copy the selected ' + unit + 's: their reference and FLEx’s tab-separated rows (Ctrl+C)', onclick: copy }, '⎘ Copy'),
+      el('span', { class: 'muted small' }, gap ? 'Pasted into a note they become one example of the whole range ' + sel[0] + '–' + sel[sel.length - 1] : 'Paste into a note for a new example, or into a sheet'),
+      el('button', { class: 'lnk', 'data-test': 'sel-clear', onclick: () => { clear(); selectionBar(box, before, selected, copyText, unit, clear); } }, 'Clear'));
+    R.lastSel = { box, copy };
+  }
+  document.addEventListener('keydown', (e) => {
+    if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey || e.key.toLowerCase() !== 'c') return;
+    const last = R.lastSel;
+    if (!last || !last.box.isConnected) return;
+    const a = document.activeElement;
+    if (a && a.closest && a.closest('input, textarea, [contenteditable="true"]')) return;   // the editor's own copy
+    const s = window.getSelection();
+    if (s && !s.isCollapsed && String(s).trim()) return;                                   // a text selection: the browser's
+    e.preventDefault();
+    last.copy();
+  }, true);
+
   function renderSegment(seg, obj, spec, lines, index, vern, anal, mediaByGuid, opts, box, sel) {
     const row = el('div', { class: 'segment', dataset: { n: seg.n } });
-    const gutter = el('div', { class: 'seg-gutter' }, el('span', { class: 'segnum', title: 'FLEx segment ' + (seg.label || seg.n) + (seg.label && seg.label !== String(seg.n) ? ' (segment ' + seg.n + ' of the text, as seg= counts them)' : '') }, seg.label || String(seg.n)));
+    const gutter = el('div', { class: 'seg-gutter' }, el('span', { class: 'segnum', 'data-test': 'segnum', title: 'FLEx segment ' + (seg.label || seg.n) + (seg.label && seg.label !== String(seg.n) ? ' (segment ' + seg.n + ' of the text, as seg= counts them)' : '') + (opts.editable ? '. Click to select this line (Shift+click: a range), then copy the selected lines' : ''), onclick: opts.editable ? (e) => { e.stopPropagation(); toggleLineSel(box, row, e.shiftKey, spec, obj); } : null }, seg.label || String(seg.n)));
     const timed = seg.begin != null && seg.end != null && seg.end > seg.begin;
     if (timed) {
       const btn = el('button', { class: 'seg-play', title: 'Play ' + FS.fmtTime(seg.begin) + '–' + FS.fmtTime(seg.end) }, '▶');
@@ -1478,5 +1534,6 @@
     });
   }
 
-  FS.interlinear = { playRange, audio, chipTitle, chipRange, blankSeg, peek, segTags, chartTags, withChartTags, nowPlaying, render, renderText, renderEntry, renderWordform, renderChip, hydrateInline, openContext, wholeText, openOverlay, closeOverlay, isCollapsed, setCollapsed, styled, styledParts, invalidate, flexGet, openInFlex, labelOf, numberFor, flexTsv, HL_COLORS };
+  R.lastSel = null;
+  FS.interlinear = { selectionBar, anchor12, dropTextSelection, playRange, audio, chipTitle, chipRange, blankSeg, peek, segTags, chartTags, withChartTags, nowPlaying, render, renderText, renderEntry, renderWordform, renderChip, hydrateInline, openContext, wholeText, openOverlay, closeOverlay, isCollapsed, setCollapsed, styled, styledParts, invalidate, flexGet, openInFlex, labelOf, numberFor, flexTsv, HL_COLORS };
 })();
