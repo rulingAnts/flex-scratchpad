@@ -1429,6 +1429,11 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   promoted beta.3 drops every `beta.3` flag and renames the legend; a new pre-release turns `next` into its number.
   What was in beta.2 was settled by `git show 0d84fd2:<file>` (no tagstyles.js / chart.js / log.py / xlsx, pptx,
   pdf writers; no Ctrl+K, nested lists, gap bar, sticky headings, promote/demote, rule collections, flexcopy).
+- NAMING LOGOS (Seth, 2026-10-20: the comparison "is actually helpful for our users, because they might be familiar
+  with Logos"): user-facing text may say a visual filter works "like a highlighting filter in Logos" — a true
+  comparison, in words, never Faithlife's logo or styling, never a hint of partnership. The site footers and the
+  README's Licence carry the notice (Logos is Faithlife, LLC's trademark; not affiliated, not endorsed): keep it
+  wherever Logos is named for users. "Visual filters" is a descriptive name and stays.
 - GitHub Actions: public repo, standard runners only, Windows build is `workflow_dispatch`. Never
   add a schedule, a larger runner, LFS or a release step without Seth's say-so.
 - This is Seth's suite: see `flextext-editor/CLAUDE.md` for the house rules on writing about
