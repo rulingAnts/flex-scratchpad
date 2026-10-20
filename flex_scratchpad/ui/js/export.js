@@ -732,10 +732,10 @@
       audio.appendChild(el('option', { value: 'original' }, 'point at the original recordings (their offsets, as in FLEx)'));
       audio.appendChild(el('option', { value: 'none' }, 'no audio'));
       audio.value = 'bundle';
-      const folder = el('input', { type: 'text', placeholder: 'next to the .flextext — or the project\u2019s LinkedFiles\\AudioVisual', style: { flex: '1 1 auto', minWidth: '0' } });
+      const folder = el('input', { type: 'text', placeholder: 'next to the .flextext — or a folder of your recordings, such as a lameta session', style: { flex: '1 1 auto', minWidth: '0' } });
       const browse = el('button', { class: 'btn', onclick: async () => { try { const f = await FS.api.pick_folder(); if (f) folder.value = f; } catch (e) { FS.toast(e.message, 'error'); } } }, 'Browse…');
       const folderRow = el('div', { class: 'form-row' }, el('label', {}, 'Audio into'), el('div', { style: { display: 'flex', gap: '6px', flex: '1 1 auto', minWidth: '0' } }, folder, browse));
-      const folderNote = el('p', { class: 'small muted' }, 'One audio file is named like its .flextext (the Audio Segmenter pairs them by name); clips per line go into a <name>-audio folder. Choose the project\u2019s LinkedFiles\\AudioVisual folder and the audio is written there with locations FLEx resolves on import; anywhere else the file points at it by full path. 16-bit mono WAV.');
+      const folderNote = el('p', { class: 'small muted' }, 'One audio file is named like its .flextext (the Audio Segmenter pairs them by name); clips per line go into a <name>-audio folder; the .flextext points at them by full path. Keep large recordings out of the FLEx project\u2019s own LinkedFiles folder: FieldWorks\u2019 Send/Receive fails on files of more than a few megabytes there. 16-bit mono WAV.');
       const showFolder = () => { const on = audio.value === 'clips' || audio.value === 'bundle'; folderRow.style.display = on ? '' : 'none'; folderNote.style.display = on ? '' : 'none'; };
       audio.addEventListener('change', showFolder);
       showFolder();

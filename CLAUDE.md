@@ -38,7 +38,12 @@ Built 2026-10-12 with Seth; the decisions below are his.
   promises it to users, and `tests/test_read_only.py` fails on any write access in the code
   (`writeEnabled=True`, a unit of work, an undo task, a save). The only files written are the
   notebook's own and the exports the user saves (a `.flextext` is a NEW text with new GUIDs,
-  imported by the user; its audio may go into LinkedFiles only when the user chooses that folder).
+  imported by the user; its audio may go into LinkedFiles only when the user chooses that folder — and the docs never
+  RECOMMEND that: Seth, 2026-10-20, FLEx's Send/Receive "will try to send/receive that file and if it's any larger than a
+  couple megabytes, it'll error and then brick until you move it"; whole-text recordings belong outside the project tree,
+  ideally in lameta ("suggest using lameta for this … and linking lameta folders": `flex.lameta_root` makes a Browse… inside a
+  lameta project remember the project's folder, the nearest ancestor with a `.sprj`, so the recursive media lookup finds
+  every session).
   The `.flextext` file source is a *fallback* (texts only), the demo is for
   tests; LCM is the product.
 - **One LCM thread.** pywebview calls `js_api` methods on arbitrary threads and LCM is not

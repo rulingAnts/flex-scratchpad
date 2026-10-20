@@ -613,3 +613,19 @@ def test_snapshot_writes_from_many_threads_and_a_failing_write_keep_the_live_rea
     svc.cache = broken
     o = svc.get_object("text", T_STORY, 1, 2)
     assert o["cached"] is False and o["segments"]
+
+
+def test_a_recording_in_a_lameta_project_remembers_the_project_folder(tmp_path):
+    """Seth, 2026-10-20: keep whole-text recordings out of FLEx's project tree, in lameta, and link
+    them from there; one Browse… in a lameta project finds every session's recordings."""
+    from flex_scratchpad.flex import lameta_root
+    proj = tmp_path / "Kalu archive"
+    (proj / "Sessions" / "story-01").mkdir(parents=True)
+    (proj / "Sessions" / "story-02").mkdir(parents=True)
+    (proj / "Kalu archive.sprj").write_text("<Project/>", encoding="utf-8")
+    a = proj / "Sessions" / "story-01" / "story-01.wav"
+    b = proj / "Sessions" / "story-02" / "story-02.wav"
+    a.write_bytes(b"RIFF"); b.write_bytes(b"RIFF")
+    assert lameta_root(a) == proj
+    loose = tmp_path / "elsewhere" / "x.wav"; loose.parent.mkdir(); loose.write_bytes(b"RIFF")
+    assert lameta_root(loose) is None
