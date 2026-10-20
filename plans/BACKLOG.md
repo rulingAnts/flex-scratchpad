@@ -166,6 +166,51 @@ so a document pasted into that project picks up the project's definitions, its n
 convention for examples, and its tab-or-table choice for the aligned lines. Needs the
 project's template (`.dotx`) or a sample `.docx` to read the style names and layout from.
 
+**2026-10-20 (Seth), the copy in detail — "save this for later, it'll require some research and planning":**
+*"copy an example as LaTeX or XLingPaper code of various shapes (optionally including the scratchpad's styling or
+visual filters-conditioned styling, and definitely including a reference to the text line(s)). Also the ability to copy
+lexical items tables or table excerpts in appropriate formats for LaTeX and XLingPaper (and HTML, so as to be paste-able
+in Word, Excel, PowerPoint, etc). LaTeX: formatted for various IGT packages, the user's choice of which, which they can
+check 'always use this' and change later in settings somewhere obvious (mit, gb4e, langsci-gb4e, expex, etc).
+XLingPaper: (wrd, gls, free fields corresponding to what's in the source example, and as individual example or list
+examples)."*
+
+- **Shapes**: one example; a range of lines as one example with sub-examples (gb4e `\ea … \ex … \z` / `\xlist`,
+  expex `\pex … \a … \xe`, XLingPaper `<listInterlinear>`); several examples (a selection, a collection) as
+  consecutive examples. Which lines go in follows the example's own `lines=` (and its writing systems, `ws=`).
+- **The reference, always**: the text's abbreviation (or title) and FLEx's line numbers, e.g. `[Kalu Story 1.2–1.3]`
+  — LaTeX as the package's trailing citation (langsci: `\trailingcitation{…}`; others `\hfill […]` after the free
+  translation; to confirm per package); XLingPaper through its own text-reference mechanism (`interlinearRef` /
+  `textInfo` / the `text=` attribute — to research in the DTD) rather than plain text.
+- **Styling, optional** (a checkbox in the copy dialog, remembered): the user's own word / morpheme / line styles
+  (hl, b, i, u, s, colour) and the looks the visual filters RESOLVE TO at that place (tag brackets, highlight,
+  tile, border, colour, B I U) — the export model already carries both as runs (`flexBlock`, `runsOf`, the tag
+  lanes). LaTeX: `\textbf` / `\emph` / `\uline` (ulem) / `\hl` (soul) / `\textcolor` (xcolor), brackets as plain
+  characters; tiles and borders have no good IGT equivalent (a `\colorbox` round a word breaks gloss alignment in
+  some packages) — research per package; tag bars are left out. XLingPaper: `<object type>` / `<langData>` with a
+  type that the paper's own `<types>` defines (to research: how styles are declared there).
+- **The package choice** (LaTeX): a select in the copy dialog with "Always use this" (no dialog next time); changed
+  in Settings › *Copy and export formats* (somewhere obvious: also a "Change format…" link in the toast after a copy).
+  Packages to cover first: gb4e, langsci-gb4e, expex, linguex?, and "mit" — TO ASK Seth what "mit" means here (the
+  MIT dissertation style's own `\exg.`, or a package of that name). Grammatical glosses in small caps through
+  `leipzig` (`\Erg{}`) or `\textsc{erg}` — a choice too. Escaping (`_ % & # $ { } ~ ^ \`), the vernacular font
+  (`fontspec`) and right-to-left scripts (polyglossia / bidi) to settle.
+- **Tables and lexical items**: a Markdown table (or the selected rows / cells of one), and entries (a card, or a
+  table whose cells hold entries) copied as LaTeX `tabular` (booktabs), XLingPaper `<table>` (`<tr>` / `<th>` /
+  `<td>`), and HTML — the clipboard's `text/html` (a `copy` event's `clipboardData.setData`, which WebView2 honours)
+  with a plain-text twin, so Word, Excel and PowerPoint paste a real table with the cell styles; an example inside a
+  cell goes as its reference (as the exports' `linkRun`) or, for HTML, as a small nested table.
+
+**Estimate (2026-10-20, before the research):** the hard half is done — every format reads the export model the Word /
+Excel / HTML writers already use, and the selection machinery (`highlightedSource`, the line / row selection, the
+⋯ menus) exists. New work: (1) a copy dialog with the format, package, styling and "always" choices + the Settings
+entry, small; (2) one LaTeX writer with a macro table per package — the first package is the bulk (escaping,
+alignment of morph lines, sub-examples, the reference, styling), each further package is small; (3) XLingPaper —
+moderate, mostly in getting the DTD right (a copy of the DTD in `tests/fixtures/` and a validation test, as for the
+.flextext); (4) HTML table copy — small, and useful at once for Word / Excel / PowerPoint. Research first: each
+package's exact macros and what styling survives alignment; XLingPaper's DTD for lists, text references and styled
+types; what "mit" refers to.
+
 ## LaTeX export (Seth, 2026-10-13: "LaTeX exports also for later")
 
 A whole-note export next to Markdown / HTML / DOCX / PDF: prose as plain LaTeX (emphasis,
