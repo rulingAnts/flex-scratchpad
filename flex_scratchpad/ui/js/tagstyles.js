@@ -437,17 +437,13 @@
     box.appendChild(custom);
     const fg = el('input', { type: 'color', value: r.fg || '#1a1d21', title: 'Text colour on the tag (automatic when unset)' });
     fg.addEventListener('change', () => set({ fg: fg.value }));
-    box.appendChild(el('span', { class: 'tag-ctl', title: 'Text colour' }, 'A', fg, r.fg ? el('button', { class: 'tog', title: 'Back to the automatic text colour', onclick: () => set({ fg: undefined }) }, 'auto') : null));
+    if (o.structure !== 'row') box.appendChild(el('span', { class: 'tag-ctl', title: 'Text colour' }, 'A', fg, r.fg ? el('button', { class: 'tog', title: 'Back to the automatic text colour', onclick: () => set({ fg: undefined }) }, 'auto') : null));
     for (const [k, l, ttl, st] of [['b', 'B', 'Bold words', { fontWeight: '700' }], ['i', 'I', 'Italic words', { fontStyle: 'italic' }], ['u', 'U', 'Underline the words in the tag’s colour', { textDecoration: 'underline' }]]) {
       box.appendChild(el('button', { class: 'tog' + (r[k] ? ' on' : ''), 'data-test': 'tag-' + k, title: ttl, style: st, onclick: () => set({ [k]: r[k] ? undefined : true }) }, l));
     }
     if (o.structure === 'chip') return box;             // a [2a] clause marker: the chip's colours and B I U
-    if (o.structure === 'row') {                          // a clause type: the whole row, always
-      const c = el('input', { type: 'color', value: r.c || '#1a1d21', title: 'Colour of the row’s words' });
-      c.addEventListener('change', () => set({ c: c.value }));
-      box.appendChild(el('span', { class: 'tag-ctl', title: 'Colour of the words' }, 'text', c, r.c ? el('button', { class: 'tog', title: 'Back to the usual word colour', onclick: () => set({ c: undefined }) }, 'auto') : null));
-      return box;
-    }
+    // a clause type (o.structure 'row') gets every text control below — brackets, highlight, tile, border,
+    // the words' colour — drawn on the whole row (Seth, 2026-10-20; chart.js applyRowLook / rowBrackets)
     if (o.structure === 'moved') {
       // moved text (Seth, 2026-10-19): whose look the word group wears, and how it is labelled
       const ms = el('select', { 'data-test': 'tag-ms', title: 'Whose look the moved words wear' });
@@ -476,12 +472,13 @@
     if (!o.structure) box.appendChild(el('button', { class: 'tog' + (r.label === false ? '' : ' on'), title: 'Show the tag’s abbreviation (off: a thin bar only)', onclick: () => set({ label: r.label === false ? undefined : false }) }, 'label'));
     // the TEXT itself (Seth, 2026-10-18): brackets round the span, a marker, a tile, a border, a colour
     const txt = el('div', { class: 'tag-ctl tag-ctl-text' });
-    const br = el('select', { title: 'Brackets around the tagged words (and the lines under them)', 'data-test': 'tag-br' });
+    const onRow = o.structure === 'row';
+    const br = el('select', { title: onRow ? 'Brackets around the row’s content' : 'Brackets around the tagged words (and the lines under them)', 'data-test': 'tag-br' });
     br.appendChild(el('option', { value: '', selected: !r.br }, 'no brackets'));
     for (const [k, [a, z]] of Object.entries(BRACKETS)) br.appendChild(el('option', { value: k, selected: r.br === k }, a + ' word ' + z));
     br.addEventListener('change', () => set({ br: br.value || undefined }));
     txt.appendChild(br);
-    for (const [k, l, ttl] of [['hl', 'highlight', 'A marker over the words'], ['tile', 'tile', 'A tinted box behind the words and their lines'], ['box', 'border', 'A border around the words and their lines']]) {
+    for (const [k, l, ttl] of [['hl', 'highlight', 'A marker over the words'], ['tile', 'tile', onRow ? 'The whole row tinted (in the tile’s own colour when you pick one)' : 'A tinted box behind the words and their lines'], ['box', 'border', onRow ? 'A border around the whole row' : 'A border around the words and their lines']]) {
       txt.appendChild(el('button', { class: 'tog' + (r[k] ? ' on' : ''), 'data-test': 'tag-' + k, title: ttl, onclick: () => set({ [k]: r[k] ? undefined : true, ...(k === 'box' && r.box ? { bs: undefined, bw: undefined, bc: undefined } : {}), ...(k === 'tile' && r.tile ? { tc: undefined } : {}) }) }, l));
       if (k === 'tile' && r.tile) {        // the tile's own colour (Seth, 2026-10-18: "edit the background color"); unset = the tag's colour, tinted
         const tc = el('input', { type: 'color', value: r.tc || r.bg || '#ffd6a5', 'data-test': 'tag-tc', title: 'Colour of the tile (the tag’s colour, tinted, when unset)' });

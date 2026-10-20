@@ -818,6 +818,21 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   mix remembered. A group with nothing in this chart starts FOLDED (`renderTagTree`'s
   `closedByDefault`; the user's own fold choice is kept as true / false in `fs:tagTree`). A missing
   🔍 button was once appended as the text "null" after every row — `row.append(null)` prints it.
+  CLAUSE ROWS WEAR EVERY LOOK (Seth, 2026-10-20: "all the same styling options for speech and dependent and song
+  clause rows that I have for cells and words: brackets, borders, highlights … the text color doesn't seem to be
+  working"): `controls()` no longer stops a `skind: 'row'` item after its colour — it gets the text controls (brackets,
+  highlight, tile + its colour, border + style / thickness / colour, the words' colour, B I U; no chip-text colour, no
+  bar). `chart.applyRowLook(tr, lk)`: the colour alone tints the row (as before), `tile` in `tc`, `hl` = `.row-hl`
+  (`--row-hl` behind every `.il-txt`), `box` = an OUTLINE on the `tr` (`outline-offset` inward; dashed / double work),
+  and `rowBrackets` puts `[` / `]` INSIDE the first and last `.il-txt` of the row's first / last non-empty cell (a
+  bracket of its own wrapped onto a line by itself in a narrow column). THE WORDS' COLOUR: the word lines carry their
+  own colours (FLEx blue), so `color` on a row, cell or wrapper never reached them; every look now goes through
+  `wordColour(node, c)` (`--look-c` + `.look-c`, CSS colours `.il-txt`, `.il-morph`, punctuation — as an example's
+  `c` colours its baseline): clause rows, marker rows, columns, cells, moved text, the flat wrappers. Exports carry a
+  clause look's tint / colour / B I U (`export.js`, `C.pseudoLook`). A ROW'S OWN POPOVER (`stylePopover`; Seth: "ANY
+  color (full color wheel/picker) as a row background"): the Highlight row is called *Background* for a row, a cell
+  or a column, and it and *Colour* end in a colour input (`chart-bg-any` / `chart-color-any`, any `#rrggbb`, written
+  as `hl[#…]=r3`) and a "none"; a row's background also paints its label cell and custom-column cells.
   NOT YET: a paragraph-analysis column (Seth, 2026-10-19: "a horizontal, right-angle tree whose
   terminal branches face inward toward the chart lines") — plans/BACKLOG.md › Text Charts. SENTENCE / PARAGRAPH PLAY (Seth: "a play button for 4, not
   just for 4a, 4b, 4c"): `playGroups(rows, segments)` — a SENTENCE is the rows sharing a label
@@ -868,6 +883,8 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   table: Column | Kind (list / notes / rule) | Settings — and a 4th column Place, `left` and/or
   `frozen`, written ONLY when some column needs it so older files stay byte-identical; `side` /
   `frozen` on the column, the dialog's Place select + Freeze box, the heading's ⋯ toggles) and
+  a CHECKBOX kind (`check`, Seth, 2026-10-20: "just a checkbox (ticked or not)": `x` in the Values table when ticked,
+  anything non-blank counts, ✓ in the exports, `<Name>:*` in a rule; `KINDS.check`, `isTicked`) and
   `## Values` (Row `1a #<anchor>` | one
   column per stored column) — Markdown tables, so the file reads anywhere and the notebook index
   searches the values for free; rule columns are computed, never stored; values are keyed by the

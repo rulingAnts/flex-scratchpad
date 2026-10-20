@@ -556,6 +556,27 @@ match alone without saying so — and stop re-finding once the user has re-point
 anchors must be written and then win). Also check `blankSeg` / `is_blank_segment`: an empty FLEx
 segment counted by one side and not the other shifts every `seg=` after it by one.
 
+## Known issue: chart column sizing / resizing is a little quirky (Seth, 2026-10-20 — "for troubleshooting later")
+
+> *"column sizing/resizing can be a little quirky."*
+
+Not described further yet; ask what was dragged, in which view (columns / one column / groups), and
+what the column did instead. The code is `colWidths` / `setColWidths` and the `resizer` in
+`ui/js/chart.js` (`cw=` in the embed, one `<col>` per table column), and the ghost header
+(`wireStickyHead`) copies the widths. Suspects, unverified:
+
+1. **The content wins over the drag.** The table lays out automatically, so a `<col>` width is only
+   a request: a column never gets narrower than its longest word or chip, and the grip stops short of
+   the mouse; widening one column can shrink the unsized ones beside it. A fixed layout once a column
+   is sized, or `min-width: 0` plus wrapping in the cells, would make the drag exact.
+2. **Custom columns are keyed by their POSITION** (`x0`, `x1`…): moving or removing a custom column in
+   a chart note hands its width to the next one. Key them by name instead (keep reading `x<i>`).
+3. **Each view keys columns its own way**: the columns view by template number, the one-column view's
+   single "Text" column and the groups view's 1000+ numbers by something else, so a width set in one view
+   means nothing (or another column) in the other.
+4. The ghost header and the frozen columns' offsets (`placeFrozen`) are measured after a frame; a drag
+   that changes a frozen column may leave them a frame behind.
+
 ## Known issue elsewhere: FieldWorks doubles the morph bundle of a two-language-glossed word on import (Seth, 2026-10-19)
 
 Seen on texts imported from FlexText Editor (`Tosokai`: every word; `Wahuka Arsen incident`: a few): the

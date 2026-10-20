@@ -142,3 +142,36 @@ test('a custom column keeps its place (left / frozen) in a 4th table column, wri
   back.columns[0].side = 'right'; back.columns[0].frozen = false; back.columns[1].frozen = false;
   assert.ok(!N.serialize(back).includes('Place'));
 });
+
+test('a checkbox column: stored as x when ticked, ✓ in exports, and a rule can test it', () => {
+  const body = [
+    '{{flex:chart ' + G + '}}',
+    '',
+    '## Custom columns',
+    '',
+    '| Column | Kind | Settings |',
+    '|---|---|---|',
+    '| Checked | check | |',
+    '| Flag | rule | Checked:* → done |',
+    '',
+    '## Values',
+    '',
+    '| Row | Checked |',
+    '|---|---|',
+    '| 1a #000000000010 | x |',
+    '',
+  ].join('\n');
+  const st = N.parse(body);
+  assert.deepEqual(st.columns.map((c) => [c.name, c.kind]), [['Checked', 'check'], ['Flag', 'rule']]);
+  assert.equal(N.KINDS.check, 'Checkbox');
+  assert.equal(N.serialize(st), body);
+  const c = chart();
+  const rule = N.parseRule('Checked:* → done; not Checked:* → todo');
+  const row = (label) => c.rows.find((r) => r.label === label);
+  const ticked = new Map([[N.anchorOf(row('1a').guid), { Checked: 'x' }]]);
+  assert.equal(N.applyRule(rule, N.rowCtx(row('1a'), c, ticked, st.columns)).text, 'done');
+  assert.equal(N.applyRule(rule, N.rowCtx(row('1b'), c, ticked, st.columns)).text, 'todo');
+  // a value typed by hand (anything but blank) counts as ticked
+  const typed = new Map([[N.anchorOf(row('1b').guid), { Checked: 'yes' }]]);
+  assert.equal(N.applyRule(rule, N.rowCtx(row('1b'), c, typed, st.columns)).text, 'done');
+});

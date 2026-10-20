@@ -203,6 +203,18 @@
         if (look.i) rowStyle.i = true;
         if (look.u) rowStyle.u = true;
       }
+      // a clause type's look (dependent / speech / song rows; Seth, 2026-10-20): the tint, the words' colour, B I U
+      if (row.clause && row.clause !== 'normal' && C.pseudoLook) {
+        const lk = C.pseudoLook('clause:' + row.clause, obj, spec);
+        if (lk && lk.styled && !lk.hide) {
+          const bgc = lk.tile ? (lk.tc || lk.bg) : lk.bg;
+          if (bgc) rowStyle.bg = tint(bgc, lk.tile ? 0.35 : 0.45);
+          if (lk.c) rowStyle.color = lk.c;
+          if (lk.b) rowStyle.b = true;
+          if (lk.i) rowStyle.i = true;
+          if (lk.u) rowStyle.u = true;
+        }
+      }
       if (extras && extras.rowStyle) { const st = extras.rowStyle(row, obj) || {}; if (st.hl) rowStyle.bg = st.hl; if (st.c) rowStyle.color = st.c; if (st.b) rowStyle.b = true; if (st.i) rowStyle.i = true; if (st.u) rowStyle.u = true; }
       const xcells = extras ? extras.cols.map((_, i) => { const v = extras.cell(i, row, obj) || {}; return { text: v.text || '', hl: v.hl || '', color: v.c || '', b: !!v.b, i: !!v.i, u: !!v.u }; }) : [];
       const run = runs.find((x) => x.from === ri);

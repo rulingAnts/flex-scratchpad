@@ -40,7 +40,9 @@
   const C = FS.chart;
   const H_COLS = '## Custom columns';
   const H_VALS = '## Values';
-  const KINDS = { list: 'Choice list', notes: 'Notes', rule: 'Rule' };
+  // `check` (Seth, 2026-10-20: "just a checkbox (ticked or not)"): stored as `x` in the Values table when ticked
+  const KINDS = { list: 'Choice list', notes: 'Notes', check: 'Checkbox', rule: 'Rule' };
+  const isTicked = (v) => !!String(v || '').trim();
   const anchorOf = (guid) => String(guid || '').replace(/-/g, '').slice(-12);
 
   /* ------------------------------------------------------------------ the body */
@@ -270,7 +272,7 @@
     if (row.depEnd) ctx.flags.add('depend');
     for (const s of chart.segments || []) if (segs.has(s.n)) ctx.free.push(s);
     const v = (values && values.get(anchorOf(row.guid))) || {};
-    for (const c of columns || []) if (c.kind === 'list' || c.kind === 'notes') ctx.lists[norm(c.name)] = v[c.name] || '';
+    for (const c of columns || []) if (c.kind === 'list' || c.kind === 'notes' || c.kind === 'check') ctx.lists[norm(c.name)] = c.kind === 'check' ? (isTicked(v[c.name]) ? 'x' : '') : (v[c.name] || '');
     return ctx;
   }
   /* The word fields a rule may test (Seth, 2026-10-19: "regex for text in a column on any interlinear
@@ -440,7 +442,7 @@
   /* Draw the builder into `host`. opts: {chart, columns (the note's custom columns), text(), setText(t), onChange()}. */
   function ruleBuilder(host, opts) {
     const chart = opts.chart || {};
-    const listNames = (opts.columns || []).filter((c) => c.kind === 'list' || c.kind === 'notes').map((c) => c.name);
+    const listNames = (opts.columns || []).filter((c) => c.kind === 'list' || c.kind === 'notes' || c.kind === 'check').map((c) => c.name);
     const markerNames = [...new Set(((chart.markers || []).map((m) => m.name)).concat((chart.rows || []).flatMap((r) => (r.cells || []).filter((c) => c.kind === 'tag' && c.tag).map((c) => c.tag.name))))].filter(Boolean);
     const tcols = ((chart.template && chart.template.columns) || []);
     const colNames = tcols.map((c) => { const dup = tcols.filter((x) => x.name === c.name).length > 1; return { value: dup ? (c.path || []).concat([c.name]).join('/') : c.name, label: (c.path || []).concat([c.name]).join(' › ') }; });
@@ -672,6 +674,7 @@
         cell(i, row, chart) {
           const col = self.st.columns[i];
           if (!col) return { text: '' };
+          if (col.kind === 'check') return { text: isTicked(self.value(row, col)) ? '\u2713' : '' };
           if (col.kind !== 'rule') return { text: self.value(row, col) };
           const ans = ruleAnswer(col, row, chart);
           if (!ans) return { text: '' };
@@ -783,6 +786,16 @@
         }
         return node;
       }
+      if (col.kind === 'check') {
+        // a checkbox: one click ticks or clears it, saved at once
+        const on = isTicked(this.value(row, col));
+        const box = el('input', { type: 'checkbox', class: 'xcheck', checked: on, 'data-test': 'xcheck', title: (on ? 'Ticked' : 'Not ticked') + ' — click to change', 'aria-label': col.name + ', row ' + (row.label || '') });
+        box.addEventListener('click', (e) => e.stopPropagation());
+        box.addEventListener('change', () => { self.setValue(row, col, box.checked ? 'x' : ''); box.title = (box.checked ? 'Ticked' : 'Not ticked') + ' — click to change'; });
+        const lab = el('label', { class: 'xval check', dataset: { col: col.name } }, box);
+        lab.addEventListener('click', (e) => e.stopPropagation());
+        return lab;
+      }
       const cur = this.value(row, col);
       const node = el('div', { class: 'xval ' + col.kind + (cur ? '' : ' empty'), tabindex: 0, title: col.kind === 'list' ? 'Click to choose' : 'Click to type', dataset: { col: col.name } }, cur || (col.kind === 'list' ? '—' : ''));
       const edit = () => {
@@ -881,6 +894,7 @@
         settingsBox.innerHTML = '';
         const k = kindSel.value;
         if (k === 'notes') settingsBox.appendChild(el('p', { class: 'muted small' }, 'Free text you type in each row. The notes are saved in the note and found by search.'));
+        if (k === 'check') settingsBox.appendChild(el('p', { class: 'muted small' }, 'A box in each row that you tick or leave empty. A rule can test it: “' + (name.value.trim() || 'Done') + ':*” is a ticked row.'));
         if (k === 'list') {
           const names = Object.keys(self.lists);
           listSel = el('select', { 'data-test': 'cn-list-sel' });

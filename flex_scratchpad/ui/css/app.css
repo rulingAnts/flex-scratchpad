@@ -995,6 +995,8 @@ table.md-table td.drop-target, table.md-table th.drop-target { outline: 2px soli
 .tchart td.xcell { background: color-mix(in srgb, var(--accent) 4%, var(--bg)); }
 .tchart td.xcell .xval { min-height: 1.3em; min-width: 4em; cursor: text; border-radius: 4px; padding: 0 3px; white-space: pre-wrap; }
 .tchart td.xcell .xval.list { cursor: pointer; }
+.tchart td.xcell .xval.check { display: flex; justify-content: center; align-items: center; min-width: 2em; cursor: pointer; }
+.tchart td.xcell .xval.check input { width: 16px; height: 16px; margin: 2px; cursor: pointer; accent-color: var(--accent); }
 .tchart td.xcell .xval.empty { color: var(--faint); }
 .tchart td.xcell .xval:hover, .tchart td.xcell .xval:focus { background: var(--accent-soft); outline: none; }
 .tchart td.xcell textarea.xedit { width: 100%; min-width: 9em; border: 1px solid var(--accent); border-radius: 4px; padding: 1px 3px; font: inherit; background: var(--bg); color: var(--text); resize: none; }
@@ -1098,6 +1100,13 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 .tchart .cw-br { color: var(--muted); font-weight: 600; align-self: flex-start; }
 .tchart .cmoved.hidden, .tchart .cclause.hidden { display: none; }
 .tchart tr.clause-styled > td.ccell.empty { background: transparent; }
+/* a look's colour of the words (chart.js wordColour): the word line, morpheme forms and punctuation,
+   which carry FLEx's own colours and never inherited a row's or a cell's `color` */
+.tchart .look-c .il-txt, .tchart .look-c .il-morph, .tchart .look-c .cw.punct { color: var(--look-c); }
+/* a clause row's highlight (chart.js applyRowLook): a marker behind the row's words */
+.tchart tr.row-hl .il-txt { background: var(--row-hl); border-radius: 3px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+/* a clause row's brackets (chart.js rowBrackets) */
+.tchart .row-br { color: var(--muted); font-weight: 600; margin: 0 2px; font-family: var(--font); }
 
 /* the on / off / previous box on a tag group's heading (tagstyles.js examplePopover) */
 .tag-tree-head .tag-group-cb { margin: 0 6px 0 auto; order: 9; }

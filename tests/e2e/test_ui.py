@@ -4650,10 +4650,27 @@ def test_a_chart_note_with_custom_columns(app):
     assert page.locator("#chartnote tr.crow[data-label='2c'] td.ccell").first.evaluate("(e) => getComputedStyle(e).borderTopColor") == "rgba(0, 0, 0, 0)"
     assert page.locator("#chartnote tr.crow[data-label='2b']").evaluate("(e) => e.style.background") != ""   # the row style covers both rows
     assert page.locator("#chartnote tr.crow[data-label='1a']").evaluate("(e) => e.classList.contains('join-up')") is False   # the first row has nothing above
+    # A CHECKBOX COLUMN (Seth, 2026-10-20: "just a checkbox (ticked or not)"): one click ticks a row, saved as x
+    page.locator("[data-test=cn-add-col]").click()
+    page.fill("[data-test=cn-col-name]", "Checked")
+    page.select_option("[data-test=cn-col-kind]", "check")
+    assert "Checked:*" in page.locator(".cn-settings").inner_text()
+    page.locator("[data-test=cn-col-save]").click()
+    page.wait_for_function("() => document.querySelectorAll('#chartnote th.th-x').length === 5")
+    assert page.locator("#chartnote tr.crow [data-test=xcheck]").count() == 7
+    page.locator("#chartnote tr.crow[data-label='2c'] [data-test=xcheck]").click()
+    assert page.locator("#chartnote tr.crow[data-label='2c'] [data-test=xcheck]").is_checked()
+    saved()
+    assert "| Checked | check | |" in page.evaluate("() => window.__fsChartNote.markdown()")
+    page.locator("#chartnote tr.crow[data-label='3a'] [data-test=xcheck]").click()   # ticked and cleared again: no value kept
+    page.locator("#chartnote tr.crow[data-label='3a'] [data-test=xcheck]").click()
+    assert not page.locator("#chartnote tr.crow[data-label='3a'] [data-test=xcheck]").is_checked()
     saved()
     body = page.evaluate("() => window.__fsChartNote.markdown()")
     assert "## Custom columns" in body and "| Status | list | Information status |" in body and "| Role | rule | marker:new" in body
     assert "| 1b #" in body and "| Subject fronted |" in body and "| 1a #" in body and "| given |" in body, body
+    vals = body.split("## Values")[1]
+    assert re.search(r"\| 2c #[0-9a-f]+ \|.*\| x \|", vals) and "| 3a #" not in vals, vals
     # the exports carry the custom columns and the rule's row style (Seth, 2026-10-18: "pretty exports for chart-type notes")
     html_path, docx_path = str(h.tmp / "cn.html"), str(h.tmp / "cn.docx")
     html = page.evaluate("""async ([hp, dp]) => {
@@ -4671,6 +4688,7 @@ def test_a_chart_note_with_custom_columns(app):
         assert rows[0]["Nucleus/Subject"] == "Kabir" and rows[0]["Markers"] == "New"
     except ImportError:
         pass
+    assert ">Checked<" in html and "\u2713" in html, "the ticked box exports as a tick"
     assert '<th class="xh" rowspan="2">Role</th>' in html and "Subject fronted" in html and "background:#fde68a" in html and ">given<" in html, html[:600]
     import zipfile
     xml = zipfile.ZipFile(docx_path).read("word/document.xml").decode("utf-8")
@@ -5285,6 +5303,61 @@ def test_the_groups_view_and_lining_up_on_a_column(app):
     page.wait_for_function("() => !document.querySelector('#editor .chart-obj.flat')")
     td = page.locator("#editor .chart-obj tr.crow[data-label='3b'] td.ccell[data-col='3']")
     assert td.get_attribute("colspan") == "2" and td.evaluate("(e) => e.classList.contains('cmerged')") and td.locator(".cmerge-in").count() == 1
+    assert not errors
+
+
+def test_clause_rows_take_every_text_style_and_any_row_colour(app):
+    """Seth, 2026-10-20: "all the same styling options for speech and dependent and song clause rows that I
+    have for cells and words: brackets, borders, highlights … (the text color doesn't seem to be working)",
+    and "ANY color (full color wheel/picker) as a row background" in the row's own popover."""
+    h, page, errors = app
+    new_note(page, "Clause rows")
+    page.keyboard.type("{{flex:chart %s}}" % CHART)
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#editor .chart-obj tr.crow")
+    obj = page.locator("#editor .chart-obj")
+    # the ⚑ popover offers a speech row the text controls, not only a colour
+    obj.locator("[data-test=marker-btn]").click()
+    row = page.locator(".popover .tagrow[data-tag='clause:speech']")
+    row.wait_for()
+    row.locator("button", has_text="Style").first.click()
+    for t in ["tag-br", "tag-hl", "tag-tile", "tag-box"]:
+        assert page.locator(".popover [data-test=%s]" % t).count() >= 1, t
+    page.keyboard.press("Escape")
+    page.evaluate("""async () => {
+      const c = await window.pywebview.api.set_tag_styles('project', FS.tagstyles.context().project, [
+        {tag: 'clause:speech', bg: '#fde68a', br: 'sq', box: true, bs: 'dashed', bw: 3, bc: '#0f766e', hl: true, c: '#c0392b'}]);
+      FS.tagstyles.setConfig(c); FS.emit('tagstyles');
+    }""")
+    page.wait_for_selector("#editor .chart-obj tr.clause-styled")
+    r2a = obj.locator("tr.crow[data-label='2a']")
+    assert r2a.evaluate("e => e.classList.contains('row-hl') && e.classList.contains('row-box') && e.style.outlineStyle === 'dashed' && e.style.outlineWidth === '3px'")
+    assert r2a.locator(".row-br-open").inner_text() == "[" and r2a.locator(".row-br-close").inner_text() == "]"
+    # the words really turn red (the word line keeps FLEx blue unless the look reaches it)
+    assert r2a.locator(".il-txt").first.evaluate("e => getComputedStyle(e).color") == "rgb(192, 57, 43)"
+    assert r2a.locator(".il-txt").first.evaluate("e => getComputedStyle(e).backgroundColor") != "rgba(0, 0, 0, 0)"
+    # a row that is not a speech clause is untouched
+    assert obj.locator("tr.crow[data-label='1a']").evaluate("e => !e.classList.contains('clause-styled')")
+    # the row's own popover: ANY colour as the row's background, the label cell and the cells painted
+    obj.locator("tr.crow[data-label='1a'] th.rlab").click()
+    page.wait_for_selector(".popover [data-test=chart-bg-any]")
+    assert "Background" in page.locator(".popover").inner_text()
+    page.locator(".popover [data-test=chart-bg-any]").evaluate("e => { e.value = '#3a86ff'; e.dispatchEvent(new Event('change', {bubbles: true})); }")
+    page.wait_for_function("() => window.__fsEditor.getMarkdown().includes('hl[#3a86ff]=r1')")
+    page.keyboard.press("Escape")
+    r1a = obj.locator("tr.crow[data-label='1a']")
+    r1a.wait_for()
+    page.wait_for_function("() => { const t = document.querySelector(\"#editor .chart-obj tr.crow[data-label='1a'] th.rlab\"); return t && getComputedStyle(t).backgroundColor === 'rgb(58, 134, 255)'; }")
+    assert r1a.locator("td.ccell").first.evaluate("e => getComputedStyle(e).backgroundColor") == "rgb(58, 134, 255)"
+    # and any colour for the words, which reaches the word line
+    r1a.locator("th.rlab").click()
+    page.wait_for_selector(".popover [data-test=chart-color-any]")
+    page.locator(".popover [data-test=chart-color-any]").evaluate("e => { e.value = '#7a3e9d'; e.dispatchEvent(new Event('change', {bubbles: true})); }")
+    page.wait_for_function("() => window.__fsEditor.getMarkdown().includes('color[#7a3e9d]=r1')")
+    page.keyboard.press("Escape")
+    page.wait_for_function("() => { const t = document.querySelector(\"#editor .chart-obj tr.crow[data-label='1a'] .il-txt\"); return t && getComputedStyle(t).color === 'rgb(122, 62, 157)'; }")
+    if os.environ.get("FS_SHOT_DIR"):
+        obj.screenshot(path=os.path.join(os.environ["FS_SHOT_DIR"], "clause-rows.png"))
     assert not errors
 
 

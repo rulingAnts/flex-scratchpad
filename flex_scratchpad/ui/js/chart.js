@@ -686,19 +686,13 @@
         if (look.b) tr.style.fontWeight = '700';
         if (look.i) tr.style.fontStyle = 'italic';
         if (look.u) tr.style.textDecoration = 'underline';
-        if (look.c) tr.style.color = look.c;
+        if (look.c) wordColour(tr, look.c);
       }
       // a clause TYPE's look (Seth, 2026-10-19: dependent / speech / song clauses as visual filters): the whole row
+      let rowLook = null;
       if (row.clause && row.clause !== 'normal') {
         const lk = pseudoLook('clause:' + row.clause, obj, spec);
-        if (lk && lk.styled && !lk.hide) {
-          tr.classList.add('clause-styled');
-          if (lk.bg) tr.style.background = rgba(lk.bg, 0.45);
-          if (lk.c) tr.style.color = lk.c;
-          if (lk.b) tr.style.fontWeight = '700';
-          if (lk.i) tr.style.fontStyle = 'italic';
-          if (lk.u) tr.style.textDecoration = 'underline';
-        }
+        if (lk && lk.styled && !lk.hide) { applyRowLook(tr, lk); rowLook = lk; }
       }
       const g = groups.get(ri) || {};
       const lab = el('th', { class: 'rlab', title: 'Row ' + row.label + (row.clause && row.clause !== 'normal' ? ' — ' + row.clause + ' clause' : '') + (row.endSent ? '; ends the sentence' : '') + (row.endPara ? '; ends the paragraph' : '') + (opts.editable ? '. Click to style the row.' : '') },
@@ -760,6 +754,12 @@
         tr.appendChild(el('td', { class: 'cfree', rowspan: run.to > run.from ? run.to - run.from + 1 : null, lang: anal.tag || null, title: 'Free translation of ' + (run.segs.length ? 'segment' + (run.segs.length > 1 ? 's ' : ' ') + run.segs.map((n) => (segsByN(obj).get(n) || { label: n }).label).join(', ') : 'this row') }, t.join(' ')));
       }
       if (notesOn) tr.appendChild(el('td', { class: 'cnotes', lang: anal.tag || null }, row.notes || ''));
+      if (rowLook && rowLook.br) rowBrackets(tr, rowLook.br);
+      // the row's OWN background from its popover (Seth, 2026-10-20: "ANY color … as a row background")
+      // reaches the label and the custom columns too, not only the chart's cells
+      const rowSt = R.chartStylesFor(index, row.n, -1, 0, '');
+      const rowHl = rowSt.find((st) => st.style === 'hl');
+      if (rowHl) for (const c of tr.querySelectorAll(':scope > th.rlab, :scope > td.xcell')) c.style.background = rowHl.color || 'var(--hl)';
       tbody.appendChild(tr);
       if (freeAfter.length) {
         const run = runEnd.get(ri);
@@ -884,6 +884,42 @@
       return look;
     } catch (e) { return null; }
   }
+  /* A look's COLOUR OF THE WORDS (Seth, 2026-10-20: a clause row's text colour "doesn't seem to be
+   * working"): the word lines carry their own colours (FLEx blue, gloss green), so `color` on a
+   * row or a cell never reached them. Like an example's `c`, it colours the WORD line (and the
+   * morpheme forms and punctuation) through `--look-c`, read by the CSS under `.look-c`. */
+  function wordColour(node, c) { if (!c) return; node.style.color = c; node.style.setProperty('--look-c', c); node.classList.add('look-c'); }
+  /* A CLAUSE ROW's look (Seth, 2026-10-20: "all the same styling options for speech and dependent and
+   * song clause rows that I have for cells and words: brackets, borders, highlights"): the colour
+   * alone tints the row (as it always did), `tile` tints it in its own colour, `hl` marks the
+   * words, `box` draws a border round the whole row, `br` brackets the row's content (rowBrackets,
+   * once the cells are in), `c` the words' colour, B I U. */
+  function applyRowLook(tr, lk) {
+    tr.classList.add('clause-styled');
+    const tint = lk.tile ? (lk.tc || lk.bg) : (!lk.hl ? lk.bg : '');
+    if (tint) tr.style.background = rgba(tint, lk.tile ? 0.35 : 0.45);
+    if (lk.hl) { tr.classList.add('row-hl'); tr.style.setProperty('--row-hl', rgba(lk.bg || '#fff2a8', 0.6)); }
+    if (lk.box) { const w = (lk.bw || 2) + 'px'; tr.classList.add('row-box'); tr.style.outline = w + ' ' + (lk.bs || 'solid') + ' ' + (lk.bc || lk.bg || 'currentColor'); tr.style.outlineOffset = '-' + w; }
+    wordColour(tr, lk.c);
+    if (lk.b) tr.style.fontWeight = '700';
+    if (lk.i) tr.style.fontStyle = 'italic';
+    if (lk.u) tr.style.textDecoration = 'underline';
+  }
+  /* Brackets round a row's content: the opening one on the word line of the first cell that holds
+   * anything, the closing one after the last word of the last (a bracket of its own in a narrow
+   * column wrapped onto a line by itself); a cell with no words takes it at its start / end. */
+  function rowBrackets(tr, key) {
+    const B = FS.tagstyles && FS.tagstyles.BRACKETS, br = key && B && B[key];
+    if (!br) return;
+    const full = [...tr.querySelectorAll(':scope > td.ccell')].filter((td) => !td.classList.contains('empty') && td.textContent.trim());
+    if (!full.length) return;
+    const first = full[0], last = full[full.length - 1];
+    const lines = (td) => [...td.querySelectorAll('.il-txt')].filter((e) => !e.closest('.hidden, .cflat-void'));
+    const a = lines(first)[0] || first.querySelector('.al-l') || first.querySelector('.cmerge-in') || first;
+    const zs = lines(last), z = zs[zs.length - 1] || last.querySelector('.al-r') || last.querySelector('.cmerge-in') || last;
+    a.insertBefore(el('span', { class: 'row-br row-br-open' }, br[0]), a.firstChild);
+    z.appendChild(el('span', { class: 'row-br row-br-close' }, br[1]));
+  }
   const LOOK_KEYS = ['bg', 'fg', 'hl', 'tile', 'tc', 'box', 'bw', 'bs', 'bc', 'br', 'c', 'b', 'i', 'u', 'hide', 'label'];
   const lookKeys = (lk) => { const o = {}; for (const k of LOOK_KEYS) if (lk[k] != null && lk[k] !== '' && lk[k] !== false) o[k] = lk[k]; return o; };
   function pseudoLook(key, obj, spec) {
@@ -919,7 +955,7 @@
         if (look.bs && look.bs !== 'solid') node.style.outline = w + ' ' + look.bs + ' ' + col;
       }
     }
-    if (look.c && !heading) node.style.color = look.c;
+    if (look.c && !heading) wordColour(node, look.c);
     if (look.b) node.style.fontWeight = '700';
     if (look.i) node.style.fontStyle = 'italic';
     if (look.u) node.style.textDecoration = 'underline';
@@ -929,7 +965,7 @@
     const bg = look.tile ? (look.tc || look.bg) : look.hl ? look.bg : '';
     if (bg) g.style.background = rgba(bg, look.tile ? 0.45 : 0.6);
     if (look.box) { g.style.outline = (look.bw || 2) + 'px ' + (look.bs || 'solid') + ' ' + (look.bc || look.bg || 'currentColor'); g.style.outlineOffset = '1px'; }
-    if (look.c) g.style.color = look.c;
+    if (look.c) wordColour(g, look.c);
     if (look.b) g.style.fontWeight = '700';
     if (look.i) g.style.fontStyle = 'italic';
     if (look.u) g.style.textDecoration = 'underline';
@@ -1011,7 +1047,7 @@
       const bg = look.tile ? (look.tc || look.bg) : look.hl ? look.bg : '';
       if (bg) wrap.style.background = rgba(bg, look.tile ? 0.45 : 0.6);
       if (look.box) { wrap.style.border = (look.bw || 2) + 'px ' + (look.bs || 'solid') + ' ' + (look.bc || look.bg || 'currentColor'); wrap.style.borderRadius = '4px'; }
-      if (look.c) wrap.style.color = look.c;
+      if (look.c) wordColour(wrap, look.c);
       if (look.b) wrap.style.fontWeight = '700';
       if (look.i) wrap.style.fontStyle = 'italic';
       if (look.u) wrap.style.textDecoration = 'underline';
@@ -1024,7 +1060,7 @@
       const bg = nbLook.tile ? (nbLook.tc || nbLook.bg) : nbLook.hl ? nbLook.bg : '';
       if (bg) outer.style.background = rgba(bg, nbLook.tile ? 0.3 : 0.45);
       if (nbLook.box) { outer.style.border = (nbLook.bw || 2) + 'px ' + (nbLook.bs || 'solid') + ' ' + (nbLook.bc || nbLook.bg || 'currentColor'); outer.style.borderRadius = '5px'; }
-      if (nbLook.c) outer.style.color = nbLook.c;
+      if (nbLook.c) wordColour(outer, nbLook.c);
       const B2 = FS.tagstyles && FS.tagstyles.BRACKETS;
       const br2 = nbLook.br && B2 && B2[nbLook.br];
       if (br2) { outer.insertBefore(el('span', { class: 'cflat-br' }, br2[0]), wrap); outer.appendChild(el('span', { class: 'cflat-br' }, br2[1])); }
@@ -1036,7 +1072,7 @@
   function applyCellStyles(td, styles) {
     for (const s of styles) {
       if (s.style === 'hl') { td.classList.add('st-hl'); if (s.color) td.style.background = s.color; }
-      else if (s.style === 'color' && s.color) td.style.color = s.color;
+      else if (s.style === 'color' && s.color) wordColour(td, s.color);
       else if (s.style === 'b') td.style.fontWeight = '700';
       else if (s.style === 'i') td.style.fontStyle = 'italic';
       else if (s.style === 'u') td.style.textDecoration = 'underline';
@@ -1164,14 +1200,28 @@
           for (const l of R.chartLines(spec)) sel.appendChild(el('option', { value: l, selected: l === state.line }, LINE_NAMES[l] || l));
           rows.appendChild(el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Line'), sel));
         }
-        const hlRow = el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Highlight'));
+        // ANY colour, not only the swatches (Seth, 2026-10-20: "ANY color (full color wheel/picker) as a row
+        // background"): a colour input after the swatches; on a row, a cell or a column the highlight IS
+        // the background, so it says so
+        const bgName = state.scope === 'word' ? 'Highlight' : 'Background';
+        const picker = (style, swatches, fallback, test, title) => {
+          const cur = (spec.styles || []).find((g) => g.style === style && g.color && g.targets.some((t) => has(style, g.color)));
+          const custom = cur && !swatches.includes(cur.color) ? cur.color : '';
+          const inp = el('input', { type: 'color', value: custom || fallback, 'data-test': test, title, class: custom ? 'on' : null });
+          inp.addEventListener('change', () => { if (!has(style, inp.value)) apply(style, inp.value); });
+          const off = (spec.styles || []).some((g) => g.style === style && has(style, g.color || '')) ? el('button', { class: 'tog', title: 'No ' + (style === 'hl' ? bgName.toLowerCase() : 'colour'), 'data-test': test + '-none', onclick: () => { const g = (spec.styles || []).find((x) => x.style === style && has(style, x.color || '')); if (g) apply(style, g.color || ''); } }, 'none') : null;
+          return [inp, off];
+        };
+        const hlRow = el('div', { class: 'row' }, el('span', { class: 'lbl' }, bgName));
         for (const c of HL_COLORS) hlRow.appendChild(el('button', { class: 'sw' + (has('hl', c) ? ' on' : ''), style: { background: c || 'var(--hl)' }, title: c || 'default', onclick: () => apply('hl', c) }));
+        hlRow.append(...picker('hl', HL_COLORS, '#ffe08a', 'chart-bg-any', 'Any colour' + (state.scope === 'word' ? '' : ' as the ' + state.scope + '’s background')).filter(Boolean));
         rows.appendChild(hlRow);
         const tRow = el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Text'));
         for (const [st, label] of [['b', 'Bold'], ['u', 'Underline'], ['i', 'Italic'], ['s', 'Strike']]) tRow.appendChild(el('button', { class: 'tog' + (has(st, '') ? ' on' : ''), onclick: () => apply(st, '') }, label));
         rows.appendChild(tRow);
         const cRow = el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Colour'));
         for (const c of TXT_COLORS) cRow.appendChild(el('button', { class: 'sw' + (has('color', c) ? ' on' : ''), style: { background: c }, onclick: () => apply('color', c) }));
+        cRow.append(...picker('color', TXT_COLORS, '#1a1d21', 'chart-color-any', 'Any colour for the words').filter(Boolean));
         rows.appendChild(cRow);
         rows.appendChild(el('hr'));
         rows.appendChild(el('div', { class: 'row' },
