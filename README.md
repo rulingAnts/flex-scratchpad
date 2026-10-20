@@ -384,3 +384,5 @@ needs a human with FieldWorks (`flex-scratchpad --check`, then connect in Settin
 ## Licence
 
 AGPL-3.0-or-later. flexicon is LGPL-2.1-or-later and is used as a library; it is not bundled.
+
+FieldWorks and FLEx are SIL International's. Logos is a trademark of Faithlife, LLC, named here only to compare a feature; FLEx Scratchpad is independent of both and is not endorsed by either.
