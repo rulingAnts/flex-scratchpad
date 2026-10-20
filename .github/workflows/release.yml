@@ -7,7 +7,10 @@
 # as a release instead of a pre-release" — a cloud session may push its branch but not a tag, nor
 # edit a release): Actions › Release › Run workflow on a branch, with `tag` = the tag to make at that
 # branch's head (and `final` to publish it as a full release), or `promote` = an existing tag to
-# mark as a full release and the latest, which builds nothing.
+# mark as a full release and the latest, which builds nothing. EVERY RELEASE ALSO LANDS ON MAIN
+# (Seth, 2026-10-20: "every time we push a release (or pre-release), we should also commit and push
+# to main"): the `main` job fast-forwards main to the released commit — after a pushed tag, after a
+# manual release, and on a manual run with neither `tag` nor `promote`, which does only that.
 # Public repository, standard runners (windows-latest, ubuntu-latest): free. No schedule.
 name: Release
 
@@ -29,6 +32,10 @@ on:
         description: "Instead: mark this EXISTING release's tag as a full release and the latest; builds nothing"
         required: false
         default: ""
+      main:
+        description: "Also fast-forward main to this commit (Seth, 2026-10-20: every release also lands on main). With neither tag nor promote: only that"
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -92,3 +99,23 @@ jobs:
             --title "FLEx Scratchpad $VERSION" \
             --notes-file build/RELEASE-NOTES.md \
             "${flags[@]}"
+
+  main:
+    # every release also lands on main; a bare manual run (no tag, no promote) does only this
+    needs: [version, package, publish]
+    if: ${{ always() && inputs.main != false && inputs.promote == '' && (needs.publish.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.tag == '')) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fast-forward main to this commit
+        run: |
+          git fetch origin main
+          if git merge-base --is-ancestor origin/main HEAD; then
+            git push origin HEAD:refs/heads/main
+            echo "main → $(git rev-parse --short HEAD)"
+          else
+            echo "::error::main has commits this branch does not: merge main into the branch first, then release again" >&2
+            exit 1
+          fi

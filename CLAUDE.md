@@ -697,11 +697,17 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   `.modal` is capped at `calc(100vh - 24px)` with `.modal-body { min-height: 0; flex: 1 1 auto }` so
   the body scrolls and the head stays. The ⋯ menu's "Merged cells" and "Marker chips" rows sit right
   under Layout, before the long column lists.
+  A TITLED POPOVER HAS A STICKY HEAD (Seth, 2026-10-20: the ⚑ popover's close "is not clearly visible. It should
+  be clearly visible and it should be sticky"): `FS.popover(anchor, build, {title})` prepends `.pop-head` — the
+  title and a ✕ (`pop-close`) — sticky at the top of the scrolling popover; the ⚑ popover ("What this chart draws,
+  and how" / "FLEx text markup tags on this example") and the chart's ⋯ menu ("Chart options") use it.
   MERGED CELLS (Seth, 2026-10-19, agreed after the question was put to him: "I merge columns when
   I'm unsure which column it is because it could be either"): a part merged with its empty
   neighbour (FLEx's MergesAfter / MergesBefore, on word groups and markers alike) belongs to BOTH
-  columns. `mergeMode(spec)` = `both` (default) | `owner` | `lookowner` (`merge=` in the embed, the
-  ⋯ menu's "Merged cells" select); `mergedNeighbour(part, allCols)` = the TEMPLATE neighbour (flat
+  columns. `mergeMode(spec)` = `both` (default) | `labels` | `lookowner` | `owner` (`merge=` in the embed, the
+  ⋯ menu's "Merged cells" select — Seth, 2026-10-20: "that needs to be clear in the documentation", so the README
+  row says where; `labels` = both for the data, both NAMED in the flat views, the owner's look only: "both labels …
+  but not both borders"; `lookowner` = the owner's look AND name); `mergedNeighbour(part, allCols)` = the TEMPLATE neighbour (flat
   views keep the flags as `srcMergeAfter` / `srcMergeBefore` and clear the real ones, so a group cell
   never spans into the next); `partColumns(part, allCols, spec, forLook)` = [owner, neighbour]. DATA:
   `visibleColumns`'s empty check counts the neighbour as used; `layoutRow(row, cols, allCols)` spans
@@ -717,6 +723,20 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   `flatWrap` labels the part `S+V` and wraps `.cflat-outer` (tint / border / brackets / colour of the
   neighbour) round the owner's `.cflat-g`; `unitOf(i, span)` closes a group unit after the span. The
   Python search always counts both (it cannot see an embed's choice). Exports: the owner's look.
+  MERGED CELLS AS A FILTER TARGET (Seth, 2026-10-20: "a special visual filter just for merged cells of any kind? Or
+  for merged cells that start with a certain column, so for example PRED that is merged right"): rules keyed
+  `merged:*`, `merged:right` / `merged:left` (the side the owner's cell extends into: MergesAfter = right), `merged:<Group/Name>`
+  (also the column's name or abbreviation) and `merged:<Group/Name>:right|left` — a fifth namespace in `matches`
+  (a drawn part carries `merged: {col, name, abbr, dir}`, `T.mergedItem(col, dir)`; the popover's own rows are
+  pseudo-items `merged:*|right|left` in STRUCTURE, `skind: 'merged'`, plus one per present (owner column, side) from
+  `structureIn`), ranked column+side < column < side < any (`rank`). `chart.mergedLook(part, allCols, obj, spec)`
+  resolves it; `flatWrap` lays its keys over the column look (`lookKeys`), the columns view applies it on the cell after
+  the column looks (`.merged-styled`). `addTagPicker` lists `merged:*|right|left` under Chart structure and, under
+  "Merged cells, by column", every known column × (either side, right, left); `T.mergedFromKey` names a written key
+  in the rule lists. `tests/js/tagstyles.test.js` pins the matching and ranking.
+  CHIPS UNDER THE WORDS (Seth, 2026-10-20: in the groups view "on a line of their own" stacked the chips to the right
+  of the words): `.cflat-body` is an inline-flex ROW, so a block `.chips-line` was just another flex item; the body now
+  wraps and the chip line is `flex: 1 0 100%`, a row of its own under the words, in every flat wrapper.
   COLUMN STYLES (Seth, 2026-10-18: "apply specific styles to specific columns … and configure them
   myself"): the chart's ⚑ popover lists its template COLUMNS after the markers and the text's tags
   (`tagstyles.columnsIn(obj)` — tag items with `column: true`, `opts.fullChart` so the one-column
@@ -1283,7 +1303,12 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   installs / upgrades / uninstalls silently with checks, and only then publishes the PRE-release
   with `build/RELEASE-NOTES.md`. `ci.yml`'s manual dispatch runs the same packaging as an artifact.
   `build_id()` reads the `BUILD_ID` the spec stamps (a frozen build has no .py files to hash).
-  Unsigned: SmartScreen says so.
+  Unsigned: SmartScreen says so. RUN BY HAND (2026-10-20): Actions › Release › Run workflow — `tag` makes and
+  releases that tag at the chosen branch's head (`final` for a full release), `promote` marks an existing release
+  final and latest; a cloud session can push its branch but neither a tag nor a release edit, nor main. EVERY
+  RELEASE ALSO LANDS ON MAIN (Seth, 2026-10-20: "every time we push a release (or pre-release), we should also
+  commit and push to main"): the workflow's `main` job fast-forwards main to the released commit (a bare manual
+  run with neither input does only that); it refuses when main holds commits the branch lacks — merge first.
 - THE SITE is `docs/` (GitHub Pages from `/docs`), in LingTeX Tools' pattern (its tokens and
   components, `assets/media.js` verbatim): hero with the loop video, three steps with stills,
   features, install, a pre-release band. `assets/release.js` moves every download link and the
