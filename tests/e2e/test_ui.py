@@ -710,6 +710,10 @@ def test_export_html_and_docx(app):
     page.keyboard.press("Enter")
     page.keyboard.type("| Form | Example |\n|---|---|\n| kabir | {{flex:entry 6a5f3a2e-1b1e-4c2a-9f10-0d2c1a7e0001}} |")
     page.wait_for_selector("#editor .text-obj")
+    page.locator("#editor .blk-body").last.click()
+    page.keyboard.press("End")
+    page.keyboard.press("Enter")
+    page.keyboard.type("> A quotation, without its marker in the export")
     page.wait_for_timeout(900)
     html_path = str(h.tmp / "note.html")
     docx_path = str(h.tmp / "note.docx")
@@ -724,6 +728,7 @@ def test_export_html_and_docx(app):
       return FS.exporter.toHtml(doc);
     }""", [html_path, docx_path])
     assert "<b>bold</b>" in html and 'class="obj"' in html and "ka-nuwa-mo" in html and "<u>-mo</u>" in html
+    assert "<blockquote>A quotation, without its marker in the export</blockquote>" in html, html
     # the entry sits in a table cell as a CHIP, so it exports as a link into FLEx (Seth, 2026-10-18), not in full
     assert "The dog slept." in html and 'href="silfw://' in html and "kabir" in html and "a domestic dog" not in html
     assert (h.tmp / "note.html").read_text(encoding="utf-8").startswith("<!doctype html>")

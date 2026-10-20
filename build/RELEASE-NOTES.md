@@ -4,6 +4,7 @@ FLEx Scratchpad is a notebook for FieldWorks: notes in tabs and folders that sho
 
 ### New in this pre-release
 
+- **A user guide on the website** ([rulingants.github.io/flex-scratchpad/guide](https://rulingants.github.io/flex-scratchpad/guide/)): everything the program does, section by section with a table of contents, every picture taken from the real program. Also: a quotation in a note exported without its `>` markers (the web page and Word exports kept them).
 - **A FLEx concordance search becomes a collection.** Run the concordance (or complex concordance) in FieldWorks, *File › Export Concordance Results…*, then `+ New ▾` → *New collection from a FLEx concordance export…* and choose that CSV: every line it lists is placed in your project (the text by its name in any writing system, the line by FLEx's number, the baseline checked) and becomes an example, in the file's order; what could not be placed is listed at the end of the collection.
 - **Copy a few lines of an example, or a few rows of a chart.** Click line numbers (Shift for a range) or Ctrl+click chart row labels, then Copy: pasted into a note they are a new example of just those lines; pasted into a sheet they are FLEx's rows, a chart's with its headers.
 - **A chart as an example, an example as a chart.** A chart object's ⋯ menu turns it into an interlinear example of every line its rows touch; an example's ⋯ menu turns it into the rows of the text's chart that hold its lines. Inclusive both ways; trim the range afterwards as usual.

@@ -1,0 +1,78 @@
+/* The user guide (docs/guide/): a table of contents beside long-form text with pictures of the
+   real program. Builds on site.css's tokens. */
+
+.guide-wrap { max-width: 1240px; margin: 0 auto; padding: 28px 20px 60px; display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 36px; align-items: start; }
+.guide-head { grid-column: 1 / -1; padding: 8px 0 4px; }
+.guide-head h1 { font-size: clamp(1.7rem, 3vw, 2.3rem); letter-spacing: -0.03em; line-height: 1.12; margin-bottom: 10px; }
+.guide-head .lead { color: var(--slate-600); max-width: 760px; font-size: 1.04rem; }
+.guide-head .meta { margin-top: 10px; font-size: 0.86rem; color: var(--slate-500); display: flex; gap: 6px 18px; flex-wrap: wrap; }
+
+.toc { position: sticky; top: 72px; max-height: calc(100vh - 88px); overflow: auto; background: #fff; border: 1px solid var(--slate-200); border-radius: var(--r-lg); padding: 14px 6px 14px 14px; font-size: 0.86rem; }
+.toc h2 { font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--slate-500); margin: 0 0 8px; }
+.toc ol { list-style: none; counter-reset: sec; }
+.toc > ol > li { counter-increment: sec; margin: 0 0 2px; }
+.toc > ol > li > a::before { content: counter(sec) " "; color: var(--slate-400); font-variant-numeric: tabular-nums; display: inline-block; width: 1.5em; }
+.toc a { display: block; color: var(--slate-700); padding: 4px 8px; border-radius: 6px; line-height: 1.3; }
+.toc a:hover { background: var(--slate-100); text-decoration: none; }
+.toc a.active { background: var(--blue-50); color: var(--blue-800); font-weight: 600; }
+.toc ol ol { margin: 2px 0 6px 1.5em; display: none; border-left: 2px solid var(--slate-100); }
+.toc li.open > ol { display: block; }
+.toc ol ol a { padding: 3px 8px; font-size: 0.82rem; color: var(--slate-600); }
+.toc-mobile { display: none; }
+
+.guide { min-width: 0; }
+.guide section { background: #fff; border: 1px solid var(--slate-200); border-radius: var(--r-lg); padding: 26px 30px 30px; margin-bottom: 22px; scroll-margin-top: 70px; }
+.guide h2 { font-size: 1.55rem; letter-spacing: -0.02em; line-height: 1.2; margin: 0 0 8px; }
+.guide h2 .num { color: var(--blue-700); margin-right: 8px; font-variant-numeric: tabular-nums; }
+.guide h3 { font-size: 1.1rem; margin: 26px 0 8px; letter-spacing: -0.01em; scroll-margin-top: 70px; }
+.guide h4 { font-size: 0.98rem; margin: 18px 0 6px; }
+.guide p, .guide li { color: var(--slate-700); font-size: 0.96rem; }
+.guide p { margin: 0 0 12px; }
+.guide ul, .guide ol { margin: 0 0 12px 1.3rem; display: grid; gap: 5px; }
+.guide .lead { color: var(--slate-600); font-size: 1.02rem; margin-bottom: 16px; }
+.guide .intro { color: var(--slate-600); margin-bottom: 18px; }
+.guide kbd { font: 600 0.8rem var(--mono); background: var(--slate-100); border: 1px solid var(--slate-200); border-bottom-width: 2px; border-radius: 5px; padding: 0 5px; white-space: nowrap; }
+.guide code { white-space: nowrap; }
+.guide pre { background: var(--slate-900); color: #e2e8f0; border-radius: var(--r); padding: 12px 14px; font: 0.82rem/1.5 var(--mono); overflow-x: auto; margin: 0 0 14px; }
+.guide pre code { background: none; padding: 0; color: inherit; white-space: pre; font-size: inherit; }
+.guide .ui { font-weight: 600; color: var(--slate-800); }
+.guide .note { background: var(--blue-50); border: 1px solid var(--blue-100); border-radius: var(--r); padding: 10px 14px; margin: 0 0 14px; font-size: 0.92rem; color: var(--slate-700); }
+.guide .note.warn { background: #fffbeb; border-color: var(--amber-200); }
+.guide .note b { color: var(--slate-900); }
+.guide .wip { background: #fffbeb; border: 1px solid var(--amber-200); color: var(--amber-900); border-radius: var(--r); padding: 8px 12px; font-size: 0.88rem; margin: 0 0 14px; }
+
+.shot { margin: 14px 0 20px; border: 1px solid var(--slate-200); border-radius: var(--r); overflow: hidden; background: var(--slate-50); }
+.shot img { display: block; width: 100%; height: auto; }
+.shot figcaption { padding: 8px 12px; font-size: 0.86rem; color: var(--slate-600); border-top: 1px solid var(--slate-200); background: #fff; }
+.shot.half { max-width: 560px; }
+.shots { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 14px 0 20px; }
+.shots .shot { margin: 0; }
+
+.guide table.ref { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin: 6px 0 18px; }
+.guide table.ref th, .guide table.ref td { text-align: left; vertical-align: top; padding: 7px 10px; border-bottom: 1px solid var(--slate-200); }
+.guide table.ref th { background: var(--slate-50); color: var(--slate-600); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
+.guide table.ref td:first-child { white-space: nowrap; font-weight: 600; color: var(--slate-800); }
+.guide table.ref td code, .guide table.ref td kbd { white-space: nowrap; }
+.guide table.ref.wrap td:first-child { white-space: normal; }
+.guide .cols2 { columns: 2; column-gap: 28px; }
+.guide .cols2 > * { break-inside: avoid; }
+.guide dl { margin: 0 0 14px; display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; font-size: 0.94rem; }
+.guide dt { font-weight: 600; color: var(--slate-800); }
+.guide dd { color: var(--slate-700); }
+.back-top { display: inline-block; margin-top: 14px; font-size: 0.82rem; color: var(--slate-500); }
+
+@media (max-width: 960px) {
+  .guide-wrap { grid-template-columns: 1fr; gap: 18px; }
+  .toc { position: static; max-height: none; display: none; }
+  .toc-mobile { display: block; background: #fff; border: 1px solid var(--slate-200); border-radius: var(--r-lg); padding: 10px 14px; }
+  .toc-mobile summary { cursor: pointer; font-weight: 600; }
+  .toc-mobile ol { margin: 10px 0 0 1.2rem; display: grid; gap: 4px; font-size: 0.9rem; }
+  .toc-mobile ol ol { margin: 4px 0 6px 1rem; }
+  .shots { grid-template-columns: 1fr; }
+  .guide section { padding: 20px 18px 22px; }
+  .guide .cols2 { columns: 1; }
+  .guide dl { grid-template-columns: 1fr; }
+  .guide table.ref { display: block; overflow-x: auto; }
+  .guide table.ref td code, .guide code { white-space: normal; overflow-wrap: anywhere; }
+  .guide table.ref td:first-child { white-space: normal; }
+}

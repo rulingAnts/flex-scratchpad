@@ -50,7 +50,9 @@ FieldWorks 9 on the same computer to read a project, and the Edge WebView2 runti
 it; Setup says when it is missing). It isn't signed yet: on "Windows protected your PC" choose
 **More info → Run anyway**. Setup installs per user (no administrator), a newer Setup upgrades in
 place, and uninstalling keeps your notebooks. `FLEx Scratchpad.exe --selftest report.json` reports
-what a copy can and cannot find. The user-facing page is [`docs/index.html`](docs/index.html).
+what a copy can and cannot find. The user-facing page is [`docs/index.html`](docs/index.html), and the
+**[user guide](https://rulingants.github.io/flex-scratchpad/guide/)** (`docs/guide/`) walks through everything the
+program does, with pictures of it.
 
 ## Install from source (Windows, with FieldWorks)
 

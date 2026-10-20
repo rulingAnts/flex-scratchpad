@@ -395,7 +395,8 @@
     for (const b of editor.blocks) {
       if (b.type !== 'list' && b.type !== 'p') numCtx.counters = [];
       if (b.type === 'p' || b.type === 'quote') {
-        const parts = await textWithEmbeds(b.src);
+        // a quote's lines carry their `> ` in the note; the exports draw the block as a quotation
+        const parts = await textWithEmbeds(b.type === 'quote' ? b.src.replace(/^>[ \t]?/gm, '') : b.src);
         for (const part of parts) blocks.push(part.type ? part : { type: b.type, runs: part.runs });
       } else if (b.type === 'h') {
         const m = /^(#{1,6})\s+(.*)$/.exec(b.src);
