@@ -39,13 +39,32 @@
       <a href="https://github.com/rulingAnts/flex-scratchpad/issues">Report an issue</a>
     </div>
     <div class="legend" id="legend">
-      <p><b>Which version this describes.</b> This guide describes FLEx Scratchpad <b>0.1.0-beta.2</b>, the current release. Two kinds of flag mark what is newer:</p>
+      <p><b>Which version this describes.</b> This guide describes FLEx Scratchpad <b>0.1.0-beta.2</b>, the current release. Two kinds of flag mark what is newer, and each version is a download of its own:</p>
       <ul>
-        <li><span class="rel rel-pre">beta.3</span> is in the <a href="https://github.com/rulingAnts/flex-scratchpad/releases/tag/v0.1.0-beta.3">pre-release 0.1.0-beta.3</a> and not in beta.2. Sections 8 to 10 (text charts, chart notes, searching the charts) and most of section 5 (text markup tags and visual filters) are pre-release in full.</li>
-        <li><span class="rel rel-next">next</span> is finished and tested but not in any download yet; it will be in the next pre-release.</li>
+        <li><b>Unmarked</b>: in the current release, <b>0.1.0-beta.2</b>. Get it from the <a href="../#install">Install section of the home page</a> (the installer or the portable zip), or from <a data-dl="notes" href="https://github.com/rulingAnts/flex-scratchpad/releases/tag/v0.1.0-beta.2">its release page</a>.</li>
+        <li><span class="rel rel-pre">beta.3</span> is in the <b>pre-release 0.1.0-beta.3</b> and not in beta.2. Sections 8 to 10 (text charts, chart notes, searching the charts) and most of section 5 (text markup tags and visual filters) are pre-release in full. Get it from <a href="https://github.com/rulingAnts/flex-scratchpad/releases/tag/v0.1.0-beta.3">its release page</a> (<a href="https://github.com/rulingAnts/flex-scratchpad/releases/download/v0.1.0-beta.3/FLEx-Scratchpad-Setup-0.1.0-beta.3.exe">installer</a> · <a href="https://github.com/rulingAnts/flex-scratchpad/releases/download/v0.1.0-beta.3/FLEx-Scratchpad-0.1.0-beta.3-windows-portable.zip">portable zip</a>). It installs over the current release and keeps your notebooks.</li>
+        <li><span class="rel rel-next">next</span> is finished and tested but not in any download yet; it will be in the next pre-release. To try it now, install it with Python: <button type="button" class="linkish" data-open="get-next">how to install the development version</button>.</li>
       </ul>
-      <p>Anything unmarked is in beta.2. The pictures were taken from the development version, so a menu in a picture can show an item your copy does not have yet.</p>
+      <p>The pictures were taken from the development version, so a menu in a picture can show an item your copy does not have yet. A flag in the text can be clicked: <span class="rel rel-pre">beta.3</span> goes to the pre-release, <span class="rel rel-next">next</span> to the install steps.</p>
     </div>
+    <dialog id="get-next" aria-labelledby="get-next-title">
+      <div class="dlg-head"><h2 id="get-next-title">Install the development version</h2><button type="button" class="dlg-close" data-close aria-label="Close">✕</button></div>
+      <div class="dlg-body">
+        <p>The development version is what the <span class="rel rel-next">next</span> flags describe: finished and tested, not yet in a download. It runs from Python on Windows, beside FieldWorks 9, and uses the same notebooks as the installed program. Use the installed program for your everyday work if you prefer; this is for trying what is coming.</p>
+        <h3>1. Install Python 3.13</h3>
+        <p>FLEx Scratchpad needs 64-bit Python <b>3.10 to 3.13</b> (the part that reads FieldWorks is not built for 3.14 yet). From <a href="https://www.python.org/downloads/windows/" target="_blank" rel="noopener">python.org's Windows downloads</a>, choose the newest <b>Python 3.13</b> release and its <b>Windows installer (64-bit)</b>, run it, and keep the default options. It also installs the <code>py</code> launcher the commands below use, which picks the right Python even when you have several.</p>
+        <h3>2. Install FLEx Scratchpad</h3>
+        <p>Open <b>Command Prompt</b> (Start, type <kbd>cmd</kbd>, Enter), paste this line, and press Enter:</p>
+        <div class="cmd"><code>py -3.13 -m pip install "flex-scratchpad[flex] @ https://github.com/rulingAnts/flex-scratchpad/archive/refs/heads/main.zip"</code><button type="button" class="copy" data-copy="py -3.13 -m pip install &quot;flex-scratchpad[flex] @ https://github.com/rulingAnts/flex-scratchpad/archive/refs/heads/main.zip&quot;">Copy</button></div>
+        <h3>3. Start it</h3>
+        <div class="cmd"><code>py -3.13 -m flex_scratchpad</code><button type="button" class="copy" data-copy="py -3.13 -m flex_scratchpad">Copy</button></div>
+        <p>Close the installed FLEx Scratchpad first: only one copy runs at a time. To see what it does while it runs, add <code>-v</code> at the end; that is the text to send with a report.</p>
+        <h3>Later: update to the newest development version</h3>
+        <p>The version number does not change between updates, so reinstall over the copy you have:</p>
+        <div class="cmd"><code>py -3.13 -m pip install --force-reinstall --no-deps "flex-scratchpad[flex] @ https://github.com/rulingAnts/flex-scratchpad/archive/refs/heads/main.zip"</code><button type="button" class="copy" data-copy="py -3.13 -m pip install --force-reinstall --no-deps &quot;flex-scratchpad[flex] @ https://github.com/rulingAnts/flex-scratchpad/archive/refs/heads/main.zip&quot;">Copy</button></div>
+        <p class="small">To go back, uninstall it with <code>py -3.13 -m pip uninstall flex-scratchpad</code>; the installed program and your notebooks are not touched.</p>
+      </div>
+    </dialog>
   </header>
 
   <details class="toc-mobile">
@@ -372,6 +391,7 @@
 
     <h3 id="co-flextext">Export as a FLEx text</h3>
     <figure class="shot half"><img src="../media/guide/flextext-export.webp" loading="lazy" alt="The FLEx text export dialog: the title, the number of examples, the source note option, the audio choice and the audio folder"><figcaption><span class="ui">Export as FLEx text…</span> at the top of a collection.</figcaption></figure>
+    <p><b>Why you would want this.</b> FieldWorks works on one text at a time. A collection exported as a FLEx text makes the examples you chose, from many texts, into <em>one new text</em> you import into FLEx: every serial-verb sentence in your corpus, say, or every clause with a particular particle, side by side as one text you can gloss, tag, chart or concord on its own, without touching the texts they came from. With its audio, it also opens in the FlexText Audio Segmenter to check or cut.</p>
     <p>Only a collection exports a <code>.flextext</code>: one paragraph per example, one phrase per line, every writing-system alternative, the word identities kept so FieldWorks reuses the analyses on import, a <em>Source</em> note per line naming the text and line it came from. Examples from texts in different baseline writing systems become one file each. The <span class="ui">Audio</span> choice: <b>one audio file for the text</b> (the default: every example's recording in order with a click between examples, named like the .flextext and saved beside it, which the FlexText Audio Segmenter pairs with it by name), <b>one small file per line</b>, the original recordings and offsets, or none; or into a folder you choose, such as the project's <code>LinkedFiles\AudioVisual</code>, which FLEx finds on import. The file is a new text with new identities: importing it cannot touch the texts its examples came from, and the program refuses to write a file FieldWorks' importer would stumble on.</p>
   </section>
 
@@ -687,6 +707,30 @@
 </footer>
 
 <script src="../assets/release.js"></script>
+<script>
+// The "next" install steps, the copy buttons, and the version flags as links (Seth, 2026-10-20: "include in the
+// documentation (where it discusses the different version chips) how to get each of them (links)").
+(function () {
+  var dlg = document.getElementById('get-next');
+  function open() { if (dlg && dlg.showModal) dlg.showModal(); else if (dlg) dlg.setAttribute('open', ''); }
+  document.addEventListener('click', function (e) {
+    var t = e.target;
+    if (t.closest('[data-open="get-next"]') || t.closest('.rel-next')) { e.preventDefault(); open(); return; }
+    if (t.closest('.rel-pre') && !t.closest('#legend li')) { location.href = 'https://github.com/rulingAnts/flex-scratchpad/releases/tag/v0.1.0-beta.3'; return; }
+    if (t.closest('[data-close]') && dlg) { dlg.close(); return; }
+    var c = t.closest('button.copy');
+    if (c) {
+      var text = c.getAttribute('data-copy');
+      var done = function () { c.textContent = 'Copied'; setTimeout(function () { c.textContent = 'Copy'; }, 1600); };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, function () { fallback(text); done(); });
+      else { fallback(text); done(); }
+    }
+  });
+  function fallback(text) { var ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); } catch (x) {} ta.remove(); }
+  if (dlg) dlg.addEventListener('click', function (e) { if (e.target === dlg) dlg.close(); });    // a click on the backdrop
+  if (location.hash === '#get-next') open();
+})();
+</script>
 <script>
 // The contents: the section (and sub-heading) the reader is at is marked, and its sub-headings shown.
 (function () {

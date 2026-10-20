@@ -1400,6 +1400,13 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   (or a picture nobody shows), when an in-page link has no target, when a section or sub-heading is missing from the
   contents, or when the home page stops linking to `guide/`. The README's how-to table and the guide say the same
   things: change both.
+  HOW TO GET EACH VERSION (Seth, 2026-10-20: "how to get each of them (links). 'Next' requires pip install … a link to the
+  latest Python installer, and a pip install command that would work with that version"): the legend links the release and
+  the pre-release, and `#get-next` is a `<dialog>` (also opened by any `.rel-next` flag; a `.rel-pre` flag goes to the
+  pre-release page) with Python 3.13 (the newest the pinned pythonnet range supports; `requires-python >=3.10`), and
+  copy buttons for `py -3.13 -m pip install "flex-scratchpad[flex] @ <main.zip>"` — GitHub's archive of main, so no Git —
+  `py -3.13 -m flex_scratchpad`, and the `--force-reinstall --no-deps` update. Checked: that zip form installs the package
+  with its ui/ into a clean venv. Change the Python version there when pythonnet's range moves.
   IT DESCRIBES THE CURRENT RELEASE (Seth, 2026-10-20: "have the documentation match the most recent full release …
   you can have documentation for features on the pre-release, but have them flagged as such"): the guide names the
   release it describes (0.1.0-beta.2, the GitHub release NOT marked pre-release) in its head and legend; anything only

@@ -507,6 +507,23 @@ columns matter by default, how the suffix list is configured (per database or pe
 whether a range of records (a word list) is one embed or many.
 
 
+## Toolbox (SFM) texts and dictionaries as sources — later (Seth, 2026-10-20)
+
+> *"can we add ParaText (UFM) and Toolbox (SFM) as data sources for interlinear texts (not charts) and lexical items"* —
+> then: *"let's not do Paratext. It's not worth the trouble. Toolbox is worth doing, but later."*
+
+**Toolbox interlinear texts.** Port flextext-editor's `docs/js/sfm.js` (pure, node-tested, ~450 lines: marker detection
+and mapping, gloss alignment by COLUMN position not token order, several texts in one file, ELAN's `\ELANBegin` /
+`\ELANEnd` times) to Python, behind a mapping dialog like its `sfm-convert.js`. Identities minted from file + text +
+`\ref` and kept, so examples stay on their lines; chips name the file and reference; no "Open in FLEx".
+**Toolbox dictionaries (MDF).** `\lx \ps \sn \ge \de \xv \xe` onto the entry card; FLEx's own SFM lexicon import is
+the model. Both ride the MULTI-SOURCE step below (and issue #9): today the program reads ONE source at a time — the
+project, one .flextext, or the demo — so the first piece is a notebook-level list of extra sources whose texts and
+entries merge into the picker, search and paste locator beside the project's, each with a source badge.
+Rough size: the merge 1–2 days (shared with #9 and #10), Toolbox texts 2–3, MDF lexicon 1–2.
+**Paratext: dropped** (Seth, same day). USFM would have given baseline-only texts; its interlinear glosses live in an
+undocumented format.
+
 ## Known issue: one short example keeps slipping off its lines (Seth, 2026-10-20 — "to look into later, not to fix now")
 
 > *"sometimes shorter examples continuously misalign with their original source and require
