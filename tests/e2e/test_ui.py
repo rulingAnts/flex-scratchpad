@@ -5527,8 +5527,9 @@ def test_deleting_the_open_collection_leaves_nothing_under_the_placeholder(app):
     page.locator("[data-test=new-collection]").click()
     page.wait_for_selector("#collection")
     assert page.locator("#collection").is_visible()
+    page.wait_for_selector(".note-card.active")          # the new collection's own card, whatever the list order
     page.once("dialog", lambda d: d.accept())
-    page.locator(".note-card").first.click(button="right")
+    page.locator(".note-card.active").click(button="right")
     page.locator(".popover .menu-item", has_text="Delete (to trash)").click()
     page.wait_for_selector("#editor-pane.no-note")
     assert page.locator(".no-note-msg").is_visible()
