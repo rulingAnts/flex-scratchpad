@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "flex-scratchpad"
 version = "0.1.0"
-description = "A notebook for FieldWorks Language Explorer: notes, tables and charts with live FLEx entries and interlinear texts rendered inline."
+description = "A notebook for FieldWorks Language Explorer: notes and tables with live FLEx entries, interlinear texts and text charts rendered inline."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.10"

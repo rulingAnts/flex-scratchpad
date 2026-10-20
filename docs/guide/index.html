@@ -78,7 +78,7 @@
       <li><a href="#notebook">The notebook</a>
         <ol><li><a href="#nb-tabs">Tabs, folders, tags</a></li><li><a href="#nb-notes">Notes and the list</a></li><li><a href="#nb-search">Search</a></li><li><a href="#nb-rail">The left pane <span class="rel rel-pre">beta.3</span></a></li></ol></li>
       <li><a href="#writing">Writing</a>
-        <ol><li><a href="#wr-markdown">Markdown, markers shown or hidden</a></li><li><a href="#wr-headings">Headings that fold and stick</a></li><li><a href="#wr-lists">Lists, checklists, quotes</a></li><li><a href="#wr-blocks">Blocks: the bar, the menu, moving</a></li><li><a href="#wr-tables">Tables</a></li><li><a href="#wr-links">Links <span class="rel rel-pre">beta.3</span></a></li><li><a href="#wr-charts">Charts of your own</a></li><li><a href="#wr-files">Attached files</a></li><li><a href="#wr-undo">Undo, saving, scripts</a></li></ol></li>
+        <ol><li><a href="#wr-markdown">Markdown, markers shown or hidden</a></li><li><a href="#wr-headings">Headings that fold and stick</a></li><li><a href="#wr-lists">Lists, checklists, quotes</a></li><li><a href="#wr-blocks">Blocks: the bar, the menu, moving</a></li><li><a href="#wr-tables">Tables</a></li><li><a href="#wr-links">Links <span class="rel rel-pre">beta.3</span></a></li><li><a href="#wr-files">Attached files</a></li><li><a href="#wr-undo">Undo, saving, scripts</a></li></ol></li>
       <li><a href="#examples">Examples from FLEx</a>
         <ol><li><a href="#ex-paste">Paste lines copied in FLEx</a></li><li><a href="#ex-picker">The FLEx object dialog</a></li><li><a href="#ex-link">Paste a FLEx hyperlink</a></li><li><a href="#ex-shows">What an example shows</a></li><li><a href="#ex-chips">Chips, inline and collapsed</a></li><li><a href="#ex-entries">Entries</a></li><li><a href="#ex-live">Live, refreshed, and staying on its lines</a></li></ol></li>
       <li><a href="#styling">Styling and visual filters</a>
@@ -174,7 +174,7 @@
   <!-- ============================================================ 3 -->
   <section id="writing">
     <h2><span class="num">3</span>Writing</h2>
-    <p class="intro">A note is Markdown, written in a block editor that shows the markup faintly or hides it, with headings that fold, tables, links, simple charts, attached files, and the FLEx objects of the next sections.</p>
+    <p class="intro">A note is Markdown, written in a block editor that shows the markup faintly or hides it, with headings that fold, tables, links, attached files, and the FLEx objects of the next sections.</p>
 
     <h3 id="wr-markdown">Markdown, markers shown or hidden</h3>
     <div class="shots">
@@ -222,10 +222,6 @@
     </div>
     <p><kbd>Ctrl+K</kbd> makes the selected text a link, filling the address from the clipboard when one is there, or links to <span class="ui">another note in this notebook</span> as <code>[[Note title]]</code>. <kbd>Ctrl+click</kbd> follows at once, and <code>[[Note title]]</code> links work in beta.2 too; the dialog and the strip are new in beta.3. A FLEx hyperlink (<code>silfw://…</code>) opens the object in FieldWorks; every example and entry carries one (↗).</p>
 
-    <h3 id="wr-charts">Charts of your own</h3>
-    <figure class="shot half"><img src="../media/guide/chart-block.webp" loading="lazy" alt="A bar chart drawn from a few lines of data in the note"><figcaption>A bar chart from a <code>chart</code> block.</figcaption></figure>
-    <p>Not text charts, but the ordinary kind: the <span class="ui">Chart</span> button makes a bar, stacked, line, pie or donut chart from a few lines of data in the note (<code>type</code>, <code>title</code>, <code>labels</code>, <code>series: name = 1, 2, 3</code>), edited in a form or as text, drawn by the program and exported with the note.</p>
-
     <h3 id="wr-files">Attached files</h3>
     <figure class="shot"><img src="../media/guide/attachments.webp" loading="lazy" alt="A file chip in a sentence and a picture shown in the note from an attached file"><figcaption>A file chip in the text and a picture previewed in the note.</figcaption></figure>
     <p>Drop a file into a note, or use <span class="ui">📎 Attach</span>: the file is copied into the notebook's <code>attachments</code> folder (the ▾ next to the button, or <kbd>Alt</kbd> while dropping, links to the file where it is instead). A chip opens the file in its own program with a click; a picture or a video shows in the note; a web page, such as a FlexText Audio Segmenter listening page, previews inside the note with <span class="ui">Open in browser</span>. A pasted screenshot becomes a picture in the note. Exports write the chip as a link to the file.</p>
@@ -257,11 +253,11 @@
 
     <h3 id="ex-link">Paste a FLEx hyperlink</h3>
     <figure class="shot half"><img src="../media/guide/paste-link.webp" loading="lazy" alt="The dialog after pasting a FLEx hyperlink: the entry it names, Insert rendered or Insert link"><figcaption>A link copied in FieldWorks.</figcaption></figure>
-    <p>In FieldWorks, <em>Edit › Copy Location as Hyperlink</em> puts a <code>silfw://</code> link to the current record on the clipboard. Pasted into a note, it is resolved: an entry, a sense, a text, a paragraph or a line; you choose <span class="ui">Insert rendered</span> or <span class="ui">Insert link</span>. The link must name the open project.</p>
+    <p>In FieldWorks, <em>Edit › Copy Location as Hyperlink</em> puts a <code>silfw://</code> link to the current record on the clipboard. Pasted into a note, it is resolved to what it names, an entry, a sense or a text; you choose <span class="ui">Insert rendered</span> or <span class="ui">Insert link</span>. The link must name the open project.</p>
 
     <h3 id="ex-shows">What an example shows</h3>
     <figure class="shot"><img src="../media/guide/example.webp" loading="lazy" alt="A numbered example of two lines with a label, a highlighted word, a bold morpheme and an underlined word, the free translations, and the tag bars under the words"><figcaption>A two-line example, numbered (1), labelled, with a highlight, a bold morpheme, an underline, and the FLEx text markup tags under the words <span class="rel rel-pre" title="In the pre-release 0.1.0-beta.3; not in 0.1.0-beta.2, the current release">beta.3</span>.</figcaption></figure>
-    <p>Each line shows the lines you choose, FLEx's own line number, the free (and literal) translation and notes. The header has the text's title with the link into FLEx (↗), ↻ to re-read the lines after an edit in FieldWorks, ⚑ for the tags, ⤡ to collapse it, and <span class="ui">⋯</span>:</p>
+    <p>Each line shows the lines you choose, FLEx's own line number, the free (and literal) translation and notes. The header has the text's title with the link into FLEx (↗, which opens the text: <a href="#flex-links">see below</a>), ↻ to re-read the lines after an edit in FieldWorks, ⚑ for the tags, ⤡ to collapse it, and <span class="ui">⋯</span>:</p>
     <figure class="shot half"><img src="../media/guide/example-menu.webp" loading="lazy" alt="The example's menu: label, lines, writing systems, numbering, indent, range, add to a collection, show as a text chart, duplicate, remove"><figcaption>The ⋯ menu of an example.</figcaption></figure>
     <ul>
       <li><b>Lines</b>: Word, Morphemes, Morph glosses, Lex. entries, Word gloss, Category, Free, Literal, Notes, the FLEx text markup tags <span class="rel rel-pre" title="In the pre-release 0.1.0-beta.3; not in 0.1.0-beta.2, the current release">beta.3</span>, and <em>Chart columns</em> <span class="rel rel-pre" title="In the pre-release 0.1.0-beta.3; not in 0.1.0-beta.2, the current release">beta.3</span> (see <a href="#ch-join">below</a>); each in a chosen writing system when the project has several.</li>
@@ -271,6 +267,8 @@
       <li><b>Add to an example collection…</b>, <b>Show these lines as a text chart…</b> <span class="rel rel-next" title="Finished and tested, not in any download yet; in the next pre-release">next</span>, <b>Duplicate</b>, <b>Edit source</b>, <b>Remove</b>.</li>
     </ul>
     <p>A line that is empty in FLEx (a stray Shift+Enter) is left out; punctuation alone is not empty. Morph glosses wear the morph type's hyphens and equals signs.</p>
+
+    <div class="note" id="flex-links"><b>Where a link into FLEx lands.</b> FieldWorks' <code>silfw://</code> links open a <b>text</b> or a <b>lexical entry</b>, but not yet a particular paragraph or line inside a text, and a sense may open its entry rather than the sense itself. So ↗ on an example, a chip, the readable copy in a file or a link in an export opens the example's text in FLEx, at its start; the FLEx line numbers shown with the example say where to look.</div>
 
     <h3 id="ex-chips">Chips, inline and collapsed</h3>
     <div class="shots">
@@ -531,8 +529,8 @@
     </div>
 
     <h3 id="xp-word">Word, in LingTeX-Word styles <span class="rel rel-pre" title="In the pre-release 0.1.0-beta.3; not in 0.1.0-beta.2, the current release">beta.3</span></h3>
-    <figure class="shot"><img src="../media/guide/export-word.webp" loading="lazy" alt="The Word export rendered: the heading, the prose, a numbered interlinear example as a borderless table with the tiers aligned, the grammatical glosses in small capitals, the free translation in quotes with a link to the line"><figcaption>The Word export, rendered by LibreOffice: a LingTeX-Word interlinear table.</figcaption></figure>
-    <p>Every expanded example is written as a <a href="https://github.com/rulingAnts/LingTeX-Tools" target="_blank" rel="noopener">LingTeX-Word</a> interlinear table: the add-in's own table and tier styles (<em>LingTeX Interlinear</em>, <em>Vernacular</em>, <em>Morphemes</em>, <em>Gloss</em>, <em>Word Gloss</em>, <em>Category</em>), grammatical glosses set in small capitals, Word's own (1) numbering with a., b. for several lines, the free translation in quotes with a link to the line in FLEx. A document with the add-in installed re-wraps them. Your highlights, bold, underline and colours stay.</p>
+    <figure class="shot"><img src="../media/guide/export-word.webp" loading="lazy" alt="The Word export rendered: the heading, the prose, a numbered interlinear example as a borderless table with the tiers aligned, the grammatical glosses in small capitals, the free translation in quotes, then the text title and line number as a link into FLEx"><figcaption>The Word export, rendered by LibreOffice: a LingTeX-Word interlinear table.</figcaption></figure>
+    <p>Every expanded example is written as a <a href="https://github.com/rulingAnts/LingTeX-Tools" target="_blank" rel="noopener">LingTeX-Word</a> interlinear table: the add-in's own table and tier styles (<em>LingTeX Interlinear</em>, <em>Vernacular</em>, <em>Morphemes</em>, <em>Gloss</em>, <em>Word Gloss</em>, <em>Category</em>), grammatical glosses set in small capitals, Word's own (1) numbering with a., b. for several lines, the free translation in quotes followed by the text's title and FLEx line number as a link that opens the text in FLEx. A document with the add-in installed re-wraps them. Your highlights, bold, underline and colours stay.</p>
     <figure class="shot"><img src="../media/guide/export-excel.webp" loading="lazy" alt="The Excel export's Note sheet rendered: the blocks in order, an example as rows per line with the words across"><figcaption>The Excel export, rendered by LibreOffice <span class="rel rel-pre" title="In the pre-release 0.1.0-beta.3; not in 0.1.0-beta.2, the current release">beta.3</span>.</figcaption></figure>
 
     <h3 id="xp-audio">Audio in the web page and slideshow <span class="rel rel-pre" title="In the pre-release 0.1.0-beta.3; not in 0.1.0-beta.2, the current release">beta.3</span></h3>

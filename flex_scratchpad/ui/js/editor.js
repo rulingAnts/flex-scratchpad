@@ -4,7 +4,7 @@
  * contenteditable elements whose textContent IS the markdown; after every input the block is
  * re-decorated (markers faint, bold bold, headings big) and the caret restored by text offset.
  * Chromium's own editing is kept on a short leash through `beforeinput`: plain text in, plain
- * text out, no <div>/<br>/<b> ever injected. Tables, FLEx embeds, charts, images and rules are
+ * text out, no <div>/<br>/<b> ever injected. Tables, FLEx embeds, images and rules are
  * widgets with their own in-place UI and an "edit source" fallback. */
 (function () {
   'use strict';
@@ -107,7 +107,7 @@
   ];
   const TEXT_TYPES = new Set(['p', 'h', 'list', 'quote', 'code']);
   /* What a block is called in a message ("Paragraph removed"). */
-  const blockLabel = (b) => ({ p: 'Paragraph', h: 'Heading', list: 'List', quote: 'Quote', code: 'Code block', table: 'Table', chart: 'Chart', hr: 'Divider', flex: 'Example' }[b.type] || 'Block');
+  const blockLabel = (b) => ({ p: 'Paragraph', h: 'Heading', list: 'List', quote: 'Quote', code: 'Code block', table: 'Table', hr: 'Divider', flex: 'Example' }[b.type] || 'Block');
   const PLACEHOLDER = 'Write something, or type / for a menu';
 
   /* ------------------------------------------------------------------ the editor */
@@ -1094,9 +1094,6 @@
         if (!spec) { host.appendChild(el('div', { class: 'flex-err' }, 'Unreadable FLEx embed: ' + b.src)); return; }
         this.applyLayout(wrap, spec);
         FS.interlinear.render(host, spec, this._flexOpts(b, host));
-      } else if (b.type === 'chart') {
-        bar.insertBefore(el('button', { onclick: () => FS.charts.editDialog(b.src, (src) => { b.src = src; this.changed(); this.rerender(b); }) }, '✎ Edit chart'), edit);
-        FS.charts.render(host, b.src, { onEdit: () => FS.charts.editDialog(b.src, (src) => { b.src = src; this.changed(); this.rerender(b); }) });
       } else if (b.type === 'hr') {
         wrap.classList.add('blk-hr');
         bar.remove();
@@ -1759,7 +1756,7 @@
         else if (e.key === 'Tab' && b.type === 'table' && wrap._table && wrap._table.ops) { e.preventDefault(); wrap._table.ops.indent(e.shiftKey ? -1 : 1); }
         else if (e.key === 'ArrowUp' && i > 0) { e.preventDefault(); this.focusBlock(i - 1, 'end'); }
         else if (e.key === 'ArrowDown') { e.preventDefault(); this.focusBlock(i + 1, 0, true); }
-        else if (e.key === 'Enter') { e.preventDefault(); if (b.type === 'table') { const cell = wrap.querySelector('.cell-view'); if (cell) cell.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); } else if (b.type === 'chart') FS.charts.editDialog(b.src, (src) => { b.src = src; this.changed(); this.rerender(b); }); else this.insertBlockAfter(b, { type: 'p', src: '' }, true); }
+        else if (e.key === 'Enter') { e.preventDefault(); if (b.type === 'table') { const cell = wrap.querySelector('.cell-view'); if (cell) cell.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); } else this.insertBlockAfter(b, { type: 'p', src: '' }, true); }
         else if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'z' || e.key.toLowerCase() === 'y')) { e.preventDefault(); e.stopPropagation(); (e.shiftKey || e.key.toLowerCase() === 'y') ? this.redoStep() : this.undoStep(); }
       });
       if (b.type === 'hr') wrap.addEventListener('click', () => wrap.focus());

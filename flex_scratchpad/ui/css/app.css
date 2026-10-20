@@ -508,9 +508,6 @@ td.nowrap .cell-view, td.nowrap .cell-edit { white-space: nowrap; }
 .vern-cell { font-family: var(--font-vern); color: var(--vern); }
 
 /* ---------- charts ---------- */
-.chart-box { background: var(--bg); border: 1px solid var(--border-soft); border-radius: var(--radius); padding: 8px; }
-.chart-box canvas { display: block; width: 100%; max-width: 760px; }
-.chart-err { color: var(--danger); font-size: 13px; }
 .chart-form { display: grid; grid-template-columns: 90px 1fr; gap: 6px 10px; align-items: center; font-size: 13.5px; }
 .chart-form input, .chart-form select, .chart-form textarea { border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; background: var(--bg); width: 100%; }
 .chart-form textarea { font-family: var(--mono); font-size: 12.5px; min-height: 90px; }

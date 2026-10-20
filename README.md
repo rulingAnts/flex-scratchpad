@@ -3,7 +3,7 @@
 # FLEx Scratchpad
 
 A notebook for [FieldWorks Language Explorer](https://software.sil.org/fieldworks/) (FLEx).
-Quick notes with tabs, folders and tags; tables and charts; and **live FLEx objects inside the
+Quick notes with tabs, folders and tags; tables; text charts; and **live FLEx objects inside the
 notes** — a lexical entry, or a range of interlinear text segments, rendered in place from the
 project database and linked back to FLEx.
 
@@ -17,15 +17,15 @@ project database and linked back to FLEx.
 - **Audio**: a timed segment plays straight from the project's media file (`▶` on the segment,
   *Play 3–5* on a range); the clip is cached in the notebook so it keeps playing when the media
   isn't reachable. If FLEx's media file isn't found, *Browse…* for the real one.
-- **Links both ways**: *Open in FLEx ↗* jumps to the object; FLEx's *Edit → Copy Location as
-  Hyperlink* pasted into a note becomes a rendered embed or a chip.
+- **Links both ways**: *Open in FLEx ↗* opens the entry, or the text an example comes from (FieldWorks'
+  `silfw://` links reach a text or an entry, not yet a paragraph or line inside a text); FLEx's
+  *Edit → Copy Location as Hyperlink* pasted into a note becomes a rendered embed or a chip.
 - **Markdown**, shown with the markers kept faint (`**bold**` reads bold, the stars stay as a
   hint) or hidden — then only the markup at the caret shows, the way a chat app does it —
   nested lists (Tab / Shift+Tab; a bullet per level, numbers 1. a. i.), checklists, quotes, code,
   images, `[[links to other notes]]`, `#tags`. A bar between blocks adds or removes one.
 - **Tables** with line breaks in cells, interlinear examples in cells, and per-row/column styling
   (bold, alignment, width, colours, vernacular font, striped, borders).
-- **Charts** (bar, stacked, horizontal, line, area, pie, donut) from a small readable block.
 - **Search** the whole notebook, including the vernacular words and glosses of embedded FLEx
   objects; diacritics-insensitive; filters by tab, folder and tag; find-in-note.
 - **Plain files**: the notebook is a folder of markdown files; tabs and folders are directories. Each FLEx example and entry is also written into the file as plain text, with a link that opens it in FLEx, so a note reads in any text editor or Markdown viewer; the app itself never shows that copy.
@@ -151,7 +151,6 @@ elsewhere (marked *cached*).
 | Choose the lines shown | The `⋯` on an embed: Word, Morphemes, Morph glosses, Lex. entries, Word gloss, Category, Free, Literal, Notes; segment range |
 | Play audio | `▶` beside a timed segment; *Play 3–5* on a range; loop and scrub in the transport strip. A text has ▶ only when its lines carry start and end times in FLEx, which FieldWorks itself cannot set: they come in through FieldWorks' interlinear text import, from a text ELAN exported as a FLEx file or a file from the FlexText Editor suite, or, for a text already in FLEx as text only, from the [FlexText Audio Segmenter](https://audio-segmenter.flextext.app/) (a release that works inside FLEx is coming) |
 | Table | *Table* button; click a cell to edit (**Tab** moves on, **Shift+Enter** breaks a line, **Enter** goes down); *Column ▾ / Row ▾ / Table ▾* for styling |
-| Chart | *Chart* button; double-click the chart or use *Edit chart* |
 | Search | The box at the top left (**Ctrl+Shift+F**); `tag:todo`, `tab:Grammar`, `"exact phrase"`; **Ctrl+F** finds in the open note |
 | Links | **Ctrl+K** or the 🔗 button: the selected text becomes the link, an address on the clipboard fills in; with the caret in a link it edits or removes it. *Another note in this notebook* makes a `[[Note title]]` link. Click a link and a strip under it offers *Follow · Edit · Copy · Unlink*; Ctrl+click follows it at once |
 | Keyboard shortcuts | **Ctrl+/** lists them all (also in Settings): Ctrl+B / I / E / Shift+X / Shift+H for bold, italic, code, strikethrough, highlight; Ctrl+Shift+7 / 8 / 9 for a numbered, bulleted list or checklist; Ctrl+Alt+0 plain text; Ctrl+Enter / Ctrl+Shift+Enter a paragraph below / above; Ctrl+D duplicate the block; F2 rename; Ctrl+Shift+N a new collection |
@@ -179,7 +178,7 @@ elsewhere (marked *cached*).
 | FLEx text markup tags | Tags from FieldWorks' Text Tagging view are drawn under the words of an example as bars — or on the text itself: brackets round the tagged words (`[` `]`, `⟨` `⟩`, `⌈` `⌉`…), a marker, a tinted tile or a border round the words and their lines, a colour, bold. Set per project, tab, folder or chosen examples (`⚑` on an example, or a selection); the most specific wins. **Visual filters** (⚑ in the rail's *FLEx tags*, Settings) are named sets of tag styles switched on and off together, like Logos's. The rail's *FLEx tags* lists the tags the tab's notes use: click one to see only those notes, with the examples that carry it marked and the others dimmed; `tagged:Topic` in the search box does the same, and the FLEx object dialog's *FLEx tags* finds every place a tag is used in the project |
 | Export a note | The note's `⋯` → *Export*: **Markdown**, a **web page** (self-contained; with the recordings embedded as players if you say so — a ▶ per line, the playing line lit, a bar to pause and stop), **Word** (charts on landscape pages), **Excel** (the note, a sheet per chart with its rows flat for filtering, an Examples sheet with one row per line), **PDF** (saved straight away on Windows, else the print dialog's *Save as PDF*), a **slideshow** (one web page: a slide per heading, example, chart and table — arrow keys, T for contents, F full screen; the players ride along) and **PowerPoint** |
 | Resize chart columns | Drag the right edge of a column heading (a wide chart scrolls sideways under its headings, which stay put while you scroll down); double-click the edge, or `⋯ → Reset column widths`, to let it size itself. The widths are kept in the note |
-| What a Word export shows | An expanded example is a LingTeX-Word table (the add-in's own styles: *LingTeX Interlinear*, the tier styles, grammatical glosses in small capitals, Word's own (1) numbering, the free translation in quotes with a link to the line in FLEx), so a document with LingTeX-Word installed re-wraps it. A collapsed example, an inline chip or an object in a table cell becomes a link into FLEx: the text's abbreviation and line numbers |
+| What a Word export shows | An expanded example is a LingTeX-Word table (the add-in's own styles: *LingTeX Interlinear*, the tier styles, grammatical glosses in small capitals, Word's own (1) numbering, the free translation in quotes with the line's FLEx number as a link that opens the text in FLEx), so a document with LingTeX-Word installed re-wraps it. A collapsed example, an inline chip or an object in a table cell becomes a link into FLEx: the text's abbreviation and line numbers |
 | Play a chart | ▶ beside the first row of each line (and in the `#` corner for all of them): the line plays from the text's recording and the cells holding its words light up; the same in the web page and slideshow exports. ▶§ plays a whole sentence (the rows 4a, 4b, 4c of sentence 4), ▶¶ a whole paragraph |
 | Chart columns | The row labels (with the ▶s) stay put while a wide chart scrolls sideways. A column heading's popover has *Hide this column*; the `⋯` menu's *Columns* brings columns back, *Hide empty columns* drops the ones with nothing in these rows, *Zoom* makes the chart larger or smaller, *Layout → One column* (or the ▤ button) shows each row in one cell, every word group labelled with its column, so visual filters by column (`column:Nucleus/Subject`) and by marker take the place of the columns, and *Layout → The header groups* (▥ Groups) shows one cell per header group with the sub-columns' words inside, labelled and styled by their own columns; ▦ brings the columns back. In those two layouts *Line up on* makes the text of chosen columns — or of a whole header group — sit on one shared axis across the rows — centred on it, or with their left or right edges on it — the rest of each row to its left and right (a run of neighbouring chosen columns lines up as one block). *Change the chart…* shows another of the project's charts with the same view settings |
 | Custom columns' place | A chart note's custom column can sit left or right of the chart and be frozen (it stays put while the chart scrolls sideways): the heading's `⋯`, or the column dialog's *Place* |

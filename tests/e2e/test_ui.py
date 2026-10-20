@@ -187,16 +187,6 @@ def test_table_cell_edit_and_embed_in_cell(app):
     assert "{table: striped; compact; col 1: bold}" in body_of(h)
 
 
-def test_chart_block(app):
-    h, page, errors = app
-    new_note(page, "Chart")
-    page.locator("#toolbar [data-ins=chart]").dispatch_event("mousedown")
-    page.wait_for_selector(".chart-box canvas")
-    page.wait_for_timeout(900)
-    assert "```chart\ntype: bar" in body_of(h)
-    assert not errors
-
-
 def test_rtl_text_and_style_targets(app):
     h, page, errors = app
     new_note(page, "RTL")
@@ -904,6 +894,8 @@ def test_table_rerender_saves_the_open_cell(app):
     page.keyboard.press("End")
     page.keyboard.type(" TYPED")
     page.wait_for_timeout(300)
+    page.locator("table.md-table").first.evaluate("(e) => e.scrollIntoView({ block: 'center' })")   # the table's tool bar floats at the pane's foot
+    page.wait_for_timeout(200)
     th = page.locator("table.md-table thead th[data-c]").nth(1)
     handle = th.locator(".col-resizer")
     box = handle.bounding_box()
