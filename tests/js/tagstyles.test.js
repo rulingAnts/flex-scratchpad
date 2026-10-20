@@ -211,3 +211,35 @@ test('chart columns: the `column:` namespace, apart from tags and markers', () =
   assert.strictEqual(T.columns().length, 1);
   assert.strictEqual(T.columns()[0].guid, 'column:c3');
 });
+
+
+test('merged cells are a filter target: any, by side, by owner column, by both (Seth, 2026-10-20)', () => {
+  const ctx = { project: 'Kalu', tab: 'Notes', folder: '' };
+  const verb = { n: 4, name: 'Verb', abbr: 'V', path: ['Nucleus'] }, subj = { n: 3, name: 'Subject', abbr: 'S', path: ['Nucleus'] };
+  const vR = T.mergedItem(verb, 'right'), vL = T.mergedItem(verb, 'left'), sR = T.mergedItem(subj, 'right');
+  assert.strictEqual(vR.name, 'merged:Nucleus/Verb:right');
+  assert.strictEqual(vR.label, 'V merged right');
+  const look = (item, tags) => T.resolve(item, R.parse('{{flex:chart ' + G + ' tags=' + tags + '}}'), ctx);
+  // merged:* reaches every merged part; merged:right only those extended to the right
+  assert.ok(look(vR, 'merged%3A*:box').box && look(vL, 'merged%3A*:box').box);
+  assert.ok(look(vR, 'merged%3Aright:box').box && !look(vL, 'merged%3Aright:box').box);
+  // by owner column: name, abbreviation or Group/Name; with a side, that side only
+  assert.ok(look(vR, 'merged%3AVerb:tile').tile && look(vL, 'merged%3AV:tile').tile && look(vR, 'merged%3ANucleus%2FVerb:tile').tile);
+  assert.ok(!look(sR, 'merged%3AVerb:tile').tile);
+  assert.ok(look(vR, 'merged%3AVerb%3Aright:tile').tile && !look(vL, 'merged%3AVerb%3Aright:tile').tile);
+  // the most specific rule wins: column+side over column over side over any
+  const r = look(vR, 'merged%3A*:bg%23111111,merged%3Aright:bg%23222222,merged%3AVerb:bg%23333333,merged%3AVerb%3Aright:bg%23444444');
+  assert.strictEqual(r.bg, '#444444');
+  assert.strictEqual(look(vL, 'merged%3A*:bg%23111111,merged%3Aleft:bg%23222222').bg, '#222222');
+  // a merged rule never touches a tag, a marker or a column; a plain `*` rule never touches a merged part
+  assert.ok(!look(SUBJ, 'merged%3A*:box').box);
+  assert.strictEqual(look(vR, '*:box').styleVia.kind, 'default');
+  // the popover's own rows: generic structure items match their key exactly; a written key reads back
+  assert.ok(T.structureItem('merged:*') && T.structureItem('merged:right').skind === 'merged');
+  assert.strictEqual(T.mergedFromKey('merged:Nucleus/Verb:right').label, 'Verb merged right');
+  assert.strictEqual(T.mergedFromKey('merged:right').label, 'Merged into the column to the right');
+  // structureIn counts a chart's merged parts, any / by side / per owner column and side
+  const obj = { rows: [{ cells: [{ kind: 'words', colN: 3, mergeAfter: true }, { kind: 'words', colN: 4 }] }, { cells: [{ kind: 'words', colN: 4, mergeBefore: true }] }], template: { columns: [subj, verb] } };
+  const counts = Object.fromEntries(T.structureIn(obj).map((x) => [x.tag.guid, x.count]));
+  assert.deepEqual(counts, { 'merged:*': 2, 'merged:right': 1, 'merged:left': 1, 'merged:Nucleus/Subject:right': 1, 'merged:Nucleus/Verb:left': 1 });
+});

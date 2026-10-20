@@ -409,6 +409,26 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   line added by hand with `seg=` only still counts as present; groups and notes are untouched, the
   new lines go to the END and the page SELECTS them (`Collection.selectBySrc`). A line the user
   removed comes back at the next update (the semantics Seth asked for, said in the README).
+  A CONCORDANCE EXPORT (Seth, 2026-10-20: "paste the results of a FLEx concordance (or complex concordance)
+  search and get an example collection … you can't actually 'paste' concordance search results, but you could
+  open the CSV results" — "THAT would be HUGELY useful"): FLEx's File › Export Concordance Results… writes
+  `Ref,Occurrence` rows — Ref = the text's abbreviation (or its title, or its title cut to eight letters) +
+  FLEx's paragraph.segment number, Occurrence = the whole paragraph's baseline with `§` between segments, a
+  row PER MATCH (a line matched twice is there twice). `flex/concordance.py` (pure, stdlib csv): `parse(text)`,
+  `match(rows, texts, index)` places each row in the per-session index (the text by `abbrev` / title / title
+  prefix — in EVERY writing system: `list_texts` rows carry `names`, every title and abbreviation alternative
+  (`lcm._text_names`; Seth, 2026-10-20: texts titled in the vernacular were not found), and `search_texts` reads
+  them too — the line by `label_key`, the baseline checked against the `§` pieces — `how` number | number? | text,
+  the last found by its baseline when the number is not in the text), one row per distinct line (`hits`) in
+  file order, the misses with a `why`. `FlexService.concordance_rows(text)`, `Api.read_concordance_file()`
+  (the CSV dialog → {path, name, text}; BOM / UTF-16 / cp1252 tolerated), `Api.concordance_preview({text|path})`,
+  `Api.create_concordance_collection(tab, folder, title, src, {note})` (an ordinary collection, no rule:
+  `match_embed` per row, `> Ref (×n)` notes on request, the misses as a closing paragraph). UI:
+  `concordanceDialog` (app.js; `+ New ▾` → "New collection from a FLEx concordance export…"): Open CSV… or a
+  textarea for the file's contents, the live placement (found / not found per row), Create. The mock has the
+  three methods (no dialog in a browser: the textarea). `tests/test_concordance.py`, e2e
+  `test_a_flex_concordance_export_becomes_a_collection`. Seth's two real exports (41 and 1087 rows) are the
+  shapes it was written from; not yet run against his project.
   `Api.set_note_rule` changes the rule, what is held stays. UI: `ruleCollectionDialog` (app.js;
   `+ New ▾` → "New collection from tagged lines…", the picker's tag view "Collect into a new
   collection…" pre-ticked, a collection's "Edit rule…"): the tag tree with a box per tag and an
@@ -735,8 +755,10 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   "Merged cells, by column", every known column × (either side, right, left); `T.mergedFromKey` names a written key
   in the rule lists. `tests/js/tagstyles.test.js` pins the matching and ranking.
   CHIPS UNDER THE WORDS (Seth, 2026-10-20: in the groups view "on a line of their own" stacked the chips to the right
-  of the words): `.cflat-body` is an inline-flex ROW, so a block `.chips-line` was just another flex item; the body now
-  wraps and the chip line is `flex: 1 0 100%`, a row of its own under the words, in every flat wrapper.
+  of the words): `.cflat-body` is an inline-flex ROW, so a block `.chips-line` was just another flex item — and as a wrapped
+  flex item it still COUNTED in the body's intrinsic width (a box twice as wide as its words). `flatWrap`'s `add`
+  now puts a chip line (`chips=line|wrap`) in the `.cflat-g` wrapper AFTER the body, a block of its own; `wrap`'s
+  `max-width` is the widest non-chip sibling (the body), with a 48px floor (`placeChipLines`).
   COLUMN STYLES (Seth, 2026-10-18: "apply specific styles to specific columns … and configure them
   myself"): the chart's ⚑ popover lists its template COLUMNS after the markers and the text's tags
   (`tagstyles.columnsIn(obj)` — tag items with `column: true`, `opts.fullChart` so the one-column
@@ -795,7 +817,28 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   rows with timed lines gets ▶§ / ▶¶ (`.chart-play-sent` / `.chart-play-para`) before its line ▶,
   playing the group's lines through the same `playRange`. BOUNDARIES (Seth: "draw that boundary
   UNDERNEATH the free translation row"): a row's `end-sent` / `end-para` class moves to the
-  `cfree-row` that follows it when `free=row` puts one there. CHANGE THE CHART (Seth: "change the
+  `cfree-row` that follows it when `free=row` puts one there. SELECTED LINES AND ROWS (Seth, 2026-10-20: "copy TSV for individual or multiple selected rows in flex objects
+  (either table or IGT) … paste them in a notes document elsewhere as a new example"): a click on a `.segnum`
+  (Shift: a range; `toggleLineSel`, `.segment.line-sel`) or Ctrl/Shift+click on a chart row's `.rlab` (or "Select
+  this row" in its popover; `chart.toggleRowSel`, `tr.crow.row-sel`) shows `interlinear.selectionBar` above the
+  lines / the chart (`sel-bar`: count, ⎘ Copy, Clear). The copy is the selection's OWN reference on the first
+  line (`{{flex:text g seg=a-b at=…}}` with the example's lines / ws; `{{flex:chart g rows=a-b at=…}}` with the
+  view keys, not cw / ex / indent / collapsed) and `flexTsv` / `chartTsv` of just those lines or rows under it
+  (a chart's header rows always); a gap in the selection still pastes as the whole range. `editor.pasteText`
+  takes a text whose first line is such a reference followed by tab-separated rows as the reference alone
+  (the collection's paste box too); a sheet gets the rows. Ctrl+C (document capture) copies `R.lastSel` when
+  nothing editable has the focus and no text is selected. e2e
+  `test_selected_lines_and_rows_copy_and_paste_as_a_new_example`.
+  A CHART AS AN EXAMPLE AND BACK (Seth, 2026-10-20: "convert a flex text-chart object to a regular
+  interlinear example object (including the lines that chart rows touch) or vice versa (text chart touching all
+  the lines in the example). They won't line up perfectly, either direction should be inclusive"): the chart's ⋯
+  → "Show these lines as an interlinear example" (`to-example`: the lowest `seg` to the highest `segTo` of the
+  shown rows' word groups, `at=` from `obj.segments`); an example's ⋯ → "Show these lines as a text chart…"
+  (`interlinear.toChart`: `flex_charts(text)` with rows — one → it, several → `FS.pickChart({text})`, which now
+  lists one text's charts — then the first to the last row holding words of the example's lines, `at=` the row
+  GUIDs). Both rewrite the spec in place (kind, guid, seg, at; lines / ws / styles / view keys dropped, `ex` /
+  `indent` / `collapsed` kept, the label kept) and call `onSpecChange`, so the editor, a cell and a collection
+  all take it. e2e `test_a_chart_becomes_an_example_and_an_example_a_chart`. CHANGE THE CHART (Seth: "change the
   text chart source for a text chart note or a text chart object, just like I can for interlinear
   objects"): ⋯ → "Change the chart…" → `FS.pickChart` (app.js `chartChooser`, the same list as the
   new-chart-note dialog, the current one marked) → the spec is retargeted in place (`guid`; `seg` /
@@ -1314,7 +1357,11 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   components, `assets/media.js` verbatim): hero with the loop video, three steps with stills,
   features, install, a pre-release band. `assets/release.js` moves every download link and the
   version to the newest release that has BOTH files (`tests/js/site-release.test.js`). The video
-  and stills are filmed from the REAL UI by `tools/record_demo.py` (demo project — an invented
+  and stills are filmed from the REAL UI by `tools/record_demo.py`; the "what you can do" table's ✓ cells carry
+  `data-stills` (Seth, 2026-10-20: "mouseover generated screenshots for each feature with a checkbox") and
+  `assets/media.js` shows those pictures in a hover / focus / tap card (`#claim-card`) when they are on the
+  manifest — `tools/shoot_claims.py` photographs them (the chart in its three views, the styled example, the
+  collection, the concordance dialog, the exports menu…) from the demo through the e2e bridge (demo project — an invented
   language, never a community's data — through the e2e bridge, a drawn cursor and captions,
   Chromium's screencast, ffmpeg): re-run it after a UI change and look at the result.
 - GitHub Actions: public repo, standard runners only, Windows build is `workflow_dispatch`. Never

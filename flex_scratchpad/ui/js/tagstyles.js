@@ -115,13 +115,37 @@
     // chart STRUCTURE (Seth, 2026-10-19): dependent / speech / song clauses, the [2a] clause
     // markers, moved text — pseudo-items a rule names exactly (`moved:*` = preposed or postposed)
     if (PSEUDO_RE.test(k)) { if (!tag.pseudo) return false; return k === 'moved:*' ? norm(tag.name).startsWith('moved:') : k === norm(tag.name); }
+    // MERGED CELLS as a target (Seth, 2026-10-20: "a special visual filter just for merged cells of any
+    // kind? Or for merged cells that start with a certain column, so for example PRED that is merged
+    // right"): `merged:*`, `merged:right` / `merged:left` (the side the owner's cell extends into),
+    // `merged:<column>` (name, abbreviation or Group/Name of the OWNER column) and `merged:<column>:right`.
+    // A drawn part carries `merged: {col, name, abbr, dir}` (T.mergedItem); the popover's own rows are
+    // pseudo-items that match their key exactly, as the other structure items do.
+    if (k.startsWith('merged:')) {
+      if (tag.merged) {
+        const m = k.slice(7);
+        if (m === '*') return true;
+        if (m === 'left' || m === 'right') return tag.merged.dir === m;
+        const dm = /:(left|right)$/.exec(m);
+        const col = dm ? m.slice(0, -dm[0].length) : m;
+        if (dm && tag.merged.dir !== dm[1]) return false;
+        return [tag.merged.col, tag.merged.name, tag.merged.abbr].some((x) => x && norm(x) === col);
+      }
+      return !!tag.pseudo && k === norm(tag.name);
+    }
+    if (tag.merged) return false;
     if (tag.pseudo) return false;
     if (k === '*') return true;
     if (k.startsWith('group:')) { const g = k.slice(6); return (tag.path || (tag.group ? [tag.group] : [])).some((x) => norm(x) === g); }
     if (k.startsWith('filter:')) return false;
     return k === norm(tag.name) || (!!tag.abbr && k === norm(tag.abbr)) || (!!tag.guid && k === norm(tag.guid));
   };
-  const rank = (r) => { const k = norm(r.tag).replace(/^(marker|column|moved):/, ''); return k === '*' ? 2 : k.startsWith('group:') ? 1 : 0; };
+  const rank = (r) => {
+    const raw = norm(r.tag);
+    if (raw.startsWith('merged:')) { const m = raw.slice(7); return m === '*' ? 3 : (m === 'left' || m === 'right') ? 2 : /:(left|right)$/.test(m) ? 0 : 1; }
+    const k = raw.replace(/^(marker|column|moved):/, '');
+    return k === '*' ? 2 : k.startsWith('group:') ? 1 : 0;
+  };
   const PSEUDO_RE = /^(clause:(dependent|speech|song)|clauseref|moved:(\*|preposed|postposed)|boundary:(sentence|paragraph))$/;
   /* The chart's structure as styleable items (Seth, 2026-10-19: "visual filter styling … for
    * subordinate clauses (and sub clause marker) and speech and song clauses … clauses marked as
@@ -136,12 +160,39 @@
     { key: 'moved:preposed', label: 'Preposed text', note: 'word groups moved forward (‹‹)', skind: 'moved' },
     { key: 'moved:postposed', label: 'Postposed text', note: 'word groups moved back (››)', skind: 'moved' },
     // the lines FLEx's "last row in sentence / paragraph" boxes draw (Seth, 2026-10-19)
+    // merged cells (Seth, 2026-10-20): the part a cell merged with its empty neighbour holds — any,
+    // by the side it extends into, and (T.mergedItem, listed per chart) by its owner column
+    { key: 'merged:*', label: 'Merged cells (any)', note: 'the words or markers of a cell FLEx merged with its neighbour', skind: 'merged' },
+    { key: 'merged:right', label: 'Merged into the column to the right', note: 'a cell extended over the next column', skind: 'merged' },
+    { key: 'merged:left', label: 'Merged into the column to the left', note: 'a cell extended over the previous column', skind: 'merged' },
     { key: 'boundary:sentence', label: 'Sentence boundaries', note: 'the line under a row marked as the last of its sentence', skind: 'line' },
     { key: 'boundary:paragraph', label: 'Paragraph boundaries', note: 'the line under a row marked as the last of its paragraph', skind: 'line' },
   ];
   const structureItem = (s) => ({ guid: s.key, name: s.key, abbr: '', group: 'Chart structure', path: ['Chart structure'], pseudo: true, skind: s.skind, label: s.label, note: s.note, fore: '', back: '' });
   T.structure = () => STRUCTURE.map(structureItem);
   T.structureItem = (key) => { const s = STRUCTURE.find((x) => x.key === norm(key)); return s ? structureItem(s) : null; };
+  /* The item a MERGED part is styled as: owner column `col` ({name, abbr, path}) extended to `dir`
+   * ('right' | 'left'). Its key names the column by Group/Name, so two "Inner" columns stay apart. */
+  T.mergedItem = (col, dir) => {
+    const colKey = (col.path || []).concat([col.name]).join('/');
+    const key = 'merged:' + colKey + ':' + dir;
+    const short = col.abbr || col.name;
+    return { guid: key, name: key, abbr: '', group: 'Chart structure', path: ['Chart structure'], pseudo: true, skind: 'merged',
+      label: short + ' merged ' + dir, note: 'a ' + (col.path || []).concat([col.name]).join(' › ') + ' cell merged into the column to the ' + dir,
+      merged: { col: colKey, name: col.name, abbr: col.abbr || '', dir }, fore: '', back: '' };
+  };
+  /* The item behind a written `merged:…` rule key, for the rule lists. */
+  T.mergedFromKey = (key) => {
+    const k = String(key).replace(/^merged:/i, '');
+    const s = STRUCTURE.find((x) => x.key === 'merged:' + norm(k));
+    if (s) return structureItem(s);
+    const dm = /:(left|right)$/i.exec(k);
+    const col = dm ? k.slice(0, -dm[0].length) : k;
+    const dir = dm ? dm[1].toLowerCase() : '';
+    const short = col.split('/').pop();
+    return { guid: 'merged:' + k, name: 'merged:' + k, abbr: '', group: 'Chart structure', path: ['Chart structure'], pseudo: true, skind: 'merged',
+      label: short + ' merged' + (dir ? ' ' + dir : ' (either side)'), note: 'cells of ' + col + ' merged' + (dir ? ' to the ' + dir : ''), merged: { col, name: short, abbr: '', dir }, fore: '', back: '' };
+  };
   /* The structure items this chart has, with counts (rows of each clause type, [2a] markers,
    * moved word groups by direction); `moved:*` counts both. */
   function structureIn(obj) {
@@ -153,7 +204,19 @@
       for (const c of r.cells || []) { if (c.kind === 'clause') n.clauseref++; else if (c.kind === 'moved') n[c.preposed ? 'moved:preposed' : 'moved:postposed']++; }
     }
     n['moved:*'] = n['moved:preposed'] + n['moved:postposed'];
-    return STRUCTURE.filter((s) => n[s.key] > 0).map((s) => ({ tag: structureItem(s), count: n[s.key] }));
+    // merged cells, and each owner column's merged cells by side (Seth, 2026-10-20: "PRED that is merged right")
+    const cols = new Map((((obj.template || {}).srcColumns || (obj.template || {}).columns) || []).map((c) => [c.n, c]));
+    const perCol = new Map();
+    n['merged:*'] = n['merged:right'] = n['merged:left'] = 0;
+    for (const r of obj.rows || []) for (const c of r.cells || []) {
+      const after = c.srcMergeAfter != null ? c.srcMergeAfter : c.mergeAfter, before = c.srcMergeBefore != null ? c.srcMergeBefore : c.mergeBefore;
+      if (!after && !before) continue;
+      const dir = after ? 'right' : 'left';
+      n['merged:*']++; n['merged:' + dir]++;
+      const col = c.srcCol || cols.get(c.colN);
+      if (col) { const it = T.mergedItem(col, dir); const e = perCol.get(it.guid) || { tag: it, count: 0 }; e.count++; perCol.set(it.guid, e); }
+    }
+    return STRUCTURE.filter((s) => n[s.key] > 0).map((s) => ({ tag: structureItem(s), count: n[s.key] })).concat([...perCol.values()]);
   }
   /* One scope's rules for a tag, in the order they are consulted: the tag's own, its group's, then `*`. */
   function rulesIn(rules, tag) {
@@ -493,7 +556,6 @@
         if (target.kind === 'example') { R.setTagRules(spec, rules); opts.onSpecChange && opts.onSpecChange(spec); return; }
         try { await save(target.kind, target.key, rules); } catch (e) { FS.toast(e.message, 'error'); }
       };
-      pop.appendChild(el('div', { class: 'row' }, el('b', {}, markerMode ? 'What this chart draws, and how' : 'FLEx text markup tags on this example')));
       pop.appendChild(el('div', { class: 'muted small', style: { marginBottom: '6px' } }, markerMode
         ? '☑ shows or hides an item here. “Style ▾” sets how it is DRAWN: a marker’s chip (or its whole row), a column’s cells, a word group. A group heading’s box switches everything under it on, off, or back to the mix it had. A visual filter is a named set of these same rules, switched on and off together.'
         : '☑ shows or hides a tag here. “Style ▾” sets how it is DRAWN: the bar under the words, and the words themselves (brackets, a tile, a border, a colour). A group heading’s box switches every tag under it on, off, or back to the mix it had. A visual filter is a named set of these same rules, switched on and off together.'));
@@ -566,7 +628,7 @@
       for (const sc of scopesFor(ctx)) { if (sc.kind !== 'filter') links.appendChild(el('button', { class: 'lnk', 'data-test': 'tag-scope-' + sc.kind, onclick: () => { close(); dialog(sc); } }, (sc.kind === 'folder' ? sc.label.replace(/^the /, '') : sc.kind === 'text' ? 'this text' : sc.label.replace(/^the /, 'this ')) + '…')); }
       links.appendChild(el('button', { class: 'lnk', 'data-test': 'tag-scope-filters', onclick: () => { close(); filtersDialog(); } }, 'visual filters…'));
       pop.appendChild(links);
-    });
+    }, { title: markerMode ? 'What this chart draws, and how' : 'FLEx text markup tags on this example' });
   }
 
   function ctxFor(scope) {
@@ -611,6 +673,7 @@
     const itemFor = (key) => {
       const k = norm(key);
       if (PSEUDO_RE.test(k)) { const it = T.structureItem(k); return Object.assign({}, it, { isMarker: true, label: it.label + ' (chart structure)' }); }
+      if (k.startsWith('merged:')) { const it = T.mergedFromKey(key); return Object.assign({}, it, { isMarker: true, label: it.label + ' (chart structure)' }); }
       if (k.startsWith('column:')) {
         const ck = k.slice(7);
         if (ck === '*') return { guid: 'column:*', name: key, abbr: '', group: '', column: true, isBroad: true, label: 'All chart columns', note: 'one rule for every chart column drawn on an example' };
@@ -725,6 +788,13 @@
         if (sitems.length) {
           lst.appendChild(el('div', { class: 'tag-tree-head', style: { marginTop: '6px' } }, 'Chart structure'));
           for (const s of sitems) lst.appendChild(row(s.key, s.label, s.note, 'tag-pick-tag'));
+        }
+        // merged cells by owner column (Seth, 2026-10-20: "PRED that is merged right or Cl Top merged right")
+        const mcols = T.columns().flatMap((c) => [['', ' merged (either side)'], [':right', ' merged right'], [':left', ' merged left']].map(([sfx, lab]) => ({ key: 'merged:' + c.name + sfx, label: (c.abbr || c.name.split('/').pop()) + lab, note: c.name })))
+          .filter((m) => !has(m.key) && (!needle || norm(m.label).includes(needle) || norm(m.key).includes(needle)));
+        if (mcols.length) {
+          lst.appendChild(el('div', { class: 'tag-tree-head', style: { marginTop: '6px' } }, 'Merged cells, by column'));
+          for (const m of mcols) lst.appendChild(row(m.key, m.label, m.note, 'tag-pick-tag'));
         }
         if (!items.length && !lst.querySelector('.tag-pick-all')) lst.appendChild(el('div', { class: 'muted small', style: { padding: '6px' } }, list.length ? 'Nothing else to add.' : 'No tags have been read from the project yet.'));
       };

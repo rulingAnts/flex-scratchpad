@@ -928,6 +928,21 @@ class FlexService:
             rows = [r for r in rows if ql in (r.get("title", "") + " " + r.get("words", "") + " " + r.get("label", "")).casefold()]
         return rows
 
+    def concordance_rows(self, text: str) -> dict:
+        """A FieldWorks concordance export (File › Export Concordance Results…, a CSV) placed in
+        the project: see flex/concordance.py. {rows, misses, matched, unmatched, texts}."""
+        from . import concordance
+        rows = concordance.parse(text)
+        if not rows:
+            raise FlexError("No concordance rows found: the file should have a Ref column (text and line number) and an Occurrence column, as FieldWorks' Export Concordance Results writes it")
+        with self.lock:
+            be = self._live()
+            texts = be.list_texts()
+            index = be.all_baselines()
+        out = concordance.match(rows, texts, index)
+        out["total"] = len(rows)
+        return out
+
     def rule_matches(self, rule: dict) -> list[dict]:
         """Every LINE (segment range) carrying any tag a rule names (Seth, 2026-10-18: "a
         collection with ALL lines that match a specific rule"). A selector is a tag's GUID,

@@ -269,6 +269,58 @@ class Api:
         d["matched"] = len(rows)
         return d
 
+    # -- a FLEx concordance export as a collection (Seth, 2026-10-20: "THAT would be HUGELY useful") --
+
+    def read_concordance_file(self) -> dict | None:
+        """Choose a concordance export (CSV) with the file dialog: {path, name, text}, or None."""
+        p = self._file_dialog(("Concordance export (CSV)", "*.csv"), ("All files", "*.*"))
+        if not p:
+            return None
+        path = Path(p)
+        return {"path": str(path), "name": path.name, "text": self._read_concordance(path)}
+
+    @staticmethod
+    def _read_concordance(path: Path) -> str:
+        raw = path.read_bytes()
+        for enc in ("utf-8-sig", "utf-16"):
+            try:
+                return raw.decode(enc)
+            except UnicodeDecodeError:
+                continue
+        return raw.decode("cp1252", errors="replace")
+
+    def concordance_preview(self, src: dict) -> dict:
+        """Where the rows of a concordance export land: {rows, misses, matched, unmatched, texts,
+        total}. `src` = {text} (the CSV's contents) or {path}."""
+        src = src or {}
+        text = src.get("text") or ""
+        if not text and src.get("path"):
+            text = self._read_concordance(Path(src["path"]))
+        try:
+            return self._flex.concordance_rows(text)
+        except FlexError as e:
+            raise RuntimeError(e.message) from e
+
+    def create_concordance_collection(self, tab: str | None, folder: str, title: str, src: dict, opts: dict | None = None) -> dict:
+        """A new collection with one example per line the export matched, in the file's order
+        (a line matched several times once); the rows not found are listed in a paragraph at
+        the end, so nothing is lost silently. `opts.note`: write each example's Ref as its note."""
+        opts = opts or {}
+        res = self.concordance_preview(src)
+        rows = res["rows"]
+        if not rows:
+            raise RuntimeError("None of the export's rows was found in the open project")
+        parts = []
+        for r in rows:
+            parts.append(match_embed(r) + (("\n> " + r["ref"] + (" (×%d)" % r["hits"] if r.get("hits", 1) > 1 else "")) if opts.get("note") else ""))
+        body = "\n\n".join(parts)
+        if res["misses"]:
+            body += "\n\nNot found in the project: " + "; ".join(m["ref"] + " (" + m["why"] + ")" for m in res["misses"])
+        n = self._nb.create_note(tab, folder or "", title or "", body + "\n", "examples")
+        d = self.get_note(n.id)
+        d.update({"matched": res["matched"], "unmatched": res["unmatched"], "total": res["total"]})
+        return d
+
     def update_rule_collection(self, note_id: str) -> dict:
         """Add the lines the rule matches now that the collection does not hold yet, at its end.
         Returns {added: [embed sources], total, matched, note}."""

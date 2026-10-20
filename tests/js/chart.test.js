@@ -206,6 +206,10 @@ test('hide empty columns, the one-column view, zoom, and the sentence / paragrap
   assert.deepEqual(C.partColumns(m3b, all, R.parse('{{flex:chart ' + G + ' merge=lookowner}}'), true).map((x) => x.n), [3]);
   assert.deepEqual(C.partColumns(m3b, all, R.parse('{{flex:chart ' + G + ' merge=lookowner}}')).map((x) => x.n), [3, 4]);
   assert.equal(C.mergeMode(R.parse('{{flex:chart ' + G + ' merge=odd}}')), 'both');
+  // `labels` (Seth, 2026-10-20: "both labels … but not both borders"): both for the data, the owner's look only
+  assert.equal(C.mergeMode(R.parse('{{flex:chart ' + G + ' merge=labels}}')), 'labels');
+  assert.deepEqual(C.partColumns(m3b, all, R.parse('{{flex:chart ' + G + ' merge=labels}}'), true).map((x) => x.n), [3]);
+  assert.deepEqual(C.partColumns(m3b, all, R.parse('{{flex:chart ' + G + ' merge=labels}}')).map((x) => x.n), [3, 4]);
   const f3b = C.flatten(c, R.parse('{{flex:chart ' + G + ' view=flat}}')).rows.find((r) => r.label === '3b').cells[0];
   assert.ok(f3b.srcMergeAfter && !f3b.mergeAfter && C.mergedNeighbour(f3b, all).n === 4);
   // the layout spans into the TEMPLATE neighbour only: with Verb hidden the merge does not swallow Object

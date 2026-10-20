@@ -663,6 +663,8 @@
         const t = text.trim();
         box.textContent = '';
         if (!t) return;
+        const refRows = /^(\{\{flex:(?:text|chart)\s[^}]*\}\})[ \t]*\n[\s\S]*\t/.exec(t);
+        if (refRows) { insert(refRows[1]); return; }                               // lines copied out of an example: their reference
         if (R.parse(t)) { insert(t); return; }                                     // an embed line
         if (/^silfw:\/\//i.test(t) || R.GUID.test(t)) { FS.picker.pasteChooser(t, (md) => insert(md)); return; }
         if (looksLikeFlexRows(text) && FS.picker && this.opts.canLocate && this.opts.canLocate()) {

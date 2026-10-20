@@ -681,11 +681,20 @@ class FlexiconBackend:
                 "guid": _guid(t),
                 "title": self._text_title(t),
                 "abbrev": _s(_t(lambda: p.Texts.GetAbbreviation(t), "")),
+                "names": self._text_names(t),
                 "segmentCount": count,
                 "hasMedia": bool(media),
             })
         out.sort(key=lambda r: r["title"].casefold())
         return out
+
+    def _text_names(self, t) -> list[str]:
+        """Every name the text goes by: its title and its abbreviation in EVERY writing system
+        (Seth, 2026-10-20: a concordance export names texts by a vernacular title, which the one
+        `title` / `abbrev` read in another system never matched)."""
+        tc = self._c(t)
+        names = list(self._title_alternatives(t).values()) + list(self._ws_alternatives(_t(lambda: tc.Abbreviation, None)).values())
+        return list(dict.fromkeys(_s(x) for x in names if _s(x)))
 
     def _title_alternatives(self, t) -> dict:
         """{ws tag: title} for every writing system the text has a non-empty title in."""
@@ -820,7 +829,7 @@ class FlexiconBackend:
 
     def search_texts(self, q: str) -> list[dict]:
         ql = (q or "").casefold()
-        return [t for t in self.list_texts() if ql in t["title"].casefold() or ql in t["abbrev"].casefold()]
+        return [t for t in self.list_texts() if any(ql in n.casefold() for n in [t["title"], t["abbrev"]] + t.get("names", []))]
 
     def get_text(self, guid: str, seg_from: int | None = None, seg_to: int | None = None,
                  max_segments: int = 60, ws: dict | None = None, diag: bool = False, at=None, alts: bool = False) -> dict:

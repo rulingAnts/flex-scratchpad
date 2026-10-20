@@ -363,12 +363,13 @@ class DemoBackend:
 
     def list_texts(self) -> list[dict]:
         return [{"guid": t["guid"], "title": t["title"], "abbrev": t["abbrev"],
+                 "names": list(dict.fromkeys(x for x in [t["title"], t["abbrev"]] + list((t.get("titleAlternatives") or {}).values()) if x)),
                  "segmentCount": t["segmentCount"], "hasMedia": any(m["found"] for m in t["media"])}
                 for t in self.texts.values()]
 
     def search_texts(self, q: str) -> list[dict]:
         ql = (q or "").casefold()
-        return [t for t in self.list_texts() if ql in t["title"].casefold()]
+        return [t for t in self.list_texts() if any(ql in n.casefold() for n in t.get("names") or [t["title"]])]
 
     def get_text(self, guid: str, seg_from=None, seg_to=None, max_segments: int = 60, ws=None, diag=False, at=None, alts: bool = False) -> dict:
         from .flextext import slice_text

@@ -71,3 +71,65 @@
         }
     });
 })();
+
+// "What you can do": a ✓ cell with data-stills shows those pictures in a card while the pointer
+// rests on it (or it has the keyboard focus; a tap toggles it). Only stills on the manifest are
+// shown, so a row whose picture is not made yet has no card at all.
+(function () {
+    var card = document.getElementById('claim-card');
+    if (!card) return;
+    var meta = document.querySelector('meta[name="media-manifest"]');
+    var base = meta ? meta.getAttribute('content').replace(/available\.json$/, '') : 'media/';
+    var listed = (!meta || !window.fetch || location.protocol === 'file:')
+        ? Promise.resolve([])
+        : fetch(meta.getAttribute('content'), { cache: 'no-cache' })
+            .then(function (r) { return r.ok ? r.json() : {}; })
+            .then(function (j) { return (j && j.files) || []; })
+            .catch(function () { return []; });
+    var VIEW = { 'claim-chart-columns': 'Columns', 'claim-chart-flat': 'One column', 'claim-chart-groups': 'Header groups' };
+    var cells = Array.prototype.slice.call(document.querySelectorAll('.compare td.has-stills'));
+    var open = null;
+    listed.then(function (files) {
+        cells.forEach(function (td) {
+            var names = (td.getAttribute('data-stills') || '').split(',').filter(function (n) { return files.indexOf(n + '.webp') !== -1; });
+            if (!names.length) return;
+            td.classList.add('has-pic');
+            function show() {
+                if (open === td) return;
+                open = td;
+                card.innerHTML = '';
+                var pics = document.createElement('div');
+                pics.className = 'pics' + (names.length > 1 ? ' three' : '');
+                names.forEach(function (n) {
+                    var f = document.createElement('figure');
+                    var i = new Image(); i.src = base + n + '.webp'; i.alt = td.getAttribute('data-caption') || ''; i.decoding = 'async';
+                    f.appendChild(i);
+                    if (VIEW[n]) { var fc = document.createElement('figcaption'); fc.textContent = VIEW[n]; f.appendChild(fc); }
+                    pics.appendChild(f);
+                });
+                card.appendChild(pics);
+                var cap = document.createElement('div'); cap.className = 'cap'; cap.textContent = td.getAttribute('data-caption') || '';
+                card.appendChild(cap);
+                card.hidden = false;
+                place(td);
+            }
+            function place(el) {
+                var r = el.getBoundingClientRect();
+                var cw = card.offsetWidth, ch = card.offsetHeight;
+                var left = Math.min(Math.max(12, r.left), window.innerWidth - cw - 12);
+                var top = r.bottom + 8;
+                if (top + ch > window.innerHeight - 12) top = Math.max(12, r.top - ch - 8);
+                card.style.left = left + 'px';
+                card.style.top = top + 'px';
+            }
+            function hide() { if (open !== td) return; open = null; card.hidden = true; }
+            td.addEventListener('mouseenter', show);
+            td.addEventListener('mouseleave', hide);
+            td.addEventListener('focus', show);
+            td.addEventListener('blur', hide);
+            td.addEventListener('click', function () { if (open === td) hide(); else show(); });
+        });
+    });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && open) { open = null; card.hidden = true; } });
+    window.addEventListener('scroll', function () { if (open) { open = null; card.hidden = true; } }, { passive: true });
+})();

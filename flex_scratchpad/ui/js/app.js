@@ -537,7 +537,7 @@
     const draw = async () => {
       list.innerHTML = '<div class="pick-item muted">Loading…</div>';
       let all = [];
-      try { all = await FS.api.flex_charts(''); } catch (e) { list.innerHTML = ''; list.appendChild(el('div', { class: 'pick-item', style: { color: 'var(--danger)' } }, e.message)); return; }
+      try { all = await FS.api.flex_charts(o.text || ''); } catch (e) { list.innerHTML = ''; list.appendChild(el('div', { class: 'pick-item', style: { color: 'var(--danger)' } }, e.message)); return; }
       const q = search.value.trim().toLowerCase();
       const hits = all.filter((c) => !q || ((c.title || '') + ' ' + (c.name || '') + ' ' + (c.template || '')).toLowerCase().includes(q)).sort((a, b) => (b.rows ? 1 : 0) - (a.rows ? 1 : 0) || (a.title || '').localeCompare(b.title || '') || (a.template || '').localeCompare(b.template || ''));
       list.innerHTML = '';
@@ -637,6 +637,61 @@
     (editing ? q : (opts.query ? title : q)).focus();
   }
   FS.chartCollection = (query) => chartCollectionDialog({ query });
+  /* A FLEx CONCORDANCE EXPORT as a collection (Seth, 2026-10-20: "the ability to paste the results of
+   * a FLEx concordance (or complex concordance) search and get an example collection … you could open
+   * the CSV results"): File › Export Concordance Results… in FieldWorks writes Ref,Occurrence rows;
+   * Api.concordance_preview places them in the open project, Api.create_concordance_collection writes
+   * the collection. The file is chosen with the dialog (the page only ever holds its path) or its
+   * contents are pasted into the box (a browser, or a file on another machine). */
+  async function concordanceDialog() {
+    const m = FS.modal({ title: 'New collection from a FLEx concordance export', class: 'rule-dlg' });
+    let src = null, res = null;
+    const file = el('span', { class: 'muted small', 'data-test': 'conc-file' }, 'No file chosen yet.');
+    const ta = el('textarea', { 'data-test': 'conc-text', placeholder: 'Ref,Occurrence\nBoa Cons 1.20,korokoi a bu i bi dirou …', spellcheck: 'false',
+      style: { width: '100%', height: '84px', fontFamily: 'ui-monospace, Consolas, monospace', fontSize: '12px' } });
+    const title = el('input', { type: 'text', 'data-test': 'conc-title', placeholder: 'Concordance', style: { width: '100%' } });
+    const noteBox = el('input', { type: 'checkbox', 'data-test': 'conc-note' });
+    const count = el('div', { class: 'rule-count', 'data-test': 'conc-count' }, 'Choose the CSV FieldWorks wrote, or paste its contents.');
+    const preview = el('div', { class: 'rule-preview', 'data-test': 'conc-preview', style: { maxHeight: '30vh', overflow: 'auto' } });
+    const err = el('div', { style: { color: 'var(--danger)' } });
+    const plural = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
+    const show = async () => {
+      err.textContent = ''; preview.innerHTML = ''; res = null;
+      if (!src) { count.textContent = 'Choose the CSV FieldWorks wrote, or paste its contents.'; return; }
+      count.textContent = 'Placing the rows in the project…';
+      try { res = await FS.api.concordance_preview(src); } catch (e) { count.textContent = ''; err.textContent = e.message; return; }
+      count.textContent = res.matched + ' of ' + plural(res.total, 'row') + ' placed' + (res.unmatched ? ', ' + res.unmatched + ' not found' : '')
+        + (res.texts.length ? ' · ' + plural(res.texts.length, 'text') : '') + (res.total > res.matched + res.unmatched ? ' (a line matched more than once is one example)' : '');
+      for (const r of res.rows.slice(0, 80)) preview.appendChild(el('div', { class: 'pick-item' }, el('span', { class: 'hw' }, r.title), el('span', { class: 'pos' }, r.label + (r.hits > 1 ? ' ×' + r.hits : '')),
+        el('span', { class: 'muted small' }, r.ref + (r.how === 'text' ? ' · found by its text, not its number' : r.how === 'number?' ? ' · by its number alone' : ''))));
+      if (res.rows.length > 80) preview.appendChild(el('div', { class: 'muted small' }, '… and ' + (res.rows.length - 80) + ' more'));
+      for (const x of res.misses.slice(0, 40)) preview.appendChild(el('div', { class: 'pick-item conc-miss' }, el('span', { class: 'hw muted' }, '✕ ' + x.ref), el('span', { class: 'muted small' }, x.why)));
+      if (res.misses.length > 40) preview.appendChild(el('div', { class: 'muted small' }, '… and ' + (res.misses.length - 40) + ' more not found'));
+      title.placeholder = 'Concordance' + (src.name ? ' — ' + src.name.replace(/\.csv$/i, '') : '');
+    };
+    const openBtn = el('button', { class: 'btn', 'data-test': 'conc-open', onclick: async () => {
+      try { const f = await FS.api.read_concordance_file(); if (!f) return; src = { path: f.path, name: f.name }; file.textContent = f.name; ta.value = ''; show(); } catch (e) { err.textContent = e.message; }
+    } }, '📂 Open the CSV…');
+    ta.addEventListener('input', FS.debounce(() => { const t = ta.value.trim(); src = t ? { text: t } : null; file.textContent = t ? 'The pasted text' : 'No file chosen yet.'; show(); }, 300));
+    m.body.append(
+      el('p', { class: 'muted small' }, 'In FieldWorks run the concordance (or complex concordance), then File › Export Concordance Results… Each row of that file names a text and a line; every line found in the open project becomes an example here, once, in the file’s order. Rows that cannot be placed are listed at the end of the collection.'),
+      el('div', { class: 'row' }, openBtn, file),
+      el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'or paste'), ta),
+      count, preview, err,
+      el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Title'), title),
+      el('label', { class: 'row muted small' }, noteBox, ' Keep each row’s reference (“Boa Cons 1.20”) as the example’s note'),
+      el('div', { class: 'btn-row' }, el('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'),
+        el('button', { class: 'btn primary', 'data-test': 'conc-create', onclick: async () => {
+          if (!src) { err.textContent = 'Choose the file or paste its contents first.'; return; }
+          try {
+            await flushSave();
+            const n = await FS.api.create_concordance_collection(S.tab, S.folder || '', title.value.trim() || title.placeholder, src, { note: noteBox.checked });
+            m.close(); clearSearch(); await refreshLists(); await openNote(n.id);
+            FS.toast(plural(n.matched, 'example') + ' collected' + (n.unmatched ? ', ' + n.unmatched + ' not found (listed at the end)' : ''), 'ok');
+          } catch (e) { err.textContent = e.message; }
+        } }, 'Create')));
+  }
+  FS.concordanceCollection = () => concordanceDialog();
   /* Where a lexical item sits in the charts (Seth, 2026-10-18: "which column a certain lexical
    * item is found in"): a count per column of every template, each a click from its rows. */
   async function chartProfileDialog(term) {
@@ -1588,6 +1643,7 @@
       pop.appendChild(el('button', { class: 'menu-item', onclick: () => { close(); newNote(); } }, 'New note', el('span', { class: 'muted small' }, '  Ctrl+N')));
       pop.appendChild(el('button', { class: 'menu-item', 'data-test': 'new-collection', title: 'A note that is just interlinear examples, numbered in order — the kind that exports as a FLEx text', onclick: () => { close(); newCollection('', ''); } }, 'New example collection'));
       pop.appendChild(el('button', { class: 'menu-item', 'data-test': 'new-rule-collection', title: 'A collection of every line in the project that carries the FLEx text markup tags you choose; later it can take in the new matches', onclick: () => { close(); ruleCollectionDialog({}); } }, 'New collection from tagged lines\u2026'));
+      pop.appendChild(el('button', { class: 'menu-item', 'data-test': 'new-concordance', title: 'Open the CSV FieldWorks writes with File › Export Concordance Results…: every line it lists becomes an example', onclick: () => { close(); concordanceDialog(); } }, 'New collection from a FLEx concordance export…'));
       pop.appendChild(el('button', { class: 'menu-item', 'data-test': 'new-chart-note', title: 'A note that is one FieldWorks text chart, with your own columns (choice lists, notes, rules) and styles', onclick: () => { close(); newChartNoteDialog(); } }, 'New chart note\u2026'));
     }));
     $('btn-add-tab').addEventListener('click', addTab);

@@ -249,6 +249,48 @@
         }
         return [...rows.values()].sort((a, b) => a.title.localeCompare(b.title) || a.seg - b.seg || a.segTo - b.segTo);
       },
+      // a FLEx concordance export (Ref,Occurrence) placed in the demo texts: the mock of flex/concordance.py
+      concordance_preview: async (src) => {
+        const text = (src && src.text) || '';
+        const csv = (t) => { const rows = []; let row = [], cell = '', q = false; for (let i = 0; i < t.length; i++) { const c = t[i];
+          if (q) { if (c === '"') { if (t[i + 1] === '"') { cell += '"'; i++; } else q = false; } else cell += c; }
+          else if (c === '"') q = true; else if (c === ',') { row.push(cell); cell = ''; } else if (c === '\n' || c === '\r') { if (c === '\r' && t[i + 1] === '\n') i++; row.push(cell); rows.push(row); row = []; cell = ''; } else cell += c; }
+          if (cell || row.length) { row.push(cell); rows.push(row); } return rows.filter((r) => r.some((x) => x.trim())); };
+        const norm = (s) => String(s || '').normalize('NFKD').replace(/[\p{M}\p{P}\p{S}]/gu, '').toLowerCase().split(/\s+/).filter(Boolean).join(' ');
+        const lk = (l) => (String(l).includes('.') ? String(l) : l + '.1');
+        let recs = csv(text.replace(/^﻿/, ''));
+        if (recs.length && recs[0].some((c) => c.trim().toLowerCase() === 'ref')) recs = recs.slice(1);
+        const rows = recs.map((r, i) => { const m = /^(.*?)\s*(\d+(?:\.\d+)?)\s*$/.exec((r[0] || '').trim()); return m ? { ref: r[0].trim(), name: m[1].trim(), label: m[2], occurrence: r[1] || '', line: i + 2 } : null; }).filter(Boolean);
+        if (!rows.length) throw new Error('No concordance rows found: the file should have a Ref column (text and line number) and an Occurrence column, as FieldWorks’ Export Concordance Results writes it');
+        const texts = Object.values(demo.texts);
+        const out = [], misses = [], seen = new Map();
+        for (const r of rows) {
+          const n = norm(r.name);
+          const titles = (t) => [t.title].concat(Object.values(t.titleAlternatives || {}));   // every writing system's title (vernacular titles too)
+          const cands = texts.filter((t) => norm(t.abbrev) === n).concat(texts.filter((t) => titles(t).some((x) => norm(x) === n)), texts.filter((t) => n.length >= 3 && titles(t).some((x) => norm(x).startsWith(n)))).filter((t, i, a) => a.indexOf(t) === i);
+          if (!cands.length) { misses.push({ ref: r.ref, found: false, why: 'no text named “' + r.name + '”', line: r.line }); continue; }
+          const occ = r.occurrence.split('§').map(norm).filter(Boolean);
+          let placed = null;
+          for (const t of cands) { const s = t.segments.find((x) => lk(x.label || x.n) === lk(r.label)); if (s) { const b = norm(s.baseline); const ok = !occ.length || !b || occ.includes(b); placed = { t, s, how: ok && occ.length && b ? 'number' : 'number?' }; if (ok) break; } }
+          if ((!placed || placed.how === 'number?') && occ.length) for (const t of cands) { const f = t.segments.filter((x) => norm(x.baseline) && occ.includes(norm(x.baseline))); if (f.length === 1) { placed = { t, s: f[0], how: 'text' }; break; } }
+          if (!placed) { misses.push({ ref: r.ref, found: false, why: '“' + cands[0].title + '” has no line ' + r.label, line: r.line }); continue; }
+          const key = placed.t.guid + '#' + placed.s.n;
+          if (seen.has(key)) { seen.get(key).hits++; continue; }
+          const a = (placed.s.guid || '').replace(/-/g, '').slice(-12);
+          const d = { text: placed.t.guid, title: placed.t.title, seg: placed.s.n, segTo: placed.s.n, label: String(placed.s.label || placed.s.n), labelTo: String(placed.s.label || placed.s.n), at: a ? [a, a] : undefined, ref: r.ref, hits: 1, how: placed.how, found: true };
+          seen.set(key, d); out.push(d);
+        }
+        return { rows: out, misses, matched: out.length, unmatched: misses.length, texts: [...new Set(out.map((d) => d.title))], total: rows.length };
+      },
+      read_concordance_file: async () => { throw new Error('There is no file dialog in a browser: paste the file’s contents into the box instead'); },
+      create_concordance_collection: async function (tab, folder, title, src, opts) {
+        const res = await this.concordance_preview(src);
+        if (!res.rows.length) throw new Error('None of the export’s rows was found in the open project');
+        let body = res.rows.map((r) => ruleEmbed(r) + (opts && opts.note ? '\n> ' + r.ref + (r.hits > 1 ? ' (×' + r.hits + ')' : '') : '')).join('\n\n');
+        if (res.misses.length) body += '\n\nNot found in the project: ' + res.misses.map((x) => x.ref + ' (' + x.why + ')').join('; ');
+        const n = mk(tab || 'Notes', folder || '', title || '', body + '\n', null, 'examples');
+        return { ...n, matched: res.matched, unmatched: res.unmatched, total: res.total };
+      },
       create_rule_collection: async function (tab, folder, title, rule) {
         const rows = await this.rule_matches(rule);
         const n = mk(tab || 'Notes', folder || '', title || '', rows.map((r) => r.embed || ruleEmbed(r)).join('\n\n') + (rows.length ? '\n' : ''), null, 'examples');

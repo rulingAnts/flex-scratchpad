@@ -209,6 +209,9 @@
     document.querySelectorAll('.popover').forEach((p) => p._close && p._close());
     const pop = FS.el('div', { class: 'popover ' + (opts.class || '') });
     pop._close = close;
+    // a titled popover has a STICKY head with a plain ✕ (Seth, 2026-10-20: the close button of the ⚑
+    // popover "is not clearly visible. It should be clearly visible and it should be sticky")
+    if (opts.title) pop.appendChild(FS.el('div', { class: 'pop-head' }, FS.el('b', {}, opts.title), FS.el('span', { class: 'spacer' }), FS.el('button', { class: 'pop-close', 'data-test': 'pop-close', title: 'Close (Esc)', 'aria-label': 'Close', onclick: () => close() }, '✕')));
     build(pop, close);
     document.body.appendChild(pop);
     const r = anchor.getBoundingClientRect();
