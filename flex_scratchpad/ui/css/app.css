@@ -1080,7 +1080,10 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 .tchart.al-right .al-a { justify-self: end; text-align: right; }
 .tchart .al-r { justify-self: start; min-width: 0; }
 .cflat-g { display: inline-block; vertical-align: top; margin: 1px 6px 3px 0; padding: 1px 3px; border-radius: 4px; }
-.cflat-g .cflat-body { display: inline-flex; align-items: flex-start; gap: 4px; vertical-align: top; }
+.cflat-g .cflat-body { display: inline-flex; flex-wrap: wrap; align-items: flex-start; gap: 4px; vertical-align: top; }
+/* a flat wrapper's chip line goes UNDER the words, not beside them (Seth, 2026-10-20: in the groups view "on a line of
+   their own" stacked the chips to the right of the words): the body wraps and the line takes a whole row */
+.cflat-g > .chips-line { display: block; margin-top: 2px; }   /* under the body, never beside it */
 .cflat-g .cflat-body .cwords { display: inline-flex; }
 .cflat-g.hidden { display: none; }
 .cflat-g .cflat-lab { font-size: calc(9.5px * var(--cz, 1)); color: var(--muted); margin-left: 2px; letter-spacing: 0.02em; }
@@ -1109,3 +1112,10 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 #bridge-wait .bw-card b { display: block; font-size: 18px; margin-bottom: 8px; }
 #bridge-wait code { font-size: 12px; background: var(--panel, #f3f4f6); padding: 1px 4px; border-radius: 3px; }
 #bridge-wait .bw-time { color: var(--muted, #6b7280); }
+
+/* A titled popover's sticky head (Seth, 2026-10-20: a clearly visible, sticky Close). */
+.popover .pop-head { position: sticky; top: -8px; z-index: 3; display: flex; align-items: center; gap: 8px; margin: -8px -8px 8px; padding: 8px 8px 7px; background: var(--bg); border-bottom: 1px solid var(--border); border-radius: 10px 10px 0 0; }
+.popover .pop-head b { font-size: 13px; }
+.popover .pop-head .spacer { flex: 1; }
+.popover .pop-close { border: 1px solid var(--border); background: var(--panel); color: var(--text); border-radius: 6px; width: 26px; height: 24px; font-size: 13px; line-height: 1; cursor: pointer; padding: 0; }
+.popover .pop-close:hover { background: var(--panel-2); }

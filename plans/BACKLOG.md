@@ -3,6 +3,15 @@
 Things Seth has asked for that are not built yet, in his words where possible, so the shape is
 not lost between sessions. Tracked in git, never served.
 
+**Where people can see what is planned (2026-10-20):** every item below that is still open is also
+a GitHub issue labelled `planned` —
+https://github.com/rulingAnts/flex-scratchpad/issues?q=is%3Aissue+is%3Aopen+label%3Aplanned — the
+issue is the short public statement, this file holds the design notes behind it. When an item ships,
+close its issue in the same commit's message (`Closes #n`) and strike it here. A GitHub Project in
+its *Roadmap* layout can be made from those issues in the repository's Projects tab (it cannot be
+created from the API this session has), if a timeline view is ever wanted; the labelled issues are
+the source either way.
+
 ## Copy an example as FLEx TSV or langsci-gb4e LaTeX (Seth, 2026-10-12)
 
 **FLEx TSV: done 2026-10-13** (⋯ → Copy as FLEx TSV, the ⎘ TSV button on the header and the
@@ -163,6 +172,35 @@ A whole-note export next to Markdown / HTML / DOCX / PDF: prose as plain LaTeX (
 lists, tables as `tabular`), examples as langsci-gb4e (`\\ea … \\gll … \\glt … \\z`, see the
 copy-as-LaTeX item above — the two share one serializer), vernacular in the writing system's
 font via `fontspec`. Exact packages and macros to be settled with Seth.
+
+**2026-10-20 (Seth): the formats, and XLingPaper, and copying.** *"We also want LaTeX export using
+langsci-gb4e or expex or langsci or mit interlinear formats. Save that feature for later. Also
+XLingPaper exports can be saved for later. (And copy to clipboard for either of those, including
+highlighting an area that may or may not include some combination of text, table rows, and FLEx
+objects of various types). That's for the future though."*
+
+- **LaTeX, four interlinear dialects, chosen in the export dialog and remembered:**
+  `langsci-gb4e` (`\ea … \gll … \glt … \z`, the Language Science Press house style),
+  `expex` (`\ex \begingl \gla … // \glb … // \glft … // \endgl \xe`), `langsci` (langsci-gb4e
+  as the langsci class loads it, with `\langinfo`), `mit` (the `gb4e`/`cgloss4e`-shaped
+  `\exg.` of the MIT dissertation style). One serializer over the export model
+  (`FS.exporter.buildDoc`), a table of macros per dialect; the prose as plain LaTeX, tables as
+  `tabular`/`longtable`, headings as sections, the user's highlight / bold / underline / colour on
+  words as `\hl` / `\textbf` / `\uline` / `\textcolor` (packages listed in the preamble it
+  writes), charts as `longtable` with a `\multicolumn` header row per group, vernacular in the
+  writing system's font with `fontspec` (XeLaTeX / LuaLaTeX). A `.tex` next to the note, or a
+  folder with the audio clips when "with audio" is on (as `\href` links — LaTeX has no player).
+- **XLingPaper** (SIL's XML for linguistics papers): `<example>` / `<interlinear>` /
+  `<lineGroup>` / `<line>` / `<wrd>` with `<langData lang>` and `<gloss lang>` per writing system,
+  `<free>`, sections for headings, `<table>` for tables and charts, the FLEx link as a comment;
+  languages declared once at the top from the writing systems used. Validated against the
+  XLingPaper DTD in a test the way the .flextext export is against FieldWorks' XSD.
+- **Copy to the clipboard in either format** for the highlighted part of a note — a
+  cross-block selection or a selection in one block that may hold text, table rows and FLEx
+  objects of any kind (examples, entries, charts, chips) — from the note menu (*Copy as →
+  LaTeX (dialect) / XLingPaper*) and the editor's context menu: `highlightedSource()` gives the
+  markdown, the same serializer renders only that; a single example's ⋯ menu offers it too
+  (the copy-as-LaTeX item above).
 
 ## Import .flextext and ELAN files as extra texts (Seth, 2026-10-13)
 

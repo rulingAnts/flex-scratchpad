@@ -278,3 +278,19 @@ footer { margin-top: 64px; border-top: 1px solid var(--slate-200); background: #
 .compare td.yes:last-child { border-left: 3px solid var(--blue-200); }
 .compare em { font-family: var(--serif); font-style: italic; color: var(--blue-800); }
 @media (max-width: 640px) { .claims li { font-size: 0.82rem; padding: 5px 11px; } .compare { font-size: 0.86rem; } }
+
+/* "What you can do": a hover card with stills of the real program on each ✓ cell (Seth, 2026-10-20:
+   "mouseover generated screenshots for each feature with a checkbox") — media.js fills it from the
+   manifest, so a row whose still is not made yet has none. Keyboard: the cells are focusable. */
+.compare td.has-stills { cursor: help; }
+.compare td.has-stills:focus { outline: 2px solid var(--blue-500, #2563eb); outline-offset: -2px; }
+.compare td.has-stills.has-pic::after { content: " 🖼"; font-size: 0.85em; opacity: 0.6; }
+.compare-hint { color: var(--slate-500); font-size: 0.85rem; margin: 8px 2px 0; }
+.claim-card { position: fixed; z-index: 50; width: min(560px, calc(100vw - 24px)); background: #fff; border: 1px solid var(--slate-200); border-radius: var(--r-lg); box-shadow: 0 18px 50px rgba(15, 23, 42, 0.22); padding: 10px; pointer-events: none; }
+.claim-card[hidden] { display: none; }
+.claim-card .pics { display: grid; gap: 8px; }
+.claim-card .pics.three { grid-template-columns: 1fr; }
+.claim-card img { display: block; width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--slate-200); background: var(--slate-50); }
+.claim-card figcaption { font-size: 0.78rem; color: var(--slate-600); margin: 4px 2px 0; }
+.claim-card .cap { font-size: 0.85rem; color: var(--slate-700); margin: 8px 2px 0; }
+@media (hover: none) { .compare td.has-stills { cursor: pointer; } }

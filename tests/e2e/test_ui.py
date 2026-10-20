@@ -4446,6 +4446,7 @@ def test_links_dialog_and_the_common_keyboard_shortcuts(app):
 
 # ---------------------------------------------------------------------------------- text charts
 CHART = "d15c0000-0000-4000-8000-00000000c001"
+TEXT = "9b1c2d3e-4f50-4a6b-8c7d-0e1f2a3b0001"   # the demo story, the chart's text
 
 
 def test_text_chart_rows_from_the_picker_with_headings_markers_and_translations(app):
@@ -5068,6 +5069,108 @@ def test_the_chart_search_is_a_button_and_a_builder(app):
     assert not errors
 
 
+def chips_under_words(page, root="#editor .chart-obj"):
+    """{n, ok}: every chip line that shares its box with words sits UNDER them, never beside them."""
+    return page.evaluate("""(root) => { const out = { n: 0, ok: true }; for (const line of document.querySelectorAll(root + ' .chips-line:not(.void)')) {
+        const words = line.parentElement.querySelector('.cwords'); if (!words) continue; out.n++;
+        if (line.getBoundingClientRect().top < words.getBoundingClientRect().bottom - 1) out.ok = false; } return out; }""", root)
+
+
+def test_marker_chips_on_their_own_line_in_the_groups_view(app):
+    """Seth, 2026-10-20: in the one-column GROUPED view "on a line of their own" stacked the chips to
+    the right of the words and "no longer than the words" did nothing visible — a flat box's body was
+    an inline-flex ROW, so the chip line was just another item in it. The line now takes a row of its
+    own under the words, in the groups view, the one-column view and the columns view alike."""
+    h, page, errors = app
+    new_note(page, "Chips under words")
+    # the demo's two markers sit in cells without words; give row 1a's first word cell a marker too,
+    # so a chip line shares a box with words (what the test measures)
+    page.evaluate("""() => { const real = window.__flexBridge;
+      window.__flexBridge = async (req) => { const q = JSON.parse(req); const r = await real(req);
+        if (q.method !== 'flex_get' || q.args[0] !== 'chart') return r;
+        const o = JSON.parse(r); const rows = o.result && o.result.rows; if (!rows) return r;
+        const tag = rows.flatMap((x) => x.cells).find((c) => c.kind === 'tag'); const w = rows[0].cells.find((c) => c.kind === 'words');
+        if (tag && w && !rows[0].cells.some((c) => c.kind === 'tag' && c.colN === w.colN)) rows[0].cells.push(Object.assign({}, tag, { col: w.col, colN: w.colN, guid: 'd15c0000-0000-4000-8000-0000000000e2' }));
+        return JSON.stringify(o); }; }""")
+    page.keyboard.type("{{flex:chart %s view=groups chips=line}}" % CHART)
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#editor .chart-obj tr.crow .cflat-g")
+    page.wait_for_selector("#editor .chart-obj .chips-line:not(.void)")
+    u = chips_under_words(page)
+    assert u["n"] >= 1 and u["ok"], u
+    # the wrapped line is no wider than the words it belongs with
+    page.locator("#editor .chart-obj [data-test=chart-menu]").click()
+    page.select_option("[data-test=chart-chips-select]", "wrap")
+    page.wait_for_function("() => { const ls = [...document.querySelectorAll('#editor .chart-obj .chips-line.wrap')]; return ls.length && ls.every((l) => /px$/.test(l.style.maxWidth)); }")
+    page.keyboard.press("Escape")
+    u = chips_under_words(page)
+    assert u["n"] >= 1 and u["ok"], u
+    assert page.evaluate("() => [...document.querySelectorAll('#editor .chart-obj .chips-line.wrap')].every((l) => { const w = l.parentElement.querySelector('.cwords'); return !w || l.getBoundingClientRect().width <= Math.max(48, w.getBoundingClientRect().width) + 1; })")   # 48px: the floor placeChipLines keeps
+    # the columns view and the one-column view too (the head's button steps groups → columns → one column)
+    page.locator("#editor .chart-obj [data-test=chart-view]").click()
+    page.wait_for_function("() => !window.__fsEditor.getMarkdown().includes('view=')")
+    page.wait_for_selector("#editor .chart-obj td.ccell .chips-line:not(.void)")
+    u = chips_under_words(page)
+    assert u["n"] >= 1 and u["ok"], u
+    page.locator("#editor .chart-obj [data-test=chart-view]").click()
+    page.wait_for_function("() => window.__fsEditor.getMarkdown().includes('view=flat')")
+    page.wait_for_selector("#editor .chart-obj .cflat-g .chips-line:not(.void)")
+    u = chips_under_words(page)
+    assert u["n"] >= 1 and u["ok"], u
+
+
+def test_the_flag_popover_keeps_its_place_and_the_chart_note_its_scroll(app):
+    """Seth, 2026-10-20: the ⚑ popover "has the annoying behavior of skipping to the top … the moment
+    something is changed within", and its close button should be clearly visible and sticky. A change
+    at the chart's own scope and at the note's scope: the pane keeps its scroll, the popover keeps its
+    place and its ✕, and the ✕ closes it."""
+    h, page, errors = app
+    page.locator("#btn-new-menu").click()
+    page.locator("[data-test=new-chart-note]").click()
+    page.wait_for_selector("[data-test=pick-chart-note]")
+    page.locator("[data-test=pick-chart-note]").first.click()
+    page.wait_for_selector("#chartnote .tchart tr.crow")
+    # a short pane; the ⚑ popover open (a fixed box of its own), then the pane scrolled down into
+    # the chart (Playwright's click would scroll the ⚑ button into view itself)
+    page.evaluate("document.getElementById('editor-pane').style.height = '380px'")
+    page.locator("#chartnote [data-test=marker-btn]").click()
+    page.wait_for_selector(".popover [data-test=tag-scope-pick]")
+    page.evaluate("document.getElementById('chartnote').scrollTop = 150")
+    page.wait_for_timeout(100)
+    pane_before = page.evaluate("document.getElementById('chartnote').scrollTop")
+    assert pane_before > 100
+    pop = page.locator(".popover")
+    assert pop.locator(".pop-head [data-test=pop-close]").is_visible()
+    # the popover is taller than the window here: scroll it down, then change something near the bottom
+    page.evaluate("() => { const p = document.querySelector('.popover'); p.style.maxHeight = '260px'; p.scrollTop = p.scrollHeight; }")
+    pop_before = page.evaluate("document.querySelector('.popover').scrollTop")
+    assert pop_before > 50
+    boxes = pop.locator("input[type=checkbox]")
+    n = boxes.count()
+    assert n > 2
+    boxes.nth(n - 1).click()
+    page.wait_for_timeout(500)
+    assert page.locator(".popover").count() == 1
+    assert abs(page.evaluate("document.querySelector('.popover').scrollTop") - pop_before) <= 2
+    assert abs(page.evaluate("document.getElementById('chartnote').scrollTop") - pane_before) <= 2
+    # the ✕ stays in view at the top of the scrolled popover, and closes it
+    head = page.locator(".popover .pop-head")
+    assert head.is_visible() and head.evaluate("e => e.getBoundingClientRect().top >= e.closest('.popover').getBoundingClientRect().top - 1")
+    # a change at the note's scope: the whole note redraws, and nothing moves either
+    page.select_option(".popover [data-test=tag-scope-pick]", index=1)
+    page.wait_for_timeout(200)
+    page.evaluate("() => { const p = document.querySelector('.popover'); p.scrollTop = p.scrollHeight; }")
+    pop_before = page.evaluate("document.querySelector('.popover').scrollTop")
+    boxes = page.locator(".popover input[type=checkbox]")
+    boxes.nth(boxes.count() - 1).click()
+    page.wait_for_timeout(700)
+    assert page.locator(".popover").count() == 1
+    assert abs(page.evaluate("document.querySelector('.popover').scrollTop") - pop_before) <= 2
+    assert abs(page.evaluate("document.getElementById('chartnote').scrollTop") - pane_before) <= 2
+    page.locator(".popover [data-test=pop-close]").click()
+    page.wait_for_selector(".popover", state="detached")
+
+
 def test_the_groups_view_and_lining_up_on_a_column(app):
     """Seth, 2026-10-19: "a major-column view … just the 3 parent columns (and then style text from sub
     columns within each cell per visual filter rules)", and in the one-column view "align elements
@@ -5131,6 +5234,7 @@ def test_the_groups_view_and_lining_up_on_a_column(app):
     page.wait_for_selector("#editor .chart-obj .chips-line.wrap")
     page.keyboard.press("Escape")
     assert "chips=wrap" in src()
+    assert chips_under_words(page)["ok"]
     page.wait_for_function("() => [...document.querySelectorAll('#editor .chart-obj .chips-line.wrap')].every((l) => /px$/.test(l.style.maxWidth))")
     assert page.locator("#editor .chart-obj tr.crow[data-label='1a'] .chips-line .ctag").count() == 1
     page.locator("#editor .chart-obj [data-test=chart-menu]").click()
@@ -5163,6 +5267,13 @@ def test_the_groups_view_and_lining_up_on_a_column(app):
     page.keyboard.press("Escape")
     assert "merge=owner" in src() and page.locator("#editor .chart-obj tr.crow[data-label='3b'] .cflat-outer").count() == 0
     assert page.locator("#editor .chart-obj tr.crow[data-label='3b'] .al-grid").count() == 0        # Subject alone is not lined up
+    # `labels` (Seth, 2026-10-20: "both labels … but not both borders"): S+V named, one box, still lined up on Verb
+    page.locator("#editor .chart-obj [data-test=chart-menu]").click()
+    page.select_option("[data-test=chart-merge-select]", "labels")
+    page.wait_for_function("() => document.querySelector(\"#editor .chart-obj tr.crow[data-label='3b'] .cflat-lab\").textContent === 'S+V'")
+    page.keyboard.press("Escape")
+    assert "merge=labels" in src() and page.locator("#editor .chart-obj tr.crow[data-label='3b'] .cflat-outer").count() == 0
+    assert page.locator("#editor .chart-obj tr.crow[data-label='3b'] .al-grid").count() == 1
     # back in the columns view the merged cell spans both and takes Verb's look as the outer layer
     page.locator("#editor .chart-obj [data-test=chart-menu]").click()
     page.select_option("[data-test=chart-merge-select]", "both")
@@ -5192,16 +5303,25 @@ def test_chart_structure_and_header_groups_as_visual_filters(app):
     page.wait_for_selector(".popover .tagrow[data-tag='moved:preposed']")
     names = page.locator(".popover .tagrow").evaluate_all("els => els.map((e) => e.dataset.tag)")
     assert "clause:speech" in names and "clauseref" in names and "moved:*" in names and "group:Nucleus" in names, names
-    page.keyboard.press("Escape")
+    # merged cells are a target too (Seth, 2026-10-20): any, by side, and 3b's "Subject merged right"
+    assert "merged:*" in names and "merged:right" in names and "merged:Nucleus/Subject:right" in names, names
+    assert page.locator(".popover .tagrow[data-tag='merged:Nucleus/Subject:right']").inner_text().startswith("S merged right")
+    # the popover's sticky head has a visible ✕ (Seth, 2026-10-20)
+    assert page.locator(".popover .pop-head [data-test=pop-close]").is_visible()
+    page.locator(".popover [data-test=pop-close]").click()
+    page.wait_for_selector(".popover", state="detached")
     # rules at the project scope: a speech row tinted, the [2a] markers hidden, moved text boxed and
     # labelled with the column it came from, the Nucleus group tiled as one
     page.evaluate("""async () => {
       const c = await window.pywebview.api.set_tag_styles('project', FS.tagstyles.context().project, [
         {tag: 'clause:speech', bg: '#fde68a'}, {tag: 'clauseref', hide: true},
-        {tag: 'moved:*', box: true, bg: '#c0392b'}, {tag: 'column:group:Nucleus', tile: true, bg: '#bdb2ff'}]);
+        {tag: 'moved:*', box: true, bg: '#c0392b'}, {tag: 'column:group:Nucleus', tile: true, bg: '#bdb2ff'},
+        {tag: 'merged:Nucleus/Subject:right', box: true, bg: '#0f766e'}]);
       FS.tagstyles.setConfig(c); FS.emit('tagstyles');
     }""")
     page.wait_for_selector("#editor .chart-obj tr.clause-styled")
+    # the merged cell of 3b (Subject, extended into Verb) wears the merged rule's box over the columns' looks; no other cell does
+    assert obj.locator("tr.crow[data-label='3b'] td.merged-styled").count() == 1 and obj.locator("td.merged-styled").count() == 1
     assert obj.locator("tr.crow[data-label='2a']").evaluate("e => e.classList.contains('clause-styled') && e.style.background !== ''")
     assert obj.locator("tr.crow[data-label='2b'] .cclause.hidden").count() == 1 and obj.locator(".cclause:not(.hidden)").count() == 0
     moved = obj.locator(".cwords.moved-styled")
@@ -5260,3 +5380,71 @@ def test_chart_structure_and_header_groups_as_visual_filters(app):
     assert page.locator("[data-test=tag-popover] .tag-style-box [data-test=tag-bs]").count() == 1 and page.locator("[data-test=tag-popover] .tag-style-box [data-test=tag-bg]").count() == 0
     page.keyboard.press("Escape")
     assert not errors
+
+
+CONCORDANCE_CSV = (
+    "Ref,Occurrence\r\n"
+    "DOG 1.2,Kabir ka-nuwa-mo lo.\u00a7 Ha\u014ba tiket ka-sila-mo pemu.\r\n"
+    "The dog and the river 2.1,\"\u201c\u019dam\u00fa!\u201d ka-sila lo.\u00a7 Kabir pemu ka-nuwa lo.\"\r\n"
+    "The dog 3,Tiket ka-nuwa-mo.\r\n"
+    "DOG 1.2,Kabir ka-nuwa-mo lo.\u00a7 Ha\u014ba tiket ka-sila-mo pemu.\r\n"
+    "DOG 9.9,Kabir pemu ka-nuwa lo.\r\n"
+    "Nowhere 1.1,ba tuhwe de kudia te\r\n"
+    "DOG 8.8,xyz nothing here\r\n"
+)
+
+
+def test_a_flex_concordance_export_becomes_a_collection(app):
+    """Seth, 2026-10-20: "you can't actually 'paste' concordance search results, but you could open
+    the CSV results and generate an example collection from that. THAT would be HUGELY useful." The
+    file's contents pasted into the dialog (the file dialog cannot be driven here): the rows are placed
+    in the project, the count says what was found, and the collection holds one example per line, the
+    misses listed at its end."""
+    h, page, errors = app
+    page.locator("#btn-new-menu").click()
+    page.locator("[data-test=new-concordance]").click()
+    page.wait_for_selector("[data-test=conc-text]")
+    page.locator("[data-test=conc-text]").fill(CONCORDANCE_CSV)
+    page.wait_for_function("() => /placed/.test(document.querySelector('[data-test=conc-count]').textContent)")
+    count = page.locator("[data-test=conc-count]").inner_text()
+    assert "4 of 7 rows placed, 2 not found" in count and "1 text" in count, count
+    assert page.locator("[data-test=conc-preview] .pick-item:not(.conc-miss)").count() == 4
+    assert page.locator("[data-test=conc-preview] .conc-miss").count() == 2
+    assert "found by its text" in page.locator("[data-test=conc-preview] .pick-item").nth(3).inner_text()
+    page.locator("[data-test=conc-title]").fill("kudia te")
+    page.locator("[data-test=conc-note]").check()
+    page.locator("[data-test=conc-create]").click()
+    page.wait_for_selector("#collection .coll-item .text-obj .segment")
+    assert page.locator("#collection .coll-item .text-obj").count() == 4       # + the closing "Not found" paragraph
+    assert page.locator("#collection .coll-note").first.input_value() == "DOG 1.2 (\u00d72)"
+    md = page.locator("#collection").inner_text()
+    assert "Not found in the project: Nowhere 1.1" in md and "DOG 8.8" in md
+
+
+def test_a_chart_becomes_an_example_and_an_example_a_chart(app):
+    """Seth, 2026-10-20: "convert a flex text-chart object to a regular interlinear example object
+    (including the lines that chart rows touch) or vice versa … either direction should be inclusive".
+    Rows 1b–2a hold lines 2 and 3 → an example of lines 2–3; that example → the rows holding words
+    of lines 2–3, which are 1b, 2a AND 2b (rows 2–4): inclusive both ways, anchored, the view keys gone."""
+    h, page, errors = app
+    new_note(page, "Convert")
+    page.keyboard.type("{{flex:chart %s rows=2-3 free=col zoom=120 \"My chart\"}}" % CHART)
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#editor .chart-obj tr.crow")
+    page.locator("#editor .chart-obj [data-test=chart-menu]").click()
+    page.locator("[data-test=to-example]").click()
+    page.wait_for_selector("#editor .text-obj .segment")
+    md = page.evaluate("() => window.__fsEditor.getMarkdown()")
+    assert "{{flex:text %s seg=2-3 at=0e1f2a3b1002-0e1f2a3b1003 \"My chart\"}}" % TEXT in md, md
+    assert "zoom" not in md and "free=" not in md
+    assert page.locator("#editor .text-obj .segment").count() == 2
+    # and back: two charts of this text have rows, so the chooser asks which
+    page.locator("#editor .text-obj .flex-head .lnk[title='Options']").click()
+    page.locator("[data-test=to-chart]").click()
+    page.wait_for_selector("[data-test=pick-chart-convert]")
+    assert page.locator("[data-test=pick-chart-convert]").count() == 2
+    page.locator("[data-test=pick-chart-convert]").first.click()
+    page.wait_for_selector("#editor .chart-obj tr.crow")
+    md = page.evaluate("() => window.__fsEditor.getMarkdown()")
+    assert "{{flex:chart %s rows=2-4 at=000000000020-000000000040 \"My chart\"}}" % CHART in md, md
+    assert page.locator("#editor .chart-obj tr.crow").count() == 3

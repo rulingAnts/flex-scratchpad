@@ -987,6 +987,7 @@
       if (spec.kind === 'text') pop.appendChild(el('button', { class: 'menu-item', onclick: () => { close(); openContext(spec, obj); } }, 'View in context (whole text)'));
       if (spec.kind === 'text' && obj && obj.kind === 'text') pop.appendChild(el('button', { class: 'menu-item', title: 'The rows FLEx itself puts on the clipboard (Word / Morphemes / Lex. Gloss / Free …), one block per segment, the lines this example shows', onclick: () => { FS.copyText(flexTsv(spec, obj)); FS.toast('Copied as FLEx TSV'); close(); } }, 'Copy as FLEx TSV'));
       pop.appendChild(el('button', { class: 'menu-item', onclick: () => { FS.copyText(R.serialize(spec)); FS.toast('Embed code copied'); close(); } }, 'Copy embed code'));
+      if (spec.kind === 'text' && obj && obj.kind === 'text' && opts.onSpecChange && FS.chart) pop.appendChild(el('button', { class: 'menu-item', 'data-test': 'to-chart', title: 'The text chart of this text, at every row that holds words of these lines, first to last (the rows are yours to adjust afterwards)', onclick: () => { close(); toChart(spec, obj, opts); } }, 'Show these lines as a text chart…'));
       if (opts.editSource) pop.appendChild(el('button', { class: 'menu-item', onclick: () => { close(); opts.editSource(); } }, 'Edit source'));
       if (opts.duplicate || opts.remove) pop.appendChild(el('hr'));
       if (opts.duplicate) pop.appendChild(el('button', { class: 'menu-item', onclick: () => { close(); opts.duplicate(); } }, 'Duplicate this object'));
@@ -1351,6 +1352,34 @@
     return () => { for (const [x, top, left] of held) { if (x.scrollTop !== top) x.scrollTop = top; if (x.scrollLeft !== left) x.scrollLeft = left; } };
   }
 
+  /* An example as the rows of its text's chart (Seth, 2026-10-20: "or vice versa (text chart touching
+   * all the lines in the example). They won't line up perfectly, either direction should be
+   * inclusive"): every row holding words of any of the example's lines, first to last; the text has
+   * one chart with rows → that one, several → the chooser (this text's charts only). */
+  async function toChart(spec, obj, opts) {
+    let charts;
+    try { charts = (await FS.api.flex_charts(spec.guid)).filter((c) => c.rows); } catch (e) { FS.toast(e.message, 'error'); return; }
+    if (!charts.length) { FS.toast('This text has no text chart with rows in FieldWorks', 'warn'); return; }
+    const go = async (c) => {
+      let chart;
+      try { chart = await flexGet('chart', c.guid, null, null, false, null, null); } catch (e) { FS.toast(e.message, 'error'); return; }
+      const ns = (obj.segments || []).map((s) => s.n).filter((n) => n != null);
+      const lo = Math.min(...ns), hi = Math.max(...ns);
+      const idx = [];
+      (chart.rows || []).forEach((r, i) => { if ((r.cells || []).some((p) => p.kind === 'words' && p.seg != null && (p.segTo || p.seg) >= lo && p.seg <= hi)) idx.push(i); });
+      if (!idx.length) { FS.toast('No row of “' + (c.name || 'the chart') + '” holds these lines', 'warn'); return; }
+      const a = chart.rows[idx[0]], b = chart.rows[idx[idx.length - 1]];
+      const anchor12 = (g) => (g || '').replace(/-/g, '').slice(-12);
+      const keep = {}; for (const k of ['ex', 'indent', 'collapsed']) if (spec.extra && spec.extra[k] != null) keep[k] = spec.extra[k];
+      spec.kind = 'chart'; spec.guid = c.guid; spec.seg = [a.n, b.n]; spec.at = a.guid && b.guid ? [anchor12(a.guid), anchor12(b.guid)] : null;
+      spec.lines = null; spec.ws = null; spec.styles = []; spec.extra = keep;
+      opts.onSpecChange(spec);
+    };
+    if (charts.length === 1) go(charts[0]);
+    else if (FS.pickChart) FS.pickChart({ title: 'Which chart of this text?', intro: 'This text has ' + charts.length + ' charts with rows; the example becomes the rows of the one you pick.', text: spec.guid, test: 'pick-chart-convert', onPick: go });
+    else go(charts[0]);
+  }
+
   async function render(container, spec, opts) {
     opts = opts || {};
     if (spec.kind === 'file') return FS.files.render(container, spec, opts);   // an attached file, not a FLEx object
@@ -1371,10 +1400,21 @@
         const o = Object.assign({}, opts, { refresh: () => reload() });
         const node = kind === 'text' ? renderText(obj, spec, o) : kind === 'chart' ? FS.chart.renderChart(obj, spec, o) : kind === 'wordform' ? renderWordform(obj, spec, o) : renderEntry(obj, spec, o);
         const restore = keep && container.isConnected ? holdScroll(container) : null;   // only when a drawing is REPLACED
-        container.innerHTML = '';
-        container.appendChild(node);
-        container._obj = obj;
-        if (restore) restore();
+        if (restore) {
+          // the new drawing goes in BEFORE the old one leaves, so the scrolling box never shrinks in
+          // between (a shorter box clamps its scroll to the top and the view jumps), and the positions
+          // are put back again on the next frame, once the chart's columns and sticky parts are laid out
+          const old = Array.from(container.childNodes);
+          container.appendChild(node);
+          old.forEach((n) => n.remove());
+          container._obj = obj;
+          restore();
+          requestAnimationFrame(restore);
+        } else {
+          container.innerHTML = '';
+          container.appendChild(node);
+          container._obj = obj;
+        }
       } catch (e) {
         container.innerHTML = '';
         const err = el('div', { class: 'flex-obj' },

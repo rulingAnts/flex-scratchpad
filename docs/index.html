@@ -68,50 +68,56 @@
         <tr>
           <th scope="row">Write around your data: headings, lists, tables, folders, tags, drafts</th>
           <td class="no">Notes fields on records; no documents</td>
-          <td class="yes">Yes</td>
+          <td class="yes has-stills" data-stills="claim-notes" data-caption="A note: headings, a styled example, a table with examples in its cells, a checklist" tabindex="0">Yes</td>
           <td class="yes">Yes: Markdown notes in tabs and folders, with your data inside them</td>
         </tr>
         <tr>
           <th scope="row">Quote an interlinear example that follows your analysis</th>
-          <td class="part">Only inside the text itself</td>
+          <td class="part">Only in the Notes field in the text itself, difficult to organize or find later</td>
           <td class="no">A pasted copy, stale the moment you re-gloss</td>
-          <td class="yes">Live: read from the project when shown; ↻ after an edit; stays on its lines when you split, merge or delete lines in FLEx</td>
+          <td class="yes has-stills" data-stills="claim-example" data-caption="An example read from the project, numbered, with its free translation" tabindex="0">Live: read from the project when shown; ↻ after an edit; stays on its lines when you split, merge or delete lines in FLEx</td>
         </tr>
         <tr>
           <th scope="row">Highlight a morpheme, bracket a phrase, colour a word in an example</th>
           <td class="no">No</td>
           <td class="part">By hand, and lost on every re-paste</td>
-          <td class="yes">A click; kept with the note; carried into every export</td>
+          <td class="yes has-stills" data-stills="claim-style" data-caption="Click a word: highlight, bold, underline, colour, brackets — kept in the note" tabindex="0">A click; kept with the note; carried into every export</td>
         </tr>
         <tr>
           <th scope="row">Gather every example of a construction across your texts</th>
           <td class="part">A filter, while the window is open</td>
           <td class="no">Copy and paste, one by one</td>
-          <td class="yes">Collections, by hand or by rule (“every line tagged Topic”, “every chart row with <em>kabir</em> in the Subject column”); “Find new lines” later</td>
+          <td class="yes has-stills" data-stills="claim-collect" data-caption="A collection made by rule: every line tagged, in text order" tabindex="0">Collections, by hand or by rule (“every line tagged Topic”, “every chart row with <em>kabir</em> in the Subject column”); “Find new lines” later</td>
+        </tr>
+        <tr>
+          <th scope="row">Turn a concordance search into a set of examples</th>
+          <td class="part">A list of references and a CSV export</td>
+          <td class="no">Retype or paste each one</td>
+          <td class="yes has-stills" data-stills="claim-concordance" data-caption="FLEx’s concordance export placed in the project, row by row" tabindex="0">Open FLEx’s concordance export: every line it lists becomes a live, numbered example in a collection</td>
         </tr>
         <tr>
           <th scope="row">Work with a text chart in a document</th>
           <td class="part">One chart at a time, in its own tool</td>
           <td class="no">A screenshot</td>
-          <td class="yes">The live chart or a range of its rows, your own columns beside it, visual filters by column, marker and clause type, three layouts</td>
+          <td class="yes has-stills" data-stills="claim-chart-columns,claim-chart-flat,claim-chart-groups" data-caption="The same chart as columns · one column · header groups" tabindex="0">The live chart or a range of its rows, your own columns beside it, visual filters by column, marker and clause type, three layouts</td>
         </tr>
         <tr>
           <th scope="row">Ask “which column does <em>kabir</em> sit in?” across every chart</th>
           <td class="no">No search over charts</td>
           <td class="no">—</td>
-          <td class="yes">One search box over every chart of the project, by word, gloss, lexeme, marker, column and clause type; a column profile per lexeme</td>
+          <td class="yes has-stills" data-stills="claim-chart-search" data-caption="The chart search: col:Subject lex:kabir across every chart" tabindex="0">One search box over every chart of the project, by word, gloss, lexeme, marker, column and clause type; a column profile per lexeme</td>
         </tr>
         <tr>
           <th scope="row">Hear exactly this example</th>
           <td class="part">The text's recording, from its player</td>
           <td class="no">No</td>
-          <td class="yes">▶ on each line of a time-aligned text; clips kept with the notebook; players ride along in the web page and slideshow exports</td>
+          <td class="yes has-stills" data-stills="claim-audio" data-caption="▶ on a line plays its stretch of the recording and lights it" tabindex="0">▶ on each line of a time-aligned text; clips kept with the notebook; players ride along in the web page and slideshow exports</td>
         </tr>
         <tr>
           <th scope="row">Publish: Word, Excel, PDF, slides, a FLEx text</th>
           <td class="part">FLEx's own exports of a text</td>
           <td class="part">Word, by hand</td>
-          <td class="yes">Word in LingTeX-Word styles, Excel with one row per chart row, PDF, a slideshow and PowerPoint, and a collection as a <code>.flextext</code> with its examples' audio stitched together</td>
+          <td class="yes has-stills" data-stills="claim-export" data-caption="The note menu: Markdown, web page, Word, Excel, PDF, slideshow, PowerPoint" tabindex="0">Word in LingTeX-Word styles, Excel with one row per chart row, PDF, a slideshow and PowerPoint, and a collection as a <code>.flextext</code> with its examples' audio stitched together. The pretty exports are a work in progress: they improve with every release, and some layouts still need a hand afterwards</td>
         </tr>
         <tr>
           <th scope="row">Read it without the program, in ten years</th>
@@ -128,6 +134,8 @@
       </tbody>
     </table>
   </div>
+  <p class="compare-hint">Rest the pointer on a ✓ (or tab to it) to see that feature in the program. Every picture is the real program on its built-in sample language.</p>
+  <div class="claim-card" id="claim-card" hidden aria-live="polite"></div>
 </section>
 
 <section class="section" id="how">
@@ -194,7 +202,7 @@
     <div class="feature">
       <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 21h14"/></svg></div>
       <h3>Out the door</h3>
-      <p>A chart exports as a Word table on a landscape page, an Excel sheet plus one flat row per chart row to filter and pivot, a PDF, a slide, FieldWorks' own chart XML or JSON; your custom columns and row colours come along. A pivot counts rows by marker and column on the spot.</p>
+      <p>A chart exports as a Word table on a landscape page, an Excel sheet plus one flat row per chart row to filter and pivot, a PDF, a slide, FieldWorks' own chart XML or JSON; your custom columns and row colours come along. A pivot counts rows by marker and column on the spot. Honestly: the chart exports are the newest part of the program and still rough in places &mdash; they get better with each release.</p>
     </div>
     <div class="feature">
       <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg></div>
@@ -263,7 +271,7 @@
     <div class="feature">
       <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V4h16v3M9 20h6M12 4v16"/></svg></div>
       <h3>Word the way linguists set it</h3>
-      <p>Every example exports to Word as a LingTeX-Word interlinear table: tier styles, small-caps grammatical glosses, Word's own example numbering, the free translation in quotes and a link back to the line in FLEx. Collapsed examples and chips become links into FLEx.</p>
+      <p>Every example exports to Word as a LingTeX-Word interlinear table: tier styles, small-caps grammatical glosses, Word's own example numbering, the free translation in quotes and a link back to the line in FLEx. Collapsed examples and chips become links into FLEx. The exports are a work in progress and constantly improving; tell us what comes out wrong.</p>
     </div>
     <div class="feature">
       <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 11-8.5 8.5a5 5 0 0 1-7-7L14 4a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-3-3L15 7"/></svg></div>

@@ -79,8 +79,11 @@
    * the line-up all match either column) and for the LOOK (the owner's look round the contents, the
    * neighbour's round that when it has a rule of its own, so the drawing says "either"). The user's
    * choice, `merge=`: `both` (default), `owner` (owner column only, data and look), `lookowner`
-   * (both for data, the owner's look only). The Python search always counts both. */
-  const mergeMode = (spec) => { const v = spec && spec.extra && spec.extra.merge; return v === 'owner' || v === 'lookowner' ? v : 'both'; };
+   * (both for data, the owner's look only, the owner's label only), `labels` (Seth, 2026-10-20:
+   * "both labels … but not both borders": both for data, both columns NAMED in the one-column
+   * layouts, the owner's look only). The Python search always counts both. */
+  const MERGE_MODES = ['both', 'labels', 'lookowner', 'owner'];
+  const mergeMode = (spec) => { const v = spec && spec.extra && spec.extra.merge; return MERGE_MODES.includes(v) ? v : 'both'; };
   const mergesAfter = (p) => !!(p && (p.srcMergeAfter != null ? p.srcMergeAfter : p.mergeAfter));
   const mergesBefore = (p) => !!(p && (p.srcMergeBefore != null ? p.srcMergeBefore : p.mergeBefore));
   /* The template column a merged part extends into, or null. */
@@ -96,7 +99,7 @@
     const owner = part.srcCol || (allCols || []).find((c) => c.n === part.colN) || null;
     const mode = mergeMode(spec);
     if (!owner) return [];
-    if (mode === 'owner' || (forLook && mode === 'lookowner')) return [owner];
+    if (mode === 'owner' || (forLook && (mode === 'lookowner' || mode === 'labels'))) return [owner];
     const nb = mergedNeighbour(part, allCols);
     return nb ? [owner, nb] : [owner];
   }
@@ -689,6 +692,8 @@
         let content = td;
         if (nbLook) { applyColumnLook(td, nbLook, false, null); td.classList.add('cmerged'); content = el('div', { class: 'cmerge-in' }); td.appendChild(content); if (colLooks.has(slot.col.n)) applyColumnLook(content, unit ? groupLooks.get(unit.group) : colLooks.get(slot.col.n), false, null); }
         else if (colLooks.has(slot.col.n)) applyColumnLook(td, unit ? groupLooks.get(unit.group) : colLooks.get(slot.col.n), false, unit);
+        // a merged cell's own rule (Seth, 2026-10-20) is drawn over the columns' looks
+        if (mergedPart) { const mlk = mergedLook(mergedPart, allCols, obj, spec); if (mlk && mlk.styled) { applyColumnLook(content, mlk, false, null); td.classList.add('merged-styled'); } }
         applyCellStyles(td, cellStyles);        // the user's own cell styles win over the column's
         // the one-column view boxes the parts of ONE chart cell together (Seth, 2026-10-18: a
         // marker "should be inside the same border as the cell they apply to"); the cells of a
@@ -833,6 +838,23 @@
     } catch (e) { return null; }
   }
   /* The look of a chart-structure item (a clause type, the [2a] markers, moved text), or null. */
+  /* The look a MERGED part's own rules give it (Seth, 2026-10-20): resolved for the item
+   * T.mergedItem(owner column, side), so `merged:*`, `merged:right`, `merged:<column>` and
+   * `merged:<column>:right` rules reach it, most specific first. */
+  function mergedLook(part, allCols, obj, spec) {
+    if (!(FS.tagstyles && FS.tagstyles.mergedItem)) return null;
+    const dir = mergesAfter(part) ? 'right' : mergesBefore(part) ? 'left' : '';
+    if (!dir) return null;
+    const owner = part.srcCol || (allCols || []).find((c) => c.n === part.colN) || null;
+    if (!owner) return null;
+    try {
+      const look = FS.tagstyles.resolve(FS.tagstyles.mergedItem(owner, dir), spec || null, Object.assign({}, FS.tagstyles.context(), { text: obj.text || '' }));
+      look.styled = !!(look.styleVia && look.styleVia.kind !== 'default');
+      return look;
+    } catch (e) { return null; }
+  }
+  const LOOK_KEYS = ['bg', 'fg', 'hl', 'tile', 'tc', 'box', 'bw', 'bs', 'bc', 'br', 'c', 'b', 'i', 'u', 'hide', 'label'];
+  const lookKeys = (lk) => { const o = {}; for (const k of LOOK_KEYS) if (lk[k] != null && lk[k] !== '' && lk[k] !== false) o[k] = lk[k]; return o; };
   function pseudoLook(key, obj, spec) {
     if (!(FS.tagstyles && FS.tagstyles.structureItem)) return null;
     const item = FS.tagstyles.structureItem(key);
@@ -922,9 +944,14 @@
   function flatWrap(part, obj, spec, key, chipMode) {
     const col = part.srcCol;
     const asGroup = !!(key && key.startsWith('g:'));
-    const bothCols = partColumns(part, (obj.template && obj.template.srcColumns) || [], spec, true);
-    const nb = bothCols[1] || null;
-    const look = asGroup ? (groupLook(key.slice(2), col, obj, spec) || columnLook(col, obj, spec)) : columnLook(col, obj, spec);
+    const srcCols = (obj.template && obj.template.srcColumns) || [];
+    const bothCols = partColumns(part, srcCols, spec, true);
+    const nb = bothCols[1] || null;                                           // the neighbour whose LOOK is drawn round the owner's
+    const nbLabel = mergeMode(spec) === 'lookowner' ? null : (partColumns(part, srcCols, spec, false)[1] || null);   // the neighbour NAMED in the label
+    const baseLook = asGroup ? (groupLook(key.slice(2), col, obj, spec) || columnLook(col, obj, spec)) : columnLook(col, obj, spec);
+    // a merged part's own rule (`merged:*`, `merged:right`, `merged:PRED:right`…) wins over the column's look
+    const mlk = asGroup ? null : mergedLook(part, srcCols, obj, spec);
+    const look = mlk && mlk.styled ? Object.assign({}, baseLook || {}, lookKeys(mlk), { styled: true }) : baseLook;
     const groupName = asGroup ? ((col.path || []).find((p) => normKey(p) === key.slice(2)) || key.slice(2)) : '';
     const path = asGroup ? (col.path || []).slice(0, (col.path || []).findIndex((p) => normKey(p) === key.slice(2)) + 1) : (col.path || []).concat([col.name]);
     const wrap = el('span', { class: 'cflat-g' + (asGroup ? ' cflat-group' : ''), dataset: { col: asGroup ? null : col.n, group: asGroup ? groupName : null }, title: path.join(' \u203a ') });
@@ -936,7 +963,7 @@
     wrap.appendChild(body);
     if (br) wrap.appendChild(el('span', { class: 'cflat-br' }, br[1]));
     const labelsOn = !(spec.extra && spec.extra.collab === 'off') && !(look && look.label === false);
-    const label = labelsOn ? el('sub', { class: 'cflat-lab' }, asGroup ? groupName : (col.abbr || col.name) + (nb ? '+' + (nb.abbr || nb.name) : '')) : null;
+    const label = labelsOn ? el('sub', { class: 'cflat-lab' }, asGroup ? groupName : (col.abbr || col.name) + (nbLabel ? '+' + (nbLabel.abbr || nbLabel.name) : '')) : null;
     if (label) wrap.appendChild(label);
     // inside a group's box each column's parts are followed by that column's own small label
     let lastCol = null;
@@ -945,7 +972,9 @@
     // 2026-10-19: "if whatever chips were in that cell are invisible, then the cell border, tile
     // or whatever shouldn't draw")
     let shown = false;
-    const add = (node, p) => { if (asGroup && lastCol && p.srcCol && p.srcCol.n !== lastCol.n) colLabel(); lastCol = p.srcCol || lastCol; addPart(body, node, chipMode || 'inline'); if (p.kind === 'words') wrap.classList.add('cflat-words'); if (!node.classList.contains('hidden')) shown = true; };
+    // a chip line goes OUTSIDE the inline-flex body (Seth, 2026-10-20: the body's width summed the words
+    // and a chip line that sat under them, so the box was twice as wide as its words): a block after it
+    const add = (node, p) => { if (asGroup && lastCol && p.srcCol && p.srcCol.n !== lastCol.n) colLabel(); lastCol = p.srcCol || lastCol; const chip = chipMode && chipMode !== 'inline' && node.classList && node.classList.contains('ctag'); addPart(chip ? wrap : body, node, chipMode || 'inline'); if (p.kind === 'words') wrap.classList.add('cflat-words'); if (!node.classList.contains('hidden')) shown = true; };
     const finish = () => { colLabel(); lastCol = null; if (!shown) wrap.classList.add('cflat-void'); };
     if (look) {
       const bg = look.tile ? (look.tc || look.bg) : look.hl ? look.bg : '';
@@ -1167,9 +1196,10 @@
       pop.appendChild(el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Layout'), vsel));
       // merged cells (Seth, 2026-10-19: "it could be either" column)
       const msel = el('select', { 'data-test': 'chart-merge-select', title: 'A cell merged with its empty neighbour could belong to either column', onchange: (e) => { if (e.target.value === 'both') delete x.merge; else x.merge = e.target.value; change(); } },
-        el('option', { value: 'both', selected: mergeMode(spec) === 'both' }, 'both columns: searches, rules and the line-up match either; the neighbour’s look round the owner’s'),
-        el('option', { value: 'lookowner', selected: mergeMode(spec) === 'lookowner' }, 'both for searches and rules; drawn with the owner column’s look only'),
-        el('option', { value: 'owner', selected: mergeMode(spec) === 'owner' }, 'the owner column only'));
+        el('option', { value: 'both', selected: mergeMode(spec) === 'both' }, 'both columns: searches, rules and the line-up match either; both named; the neighbour’s look round the owner’s'),
+        el('option', { value: 'labels', selected: mergeMode(spec) === 'labels' }, 'both columns for searches and rules, both named (S+V); the owner column’s look only'),
+        el('option', { value: 'lookowner', selected: mergeMode(spec) === 'lookowner' }, 'both columns for searches and rules; the owner column’s look and name only'),
+        el('option', { value: 'owner', selected: mergeMode(spec) === 'owner' }, 'the owner column only, for everything'));
       pop.appendChild(el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Merged cells'), msel));
       // marker chips (Seth, 2026-10-19: "on a separate line … wrap at word width")
       const csel = el('select', { 'data-test': 'chart-chips-select', title: 'Where a cell’s chart-marker chips go', onchange: (e) => { if (e.target.value === 'inline') delete x.chips; else x.chips = e.target.value; change(); } },
@@ -1258,11 +1288,28 @@
         const retarget = (guid) => { spec.guid = guid; spec.seg = null; spec.at = null; delete x.cw; delete x.cols; R.clearStyles(spec, null); change(); };
         FS.pickChart({ title: 'Change the chart', current: spec.guid, test: 'pick-chart-change', onPick: async (c) => { try { if (opts.changeChart) await opts.changeChart(c.guid, retarget); else retarget(c.guid); } catch (e) { FS.toast(e.message, 'error'); } } });
       } }, 'Change the chart…'));
+      // the same stretch of the text as an interlinear example (Seth, 2026-10-20: "convert a flex
+      // text-chart object to a regular interlinear example object (including the lines that chart
+      // rows touch) … either direction should be inclusive"): every line any shown row holds words
+      // of, first to last; the chart's view keys and styles go, the example's layout keys stay
+      if (opts.onSpecChange && obj.text) pop.appendChild(el('button', { class: 'menu-item', 'data-test': 'to-example', title: 'An interlinear example of every line of the text these rows touch, first to last (the range is yours to adjust afterwards)', onclick: () => {
+        close();
+        let lo = Infinity, hi = -Infinity;
+        for (const r of obj.rows || []) for (const p of r.cells || []) if (p.kind === 'words' && p.seg != null) { lo = Math.min(lo, p.seg); hi = Math.max(hi, p.segTo || p.seg); }
+        if (!isFinite(lo)) { FS.toast('These rows hold no words of the text', 'warn'); return; }
+        const segOf = (n) => (obj.segments || []).find((s) => s.n === n);
+        const anchor12 = (g) => (g || '').replace(/-/g, '').slice(-12);
+        const keep = {}; for (const k of ['ex', 'indent', 'collapsed']) if (x[k] != null) keep[k] = x[k];
+        const sa = segOf(lo), sb = segOf(hi);
+        spec.kind = 'text'; spec.guid = obj.text; spec.seg = [lo, hi]; spec.at = sa && sb && sa.guid && sb.guid ? [anchor12(sa.guid), anchor12(sb.guid)] : null;
+        spec.lines = null; spec.ws = null; spec.styles = []; spec.extra = keep;
+        change();
+      } }, 'Show these lines as an interlinear example'));
       if (opts.editSource) pop.appendChild(el('button', { class: 'menu-item', onclick: () => { close(); opts.editSource(); } }, 'Edit source'));
       if (opts.duplicate || opts.remove) pop.appendChild(el('hr'));
       if (opts.duplicate) pop.appendChild(el('button', { class: 'menu-item', onclick: () => { close(); opts.duplicate(); } }, 'Duplicate this object'));
       if (opts.remove) pop.appendChild(el('button', { class: 'menu-item danger', onclick: async () => { close(); if (await FS.confirmAt(anchor, 'Remove this chart from the note? (Undo brings it back.)', 'Remove')) { FS.interlinear.closeOverlay(); opts.remove(); } } }, 'Remove this object…'));
-    });
+    }, { title: 'Chart options' });
   }
 
   /* ------------------------------------------------------------------ plain text */
@@ -1342,5 +1389,5 @@
       el('div', { class: 'btn-row' }, el('button', { class: 'btn', 'data-test': 'pivot-copy', onclick: () => { FS.copyText(tsv); FS.toast('Copied as TSV'); } }, 'Copy as TSV'), el('button', { class: 'btn primary', onclick: () => m.close() }, 'Done')));
   }
 
-  FS.chart = { renderChart, visibleColumns, selectedColumns, flatten, isFlat, isGroups, viewOf, alignedColumns, alignEdge, chipsMode, mergeMode, mergedNeighbour, partColumns, zoomOf, setZoom, playGroups, columnLook, pseudoLook, markerShown, headerRows, layoutRow, rowSegs, freeRuns, lineStarts, colWidths, setColWidths, freeText, chartGrid, chartTsv, markerLook, pivot, pivotDialog, LINE_NAMES, FREE_NAMES };
+  FS.chart = { renderChart, visibleColumns, selectedColumns, flatten, isFlat, isGroups, viewOf, alignedColumns, alignEdge, chipsMode, mergeMode, mergedNeighbour, partColumns, mergedLook, zoomOf, setZoom, playGroups, columnLook, pseudoLook, markerShown, headerRows, layoutRow, rowSegs, freeRuns, lineStarts, colWidths, setColWidths, freeText, chartGrid, chartTsv, markerLook, pivot, pivotDialog, LINE_NAMES, FREE_NAMES };
 })();
