@@ -1354,8 +1354,10 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   run with neither input does only that) by fast-forward, else by a merge commit (Seth merges pull requests of this
   branch into main, so main carries merge commits the branch lacks); a conflict stops it and says to merge by hand.
 - THE SITE is `docs/` (GitHub Pages from `/docs`), in LingTeX Tools' pattern (its tokens and
-  components, `assets/media.js` verbatim): hero with the loop video, three steps with stills,
-  features, install, a pre-release band. `assets/release.js` moves every download link and the
+  components, `assets/media.js` verbatim): a BRIEF hero (Seth, 2026-10-20: "make the intro text a LOT briefer so that the
+  scrolling carousel is immediately visible on page load" — the kicker, the title, ONE sentence and three buttons, no
+  claim pills or link row; the carousel's top sits at ~440px on a 768px-tall screen), the carousel, three steps with
+  stills, features, install, a pre-release band. `assets/release.js` moves every download link and the
   version to the newest release that has BOTH files (`tests/js/site-release.test.js`). The video
   and stills are filmed from the REAL UI by `tools/record_demo.py`; THE HERO IS A CAROUSEL (Seth, 2026-10-20: first
   "mouseover generated screenshots for each feature", then "what I'd rather have is just one scrolling carousel of
