@@ -1365,6 +1365,13 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   commit and push to main"): the workflow's `main` job fast-forwards main to the released commit (a bare manual
   run with neither input does only that) by fast-forward, else by a merge commit (Seth merges pull requests of this
   branch into main, so main carries merge commits the branch lacks); a conflict stops it and says to merge by hand.
+  PUSH TO MAIN OFTEN (Seth, 2026-10-20: "we should be frequently pushing to main, every time I've tested something and
+  it works reasonably well. And definitely every time we build a release or a pre-release"): whenever Seth reports that
+  something he tried works, and with every release or pre-release, bring main up to the branch — from a cloud session,
+  dispatch Release with NO inputs (`release.yml`, ref = the branch; its `main` job fast-forwards or merges) and confirm with
+  `git merge-base --is-ancestor <commit> origin/main`. Site and documentation changes go to main as soon as they are
+  pushed, since GitHub Pages serves `main:/docs`. main is also what the guide's "install the development version" command
+  downloads (GitHub's zip of main), so it should always be a version Seth has seen working.
 - THE SITE is `docs/` (GitHub Pages from `/docs`), in LingTeX Tools' pattern (its tokens and
   components, `assets/media.js` verbatim): a BRIEF hero (Seth, 2026-10-20: "make the intro text a LOT briefer so that the
   scrolling carousel is immediately visible on page load" — the kicker, the title, ONE sentence and three buttons, no
