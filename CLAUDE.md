@@ -639,7 +639,11 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   of every header cell (a template column, a custom column, Free, Notes) drags its `<col>` width;
   `cw=4:300,free:160,x0:120` in the embed (`colWidths` / `setColWidths`, pixels; `spec.extra.cw`,
   round-tripped by flexref like any key); a sized table is `width: max-content` and scrolls
-  sideways in `.chart-scroll` (dragging past the pane's right edge scrolls along); double-click a
+  sideways in `.chart-scroll` (dragging past the pane's right edge scrolls along). ONE DRAG MOVES ONE COLUMN (Seth,
+  2026-10-20: "if I drag one column, other columns nearby suddenly become VERY wide"): the table used to stretch to the
+  pane and the unsized columns shared out what a drag gave up or took; a drag now pins EVERY column at its drawn width
+  first (`pinAll`, so `cw=` holds them all), a sized table has no `min-width: 100%`, and the width saved is the width the
+  column really has (never narrower than its words); double-click a
   grip or ⋯ → "Reset column widths" lets go; the HTML export writes the same `<col>` widths. STICKY
   HEADER ROWS (Seth, 2026-10-18): CSS sticky cannot do it (the table's sticky box is its sideways
   scroller), so `wireStickyHead` keeps a fixed COPY of the thead (`.tchart-sticky`, the live

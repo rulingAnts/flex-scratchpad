@@ -350,6 +350,8 @@ def test_chart_columns_resize_and_a_collapsed_example_exports_as_a_link(app):
     grip = page.locator("#editor .chart-obj [data-test=col-rs-4]")
     th = page.locator("#editor .chart-obj thead th.th-col[data-col='4']")
     before = th.bounding_box()["width"]
+    others = lambda skip: page.evaluate("(skip) => Object.fromEntries([...document.querySelectorAll('#editor .chart-obj thead th.th-col')].filter((t) => t.dataset.col !== skip).map((t) => [t.dataset.col, Math.round(t.getBoundingClientRect().width)]))", skip)  # noqa: E731
+    others_before = others("4")
     pane_w = page.evaluate("document.querySelector('#editor .chart-obj .chart-scroll').clientWidth")
     box = grip.bounding_box()
     page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
@@ -359,8 +361,24 @@ def test_chart_columns_resize_and_a_collapsed_example_exports_as_a_link(app):
     page.wait_for_function("() => document.getElementById('save-state').textContent === 'Saved'", timeout=5000)
     after = page.locator("#editor .chart-obj thead th.th-col[data-col='4']").bounding_box()["width"]
     assert after > before + 300, (before, after)
+    # ONLY the dragged column changes (Seth, 2026-10-20: "if I drag one column, other columns nearby suddenly
+    # become VERY wide"): the others keep their widths, wider or narrower
+    near = lambda a, b: all(abs(a[k] - b[k]) <= 2 for k in a)  # noqa: E731
+    assert near(others_before, others("4")), (others_before, others("4"))
+    before3, rest3 = page.locator("#editor .chart-obj thead th.th-col[data-col='3']").bounding_box()["width"], others("3")
+    g3 = page.locator("#editor .chart-obj [data-test=col-rs-3]").bounding_box()
+    page.mouse.move(g3["x"] + g3["width"] / 2, g3["y"] + g3["height"] / 2)
+    page.mouse.down()
+    page.mouse.move(g3["x"] - 200, g3["y"] + 2, steps=8)
+    page.mouse.up()
+    page.wait_for_function("() => document.getElementById('save-state').textContent === 'Saved'", timeout=5000)
+    after3 = page.locator("#editor .chart-obj thead th.th-col[data-col='3']").bounding_box()["width"]
+    assert after3 <= before3 and near(rest3, others("3")), (before3, after3, rest3, others("3"))
+    # the width saved is the width it has (never narrower than its words)
+    m3 = re.search(r"\b3:(\d+)", body_of(h))
+    assert m3 and abs(int(m3.group(1)) - after3) <= 2, (m3, after3)
     body = body_of(h)
-    assert re.search(r"cw=4:\d+", body), body
+    assert re.search(r"cw=\S*\b4:\d+", body) and "lab:" in body, body     # a drag pins every column (all their widths are saved)
     # the table outgrew the pane and scrolls sideways
     assert page.evaluate("() => { const s = document.querySelector('#editor .chart-obj .chart-scroll'); return s.scrollWidth > s.clientWidth; }"), pane_w
     # the exports: the widths on the page's table, the collapsed example as a FLEx link

@@ -1044,7 +1044,9 @@ table.md-table td.drop-target, table.md-table th.drop-target { outline: 2px soli
 .tchart thead th { position: relative; }
 .tchart .col-rs { position: absolute; top: 0; right: -4px; width: 8px; height: 100%; cursor: col-resize; z-index: 2; }
 .tchart .col-rs:hover, body.col-resizing .tchart .col-rs { background: linear-gradient(to right, transparent 3px, var(--accent) 3px, var(--accent) 5px, transparent 5px); }
-.tchart.sized { table-layout: auto; width: max-content; min-width: 100%; }
+/* a sized chart is exactly as wide as its columns (no stretching to the pane: the columns nobody sized
+   shared out the room a drag gave up — chart.js pins them all when a drag starts) */
+.tchart.sized { table-layout: auto; width: max-content; min-width: 0; }
 body.col-resizing { cursor: col-resize; user-select: none; }
 
 /* the chart's header rows, stuck to the top of the pane while its rows scroll (chart.js wireStickyHead) */

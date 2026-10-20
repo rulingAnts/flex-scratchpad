@@ -600,13 +600,28 @@
     for (const k of colKeys) { const c = el('col', { dataset: { key: k } }); if (widths.has(k)) c.style.width = widths.get(k) + 'px'; colEls.set(k, c); colgroup.appendChild(c); }
     table.appendChild(colgroup);
     if (widths.size) table.classList.add('sized');
+    // every header cell that has a width of its own, by key — a drag PINS them all first (Seth, 2026-10-20:
+    // "if I drag one column, other columns nearby suddenly become VERY wide … dragging one column shouldn't
+    // cause an adjacent one to resize"): the table used to stretch to the pane, and the columns nobody had
+    // sized shared out whatever one drag gave up or took
+    const thOf = new Map();
+    const pinAll = () => {
+      for (const [k, t] of thOf) {
+        if (widths.has(k) || !t.isConnected) continue;
+        const w = Math.round(t.getBoundingClientRect().width);
+        if (w > 0) { widths.set(k, w); colEls.get(k).style.width = w + 'px'; }
+      }
+      table.classList.add('sized');
+    };
     const resizer = (th, key) => {
+      thOf.set(key, th);
       if (!opts.editable) return;
       const grip = el('span', { class: 'col-rs', title: 'Drag to resize this column; double-click to let it size itself', 'data-test': 'col-rs-' + key });
       grip.addEventListener('click', (e) => e.stopPropagation());
       grip.addEventListener('dblclick', (e) => { e.stopPropagation(); widths.delete(key); setColWidths(spec, widths); change(); });
       grip.addEventListener('mousedown', (e) => {
         e.preventDefault(); e.stopPropagation();
+        pinAll();
         const col = colEls.get(key);
         const startX = e.clientX, startW = th.getBoundingClientRect().width;
         const scroller = box.querySelector('.chart-scroll');
@@ -617,7 +632,7 @@
           table.classList.add('sized');
           if (scroller) { const r = scroller.getBoundingClientRect(); if (ev.clientX > r.right - 24) scroller.scrollLeft += 12; }   // past the right edge: scroll along
         };
-        const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); document.body.classList.remove('col-resizing'); widths.set(key, Math.round(w)); setColWidths(spec, widths); change(); };
+        const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); document.body.classList.remove('col-resizing'); const real = Math.round(th.getBoundingClientRect().width); widths.set(key, Math.max(40, Math.round(Math.max(w, real || 0)))); setColWidths(spec, widths); change(); };   // a column never narrower than its words: keep the width it really has
         document.addEventListener('mousemove', move);
         document.addEventListener('mouseup', up);
         document.body.classList.add('col-resizing');
@@ -630,7 +645,9 @@
       hrows.forEach((hr, hi) => {
         const tr = el('tr', { class: hi === hrows.length - 1 ? 'th-cols' : 'th-groups' });
         if (hi === 0) {
-          tr.appendChild(frz(el('th', { class: 'th-lab', rowspan: hrows.length }, timedAll.length && starts.size ? playBtn(timedAll, 'Play the lines of these rows', 'chart-play-all') : null, '#'), 'lab'));
+          const labTh = frz(el('th', { class: 'th-lab', rowspan: hrows.length }, timedAll.length && starts.size ? playBtn(timedAll, 'Play the lines of these rows', 'chart-play-all') : null, '#'), 'lab');
+          thOf.set('lab', labTh);
+          tr.appendChild(labTh);
           for (const xc of xL) { const th = frz(el('th', { class: 'th-x th-x-' + xc.kind + ' th-x-left', rowspan: hrows.length, dataset: { x: xc.key } }, xc.head ? xc.head() : xc.name), 'x' + xc.xi); resizer(th, 'x' + xc.xi); tr.appendChild(th); }
         }
         for (const h of hr) {

@@ -558,7 +558,15 @@ segment counted by one side and not the other shifts every `seg=` after it by on
 
 ## Known issue: chart column sizing / resizing is a little quirky (Seth, 2026-10-20 — "for troubleshooting later")
 
-> *"column sizing/resizing can be a little quirky."*
+> *"column sizing/resizing can be a little quirky."* — then: *"if I drag one column, other columns nearby
+> suddenly become VERY wide … dragging one column shouldn't cause an adjacent one to resize equally large
+> as well."*
+
+**FIXED the same day (suspect 1 below, half of it):** the table stretched to fill the pane (`min-width:
+100%`), so the columns nobody had sized shared out whatever one drag gave up or took. A drag now PINS every
+column at its drawn width first (`pinAll` in the resizer; all of them land in `cw=`), and a sized table is
+exactly as wide as its columns (`.tchart.sized { min-width: 0 }`). A column dragged narrower than its words
+stops there and saves the width it really has. Suspects 2–4 are still open.
 
 Not described further yet; ask what was dragged, in which view (columns / one column / groups), and
 what the column did instead. The code is `colWidths` / `setColWidths` and the `resizer` in
