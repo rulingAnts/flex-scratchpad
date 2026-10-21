@@ -1106,7 +1106,8 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   `export_note_pptx` reads the bytes in Python (`media(src)` → `build_pptx(deck, media)`): a `p:pic` with `a:audioFile`
   + `p14:media` relationships to one media part per recording, a ▶ PNG drawn by the stdlib (`audio_icon_png`),
   `ppaction://media` on a click, the slide's `p:timing` media node; the object is drawn narrower beside it (`self.w`).
-  Not run in PowerPoint itself yet (LibreOffice opens it). THE DESIGN PROMPT ("optional handoff prompt that they can
+  RUN IN POWERPOINT (Seth, 2026-10-21, 0.2.0-beta.1: "They work reasonably well in PowerPoint. Not perfect, but good enough
+  for manual editing to be a minor chore rather than a major problem"). THE DESIGN PROMPT ("optional handoff prompt that they can
   share with an LLM (especially Claude design or similar) … a default handoff prompt, but editable by the user on
   export"; "same for regular HTML export"): web page + slideshow; `DEFAULT_HANDOFF.html|slides` (what the file is, its
   classes, what to keep exactly — every word / gloss / number, the alignment, Unicode fonts and dir / lang, the scripts,
@@ -1159,7 +1160,7 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   label, clause type, flags, each template column's words and then their glosses, markers, moved
   text, clause refs, custom columns, free translation, notes — what Excel filters and pivots), and
   "Examples" (one row per interlinear line across the note). POWERPOINT (pptx_writer: the smallest
-  package PowerPoint opens — one master, one blank layout, a theme; checked in LibreOffice): a title
+  package PowerPoint opens — one master, one blank layout, a theme; checked in LibreOffice and, since 0.2.0-beta.1, PowerPoint): a title
   slide on blue, a heading bar per slide, text as paragraphs, an example as a borderless table per
   line (fonts shrink to fit, `fit_widths` from the words), a chart as a table filling the slide
   (header groups merged, a cell's words on one line and glosses on the next, markers, Free, custom
