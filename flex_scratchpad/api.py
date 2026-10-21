@@ -444,17 +444,27 @@ class Api:
         ext = ext if ext.startswith(".") else "." + ext
         return self._save_dialog((n.title or "note") + (suffix or "") + ext)
 
-    def export_note_html(self, note_id: str, html: str, path: str | None = None, suffix: str = "", job: str | None = None) -> str | None:
+    def export_note_html(self, note_id: str, html: str, path: str | None = None, suffix: str = "", job: str | None = None, handoff: str | None = None) -> str | None:
         """Save a self-contained HTML export (built by the page) through a save dialog; `suffix`
         is added to the suggested name (" slides" for a slideshow). Every `fs-clip:<token>` the
         page wrote (Api.export_clips) becomes that recording as a data: URL here, streamed into the
-        file, so the audio never crosses into the page and back."""
+        file, so the audio never crosses into the page and back.
+
+        `handoff`: the design prompt the user chose to send along (Seth, 2026-10-20: "optional handoff
+        prompt that they can share with an LLM … to adjust the look and feel"; "a default handoff
+        prompt, but editable by the user on export"), written beside the page as
+        `<name>.design-prompt.md`."""
         n = self._nb.get_note(note_id)
         target = path or self._save_dialog((n.title or "note") + (suffix or "") + ".html")
         if not target:
             return None
         self._job(job, step="write", text="Writing the page…")
         self._write_with_clips(Path(target), html)
+        if handoff and str(handoff).strip():
+            prompt = Path(target).with_name(Path(target).stem + ".design-prompt.md")
+            tmp = prompt.with_name(prompt.name + ".part")
+            tmp.write_text(str(handoff).rstrip() + "\n", encoding="utf-8", newline="\n")
+            replace_file(tmp, prompt)
         return target
 
     _CLIP_RE = re.compile(r"fs-clip:([0-9a-f]{16})")
@@ -557,14 +567,23 @@ class Api:
         return {"path": target} if ok else {"fallback": True, "failed": True, "path": target}
 
     def export_note_pptx(self, note_id: str, deck: dict, path: str | None = None, job: str | None = None) -> str | None:
-        """PowerPoint from the page's slide model (export.js slidesOf; zero-dependency writer)."""
+        """PowerPoint from the page's slide model (export.js slidesOf; zero-dependency writer). A
+        block's `audio.src` of `fs-clip:<token>` (Api.export_clips with fmt "office") is that
+        recording, read here and put in the package as playable media — never through the page."""
         from .pptx_writer import build_pptx
         n = self._nb.get_note(note_id)
         target = path or self._save_dialog((n.title or "note") + ".pptx")
         if not target:
             return None
         self._job(job, step="write", text="Writing the PowerPoint file…")
-        Path(target).write_bytes(build_pptx(deck))
+
+        def media(src: str):
+            m = self._CLIP_RE.fullmatch(str(src or ""))
+            clip = self._clips.get(m.group(1)) if m else None
+            if not clip or not Path(clip[0]).is_file():
+                return None
+            return Path(clip[0]).read_bytes(), clip[1], Path(clip[0]).suffix.lower()
+        Path(target).write_bytes(build_pptx(deck, media))
         return target
 
     def export_note_xlsx(self, note_id: str, doc: dict, path: str | None = None, job: str | None = None) -> str | None:
@@ -1242,13 +1261,13 @@ class Api:
         except FlexError as e:
             raise RuntimeError(e.message)
 
-    def export_clips(self, items: list[dict], job: str | None = None) -> list[dict]:
+    def export_clips(self, items: list[dict], job: str | None = None, fmt: str = "web") -> list[dict]:
         """The recordings an HTML export embeds, one compressed clip per example: cut and encoded
         here (or taken from the cache), kept here, and handed to the page as a TOKEN — the page writes
         `fs-clip:<token>` where the audio goes and export_note_html puts the recording in the file."""
         import secrets
         prog = (lambda done, total, label: self._job(job, step="audio", done=done, total=total, text=("Preparing the recordings " + str(min(done + 1, total)) + " of " + str(total) + (" — " + label if label else "")) if done < total else "Recordings ready")) if job else None
-        out = self._flex.export_clips(items or [], progress=prog)
+        out = self._flex.export_clips(items or [], progress=prog, fmt="office" if fmt == "office" else "web")
         for r in out:
             p = r.pop("path", None)
             if p:

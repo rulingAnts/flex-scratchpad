@@ -1084,7 +1084,37 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   ending in ":" riding along; running text fills slides and continues on "(cont.)" slides;
   `SLIDES_CSS` / `SLIDES_JS` scale a 1280×720 slide to the window and shrink content that overflows,
   keys → ← Space PgUp/PgDn Home End, T contents, F full screen, P print (one slide a page), `#n`
-  in the URL; the players ride along. COLLAPSED OBJECTS AND CHIPS (Seth, 2026-10-18: "When not
+  in the URL; the players ride along. THE USER LAYS OUT THE SLIDES (Seth, 2026-10-20: "allow the user to select by
+  checkbox which blocks go on which slides (including examples), with our app initially assigning per 'one example per
+  slide'"; "more styling options than just white background"): `exportDialog(note, editor, format, nAudio)` (export.js;
+  every web page / slideshow / PowerPoint export, BEFORE the save dialog; resolves {embed, plan, handoff}) lists the
+  note's blocks (`blockLabel`; empty lines not listed) with "New slide" / "Show" boxes and the slide each lands on (a
+  slide with nothing shown is dropped, so a heading that only names the slides after it shows §). A PLAN = {rows:
+  {<editor block index>: {brk, skip}}, theme}; `defaultPlan(blocks)` is slidesOf's own cut from the NOTE's blocks
+  (nothing fetched yet), and `slidesOf(doc, plan)` → `planSlides` cuts by it — every doc block carries `at`, its editor
+  block's index (buildDoc), so a paragraph with inline objects is several blocks of one row. Slide kinds: one object →
+  'object' (a short p before it its `lead`), text only → 'text', else 'mixed' (pptx_writer `mixed_slide`: groups
+  stacked, the room shared by `_need`). Remembered per computer: the look (`fs:slideTheme`), a note's changed rows
+  keyed by their block's text without `at=` / `cw=` (`fs:slidePlan:<id>`). LOOKS: `SLIDE_THEMES` (classic, dark,
+  paper, contrast, forest) + the user's bg / fg / accent / font → `themeOf` (null for untouched classic: the output is
+  exactly what it was); the HTML gets `themeCss` and `recolour` (the export model's inline example colours swapped);
+  PowerPoint gets `deck.theme` (`_set_theme`: the slides' background, `_remap` of the default palette in runs, fills and
+  borders, the theme part's colours and font; one build at a time under `_BUILD_LOCK`). RECORDINGS IN POWERPOINT
+  ("embedded audio as playable media in the slides next to the examples"): `embedAudio(doc, job, 'office')` →
+  `Api.export_clips(items, job, "office")` → `audio.encode_for_office` (AAC .m4a through ffmpeg, else MP3, else the WAV
+  clip — PowerPoint plays no Opus / FLAC; `<clip>.office.m4a` kept); the block's `audio.src` is the `fs-clip:` token and
+  `export_note_pptx` reads the bytes in Python (`media(src)` → `build_pptx(deck, media)`): a `p:pic` with `a:audioFile`
+  + `p14:media` relationships to one media part per recording, a ▶ PNG drawn by the stdlib (`audio_icon_png`),
+  `ppaction://media` on a click, the slide's `p:timing` media node; the object is drawn narrower beside it (`self.w`).
+  Not run in PowerPoint itself yet (LibreOffice opens it). THE DESIGN PROMPT ("optional handoff prompt that they can
+  share with an LLM (especially Claude design or similar) … a default handoff prompt, but editable by the user on
+  export"; "same for regular HTML export"): web page + slideshow; `DEFAULT_HANDOFF.html|slides` (what the file is, its
+  classes, what to keep exactly — every word / gloss / number, the alignment, Unicode fonts and dir / lang, the scripts,
+  offline — what to do, "My wishes" to fill in), the textarea's edit kept as `fs:handoff:<format>` (null = the
+  default), written by `export_note_html(…, handoff)` beside the page as `<stem>.design-prompt.md`. Update the
+  defaults when the export's markup changes. e2e `test_slides_are_planned_by_block_themed_and_carry_audio_and_a_design_prompt`,
+  `tests/test_pptx.py::test_recordings_play_beside…`, `tests/test_export.py::test_powerpoint_gets_its_recordings…`.
+  COLLAPSED OBJECTS AND CHIPS (Seth, 2026-10-18: "When not
   expanded, then just a text abbreviation or title and line range that is a hyperlink to that text
   in FLEx"): `linkRun(spec)` — a block embed with `collapsed`, every inline chip, and an object in
   a table cell unless `expanded` — exports as ONE run: the text's abbreviation (its title when it
@@ -1133,7 +1163,7 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   slide on blue, a heading bar per slide, text as paragraphs, an example as a borderless table per
   line (fonts shrink to fit, `fit_widths` from the words), a chart as a table filling the slide
   (header groups merged, a cell's words on one line and glosses on the next, markers, Free, custom
-  columns, row fills), a Markdown table, an entry, a picture; no audio (the slideshow carries it).
+  columns, row fills), a Markdown table, an entry, a picture; each example's recording as a ▶ beside it (above).
   PDF (`Api.export_note_pdf` → pdf_print.py): on Windows a HIDDEN pywebview window loads the page
   (a `file://` temp file in `.scratchpad/export-tmp`) and `CoreWebView2.PrintToPdfAsync` writes the
   PDF (landscape when the page says so, backgrounds on) — pywebview exposes none of this, so the

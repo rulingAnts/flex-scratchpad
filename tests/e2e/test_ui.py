@@ -391,8 +391,11 @@ def test_exports_run_as_queued_jobs_with_a_progress_pill(app):
     import time
     orig = h.api.list_notes
     h.api.list_notes = lambda *a, **k: (time.sleep(0.7), orig(*a, **k))[1]
-    page.evaluate("() => { window.__slow = FS.api.list_notes(); }")
-    page.wait_for_selector("#working-pill:not([hidden])", timeout=2000)
+    # seen from the page itself: Python sleeps inside the call, so a check from here could miss the sign
+    page.evaluate("""() => { window.__pillSeen = false; const w = document.getElementById('working-pill');
+      new MutationObserver(() => { if (!w.hidden) window.__pillSeen = true; }).observe(w, { attributes: true, attributeFilter: ['hidden'] });
+      window.__slow = FS.api.list_notes(); }""")
+    page.wait_for_function("() => window.__pillSeen", timeout=4000)
     page.wait_for_selector("#working-pill", state="hidden", timeout=4000)
     h.api.list_notes = orig
     assert not errors
@@ -5754,3 +5757,81 @@ def test_deleting_the_open_collection_leaves_nothing_under_the_placeholder(app):
     page.wait_for_selector("#editor-pane.no-note")
     assert page.locator(".no-note-msg").is_visible()
     assert not page.locator("#collection").is_visible() and not page.locator("#chartnote").is_visible() and not page.locator("#editor").is_visible()
+
+
+def test_slides_are_planned_by_block_themed_and_carry_audio_and_a_design_prompt(app):
+    """Seth, 2026-10-20: "is it possible for our pptx export to include embedded audio as playable media in
+    the slides next to the examples?"; "for both slideshow exports, instead of one example per slide, allow
+    the user to select by checkbox which blocks go on which slides … with our app initially assigning per
+    'one example per slide'"; "more styling options than just white background"; "optional handoff prompt
+    that they can share with an LLM … a default handoff prompt, but editable by the user on export … Also
+    same for regular HTML export"."""
+    import io
+    import zipfile
+    h, page, errors = app
+    saved = []
+    h.api._save_dialog = lambda name: (saved.append(name) or str(h.tmp / name))
+    new_note(page, "Talk")
+    page.locator("#editor .blk-body").first.click()
+    paste(page, "# Opening\n\nWe begin with a story:\n\n{{flex:text %s seg=1-2}}\n\nThe dog sleeps.\n\n{{flex:chart %s rows=1-2}}\n\n# Closing\n\nThanks." % (T_STORY, CHART))
+    page.wait_for_selector("#editor .chart-obj tr.crow")
+    page.wait_for_function("() => document.getElementById('save-state').textContent === 'Saved'", timeout=5000)
+    # PowerPoint: the dialog lists every block with the app's own breaks ticked
+    page.locator("#btn-note-menu").click()
+    page.locator(".popover .menu-item", has_text="PowerPoint (.pptx)").click()
+    page.wait_for_selector("[data-test=slide-plan] table.exp-plan tr[data-i]")
+    rows = page.locator("[data-test=slide-plan] tr[data-i]")
+    assert rows.count() == 7                                              # the note's empty last line is not listed
+    brk = lambda: [page.locator("[data-test=slide-plan] tr[data-i='%d'] [data-test=plan-brk]" % i).is_checked() for i in range(7)]  # noqa: E731
+    # heading, lead-in (rides with its example), example, text, chart, heading, text
+    assert brk() == [True, True, False, True, True, True, False], brk()
+    assert "Example: DOG 1.1" in rows.nth(2).inner_text() and "Chart" in rows.nth(4).inner_text()
+    # the chart joins the text before it; the closing heading's text is left out
+    page.locator("[data-test=slide-plan] tr[data-i='4'] [data-test=plan-brk]").uncheck()
+    page.locator("[data-test=slide-plan] tr[data-i='6'] [data-test=plan-show]").uncheck()
+    assert "3 slides" in page.locator("[data-test=slide-count]").inner_text()   # the headings only name the slides after them; Closing's only text is out
+    page.select_option("[data-test=slide-theme]", "dark")
+    assert page.locator("[data-test=embed-audio]").is_checked()
+    assert page.locator("[data-test=handoff]").count() == 0                # no design prompt for PowerPoint
+    page.locator("[data-test=export-html-go]").click()
+    page.wait_for_function("() => { const l = FS.jobs.list(); return !l.running && !l.queue.length && l.finished.length === 1; }", timeout=20000)
+    assert not page.evaluate("FS.jobs.list().finished[0].error"), page.evaluate("FS.jobs.list().finished[0].error")
+    z = zipfile.ZipFile(io.BytesIO((h.tmp / "Talk.pptx").read_bytes()))
+    slides = sorted(n for n in z.namelist() if n.startswith("ppt/slides/slide"))
+    assert len(slides) == 3, slides                                       # title, the lead-in + example, the text + chart
+    xml = [z.read("ppt/slides/slide%d.xml" % i).decode() for i in range(1, 4)]
+    assert "We begin with a story:" in xml[1] and "Opening" in xml[1] and xml[1].count("<a:audioFile ") == 1      # the lead-in and the example's recording
+    assert "The dog sleeps." in xml[2] and 'name="Chart"' in xml[2] and xml[2].count("<a:audioFile ") == 1   # mixed: text + chart
+    assert "1a" in xml[2] and "2a" not in xml[2]                          # the chart's own rows (1a–1b), not the whole chart
+    assert "Thanks." not in "".join(xml)
+    assert '<a:srgbClr val="1E2227"/>' in xml[1]                          # the dark theme's background
+    media = [n for n in z.namelist() if n.startswith("ppt/media/media")]
+    assert media and all(n.endswith((".m4a", ".mp3", ".wav")) for n in media), media
+    # the slideshow remembers the plan and the look; with the design prompt, edited
+    page.locator("#btn-note-menu").click()
+    page.locator(".popover .menu-item", has_text="Slideshow (.html)").click()
+    page.wait_for_selector("[data-test=slide-plan] tr[data-i]")
+    assert not page.locator("[data-test=slide-plan] tr[data-i='4'] [data-test=plan-brk]").is_checked()
+    assert page.locator("[data-test=slide-theme]").input_value() == "dark"
+    page.locator("[data-test=handoff-on]").check()
+    ta = page.locator("[data-test=handoff-text]")
+    assert "Keep exactly" in ta.input_value() and "1280 × 720" in ta.input_value()
+    ta.fill(ta.input_value().replace("- Colours / mood:", "- Colours / mood: calm blues"))
+    page.locator("[data-test=export-html-go]").click()
+    page.wait_for_function("() => FS.jobs.list().finished.length === 2 && !FS.jobs.list().running", timeout=20000)
+    html = (h.tmp / "Talk slides.html").read_text(encoding="utf-8")
+    assert html.count('<section class="slide') == 3 and "#1e2227" in html and "#8ab4ff" in html and "#00379c" not in html.lower()
+    prompt = (h.tmp / "Talk slides.design-prompt.md").read_text(encoding="utf-8")
+    assert "calm blues" in prompt and "Keep exactly" in prompt
+    # the web page has the prompt too (its own default), and the edited slideshow prompt is remembered
+    page.locator("#btn-note-menu").click()
+    page.locator(".popover .menu-item", has_text="Web page (.html)").click()
+    page.wait_for_selector("[data-test=handoff]")
+    assert page.locator("[data-test=slide-plan]").count() == 0
+    page.locator("[data-test=handoff-on]").check()
+    assert "web page exported from FLEx Scratchpad" in page.locator("[data-test=handoff-text]").input_value()
+    page.locator("[data-test=export-html-go]").click()
+    page.wait_for_function("() => FS.jobs.list().finished.length === 3 && !FS.jobs.list().running", timeout=20000)
+    assert (h.tmp / "Talk.design-prompt.md").is_file()
+    assert "calm blues" in page.evaluate("() => JSON.parse(localStorage.getItem('fs:handoff:slides'))")
+    assert not errors

@@ -174,3 +174,35 @@ def test_html_export_writes_the_recordings_from_python(tmp_path, monkeypatch):
     assert m and b64.b64decode(m.group(1))[:4] == b"RIFF", written[:200]
     assert 'src=""' in written and "fs-clip:" not in written       # an unknown token: a silent player, never a broken URL
     assert any(d.get("step") == "write" for e, d in events if e == "job")
+
+
+def test_powerpoint_gets_its_recordings_from_python_and_a_page_its_design_prompt(tmp_path, monkeypatch):
+    """Seth, 2026-10-20: the recordings "as playable media in the slides next to the examples" — a clip
+    PowerPoint plays (fmt "office": .m4a / .mp3 / .wav, never Opus), handed to the page as a token and read
+    back here by export_note_pptx — and a design prompt "editable by the user on export", written beside
+    the page as <name>.design-prompt.md."""
+    import io
+    import zipfile
+    from flex_scratchpad.api import Api
+    from flex_scratchpad.flex import audio
+    monkeypatch.setattr(audio, "find_ffmpeg", lambda configured="": None)      # the WAV slice itself, whatever this machine has
+    from flex_scratchpad.config import AppConfig
+    from flex_scratchpad.flex.demo import T_STORY
+    api = Api(AppConfig(tmp_path / "config.json"), notebook_dir=tmp_path / "nb", demo=True)
+    out = api.export_clips([{"id": "a1", "text": T_STORY, "begin": 1500, "end": 3200}], None, "office")
+    assert out[0].get("token") and out[0]["mime"] == "audio/wav", out
+    note = api.create_note(None, "", "Talk", "x")
+    seg = {"n": 1, "label": "1.1", "lines": [{"name": "txt", "cells": [[{"text": "Kabir"}]]}], "free": [{"text": "The dog."}]}
+    deck = {"title": "Talk", "slides": [{"kind": "object", "title": "One", "blocks": [{"type": "interlinear", "title": "Story", "segments": [seg], "audio": {"src": "fs-clip:" + out[0]["token"]}}]}]}
+    target = tmp_path / "Talk.pptx"
+    assert api.export_note_pptx(note["id"], deck, str(target)) == str(target)
+    z = zipfile.ZipFile(io.BytesIO(target.read_bytes()))
+    wav = [n for n in z.namelist() if n.startswith("ppt/media/media")]
+    assert wav == ["ppt/media/media1.wav"] and z.read(wav[0])[:4] == b"RIFF"
+    assert "<a:audioFile " in z.read("ppt/slides/slide1.xml").decode()
+    # the page and its prompt
+    page = tmp_path / "Talk.html"
+    assert api.export_note_html(note["id"], "<p>x</p>", str(page), "", None, "Restyle this.\nMy wishes: calm.") == str(page)
+    assert (tmp_path / "Talk.design-prompt.md").read_text(encoding="utf-8") == "Restyle this.\nMy wishes: calm.\n"
+    api.export_note_html(note["id"], "<p>x</p>", str(tmp_path / "Other.html"), "", None, None)
+    assert not (tmp_path / "Other.design-prompt.md").exists()

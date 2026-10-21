@@ -6,6 +6,11 @@ FLEx Scratchpad is a notebook for FieldWorks: notes in tabs and folders that sho
 
 - **⎘ Copy, for a note, Word, PowerPoint and LingTeX Word.** The *⎘ TSV* button is now *⎘ Copy* with a ▾ beside it. *⎘ Copy* puts both an example's reference and a formatted copy on the clipboard, so a note pastes the example again and Word, PowerPoint, Excel or a web page paste a formatted example (a table per line, the translation in quotes, the text's abbreviation and line numbers linked into FLEx). Under ▾: *Copy for LingTeX Word* (FLEx's own rows, a column per morpheme, each translation followed by its reference such as `(DOG 1.1)`), *Copy as HTML (for web, Word, PowerPoint, other)* and *Copy example source ({{flex}} code)*. Charts, entries, selected lines and rows, tables (*Table ▾ → ⎘ Copy the table*), copied cells and the pivot copy the same way.
 
+- **Slides the way you want them.** The slideshow and PowerPoint exports open a dialog listing the note's blocks: tick *New slide* where a slide begins, untick *Show* to leave a block out. It starts at one example per slide, and several examples, a chart and the text between them can share a slide. Choose a theme (Classic, Dark, Paper, High contrast, Forest), your own background, text and accent colours and a font. The ticks and the look are remembered.
+- **Recordings in PowerPoint.** Each example and chart with time-aligned lines gets its recording beside it on its slide: a ▶ that plays it in the slide show, with PowerPoint's own player bar (AAC through the bundled ffmpeg, else WAV).
+- **A design prompt for an AI assistant.** The web page and slideshow exports can save a prompt beside the file (`<name>.design-prompt.md`) for Claude Design or another assistant: restyle the plain page, keep every word, gloss and number, the alignment and the players. The prompt is editable in the export dialog, and your version is kept.
+- **A chart's own rows in the exports.** An exported chart object showed every row of the chart instead of the rows it names (`rows=1-2`); every interlinear export now keeps the punctuation on the Word line.
+
 ### New in 0.1.0 since 0.1.0-beta.2
 
 Everything below arrived in the pre-release 0.1.0-beta.3 or since.
@@ -46,7 +51,7 @@ Everything below arrived in the pre-release 0.1.0-beta.3 or since.
 ### Known issues
 
 - A **web page export with the recordings embedded** can make the window stop responding until it is done (minutes for a long note) in 0.1.0-beta.3 and earlier; let it finish, or export without the recordings. Fixed in 0.1.0: exports run in the background with a progress bar ([#20](https://github.com/rulingAnts/flex-scratchpad/issues/20)).
-- **Slideshow and PowerPoint** exports are still rough: some examples' tables are crowded or overlap in PowerPoint, and where a note breaks into slides is not settled. Word's LingTeX example tables look right but do not yet re-render correctly with the LingTeX-Word add-in. Word, PDF and web page exports come out well ([#21](https://github.com/rulingAnts/flex-scratchpad/issues/21)).
+- **Slideshow and PowerPoint** exports are still rough: some examples' tables are crowded or overlap in PowerPoint (where slides break is now chosen in the export dialog). Word's LingTeX example tables look right but do not yet re-render correctly with the LingTeX-Word add-in. Word, PDF and web page exports come out well ([#21](https://github.com/rulingAnts/flex-scratchpad/issues/21)).
 
 ### Download
 

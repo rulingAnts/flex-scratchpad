@@ -85,7 +85,7 @@
       <li><a href="#chartsearch">Searching the charts</a>
         <ol><li><a href="#cs-query">The query</a></li><li><a href="#cs-profile">Column profile and collections</a></li></ol></li>
       <li><a href="#exports">Exports</a>
-        <ol><li><a href="#xp-formats">The formats</a></li><li><a href="#xp-word">Word, in LingTeX-Word styles</a></li><li><a href="#xp-audio">Audio in the web page and slideshow</a></li></ol></li>
+        <ol><li><a href="#xp-formats">The formats</a></li><li><a href="#xp-word">Word, in LingTeX-Word styles</a></li><li><a href="#xp-slides">Slides: which blocks, and the look</a></li><li><a href="#xp-audio">Audio in the web page, slideshow and PowerPoint</a></li><li><a href="#xp-prompt">A design prompt for an AI assistant</a></li></ol></li>
       <li><a href="#backup">Backup and storage</a></li>
       <li><a href="#settings">Settings and shortcuts</a>
         <ol><li><a href="#se-settings">Settings</a></li><li><a href="#se-keys">Keyboard shortcuts</a></li></ol></li>
@@ -523,8 +523,8 @@
       <tr><td>Word</td><td>A .docx: headings 1–6, lists, tables, examples and pictures; the examples are LingTeX-Word tables (below), charts come on landscape pages with their custom columns and row colours, and chips and collapsed examples are links into FLEx.</td></tr>
       <tr><td>Excel</td><td>A sheet <em>Note</em> with the blocks in order, a sheet per chart (the table as drawn, merged header groups, word and gloss in each cell) followed by <em>Chart rows</em> with one flat row per chart row (label, clause type, flags, each column's words and glosses, markers, moved text, custom columns, free translation, notes: what Excel filters and pivots), and <em>Examples</em> with one row per interlinear line.</td></tr>
       <tr><td>PDF</td><td>Saved straight away on Windows; elsewhere the print dialog's <em>Save as PDF</em>. Charts land on landscape pages with the header rows repeated.</td></tr>
-      <tr><td>Slideshow</td><td>One web page: a title slide, a slide per heading, example, chart, table, entry and picture, running text continuing on "(cont.)" slides; arrow keys, <kbd>T</kbd> for contents, <kbd>F</kbd> full screen, <kbd>P</kbd> print; the players ride along.</td></tr>
-      <tr><td>PowerPoint</td><td>A .pptx of the same slides: a title slide, a heading bar per slide, examples as tables, charts filling the slide; no audio (the slideshow carries it).</td></tr>
+      <tr><td>Slideshow</td><td>One web page: a title slide, then the slides you lay out in the export dialog (to begin with a slide per heading, example, chart, table, entry and picture, running text continuing on "(cont.)" slides — <a href="#xp-slides">below</a>), in the theme you choose; arrow keys, <kbd>T</kbd> for contents, <kbd>F</kbd> full screen, <kbd>P</kbd> print; the players ride along.</td></tr>
+      <tr><td>PowerPoint</td><td>A .pptx of the same slides in the same theme: a title slide, a heading bar per slide, examples as tables, charts filling the slide, and each example's recording beside it as a ▶ that plays in the slide show.</td></tr>
       <tr><td>FLEx text</td><td>A collection as a <code>.flextext</code> with its audio (<a href="#co-flextext">above</a>).</td></tr>
       <tr><td>Chart XML / JSON</td><td>One chart in FieldWorks' own discourse-chart XML shape (with identities added), or as data, from the chart's ⋯.</td></tr>
       <tr><td>Copy</td><td>Not a file: an example, entry, chart, chosen lines or rows, a table or a pivot on the clipboard — formatted for Word, PowerPoint, Excel and web pages, the example itself for a note, FLEx's rows for LingTeX Word (<a href="#ex-copy">Copy an example</a>).</td></tr>
@@ -539,8 +539,16 @@
     <p>Every expanded example is written as a <a href="https://github.com/rulingAnts/LingTeX-Tools" target="_blank" rel="noopener">LingTeX-Word</a> interlinear table: the add-in's own table and tier styles (<em>LingTeX Interlinear</em>, <em>Vernacular</em>, <em>Morphemes</em>, <em>Gloss</em>, <em>Word Gloss</em>, <em>Category</em>), grammatical glosses set in small capitals, Word's own (1) numbering with a., b. for several lines, the free translation in quotes followed by the text's title and FLEx line number as a link that opens the text in FLEx. A document with the add-in installed re-wraps them. Your highlights, bold, underline and colours stay.</p>
     <figure class="shot"><img src="../media/guide/export-excel.webp" loading="lazy" alt="The Excel export's Note sheet rendered: the blocks in order, an example as rows per line with the words across"><figcaption>The Excel export, rendered by LibreOffice.</figcaption></figure>
 
-    <h3 id="xp-audio">Audio in the web page and slideshow</h3>
+    <h3 id="xp-slides">Slides: which blocks, and the look</h3>
+    <p>The slideshow and PowerPoint exports open a dialog before they ask where to save. <b>Slides</b> lists every block of the note: tick <span class="ui">New slide</span> where a slide should begin, and every block after it, up to the next tick, shares that slide; untick <span class="ui">Show</span> to leave a block out. A heading that starts a slide is its title. It starts as the program would lay it out (<span class="ui">One example per slide</span>), and <span class="ui">One slide per heading</span> and <span class="ui">Every block on its own slide</span> set all the ticks at once. The Slide column shows where each block lands. Several examples, a chart and the text between them can share one slide; they are stacked and shrunk to fit. The program remembers your ticks for that note's blocks.</p>
+    <p><b>Look</b>: a theme (Classic, Dark, Paper, High contrast, Forest) and, over it, your own background, text and accent colours and a font. The example colours follow the theme, and the small preview shows the result. The same look goes into the slideshow and PowerPoint.</p>
+
+    <h3 id="xp-audio">Audio in the web page, slideshow and PowerPoint</h3>
     <p>When the note has time-aligned examples or charts, the export asks whether to <b>embed the recordings</b>: one clip per object, compressed (about 300 KB a minute), inside the page. Each line then has ▶, an example and a chart their own, the playing line or cells are lit, and a bar at the bottom pauses, stops and seeks. An object whose recording is not there exports without a player.</p>
+    <p>In <b>PowerPoint</b> each example and chart with time-aligned lines gets its recording as a round ▶ beside it on its slide. A click plays it in the slide show, and PowerPoint's own player bar appears under it. The clip is AAC (an .m4a) when ffmpeg is available, which it is in the Windows download, or a WAV file otherwise. PowerPoint plays a whole example, not line by line; the web slideshow plays each line.</p>
+
+    <h3 id="xp-prompt">A design prompt for an AI assistant</h3>
+    <p>The web page and slideshow come out plain on purpose: the content is laid out, the design is yours. Tick <span class="ui">Also save a design prompt for an AI assistant</span> in the export dialog and a prompt is saved beside the file as <code>&lt;name&gt;.design-prompt.md</code>. Give both files to Claude Design or another assistant that edits web pages and it can restyle the page while keeping every word, gloss and number, the alignment of the glosses, the Unicode fonts, and the players working. The prompt is yours to edit in the dialog: fill in your wishes at its end, and your version is kept for the next export (<span class="ui">↺ The default prompt</span> brings the original back). The toast after the export can also copy the prompt to the clipboard.</p>
   </section>
 
   <!-- ============================================================ 12 -->
@@ -676,7 +684,7 @@
 
     <h3 id="tr-known">Known issues</h3>
     <ul>
-      <li><b>Some export formats are still rough.</b> Word, PDF and the web page come out well. The slideshow and PowerPoint less so: in PowerPoint some examples' tables are crowded or overlap, and where a note breaks into slides is not settled yet. In Word the examples are LingTeX-Word tables and look right, but asking the LingTeX-Word add-in to re-render them does not work correctly yet (<a href="https://github.com/rulingAnts/flex-scratchpad/issues/21">issue&nbsp;21</a>).</li>
+      <li><b>Some export formats are still rough.</b> Word, PDF and the web page come out well. The slideshow and PowerPoint less so: in PowerPoint some examples' tables are crowded or overlap (you now choose where slides break, in the export dialog). In Word the examples are LingTeX-Word tables and look right, but asking the LingTeX-Word add-in to re-render them does not work correctly yet (<a href="https://github.com/rulingAnts/flex-scratchpad/issues/21">issue&nbsp;21</a>).</li>
     </ul>
     <p>Please <a href="https://github.com/rulingAnts/flex-scratchpad/issues">report what you find</a>; the planned features are the issues labelled <em>planned</em>.</p>
     <a class="back-top" href="#top">↑ Back to the top</a>

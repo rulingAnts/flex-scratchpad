@@ -67,7 +67,9 @@
 
   async function flexBlock(spec, extras) {
     const kind = spec.kind === 'sense' ? 'entry' : spec.kind;
-    const obj = await FS.interlinear.flexGet(kind, spec.guid, spec.kind === 'text' && spec.seg ? spec.seg[0] : null, spec.kind === 'text' && spec.seg ? spec.seg[1] : null, false, spec.kind === 'text' ? spec.ws : null);
+    // a chart's rows too (its `rows=` is held in spec.seg): an export of rows 1a–1b once drew the whole chart
+    const ranged = (spec.kind === 'text' || spec.kind === 'chart') && spec.seg;
+    const obj = await FS.interlinear.flexGet(kind, spec.guid, ranged ? spec.seg[0] : null, ranged ? spec.seg[1] : null, false, spec.kind === 'text' ? spec.ws : null, ranged ? spec.at || null : null);
     return blockOf(spec, obj, extras);
   }
   /* The export model of an object already fetched (what flexBlock does after its fetch; the rich
@@ -269,7 +271,7 @@
     walk(doc.blocks);
     return out;
   }
-  async function embedAudio(doc, job) {
+  async function embedAudio(doc, job, fmt) {
     const blocks = timedBlocks(doc);
     if (!blocks.length) return { count: 0, bytes: 0, missing: 0 };
     const items = blocks.map((b, i) => {
@@ -280,7 +282,7 @@
     // the recordings stay in Python (Seth, 2026-10-20: "audio stays in python is a good idea"): each clip
     // comes back as a TOKEN, written into the page as `fs-clip:<token>`, and Api.export_note_html puts the
     // recording itself into the file — megabytes of base64 through the bridge froze the window
-    const got = await FS.api.export_clips(items, job ? job.id : null);
+    const got = await FS.api.export_clips(items, job ? job.id : null, fmt === 'office' ? 'office' : 'web');   // office: a clip PowerPoint plays
     let bytes = 0, count = 0, missing = 0;
     blocks.forEach((b, i) => {
       const r = (got || []).find((x) => x.id === items[i].id);
@@ -303,7 +305,8 @@
    * in order and spills onto a continuation slide when it grows long. The same deck model feeds
    * the HTML slideshow (toSlides) and the PowerPoint writer (Python, pptx_writer.py). */
   const OWN_SLIDE = new Set(['interlinear', 'chart', 'table', 'image', 'imageref', 'entry', 'wordform']);
-  function slidesOf(doc) {
+  function slidesOf(doc, plan) {
+    if (plan && plan.rows) return planSlides(doc, plan);
     const slides = [{ kind: 'title', title: doc.title || 'Untitled', subtitle: [doc.where, doc.project ? 'FLEx project ' + doc.project : '', doc.date].filter(Boolean).join(' · '), blocks: [] }];
     let section = '';
     let cur = null;
@@ -330,6 +333,145 @@
     return { title: doc.title || 'Untitled', where: doc.where || '', project: doc.project || '', date: doc.date || '', slides: slides.filter((s) => s.kind === 'title' || s.blocks.length) };
   }
   const plainOf = (runs) => (runs || []).map((r) => r.text || '').join('');
+
+  /* THE USER'S SLIDES (Seth, 2026-10-20: "instead of one example per slide, allow the user to select by
+   * checkbox which blocks go on which slides (including examples), with our app initially assigning per
+   * 'one example per slide'"). A PLAN is {rows: {<editor block index>: {brk, skip}}}: a block with `brk`
+   * starts a new slide, one with `skip` is left out, the rest join the slide before them. A heading
+   * that starts a slide is its title (and the title of what follows, until the next one); a heading
+   * that does not is drawn on the slide. A slide holding one object is an 'object' slide (a short
+   * text just before it its lead-in), one of text only a 'text' slide, anything else 'mixed'. */
+  const isObjBlock = (b) => OWN_SLIDE.has(b.type);
+  function planSlides(doc, plan) {
+    const slides = [{ kind: 'title', title: doc.title || 'Untitled', subtitle: [doc.where, doc.project ? 'FLEx project ' + doc.project : '', doc.date].filter(Boolean).join(' · '), blocks: [] }];
+    let section = '', cur = null, lastAt = null, fromHeading = false;
+    const fresh = (title) => { cur = { kind: 'text', title, blocks: [] }; slides.push(cur); return cur; };
+    for (const b of doc.blocks || []) {
+      const row = (plan.rows || {})[b.at] || {};
+      if (row.skip) continue;
+      const first = b.at !== lastAt;
+      lastAt = b.at;
+      const brk = first && !!row.brk;
+      if (b.type === 'h') {
+        if (brk || !cur) { section = plainOf(b.runs); fresh(section); fromHeading = true; continue; }
+        cur.blocks.push(b);
+        continue;
+      }
+      if (b.type === 'hr') { if (brk) cur = null; continue; }
+      if ((b.type === 'p' || b.type === 'quote') && !plainOf(b.runs).trim()) continue;      // an empty line is no content
+      if (!cur || brk) {
+        const prev = slides[slides.length - 1];
+        const cont = !isObjBlock(b) && prev && prev.kind !== 'title' && prev.title === section && section && !fromHeading;
+        fresh(section + (cont ? ' (cont.)' : ''));
+        fromHeading = false;
+      } else if (cur.blocks.length) fromHeading = false;
+      cur.blocks.push(b);
+    }
+    for (const s of slides) {
+      if (s.kind === 'title') continue;
+      const objs = s.blocks.filter(isObjBlock);
+      if (!objs.length) s.kind = 'text';
+      else if (s.blocks.length === 1) s.kind = 'object';
+      else if (s.blocks.length === 2 && objs.length === 1 && s.blocks[1] === objs[0] && s.blocks[0].type === 'p' && plainOf(s.blocks[0].runs).length < 160) { s.kind = 'object'; s.lead = s.blocks[0]; s.blocks = [objs[0]]; }
+      else s.kind = 'mixed';
+    }
+    return { title: doc.title || 'Untitled', where: doc.where || '', project: doc.project || '', date: doc.date || '', theme: plan.theme || null, slides: slides.filter((s) => s.kind === 'title' || s.blocks.length) };
+  }
+
+  /* The plan the app starts from: what slidesOf does on its own — every heading starts a slide,
+   * every example, chart, table, entry and picture gets one of its own (a short line ending in ":"
+   * just before it rides along as its lead-in), running text fills a slide and goes on to another
+   * when it grows long. From the NOTE's blocks, before anything is fetched (the questions come first). */
+  const EDITOR_OBJ = (b) => (b.type === 'flex' && !/^\s*\{\{\s*file\s/.test(b.src || '') && !/\{\{[^}]*\bcollapsed\b/.test(b.src || '')) || b.type === 'table' || b.type === 'image';
+  function blockWeight(b) {
+    const src = String(b.src || '');
+    if (b.type === 'list') return src.split('\n').length * 1.2;
+    if (b.type === 'code') return src.split('\n').length;
+    return Math.max(1, Math.ceil(src.length / 90));
+  }
+  function defaultPlan(blocks) {
+    const rows = {};
+    let state = null, lines = 0;            // state: null | 'head' | 'text' | 'object'
+    (blocks || []).forEach((b, i) => {
+      const row = rows[i] = { brk: false, skip: false };
+      if (b.type === 'h') { row.brk = true; state = 'head'; lines = 0; return; }
+      if (b.type === 'hr') { row.brk = true; state = null; return; }
+      if (EDITOR_OBJ(b)) {
+        const prev = blocks[i - 1];
+        const lead = prev && prev.type === 'p' && String(prev.src || '').length < 120 && /[:：]\s*$/.test(prev.src || '') && rows[i - 1] && !rows[i - 1].skip;
+        if (lead) rows[i - 1].brk = true; else row.brk = true;
+        state = 'object'; lines = 0;
+        return;
+      }
+      const w = blockWeight(b);
+      if (state === 'object' || state === null || (state === 'text' && lines + w > 14)) { row.brk = true; lines = 0; }
+      state = 'text'; lines += w;
+    });
+    return { rows };
+  }
+  /* A row's label in the dialog: what the block is, in a few words. */
+  function blockLabel(b) {
+    const src = String(b.src || '');
+    if (b.type === 'h') return { icon: 'H', text: src.replace(/^#+\s*/, '').replace(/\s*\{collapsed\}\s*$/, ''), head: true };
+    if (b.type === 'hr') return { icon: '—', text: 'Divider' };
+    if (b.type === 'table') return { icon: '▦', text: 'Table (' + Math.max(0, src.split('\n').filter((l) => /^\s*\|/.test(l)).length - 1) + ' rows)' };
+    if (b.type === 'image') return { icon: '🖼', text: 'Picture' };
+    if (b.type === 'flex') {
+      const spec = R.parse(src);
+      if (spec) {
+        if (spec.kind === 'file') return { icon: '📎', text: spec.label || String(spec.ref || '').split(/[\\/]/).pop() };
+        const I = FS.interlinear;
+        const obj = I && I.peek ? I.peek(spec) : null;
+        const kind = spec.kind === 'chart' ? 'Chart' : spec.kind === 'text' ? 'Example' : spec.kind === 'wordform' ? 'Wordform' : 'Entry';
+        let name = spec.label || '';
+        if (!name && obj) name = spec.kind === 'text' ? ((obj.abbrev || obj.title || '') + ' ' + I.chipRange(spec, obj)).trim() : I.chipTitle(spec, obj) + (spec.kind === 'chart' ? ' ' + I.chipRange(spec, obj) : '');
+        return { icon: spec.kind === 'chart' ? '▦' : spec.kind === 'text' ? '¶' : '◆', text: kind + (name ? ': ' + name : '') + (spec.extra && spec.extra.collapsed ? ' (a link)' : ''), obj: !(spec.extra && spec.extra.collapsed) };
+      }
+    }
+    const plain = FS.markdown.plainText ? FS.markdown.plainText(src) : src;
+    return { icon: b.type === 'list' ? '•' : b.type === 'quote' ? '❝' : b.type === 'code' ? '</>' : '¶', text: plain.replace(/\s+/g, ' ').trim().slice(0, 90) || '(empty)' };
+  }
+
+  /* LOOKS (Seth, 2026-10-20: "more styling options than just white background, text foreground"): a
+   * preset and, over it, the user's background / text / accent colours and font. The same palette
+   * colours the HTML slideshow (themeCss + the example colours swapped in the page) and the PowerPoint
+   * deck (`deck.theme`, pptx_writer _set_theme). */
+  const SLIDE_THEMES = {
+    classic: { name: 'Classic (blue title, white slides)', bg: '#ffffff', fg: '#1a1d21', accent: '#1f4f8f', titleFg: '#ffffff', sub: '#cfe0ff', rule: '#e8ebef', panel: '#f3f4f6', vern: '#00379c', gloss: '#2a6e2a', pos: '#7a3e9d', morph: '#4a4f57', muted: '#68717d', deck: '#1a1d21', font: 'Segoe UI' },
+    dark: { name: 'Dark', bg: '#1e2227', fg: '#e8eaed', accent: '#3b6fb6', titleFg: '#ffffff', sub: '#cfe0ff', rule: '#3a4048', panel: '#2a2f36', vern: '#8ab4ff', gloss: '#7fd18b', pos: '#d6a2f5', morph: '#c9ced6', muted: '#a8b0ba', deck: '#0f1114', font: 'Segoe UI' },
+    paper: { name: 'Paper (warm, serif)', bg: '#fbf6ec', fg: '#2b2620', accent: '#7a4b1e', titleFg: '#fff8ec', sub: '#f1dcc0', rule: '#e6dccb', panel: '#f2ead9', vern: '#1d3f7a', gloss: '#3f6b2a', pos: '#7a3e6d', morph: '#4d453b', muted: '#7d7264', deck: '#3a332b', font: 'Charis SIL' },
+    contrast: { name: 'High contrast', bg: '#ffffff', fg: '#000000', accent: '#000000', titleFg: '#ffffff', sub: '#ffffff', rule: '#000000', panel: '#e6e6e6', vern: '#00278a', gloss: '#0b5a14', pos: '#5c1f84', morph: '#000000', muted: '#333333', deck: '#000000', font: 'Segoe UI' },
+    forest: { name: 'Forest', bg: '#f4f8f4', fg: '#1c2a1f', accent: '#2f6b3f', titleFg: '#ffffff', sub: '#d6ecd9', rule: '#d7e3d8', panel: '#e7efe7', vern: '#174a7c', gloss: '#2f6b3f', pos: '#7a3e9d', morph: '#3d4a40', muted: '#5f6f63', deck: '#142019', font: 'Gentium Plus' },
+  };
+  const SLIDE_FONTS = ['Segoe UI', 'Calibri', 'Arial', 'Charis SIL', 'Doulos SIL', 'Gentium Plus', 'Andika', 'Noto Sans', 'Noto Serif', 'Georgia', 'Cambria'];
+  /* The full palette of a choice {preset, bg?, fg?, accent?, font?}; null for the untouched classic look
+   * (which writes exactly what the exports always wrote). */
+  function themeOf(choice) {
+    if (!choice) return null;
+    const base = SLIDE_THEMES[choice.preset] || SLIDE_THEMES.classic;
+    const t = Object.assign({}, base);
+    for (const k of ['bg', 'fg', 'accent', 'font']) if (choice[k]) t[k] = choice[k];
+    const untouched = (choice.preset || 'classic') === 'classic' && !choice.bg && !choice.fg && !choice.accent && !choice.font;
+    return untouched ? null : t;
+  }
+  const fontStack = (f) => '"' + String(f || 'Segoe UI').replace(/"/g, '') + '", "Charis SIL", "Doulos SIL", "Noto Sans", "Segoe UI", sans-serif';
+  function themeCss(t) {
+    return `
+  body { background: ${t.deck}; }
+  .slide { background: ${t.bg}; color: ${t.fg}; font-family: ${fontStack(t.font)}; }
+  .slide .stitle { color: ${t.fg}; border-bottom-color: ${t.rule}; } .slide .stitle small, .slide .lead { color: ${t.muted}; }
+  .slide.title { background: linear-gradient(135deg, ${t.accent}, ${t.accent}); color: ${t.titleFg}; } .slide.title h1 { color: ${t.titleFg}; } .slide.title .sub, .slide.title .hint { color: ${t.sub}; }
+  .slide table th { background: ${t.panel}; color: ${t.fg}; } .slide table td, .slide table th { border-color: ${t.rule}; }
+  .slide .obj .head .ttl, .slide .ft, .slide .lit, .slide .note { color: ${t.fg}; } .slide a { color: ${t.vern}; }
+  .slide .obj { background: transparent; } .slide table.tchart thead th { background: ${t.panel}; color: ${t.muted}; } .slide table.tchart th, .slide table.tchart td { border-color: ${t.rule}; }
+  .slide table.tchart td.free, .slide table.tchart tr.free-row td { background: ${t.panel}; } .slide table.tchart td.xcell { background: transparent; } .slide button.play { background: ${t.bg}; color: ${t.vern}; border-color: ${t.rule}; }`;
+  }
+  /* The example colours the export model writes inline, swapped for the theme's. */
+  function recolour(html, t) {
+    const pairs = [['#00379c', t.vern], ['#2a6e2a', t.gloss], ['#7a3e9d', t.pos], ['#4a4f57', t.morph], ['#68717d', t.muted]];
+    for (const [a, b] of pairs) if (b && b.toLowerCase() !== a) html = html.replace(new RegExp(a, 'gi'), b);
+    return html;
+  }
 
   const SLIDES_CSS = `
   html, body { height: 100%; }
@@ -402,25 +544,27 @@
     var start = parseInt((location.hash || '').replace('#', ''), 10);
     show(isNaN(start) ? 0 : start - 1, false);
   })();`;
-  function toSlides(doc) {
-    const deck = slidesOf(doc);
+  function toSlides(doc, plan) {
+    const deck = slidesOf(doc, plan);
+    const theme = plan && plan.theme ? themeOf(plan.theme) : null;
     const hasAudio = timedBlocks(doc).some((b) => b.audio);
     const slideHtml = (s, n) => {
       if (s.kind === 'title') return '<section class="slide title" data-n="' + n + '"><h1>' + esc(s.title) + '</h1><div class="sub">' + esc(s.subtitle || '') + '</div><div class="hint">→ next · ← back · T contents · F full screen · P print' + (hasAudio ? ' · ▶ plays a line' : '') + '</div></section>';
       const obj = s.kind === 'object' ? s.blocks[0] : null;
       const sub = obj ? (obj.type === 'interlinear' ? obj.title : obj.type === 'chart' ? (obj.name || 'Chart') + ' · ' + (obj.title || '') : obj.type === 'entry' ? obj.headword : '') : '';
-      return '<section class="slide' + (obj && obj.type === 'chart' ? ' wide' : '') + '" data-n="' + n + '">'
+      return '<section class="slide' + ((obj && obj.type === 'chart') || (s.kind === 'mixed' && s.blocks.some((b) => b.type === 'chart')) ? ' wide' : '') + '" data-n="' + n + '">'
         + (s.title || sub ? '<h2 class="stitle">' + esc(s.title || sub) + (s.title && sub && sub !== s.title ? '<small>' + esc(sub) + '</small>' : '') + '</h2>' : '')
         + (s.lead ? '<p class="lead">' + runsHtml(s.lead.runs) + '</p>' : '')
         + '<div class="sbody"><div class="fit">' + s.blocks.map(blockHtml).join('\n') + '</div></div></section>';
     };
     const tocHtml = deck.slides.map((s, n) => '<a href="#' + (n + 1) + '" data-n="' + n + '"><i>' + (n + 1) + '</i>' + esc(s.kind === 'title' ? s.title : (s.title || (s.blocks[0] && (s.blocks[0].title || s.blocks[0].headword)) || 'Slide ' + (n + 1))) + '</a>').join('');
-    return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>' + esc(deck.title) + ' — slides</title><style>' + CSS + SLIDES_CSS + '\n  @page { size: landscape; margin: 0; }</style></head><body class="wide">'
+    const page = '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>' + esc(deck.title) + ' — slides</title><style>' + CSS + SLIDES_CSS + (theme ? themeCss(theme) : '') + '\n  @page { size: landscape; margin: 0; }</style></head><body class="wide">'
       + '<div class="deck">' + deck.slides.map(slideHtml).join('\n') + '</div>'
       + '<div class="nav"><span><b>' + esc(deck.title) + '</b></span><span><span class="keys" id="ctr"></span><button id="btn-toc" title="Contents (T)">☰</button><button id="btn-full" title="Full screen (F)">⛶</button><button id="btn-print" title="Print / save as PDF (P)">⎙</button></span></div>'
       + '<div class="toc" id="toc"><h3>Slides</h3>' + tocHtml + '</div>'
       + (hasAudio ? '<div id="np" hidden><button class="pp" title="Pause / play">❚❚</button><button class="st" title="Stop">■</button><span class="w"></span><div class="bar"><i></i></div><span class="t"></span></div><script>' + PLAYER_JS + '</script>' : '')
       + '<script>' + SLIDES_JS + '</script></body></html>';
+    return theme ? recolour(page, theme) : page;
   }
 
   /* ------------------------------------------------------------------ note → model */
@@ -435,7 +579,8 @@
     const all = editor.blocks || [];
     const objects = all.filter((b) => b.type === 'flex' || b.type === 'table' || ((b.type === 'p' || b.type === 'quote') && /\{\{\s*flex:/.test(b.src || ''))).length;
     let seen = 0;
-    for (const b of all) {
+    for (const [at, b] of all.entries()) {
+      const from = blocks.length;          // every block made from this one carries `at` (the slide plan addresses them by it)
       await breathe();
       if (job) { if (job.cancelled) throw new Error('cancelled'); if (b.type === 'flex' || b.type === 'table' || /\{\{\s*flex:/.test(b.src || '')) { seen++; job.step('Reading the examples from FLEx… ' + seen + ' of ' + objects, seen - 1, objects); } }
       if (b.type !== 'list' && b.type !== 'p') numCtx.counters = [];
@@ -493,6 +638,7 @@
         const m = /^!\[([^\]]*)\]\(([^)\s]+)/.exec(b.src.trim());
         if (m) blocks.push({ type: 'imageref', src: m[2], alt: m[1] });
       }
+      for (let k = from; k < blocks.length; k++) if (blocks[k].at == null) blocks[k].at = at;
     }
     const where = [note.tab, note.folder].filter(Boolean).join(' \u203a ');
     const project = (FS.tagstyles && FS.tagstyles.context && FS.tagstyles.context().project) || '';
@@ -948,38 +1094,51 @@
     if (format === 'flextext') return exportFlextext(note, editor);
     if (format === 'md') { const p = await FS.api.export_note_markdown(note.id); if (p) FS.toast('Saved ' + p, 'ok'); return p; }
     const snap = snapshot(editor);
-    let embed = false;
-    if ((format === 'html' || format === 'slides') && !(FS.isMock && FS.isMock())) {
-      const n = mayHaveAudio(snap);
-      if (n) { embed = await askEmbedAudio(n, format === 'slides' ? 'Slideshow export' : null); if (embed === null) return null; }
+    // the questions first (the recordings, the slides and their look, a design prompt), then the save dialog, then the work
+    let opts = { embed: false, plan: null, handoff: '' };
+    if (format === 'html' || format === 'slides' || format === 'pptx') {
+      opts = await exportDialog(note, snap, format, FS.isMock && FS.isMock() ? 0 : mayHaveAudio(snap));
+      if (!opts) return null;
     }
     let direct = format !== 'pdf';
     if (format === 'pdf') { try { direct = !!(await FS.api.export_pdf_direct()); } catch (e) { direct = false; } }
     let target = null;
     if (direct && !(FS.isMock && FS.isMock())) { target = await chooseTarget(note, format); if (target === null) return null; if (target === undefined) target = null; }
     const title = note.title || 'note';
-    return FS.jobs.run('Export \u201c' + title + '\u201d to ' + KIND[format], (job) => runExport(job, note, snap, format, embed, target));
+    return FS.jobs.run('Export “' + title + '” to ' + KIND[format], (job) => runExport(job, note, snap, format, opts, target));
   }
-  async function runExport(job, note, editor, format, embed, target) {
+  async function runExport(job, note, editor, format, opts, target) {
+    opts = opts && typeof opts === 'object' ? opts : { embed: !!opts };
+    const embed = !!opts.embed;
     const stop = () => { if (job.cancelled) throw new Error('cancelled'); };   // Stop in the jobs list: between steps
     const doc = await buildDoc(note, editor, job);
     stop();
     job.step('Laying out the ' + (format === 'xlsx' ? 'workbook' : format === 'pptx' || format === 'slides' ? 'slides' : 'document') + '…');
     await breathe(true);
+    const audioNote = (stats) => (stats && stats.count ? ' — ' + stats.count + ' recording' + (stats.count > 1 ? 's' : '') + ' embedded (' + (FS.files ? FS.files.fmtSize(stats.bytes) : stats.bytes + ' B') + ')' + (stats.missing ? ', ' + stats.missing + ' not available' : '') : '');
     if (format === 'html' || format === 'slides') {
       let stats = null;
       if (embed) { try { stats = await embedAudio(doc, job); } catch (e) { FS.toast('The recordings could not be embedded: ' + e.message, 'warn'); } }
       stop();
       job.step('Writing the page…');
       await breathe(true);
-      const p = await FS.api.export_note_html(note.id, format === 'slides' ? toSlides(doc) : toHtml(doc), target, format === 'slides' ? ' slides' : '', job.id);
-      if (p) FS.toast('Saved ' + p + (stats && stats.count ? ' \u2014 ' + stats.count + ' recording' + (stats.count > 1 ? 's' : '') + ' embedded (' + (FS.files ? FS.files.fmtSize(stats.bytes) : stats.bytes + ' B') + ')' + (stats.missing ? ', ' + stats.missing + ' not available' : '') : ''), 'ok');
+      const p = await FS.api.export_note_html(note.id, format === 'slides' ? toSlides(doc, opts.plan) : toHtml(doc), target, format === 'slides' ? ' slides' : '', job.id, opts.handoff || null);
+      if (p) FS.toast('Saved ' + p + audioNote(stats) + (opts.handoff ? ' — and its design prompt beside it' : ''), 'ok', opts.handoff ? { action: { label: 'Copy the prompt', fn: () => FS.copyText(opts.handoff) } } : undefined);
       return job.done(p);
     }
     stop();
     if (format === 'docx') { const p = await FS.api.export_note_docx(note.id, doc, target, job.id); if (p) FS.toast('Saved ' + p, 'ok'); return job.done(p); }
     if (format === 'xlsx') { const p = await FS.api.export_note_xlsx(note.id, doc, target, job.id); if (p) FS.toast('Saved ' + p, 'ok'); return job.done(p); }
-    if (format === 'pptx') { const p = await FS.api.export_note_pptx(note.id, slidesOf(doc), target, job.id); if (p) FS.toast('Saved ' + p, 'ok'); return job.done(p); }
+    if (format === 'pptx') {
+      let stats = null;
+      if (embed) { try { stats = await embedAudio(doc, job, 'office'); } catch (e) { FS.toast('The recordings could not be embedded: ' + e.message, 'warn'); } }
+      stop();
+      const deck = slidesOf(doc, opts.plan);
+      deck.theme = opts.plan && opts.plan.theme ? themeOf(opts.plan.theme) : null;
+      const p = await FS.api.export_note_pptx(note.id, deck, target, job.id);
+      if (p) FS.toast('Saved ' + p + audioNote(stats), 'ok');
+      return job.done(p);
+    }
     if (format === 'pdf') {
       const html = toHtml(doc);
       // Windows: WebView2 writes the PDF itself (Api.export_note_pdf → pdf_print.py), landscape
@@ -1004,6 +1163,231 @@
     return job.done(null);
   }
 
+  /* ------------------------------------------------------------------ the export dialog
+   * One set of questions before the save dialog (Seth, 2026-10-20): the recordings (a web page,
+   * a slideshow, PowerPoint), the SLIDES — which block starts a slide and which are left out, the
+   * app's own "one example per slide" ticked to start with — and their LOOK (a slideshow, PowerPoint),
+   * and the DESIGN PROMPT (a web page, a slideshow: "optional handoff prompt that they can share with
+   * an LLM (especially Claude design or similar) to adjust the look and feel … a default handoff
+   * prompt, but editable by the user on export"). What was chosen is remembered on this computer:
+   * the look and the prompt for the next export, a note's slide breaks for its blocks that have not
+   * changed. Resolves {embed, plan, handoff}, or null when closed. */
+  const DEFAULT_HANDOFF = {
+    slides: `I'm attaching an HTML slideshow exported from FLEx Scratchpad, a linguist's notebook for FieldWorks (FLEx). It is deliberately plain: the content is laid out, the design is not. Please give it a finished, coherent visual design and send back the complete HTML file.
+
+What the file is
+- One self-contained page. Every <section class="slide"> is a 1280 × 720 slide; the script at the end scales the slides to the window, moves between them (→ ← Space PgUp PgDn Home End), shows the contents (T), goes full screen (F) and prints one slide a page (P).
+- Interlinear examples: each line of text (.seg) has its number (.n) and a row of word columns (.il > .w); in each column the word (.l.txt) sits over its morphemes (.l.morph), their glosses (.l.mgls), the word gloss (.l.gls) and the category (.l.pos); then the free translation (.ft), the literal translation (.lit) and notes (.note).
+- Text charts are tables (table.tchart): header rows of column groups and columns, a row label first, words and glosses in the cells, chart markers as small chips.
+- When recordings are embedded there are <audio> elements, ▶ buttons (button.play with data-a / data-segs) and a player bar (#np), driven by a script in the page.
+
+Keep exactly
+- Every word, gloss, number, translation and reference, letter for letter and in the same order. Do not translate, correct, re-gloss, re-number or summarise anything: it is language data.
+- Each word lined up over its glosses, and the columns of every table.
+- Unicode and phonetic characters: use fonts that cover them (Charis SIL, Doulos SIL, Gentium, Noto Serif / Noto Sans as fallbacks) and keep every dir and lang attribute.
+- One section.slide per slide at 1280 × 720, the class names and data-* attributes the scripts use, and both scripts working: navigation, fitting, contents, printing, and every ▶ that plays a line and lights it while it plays.
+- A self-contained file that works offline: no external fonts, images, scripts or stylesheets. Font stacks may name fonts installed on the computer.
+
+Please do
+- One consistent theme for the title slide and the content slides: background, colours, type, spacing, the slide title bar.
+- Examples readable from the back of a room: the vernacular line prominent, glosses smaller and calmer, the free translation clearly set apart, grammatical glosses (3SG, PST…) in small capitals if it suits.
+- Readable charts: clear headers, calm borders, room in the cells.
+- Good contrast (WCAG AA) and a print version that still works.
+
+My wishes for the look (edit these):
+- Colours / mood:
+- Fonts:
+- Anything else:
+`,
+    html: `I'm attaching a web page exported from FLEx Scratchpad, a linguist's notebook for FieldWorks (FLEx). It is deliberately plain: the content is laid out, the design is not. Please give it a finished, coherent visual design and send back the complete HTML file.
+
+What the file is
+- One self-contained page: a header (title, where the note lives, the FLEx project, the date), the note's headings, paragraphs, lists and tables, and FLEx objects, then a footer.
+- Interlinear examples (div.obj): each line of text (.seg) has its number (.n) and a row of word columns (.il > .w); in each column the word (.l.txt) sits over its morphemes (.l.morph), their glosses (.l.mgls), the word gloss (.l.gls) and the category (.l.pos); then the free translation (.ft), the literal translation (.lit) and notes (.note). Numbered examples sit in .exrow with their number in .exn.
+- Text charts are tables (table.tchart): header rows of column groups and columns, a row label first, words and glosses in the cells, chart markers as small chips. Lexical entries show a headword (.hw) and senses (.sense).
+- When recordings are embedded there are <audio> elements, ▶ buttons (button.play with data-a / data-segs) and a player bar (#np), driven by a script in the page.
+
+Keep exactly
+- Every word, gloss, number, translation and reference, letter for letter and in the same order. Do not translate, correct, re-gloss, re-number or summarise anything: it is language data.
+- Each word lined up over its glosses, and the columns of every table.
+- Unicode and phonetic characters: use fonts that cover them (Charis SIL, Doulos SIL, Gentium, Noto Serif / Noto Sans as fallbacks) and keep every dir and lang attribute.
+- The class names and data-* attributes the player script uses, and the script working: every ▶ plays its line and lights it while it plays.
+- The print stylesheet (charts on landscape pages, header rows repeated) and a self-contained file that works offline: no external fonts, images, scripts or stylesheets. Font stacks may name fonts installed on the computer.
+
+Please do
+- A readable, consistent design: type, spacing, headings, tables, the header and footer.
+- Examples set off from the text, the vernacular line prominent, glosses smaller and calmer, the free translation clearly set apart, grammatical glosses (3SG, PST…) in small capitals if it suits.
+- Readable charts: clear headers, calm borders, room in the cells.
+- Good contrast (WCAG AA), and a page that reads well on a phone and prints well.
+
+My wishes for the look (edit these):
+- Colours / mood:
+- Fonts:
+- Anything else:
+`,
+  };
+  const ls = {
+    get(k) { try { const v = localStorage.getItem(k); return v == null ? null : JSON.parse(v); } catch (e) { return null; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* a private window: nothing remembered */ } },
+  };
+  const hashOf = (str) => { let h = 5381; for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0; return (h >>> 0).toString(36); };
+  function exportDialog(note, editor, format, nAudio) {
+    const slides = format === 'slides' || format === 'pptx';
+    const prompt = format === 'html' || format === 'slides';
+    const blocks = editor.blocks || [];
+    return new Promise((resolve) => {
+      let answered = false;
+      const m = FS.modal({ title: format === 'pptx' ? 'PowerPoint export' : format === 'slides' ? 'Slideshow export' : 'Web page export', class: slides ? 'wide' : 'narrow', onClose: () => { if (!answered) resolve(null); } });
+      m.body.setAttribute('data-test', 'export-dialog');
+      // the recordings
+      let audioCb = null;
+      if (nAudio) {
+        audioCb = el('input', { type: 'checkbox', checked: true, 'data-test': 'embed-audio' });
+        m.body.appendChild(el('label', { class: 'row', style: { gap: '8px' } }, audioCb, el('span', {}, (format === 'pptx' ? 'Put the recordings in the slides (' : 'Embed the recordings as players (') + nAudio + ' example' + (nAudio > 1 ? 's' : '') + ' that may have audio)')));
+        m.body.appendChild(el('p', { class: 'small muted' }, format === 'pptx'
+          ? 'Each example and chart with timed lines gets its recording beside it on its slide: a round ▶ that plays it in the slide show, with PowerPoint’s own player bar. Compressed (AAC) with ffmpeg when it is available, else a WAV file.'
+          : 'Each example gets one clip, compressed with ffmpeg when it is available (about 300 KB a minute), written INTO the page as base64 so the file plays anywhere on its own. A ▶ per line plays that line and lights it while it plays.'));
+      }
+      // the slides and their look
+      let plan = null, look = null;
+      if (slides) {
+        const stored = ls.get('fs:slidePlan:' + note.id) || {};
+        const base = defaultPlan(blocks);
+        // a block is known again by its text; an example's `at=` anchors are written in once it is fetched, so they do not count
+        const keys = blocks.map((b) => hashOf(b.type + '\u0000' + String(b.src || '').replace(/\s(?:at|cw)=[^\s}]+/g, '')));
+        const fromApp = () => { const p = defaultPlan(blocks); for (const i of Object.keys(p.rows)) plan.rows[i] = p.rows[i]; };
+        plan = { rows: defaultPlan(blocks).rows };          // its own rows: `base` stays the app's, to tell the user's changes from it
+        keys.forEach((k, i) => { if (stored[k]) plan.rows[i] = { brk: !!stored[k].brk, skip: !!stored[k].skip }; });
+        look = Object.assign({ preset: 'classic' }, ls.get('fs:slideTheme') || {});
+        // look
+        const lookBox = el('fieldset', { class: 'exp-look', 'data-test': 'slide-look' }, el('legend', {}, 'Look'));
+        const preview = el('div', { class: 'exp-preview', 'data-test': 'slide-preview' });
+        const drawPreview = () => {
+          const t = themeOf(look) || SLIDE_THEMES.classic;
+          preview.innerHTML = '';
+          preview.style.background = t.bg; preview.style.color = t.fg; preview.style.fontFamily = fontStack(t.font);
+          preview.append(el('div', { class: 'pv-title', style: { background: t.accent, color: t.titleFg } }, note.title || 'Title'),
+            el('div', { class: 'pv-head', style: { borderBottomColor: t.rule } }, 'A heading'),
+            el('div', { class: 'pv-ex' }, el('span', { style: { color: t.vern, fontWeight: 600 } }, 'Kabir'), ' ', el('span', { style: { color: t.gloss } }, 'dog'), ' ', el('span', { style: { color: t.pos } }, 'n')),
+            el('div', { class: 'pv-ft' }, '‘The dog slept.’'));
+        };
+        const sel = el('select', { 'data-test': 'slide-theme' }, ...Object.entries(SLIDE_THEMES).map(([k, t]) => el('option', { value: k, selected: k === look.preset }, t.name)));
+        const colour = (key, label) => {
+          const t = () => themeOf(look) || SLIDE_THEMES.classic;
+          const inp = el('input', { type: 'color', value: t()[key], 'data-test': 'slide-' + key, title: label });
+          inp.addEventListener('input', () => { look[key] = inp.value; drawPreview(); });
+          return { inp, row: el('label', { class: 'row', style: { gap: '6px' } }, inp, el('span', { class: 'small' }, label)) };
+        };
+        const cBg = colour('bg', 'Background'), cFg = colour('fg', 'Text'), cAc = colour('accent', 'Accent (title slide, links)');
+        const fontSel = el('select', { 'data-test': 'slide-font' }, ...SLIDE_FONTS.map((f) => el('option', { value: f, selected: f === (themeOf(look) || SLIDE_THEMES.classic).font }, f)));
+        fontSel.addEventListener('change', () => { look.font = fontSel.value; drawPreview(); });
+        const sync = () => { const t = themeOf(look) || SLIDE_THEMES.classic; cBg.inp.value = t.bg; cFg.inp.value = t.fg; cAc.inp.value = t.accent; fontSel.value = SLIDE_FONTS.includes(t.font) ? t.font : SLIDE_FONTS[0]; drawPreview(); };
+        sel.addEventListener('change', () => { look = { preset: sel.value }; sync(); });
+        lookBox.append(el('div', { class: 'exp-look-row' },
+          el('div', { class: 'exp-look-ctrls' },
+            el('label', { class: 'row', style: { gap: '6px' } }, el('span', { class: 'small' }, 'Theme'), sel),
+            cBg.row, cFg.row, cAc.row,
+            el('label', { class: 'row', style: { gap: '6px' } }, el('span', { class: 'small' }, 'Font'), fontSel),
+            el('button', { class: 'lnk', type: 'button', onclick: () => { look = { preset: look.preset }; sync(); } }, '↺ The theme’s own colours')),
+          preview),
+          el('p', { class: 'small muted' }, 'The example colours follow the theme too. A web-page slideshow can be restyled further by an AI assistant: tick the design prompt below.'));
+        drawPreview();
+        m.body.appendChild(lookBox);
+        // slides
+        const box = el('fieldset', { class: 'exp-slides', 'data-test': 'slide-plan' }, el('legend', {}, 'Slides'));
+        const tbl = el('table', { class: 'exp-plan' });
+        const count = el('span', { class: 'small muted', 'data-test': 'slide-count' });
+        const draw = () => {
+          tbl.innerHTML = '';
+          tbl.appendChild(el('tr', {}, el('th', { title: 'This block starts a new slide' }, 'New slide'), el('th', { title: 'Untick to leave the block out' }, 'Show'), el('th', {}, 'Slide'), el('th', {}, 'Block')));
+          // which slide each block lands on, as planSlides cuts them: a slide with nothing shown on it (a
+          // heading that only names the slides after it, a section whose blocks are all left out) is dropped
+          const group = [], content = new Set();
+          let g = -1;
+          blocks.forEach((b, i) => {
+            const row = plan.rows[i] || (plan.rows[i] = { brk: false, skip: false });
+            if (row.skip) { group[i] = null; return; }
+            if (row.brk || g < 0) g++;
+            group[i] = g;
+            const empty = (b.type === 'p' || b.type === 'quote') && !String(b.src || '').trim();
+            if (!(b.type === 'h' && (row.brk || i === 0)) && b.type !== 'hr' && !empty) content.add(g);
+          });
+          const numbers = new Map();
+          let n = 1;
+          [...content].sort((a, b) => a - b).forEach((k) => numbers.set(k, ++n));
+          const seen = new Set();
+          blocks.forEach((b, i) => {
+            const row = plan.rows[i];
+            const lab = blockLabel(b);
+            const k = group[i];
+            let sn = '';
+            if (k != null) {
+              if (!numbers.has(k)) sn = b.type === 'h' ? '§' : '';
+              else if (!seen.has(k)) { sn = String(numbers.get(k)); seen.add(k); }
+              else sn = '↳';
+            }
+            const brk = el('input', { type: 'checkbox', checked: row.brk, 'data-test': 'plan-brk', title: 'Start a new slide here' });
+            const show = el('input', { type: 'checkbox', checked: !row.skip, 'data-test': 'plan-show', title: 'Show this block' });
+            brk.addEventListener('change', () => { row.brk = brk.checked; draw(); });
+            show.addEventListener('change', () => { row.skip = !show.checked; draw(); });
+            if ((b.type === 'p' || b.type === 'quote') && !String(b.src || '').trim()) return;     // an empty line: not worth a row
+            tbl.appendChild(el('tr', { class: (row.skip ? 'skip' : '') + (row.brk && !row.skip ? ' brk' : '') + (lab.head ? ' head' : '') + (lab.obj ? ' obj' : ''), 'data-i': String(i) },
+              el('td', {}, brk), el('td', {}, show), el('td', { class: 'sn', title: sn === '§' ? 'A heading with nothing after it on its slide: it names the slides that follow' : '' }, sn),
+              el('td', { class: 'lab' }, el('span', { class: 'ic' }, lab.icon), ' ', lab.text)));
+          });
+          count.textContent = n + ' slides, the title slide included';
+        };
+        const preset = (fn) => () => { fn(); draw(); };
+        box.append(el('p', { class: 'small muted' }, 'Tick “New slide” where a slide should begin; every block after it, up to the next tick, shares that slide. A heading that starts a slide is its title. Untick “Show” to leave a block out. To begin with, every example, chart, table, entry and picture has a slide of its own.'),
+          el('div', { class: 'row', style: { gap: '8px', flexWrap: 'wrap' } },
+            el('button', { class: 'btn small', type: 'button', 'data-test': 'plan-default', onclick: preset(fromApp) }, 'One example per slide'),
+            el('button', { class: 'btn small', type: 'button', 'data-test': 'plan-headings', onclick: preset(() => blocks.forEach((b, i) => { plan.rows[i].brk = b.type === 'h' || i === 0; })) }, 'One slide per heading'),
+            el('button', { class: 'btn small', type: 'button', 'data-test': 'plan-each', onclick: preset(() => blocks.forEach((b, i) => { plan.rows[i].brk = true; })) }, 'Every block on its own slide'),
+            el('button', { class: 'btn small', type: 'button', onclick: preset(() => blocks.forEach((b, i) => { plan.rows[i].skip = false; })) }, 'Show everything'),
+            count),
+          el('div', { class: 'exp-plan-scroll' }, tbl));
+        draw();
+        m.body.appendChild(box);
+        plan.save = () => { const keep = {}; keys.forEach((k, i) => { const r = plan.rows[i]; const d = base.rows[i] || {}; if (r && (r.brk !== !!d.brk || r.skip)) keep[k] = { brk: r.brk, skip: r.skip }; }); ls.set('fs:slidePlan:' + note.id, keep); };
+      }
+      // the design prompt
+      let promptCb = null, promptTa = null;
+      if (prompt) {
+        const key = 'fs:handoff:' + format;
+        const saved = ls.get(key);
+        promptCb = el('input', { type: 'checkbox', checked: !!ls.get(key + ':on'), 'data-test': 'handoff-on' });
+        promptTa = el('textarea', { class: 'exp-prompt', rows: 10, spellcheck: 'false', 'data-test': 'handoff-text' });
+        promptTa.value = saved || DEFAULT_HANDOFF[format];
+        const body = el('div', { class: 'exp-prompt-body' }, promptTa,
+          el('div', { class: 'row', style: { gap: '10px' } },
+            el('button', { class: 'lnk', type: 'button', 'data-test': 'handoff-reset', onclick: () => { promptTa.value = DEFAULT_HANDOFF[format]; } }, '↺ The default prompt'),
+            el('span', { class: 'small muted' }, 'Your changes are kept for the next export.')));
+        const showBody = () => { body.hidden = !promptCb.checked; };
+        promptCb.addEventListener('change', showBody);
+        m.body.appendChild(el('fieldset', { class: 'exp-handoff', 'data-test': 'handoff' }, el('legend', {}, 'Design prompt'),
+          el('label', { class: 'row', style: { gap: '8px' } }, promptCb, el('span', {}, 'Also save a design prompt for an AI assistant (Claude Design or another one that edits web pages)')),
+          el('p', { class: 'small muted' }, 'The export stays plain on purpose: the content is laid out, the design is yours. The prompt is saved beside it as “<name>.design-prompt.md”; give the assistant both files and it can restyle the page without touching the language data, the alignment or the players. Fill in your wishes at the end.'),
+          body));
+        showBody();
+      }
+      const go = el('button', { class: 'btn primary', 'data-test': 'export-html-go', onclick: () => {
+        answered = true;
+        if (look) ls.set('fs:slideTheme', look);
+        if (plan && plan.save) plan.save();
+        let handoff = '';
+        if (promptCb) {
+          ls.set('fs:handoff:' + format + ':on', promptCb.checked);
+          const txt = promptTa.value;
+          ls.set('fs:handoff:' + format, txt.trim() === DEFAULT_HANDOFF[format].trim() ? null : txt);
+          if (promptCb.checked && txt.trim()) handoff = txt;
+        }
+        const out = { embed: audioCb ? audioCb.checked : false, plan: plan ? { rows: plan.rows, theme: look } : null, handoff };
+        m.close(); resolve(out);
+      } }, 'Export…');
+      m.body.appendChild(el('div', { class: 'btn-row' }, el('button', { class: 'btn', onclick: () => { answered = true; m.close(); resolve(null); } }, 'Cancel'), go));
+    });
+  }
+
   /* "Embed the recordings?" — a page with N players is bigger (about 300 KB a minute compressed,
    * much more without ffmpeg); the user decides. Resolves true / false, null when closed. */
   function askEmbedAudio(n, title) {
@@ -1019,5 +1403,5 @@
     });
   }
 
-  FS.exporter = { blockOf, clipHtml, copyHtml, buildDoc, toHtml, toSlides, slidesOf, exportNote, runsOf, flextextItems, exportFlextext, embedAudio, timedBlocks, askEmbedAudio, linkRun };
+  FS.exporter = { defaultPlan, planSlides, themeOf, SLIDE_THEMES, DEFAULT_HANDOFF, exportDialog, blockOf, clipHtml, copyHtml, buildDoc, toHtml, toSlides, slidesOf, exportNote, runsOf, flextextItems, exportFlextext, embedAudio, timedBlocks, askEmbedAudio, linkRun };
 })();

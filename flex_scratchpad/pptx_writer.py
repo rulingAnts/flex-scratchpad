@@ -14,7 +14,13 @@ words across, their glosses under them), a text chart as a table (its header row
 their groups, a cell's words on one line and their glosses on the next, the markers, the free
 translations, a chart note's custom columns, the rows' colours), a Markdown table as a bordered
 table, a picture as itself. Fonts shrink when an example or a chart would not fit the slide.
-The recordings do not travel into PowerPoint (the HTML slideshow carries them).
+A slide may also be {kind: 'mixed', title, blocks: [any of them]} — the blocks the user put on one
+slide in the export dialog (export.js slidesOf with a plan), stacked top to bottom with the room
+shared out by what each needs. An example or chart whose block carries `audio: {src}` gets its
+recording as PLAYABLE MEDIA beside it (Seth, 2026-10-20) — `media(src)` (Api.export_note_pptx)
+returns its bytes, mime and extension (.m4a / .mp3 / .wav: what PowerPoint plays) — a round ▶ that
+plays it on a click in the slide show, with PowerPoint's own player bar. `deck.theme` recolours the
+deck (background, text, accent, the example colours, the font; export.js SLIDE_THEMES).
 
 The package is the smallest PowerPoint accepts: a presentation, one slide master with one blank
 layout, a theme, the slides. Checked by tests/test_pptx.py (well-formed parts, the relationships,
@@ -25,7 +31,9 @@ from __future__ import annotations
 import base64
 import io
 import re
+import threading
 import zipfile
+import zlib
 from xml.sax.saxutils import escape
 
 SLIDE_W, SLIDE_H = 12192000, 6858000          # 16:9, EMU
@@ -35,6 +43,8 @@ TITLE_H = 760000
 BODY_Y = MARGIN + TITLE_H + 120000
 BODY_H = SLIDE_H - BODY_Y - MARGIN
 EMU_PER_PT = 12700
+AUDIO_SIZE = 457200                           # the ▶ of a recording, ½ inch
+TEXT_TYPES = ("h", "p", "quote", "list", "code", "hr")
 
 VERN, GLOSS, MUTED, POS, MORPH = "00379C", "2A6E2A", "68717D", "7A3E9D", "4A4F57"
 
@@ -58,6 +68,33 @@ def _plain(runs) -> str:
     return "".join(str(r.get("text") or "") for r in (runs or []))
 
 
+# ----------------------------------------------------------------------------- the theme
+DEFAULT_THEME = {"bg": "FFFFFF", "fg": "1A1D21", "accent": "1F4F8F", "titleFg": "FFFFFF", "sub": "CFE0FF", "rule": "E8EBEF",
+                 "panel": "F3F4F6", "vern": VERN, "gloss": GLOSS, "pos": POS, "morph": MORPH, "muted": MUTED, "font": "Segoe UI"}
+_TH: dict = dict(DEFAULT_THEME)
+_CMAP: dict = {}          # the default palette's colours → the theme's (run colours, fills, borders)
+
+
+def _set_theme(theme: dict | None) -> None:
+    global _TH, _CMAP
+    th = dict(DEFAULT_THEME)
+    for k, v in (theme or {}).items():
+        if k == "font":
+            if v:
+                th[k] = str(v)[:60]
+        elif _hex(v):
+            th[k] = _hex(v)
+    _TH = th
+    pairs = {VERN: "vern", GLOSS: "gloss", POS: "pos", MORPH: "morph", MUTED: "muted", "1A1D21": "fg", "E8EBEF": "rule", "D9DDE3": "rule", "F3F4F6": "panel",
+             "A8B0BA": "muted", "4A4F57": "morph", "1F4F8F": "accent", "C9CED6": "rule"}
+    # only what the theme changes: the default theme writes exactly what it always did
+    _CMAP = {k: th[v] for k, v in pairs.items() if th[v] != DEFAULT_THEME[v] and th[v] != k}
+
+
+def _remap(c: str) -> str:
+    return _CMAP.get(c, c) if c else c
+
+
 # ----------------------------------------------------------------------------- DrawingML text
 def run_xml(r: dict, size: int, base: dict | None = None) -> str:
     """One <a:r> (or <a:br/> for a bare newline). `size` in hundredths of a point."""
@@ -77,7 +114,7 @@ def run_xml(r: dict, size: int, base: dict | None = None) -> str:
     if r.get("s"):
         attrs += ' strike="sngStrike"'
     inner = ""
-    color = _hex(r.get("color") or base.get("color"))
+    color = _remap(_hex(r.get("color") or base.get("color"))) or (_TH["fg"] if _TH["fg"] != DEFAULT_THEME["fg"] else "")   # table cells do not inherit the theme's text colour everywhere
     if color:
         inner += f'<a:solidFill><a:srgbClr val="{color}"/></a:solidFill>'
     hl = r.get("hl")
@@ -113,6 +150,7 @@ def text_box(sid: int, name: str, x: int, y: int, w: int, h: int, paras: list[st
 
 
 def _line(tag: str, color: str, w: int = 6350) -> str:
+    color = _remap(color)
     if not color:
         return f"<a:{tag}><a:noFill/></a:{tag}>"
     return f'<a:{tag} w="{w}" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:srgbClr val="{color}"/></a:solidFill><a:prstDash val="solid"/></a:{tag}>'
@@ -147,7 +185,7 @@ def table_xml(sid: int, name: str, x: int, y: int, w: int, widths: list[int], ro
             paras = c.get("paras") or [f'<a:p><a:endParaRPr lang="en-US" sz="{size}"/></a:p>']
             tcpr = f'<a:tcPr marL="45720" marR="45720" marT="27432" marB="27432" anchor="{c.get("anchor") or "t"}">'
             tcpr += _line("lnL", border) + _line("lnR", border) + _line("lnT", border) + _line("lnB", border)
-            fill = _hex(c.get("fill"))
+            fill = _remap(_hex(c.get("fill")))
             tcpr += f'<a:solidFill><a:srgbClr val="{fill}"/></a:solidFill>' if fill else "<a:noFill/>"
             tcpr += "</a:tcPr>"
             out.append(f'<a:tc{attrs}><a:txBody><a:bodyPr/><a:lstStyle/>{"".join(paras)}</a:txBody>{tcpr}</a:tc>')
@@ -177,7 +215,9 @@ class _SlideBuilder:
         self.shapes: list[str] = []
         self.rels: list[tuple[str, str, str]] = []           # (id, type, target)
         self.next_id = 2
-        self.bg = ""
+        self.bg = "" if _TH["bg"] == "FFFFFF" else _TH["bg"]
+        self.w = CONTENT_W                                   # the width an object may take (less beside its ▶)
+        self.audio_ids: list[int] = []
 
     def sid(self) -> int:
         self.next_id += 1
@@ -185,14 +225,14 @@ class _SlideBuilder:
 
     # -- slide kinds ---------------------------------------------------------------------------
     def title_slide(self, s: dict):
-        self.bg = "1F4F8F"
+        self.bg = _TH["accent"]
         self.shapes.append(text_box(self.sid(), "Title", MARGIN, SLIDE_H // 2 - 1100000, CONTENT_W, 1400000,
-                                    [para_xml([{"text": s.get("title") or "", "b": True, "color": "FFFFFF"}], 4400, align="ctr")], anchor="b"))
+                                    [para_xml([{"text": s.get("title") or "", "b": True, "color": "#" + _TH["titleFg"]}], 4400, align="ctr")], anchor="b"))
         if s.get("subtitle"):
             self.shapes.append(text_box(self.sid(), "Subtitle", MARGIN, SLIDE_H // 2 + 400000, CONTENT_W, 800000,
-                                        [para_xml([{"text": s["subtitle"], "color": "CFE0FF"}], 2000, align="ctr")]))
+                                        [para_xml([{"text": s["subtitle"], "color": "#" + _TH["sub"]}], 2000, align="ctr")]))
         self.shapes.append(text_box(self.sid(), "Credit", MARGIN, SLIDE_H - MARGIN - 300000, CONTENT_W, 300000,
-                                    [para_xml([{"text": "FLEx Scratchpad", "color": "9FB8E6"}], 1100, align="ctr")]))
+                                    [para_xml([{"text": "FLEx Scratchpad", "color": "#" + _TH["sub"]}], 1100, align="ctr")]))
 
     def heading(self, title: str, sub: str = ""):
         runs = [{"text": title or "", "b": True}]
@@ -202,12 +242,16 @@ class _SlideBuilder:
             runs = [{"text": sub, "b": True, "color": VERN}]
         self.shapes.append(text_box(self.sid(), "Heading", MARGIN, MARGIN, CONTENT_W, TITLE_H, [para_xml(runs, 2800)], anchor="b"))
         # the rule under it
-        self.shapes.append(f'<p:cxnSp><p:nvCxnSpPr><p:cNvPr id="{self.sid()}" name="Rule"/><p:cNvCxnSpPr/><p:nvPr/></p:nvCxnSpPr><p:spPr><a:xfrm><a:off x="{MARGIN}" y="{MARGIN + TITLE_H + 40000}"/><a:ext cx="{CONTENT_W}" cy="0"/></a:xfrm><a:prstGeom prst="line"><a:avLst/></a:prstGeom><a:ln w="19050"><a:solidFill><a:srgbClr val="E8EBEF"/></a:solidFill></a:ln></p:spPr></p:cxnSp>')
+        self.shapes.append(f'<p:cxnSp><p:nvCxnSpPr><p:cNvPr id="{self.sid()}" name="Rule"/><p:cNvCxnSpPr/><p:nvPr/></p:nvCxnSpPr><p:spPr><a:xfrm><a:off x="{MARGIN}" y="{MARGIN + TITLE_H + 40000}"/><a:ext cx="{CONTENT_W}" cy="0"/></a:xfrm><a:prstGeom prst="line"><a:avLst/></a:prstGeom><a:ln w="19050"><a:solidFill><a:srgbClr val="{_remap("E8EBEF")}"/></a:solidFill></a:ln></p:spPr></p:cxnSp>')
 
     def text_slide(self, s: dict):
         self.heading(s.get("title") or "")
+        self.shapes.append(text_box(self.sid(), "Body", MARGIN, BODY_Y, CONTENT_W, BODY_H, self.text_paras(s.get("blocks") or [])))
+
+    @staticmethod
+    def text_paras(blocks: list[dict]) -> list[str]:
         paras: list[str] = []
-        for b in s.get("blocks") or []:
+        for b in blocks:
             t = b.get("type")
             if t == "h":
                 paras.append(para_xml(b.get("runs"), 2200, base={"b": True}))
@@ -227,7 +271,7 @@ class _SlideBuilder:
                     paras.append(para_xml(it.get("runs"), 1900, bullet=mark, level=min(4, int(it.get("level") or 0)), space_after=300))
             elif t == "hr":
                 paras.append(para_xml([{"text": "— — —", "color": "C9CED6"}], 1400, align="ctr"))
-        self.shapes.append(text_box(self.sid(), "Body", MARGIN, BODY_Y, CONTENT_W, BODY_H, paras))
+        return paras
 
     def object_slide(self, s: dict):
         b = (s.get("blocks") or [{}])[0]
@@ -238,7 +282,12 @@ class _SlideBuilder:
         if s.get("lead"):
             self.shapes.append(text_box(self.sid(), "Lead", MARGIN, y, CONTENT_W, 420000, [para_xml(s["lead"].get("runs"), 1800, base={"color": "4A4F57"})]))
             y += 480000
-        avail_h = SLIDE_H - MARGIN - y
+        self.draw_object(b, y, SLIDE_H - MARGIN - y)
+
+    def draw_object(self, b: dict, y: int, avail_h: int):
+        t = b.get("type")
+        played = self.audio(b, y) if t in ("interlinear", "chart") else False
+        self.w = CONTENT_W - (AUDIO_SIZE + 160000 if played else 0)
         if t == "interlinear":
             self.interlinear(b, y, avail_h)
         elif t == "chart":
@@ -248,9 +297,69 @@ class _SlideBuilder:
         elif t == "entry":
             self.entry(b, y, avail_h)
         elif t == "wordform":
-            self.shapes.append(text_box(self.sid(), "Wordform", MARGIN, y, CONTENT_W, 600000, [para_xml([{"text": b.get("form") or "", "b": True, "color": VERN}, {"text": "  " + "; ".join(b.get("glosses") or []), "color": GLOSS}], 2200)]))
+            self.shapes.append(text_box(self.sid(), "Wordform", MARGIN, y, self.w, 600000, [para_xml([{"text": b.get("form") or "", "b": True, "color": VERN}, {"text": "  " + "; ".join(b.get("glosses") or []), "color": GLOSS}], 2200)]))
         elif t in ("image", "imageref"):
             self.image(b, y, avail_h)
+        elif t in TEXT_TYPES:
+            self.shapes.append(text_box(self.sid(), "Text", MARGIN, y, self.w, avail_h, self.text_paras([b])))
+        self.w = CONTENT_W
+
+    def mixed_slide(self, s: dict):
+        """Several blocks on one slide (the user's choice in the export dialog): stacked, the room
+        shared out by what each needs; running text in between keeps its paragraphs together."""
+        self.heading(s.get("title") or "")
+        groups: list[tuple[str, list[dict]]] = []
+        for b in s.get("blocks") or []:
+            if b.get("type") in TEXT_TYPES:
+                if groups and groups[-1][0] == "text":
+                    groups[-1][1].append(b)
+                else:
+                    groups.append(("text", [b]))
+            else:
+                groups.append(("obj", [b]))
+        need = [_need(kind, bs) for kind, bs in groups]
+        avail = SLIDE_H - MARGIN - BODY_Y
+        gap = 120000
+        k = min(1.0, (avail - gap * max(0, len(groups) - 1)) / max(1, sum(need)))
+        y = BODY_Y
+        for (kind, bs), h in zip(groups, need):
+            h = max(300000, int(h * k))
+            if kind == "text":
+                self.shapes.append(text_box(self.sid(), "Text", MARGIN, y, CONTENT_W, h, self.text_paras(bs)))
+            else:
+                self.draw_object(bs[0], y, h)
+            y += h + gap
+
+    # -- a recording beside its object ----------------------------------------------------------
+    def audio(self, b: dict, y: int) -> bool:
+        src = (b.get("audio") or {}).get("src")
+        got = self.deck.media_of(src) if src else None
+        if not got:
+            return False
+        data, mime, ext = got
+        name = self.deck.media_names.get(src)                # the same recording twice is one part
+        if not name:
+            name = f"media{len(self.deck.media_names) + 1}{ext if ext in ('.m4a', '.mp3', '.wav') else '.wav'}"
+            self.deck.media_names[src] = name
+            self.deck.media.append((name, data))
+        icon = self.deck.icon()
+        base = len(self.rels) + 2
+        r_link, r_media, r_img = f"rId{base}", f"rId{base + 1}", f"rId{base + 2}"
+        self.rels.append((r_link, "http://schemas.openxmlformats.org/officeDocument/2006/relationships/audio", f"../media/{name}"))
+        self.rels.append((r_media, "http://schemas.microsoft.com/office/2007/relationships/media", f"../media/{name}"))
+        self.rels.append((r_img, "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image", f"../media/{icon}"))
+        sid = self.sid()
+        self.audio_ids.append(sid)
+        label = "Recording" + (" — " + str(b.get("title")) if b.get("title") else "")
+        x = MARGIN + CONTENT_W - AUDIO_SIZE
+        self.shapes.append(
+            f'<p:pic><p:nvPicPr><p:cNvPr id="{sid}" name="{_t(label)}" descr="{_t(label)}"><a:hlinkClick r:id="" action="ppaction://media"/></p:cNvPr>'
+            '<p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr>'
+            f'<p:nvPr><a:audioFile r:link="{r_link}"/><p:extLst><p:ext uri="{{DAA4B4D4-6D71-4841-9C94-3DE7FCFB9230}}">'
+            f'<p14:media xmlns:p14="http://schemas.microsoft.com/office/powerpoint/2010/main" r:embed="{r_media}"/></p:ext></p:extLst></p:nvPr></p:nvPicPr>'
+            f'<p:blipFill><a:blip r:embed="{r_img}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>'
+            f'<p:spPr><a:xfrm><a:off x="{x}" y="{y}"/><a:ext cx="{AUDIO_SIZE}" cy="{AUDIO_SIZE}"/></a:xfrm><a:prstGeom prst="ellipse"><a:avLst/></a:prstGeom></p:spPr></p:pic>')
+        return True
 
     # -- objects ------------------------------------------------------------------------------
     def interlinear(self, b: dict, y: int, avail_h: int):
@@ -268,7 +377,7 @@ class _SlideBuilder:
             ncols = max((len(ln.get("cells") or []) for ln in lines), default=0)
             if ncols:
                 longest = [3] + [max((_text_len((ln.get("cells") or [[]] * ncols)[ci] if ci < len(ln.get("cells") or []) else []) for ln in lines), default=1) for ci in range(ncols)]
-                widths = fit_widths(longest, CONTENT_W, min_w=300000, per_char=int(size * 0.62 * 127))   # ~0.62 em a character, plus the cell margins (fit_widths adds 120000)
+                widths = fit_widths(longest, self.w, min_w=300000, per_char=int(size * 0.62 * 127))   # ~0.62 em a character, plus the cell margins (fit_widths adds 120000)
                 rows = []
                 for li, ln in enumerate(lines):
                     base = look.get(ln.get("name"), {})
@@ -277,7 +386,7 @@ class _SlideBuilder:
                         runs = ln["cells"][ci] if ci < len(ln.get("cells") or []) else []
                         cells.append({"paras": [para_xml(runs, size if ln.get("name") == "txt" else max(900, size - 300), space_after=0, base=base)]})
                     rows.append(cells)
-                self.shapes.append(table_xml(self.sid(), "Example", MARGIN, y, CONTENT_W, widths, rows, row_h, border="", size=size))
+                self.shapes.append(table_xml(self.sid(), "Example", MARGIN, y, self.w, widths, rows, row_h, border="", size=size))
                 y += row_h * len(rows)
             for key, lab in (("free", "Free"), ("lit", "Lit."), ("notes", "Note")):
                 vals = sg.get(key)
@@ -285,7 +394,7 @@ class _SlideBuilder:
                     continue
                 for v in (vals if key == "notes" else [vals]):
                     runs = [{"text": lab + "  ", "color": "A8B0BA", "size": 9}] + ([dict(x) for x in v] if isinstance(v, list) else [{"text": str(v)}])
-                    self.shapes.append(text_box(self.sid(), lab, MARGIN + 400000, y, CONTENT_W - 400000, row_h, [para_xml(runs, max(1000, size - 200), space_after=0, base={"i": key != "free"})]))
+                    self.shapes.append(text_box(self.sid(), lab, MARGIN + 400000, y, self.w - 400000, row_h, [para_xml(runs, max(1000, size - 200), space_after=0, base={"i": key != "free"})]))
                     y += row_h
             y += row_h // 2
 
@@ -320,9 +429,9 @@ class _SlideBuilder:
                 col = int(c.get("col") or 0)
                 if 1 <= col <= ncols and int(c.get("span") or 1) == 1:
                     longest[col + nl] = max(longest[col + nl], min(28, n))
-        widths = fit_widths(longest, CONTENT_W, min_w=380000, per_char=int(size * 0.6 * 127))
-        if sum(widths) < CONTENT_W:                     # a chart fills the slide's width
-            widths = [int(w * CONTENT_W / sum(widths)) for w in widths]
+        widths = fit_widths(longest, self.w, min_w=380000, per_char=int(size * 0.6 * 127))
+        if sum(widths) < self.w:                     # a chart fills the slide's width
+            widths = [int(w * self.w / sum(widths)) for w in widths]
         rows: list[list[dict | None]] = []
         head_fill = "F3F4F6"
         for hi, hr in enumerate(headers):
@@ -420,7 +529,7 @@ class _SlideBuilder:
                     skip -= 1
                     continue
                 skip = max(0, int((cell or {}).get("rowspan") or 1) - 1)
-        self.shapes.append(table_xml(self.sid(), "Chart", MARGIN, y, CONTENT_W, widths, rows, max(230000, int(row_h * max(scale, 0.55))), border="E8EBEF", size=size))
+        self.shapes.append(table_xml(self.sid(), "Chart", MARGIN, y, self.w, widths, rows, max(230000, int(row_h * max(scale, 0.55))), border="E8EBEF", size=size))
         del nrows
 
     def table(self, b: dict, y: int, avail_h: int):
@@ -434,7 +543,7 @@ class _SlideBuilder:
         scale = min(1.0, avail_h / max(1, len(rows_in) * row_h))
         size = max(900, int(1600 * scale))
         longest = [max((_text_len(r[ci].get("runs")) if ci < len(r) and not r[ci].get("blocks") else 12 for r in rows_in), default=1) for ci in range(ncols)]
-        widths = fit_widths([min(40, n) for n in longest], CONTENT_W, min_w=600000, per_char=int(size * 0.6 * 127))
+        widths = fit_widths([min(40, n) for n in longest], self.w, min_w=600000, per_char=int(size * 0.6 * 127))
         rows = []
         for ri, r in enumerate(rows_in):
             out: list[dict | None] = []
@@ -453,7 +562,7 @@ class _SlideBuilder:
                     paras = [para_xml(c.get("runs"), size, align={"center": "ctr", "right": "r"}.get(rs.get("align") or col.get("align") or ((b.get("aligns") or [None] * ncols)[ci] if ci < len(b.get("aligns") or []) else None), ""), space_after=0, base=base)]
                 out.append({"paras": paras, "fill": rs.get("bg") or col.get("bg") or ("F3F4F6" if header else ""), "span": int(c.get("colspan") or 1), "rowspan": int(c.get("rowspan") or 1)})
             rows.append(out)
-        self.shapes.append(table_xml(self.sid(), "Table", MARGIN, y, CONTENT_W, widths, rows, max(260000, int(row_h * max(scale, 0.6))), border="D9DDE3", size=size))
+        self.shapes.append(table_xml(self.sid(), "Table", MARGIN, y, self.w, widths, rows, max(260000, int(row_h * max(scale, 0.6))), border="D9DDE3", size=size))
 
     def entry(self, b: dict, y: int, avail_h: int):
         paras = [para_xml([{"text": b.get("headword") or "", "b": True, "color": VERN, "font": b.get("font") or ""}, {"text": ("  " + b["pos"]) if b.get("pos") else "", "i": True, "color": MUTED}], 2600)]
@@ -461,12 +570,12 @@ class _SlideBuilder:
             paras.append(para_xml([{"text": (s.get("number") or "") + "  ", "color": "A8B0BA"}, {"text": (s["pos"] + " ") if s.get("pos") else "", "i": True, "color": MUTED}, {"text": s.get("gloss") or "", "b": True, "color": GLOSS}, {"text": (" — " + s["definition"]) if s.get("definition") and s.get("definition") != s.get("gloss") else ""}], 1900, level=min(4, int(s.get("level") or 0))))
             for ex in s.get("examples") or []:
                 paras.append(para_xml([{"text": ex.get("text") or "", "color": VERN, "font": b.get("font") or ""}, {"text": ("  ‘" + ex["translation"] + "’") if ex.get("translation") else "", "color": MUTED}], 1700, level=min(4, int(s.get("level") or 0) + 1), space_after=300))
-        self.shapes.append(text_box(self.sid(), "Entry", MARGIN, y, CONTENT_W, avail_h, paras))
+        self.shapes.append(text_box(self.sid(), "Entry", MARGIN, y, self.w, avail_h, paras))
 
     def image(self, b: dict, y: int, avail_h: int):
         png = b.get("png") or ""
         if not png.startswith("data:image/png;base64,"):
-            self.shapes.append(text_box(self.sid(), "Picture", MARGIN, y, CONTENT_W, 400000, [para_xml([{"text": "[picture: " + (b.get("alt") or b.get("src") or "") + "]", "color": MUTED}], 1400)]))
+            self.shapes.append(text_box(self.sid(), "Picture", MARGIN, y, self.w, 400000, [para_xml([{"text": "[picture: " + (b.get("alt") or b.get("src") or "") + "]", "color": MUTED}], 1400)]))
             return
         data = base64.b64decode(png.split(",", 1)[1])
         name = f"image{len(self.deck.media) + 1}.png"
@@ -474,11 +583,11 @@ class _SlideBuilder:
         rid = f"rId{len(self.rels) + 2}"
         self.rels.append((rid, "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image", f"../media/{name}"))
         w, h = int(b.get("width") or 800), int(b.get("height") or 450)
-        k = min(CONTENT_W / max(1, w * 9525), avail_h / max(1, h * 9525), 1.0)
+        k = min(self.w / max(1, w * 9525), avail_h / max(1, h * 9525), 1.0)
         cw, ch = int(w * 9525 * k), int(h * 9525 * k)
         self.shapes.append(f'<p:pic><p:nvPicPr><p:cNvPr id="{self.sid()}" name="Picture"/><p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr><p:nvPr/></p:nvPicPr>'
                            f'<p:blipFill><a:blip r:embed="{rid}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>'
-                           f'<p:spPr><a:xfrm><a:off x="{MARGIN + (CONTENT_W - cw) // 2}" y="{y}"/><a:ext cx="{cw}" cy="{ch}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>')
+                           f'<p:spPr><a:xfrm><a:off x="{MARGIN + (self.w - cw) // 2}" y="{y}"/><a:ext cx="{cw}" cy="{ch}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>')
 
     # -- the part -----------------------------------------------------------------------------
     def xml(self) -> str:
@@ -486,7 +595,21 @@ class _SlideBuilder:
         return ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
                 '<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">'
                 f"<p:cSld>{bg}<p:spTree><p:nvGrpSpPr><p:cNvPr id=\"1\" name=\"\"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/><a:chOff x=\"0\" y=\"0\"/><a:chExt cx=\"0\" cy=\"0\"/></a:xfrm></p:grpSpPr>"
-                + "".join(self.shapes) + "</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>")
+                + "".join(self.shapes) + "</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>" + self.timing() + "</p:sld>")
+
+    def timing(self) -> str:
+        """The media nodes PowerPoint wants for each recording on the slide (what it writes for an
+        inserted audio file): the player knows its shape; a click on the ▶ plays it (hlinkClick)."""
+        if not self.audio_ids:
+            return ""
+        nodes, cid = [], 2
+        for sid in self.audio_ids:
+            nodes.append(f'<p:audio><p:cMediaNode vol="80000"><p:cTn id="{cid}" fill="hold" display="0"><p:stCondLst><p:cond delay="indefinite"/></p:stCondLst>'
+                         f'<p:endCondLst><p:cond evt="onStopAudio" delay="0"><p:tgtEl><p:sldTgt/></p:tgtEl></p:cond></p:endCondLst></p:cTn>'
+                         f'<p:tgtEl><p:spTgt spid="{sid}"/></p:tgtEl></p:cMediaNode></p:audio>')
+            cid += 1
+        return ('<p:timing><p:tnLst><p:par><p:cTn id="1" dur="indefinite" restart="never" nodeType="tmRoot"><p:childTnLst>'
+                + "".join(nodes) + "</p:childTnLst></p:cTn></p:par></p:tnLst></p:timing>")
 
     def rels_xml(self) -> str:
         rels = ['<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>']
@@ -497,10 +620,10 @@ class _SlideBuilder:
 # ----------------------------------------------------------------------------- the package
 THEME = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
          '<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="FLEx Scratchpad"><a:themeElements>'
-         '<a:clrScheme name="Scratchpad"><a:dk1><a:srgbClr val="1A1D21"/></a:dk1><a:lt1><a:srgbClr val="FFFFFF"/></a:lt1><a:dk2><a:srgbClr val="1F4F8F"/></a:dk2><a:lt2><a:srgbClr val="F3F4F6"/></a:lt2>'
+         '<a:clrScheme name="Scratchpad"><a:dk1><a:srgbClr val="@FG@"/></a:dk1><a:lt1><a:srgbClr val="@BG@"/></a:lt1><a:dk2><a:srgbClr val="@ACCENT@"/></a:dk2><a:lt2><a:srgbClr val="@PANEL@"/></a:lt2>'
          '<a:accent1><a:srgbClr val="1F4F8F"/></a:accent1><a:accent2><a:srgbClr val="2A6E2A"/></a:accent2><a:accent3><a:srgbClr val="7A3E9D"/></a:accent3><a:accent4><a:srgbClr val="C0392B"/></a:accent4><a:accent5><a:srgbClr val="00379C"/></a:accent5><a:accent6><a:srgbClr val="68717D"/></a:accent6>'
          '<a:hlink><a:srgbClr val="1F4F8F"/></a:hlink><a:folHlink><a:srgbClr val="7A3E9D"/></a:folHlink></a:clrScheme>'
-         '<a:fontScheme name="Scratchpad"><a:majorFont><a:latin typeface="Segoe UI"/><a:ea typeface=""/><a:cs typeface=""/></a:majorFont><a:minorFont><a:latin typeface="Segoe UI"/><a:ea typeface=""/><a:cs typeface=""/></a:minorFont></a:fontScheme>'
+         '<a:fontScheme name="Scratchpad"><a:majorFont><a:latin typeface="@FONT@"/><a:ea typeface=""/><a:cs typeface=""/></a:majorFont><a:minorFont><a:latin typeface="@FONT@"/><a:ea typeface=""/><a:cs typeface=""/></a:minorFont></a:fontScheme>'
          '<a:fmtScheme name="Scratchpad"><a:fillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:fillStyleLst>'
          '<a:lnStyleLst><a:ln w="6350"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln><a:ln w="12700"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln><a:ln w="19050"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln></a:lnStyleLst>'
          '<a:effectStyleLst><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle></a:effectStyleLst>'
@@ -519,9 +642,28 @@ LAYOUT = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
 
 
 class Pptx:
-    def __init__(self):
+    def __init__(self, media=None):
         self.slides: list[_SlideBuilder] = []
         self.media: list[tuple[str, bytes]] = []
+        self._media_fn = media
+        self.media_names: dict[str, str] = {}
+        self._icon = ""
+
+    def media_of(self, src: str):
+        """(bytes, mime, ext) of a recording, or None (no resolver, or it is not there)."""
+        if not self._media_fn:
+            return None
+        try:
+            got = self._media_fn(src)
+        except Exception:  # noqa: BLE001 — a recording that cannot be read leaves the slide without a player
+            return None
+        return got if got and got[0] else None
+
+    def icon(self) -> str:
+        if not self._icon:
+            self._icon = "audio-play.png"
+            self.media.append((self._icon, audio_icon_png(bg=tuple(int(_TH["accent"][i:i + 2], 16) for i in (0, 2, 4)))))
+        return self._icon
 
     def add(self, s: dict):
         b = _SlideBuilder(self, len(self.slides) + 1)
@@ -530,6 +672,8 @@ class Pptx:
             b.title_slide(s)
         elif kind == "object":
             b.object_slide(s)
+        elif kind == "mixed":
+            b.mixed_slide(s)
         else:
             b.text_slide(s)
         self.slides.append(b)
@@ -542,7 +686,7 @@ class Pptx:
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
             z.writestr("[Content_Types].xml",
                        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
-                       '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/>'
+                       '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Default Extension="m4a" ContentType="audio/mp4"/><Default Extension="mp3" ContentType="audio/mpeg"/><Default Extension="wav" ContentType="audio/wav"/>'
                        '<Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>'
                        '<Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/>'
                        '<Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/>'
@@ -578,7 +722,7 @@ class Pptx:
             z.writestr("ppt/slideLayouts/_rels/slideLayout1.xml.rels",
                        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
                        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="../slideMasters/slideMaster1.xml"/></Relationships>')
-            z.writestr("ppt/theme/theme1.xml", THEME)
+            z.writestr("ppt/theme/theme1.xml", THEME.replace("@FG@", _TH["fg"]).replace("@BG@", _TH["bg"]).replace("@ACCENT@", _TH["accent"]).replace("@PANEL@", _TH["panel"]).replace("@FONT@", _t(_TH["font"])))
             for i, s in enumerate(self.slides):
                 z.writestr(f"ppt/slides/slide{i + 1}.xml", s.xml())
                 z.writestr(f"ppt/slides/_rels/slide{i + 1}.xml.rels", s.rels_xml())
@@ -587,9 +731,69 @@ class Pptx:
         return buf.getvalue()
 
 
-def build_pptx(deck: dict) -> bytes:
-    """The deck (export.js slidesOf) as a .pptx file."""
-    p = Pptx()
-    for s in (deck or {}).get("slides") or []:
-        p.add(s)
-    return p.build((deck or {}).get("title") or "")
+_BUILD_LOCK = threading.Lock()      # the theme is module state for the run helpers: one build at a time
+
+
+def build_pptx(deck: dict, media=None) -> bytes:
+    """The deck (export.js slidesOf) as a .pptx file; `media(src)` → (bytes, mime, ext) of a
+    recording an example or chart carries (`audio.src`), or None."""
+    with _BUILD_LOCK:
+        _set_theme((deck or {}).get("theme"))
+        try:
+            p = Pptx(media)
+            for s in (deck or {}).get("slides") or []:
+                p.add(s)
+            return p.build((deck or {}).get("title") or "")
+        finally:
+            _set_theme(None)
+
+
+def _need(kind: str, blocks: list[dict]) -> int:
+    """About how tall a group of a mixed slide wants to be (EMU) before it is shrunk to fit."""
+    if kind == "text":
+        n = 0.0
+        for b in blocks:
+            if b.get("type") == "list":
+                n += len(b.get("items") or []) * 1.1
+            elif b.get("type") == "code":
+                n += len(str(b.get("text") or "").split("\n")) * 0.8
+            else:
+                n += max(1, len(_plain(b.get("runs"))) // 80 + 1)
+        return int(n * 400000) + 80000
+    b = blocks[0]
+    t = b.get("type")
+    if t == "interlinear":
+        segs = b.get("segments") or []
+        return sum(len(sg.get("lines") or []) + (1 if sg.get("free") else 0) + (1 if sg.get("lit") else 0) + len(sg.get("notes") or []) for sg in segs) * 330000 + len(segs) * 160000
+    if t == "chart":
+        return (len(b.get("headers") or []) + 2 * len(b.get("rows") or [])) * 260000
+    if t == "table":
+        return len(b.get("rows") or []) * 400000
+    if t == "entry":
+        return (1 + sum(1 + len(x.get("examples") or []) for x in b.get("senses") or [])) * 420000
+    if t in ("image", "imageref"):
+        return 3200000
+    return 600000
+
+
+def audio_icon_png(size: int = 96, fg=(255, 255, 255), bg=(31, 79, 143)) -> bytes:
+    """A round play button for a recording on a slide (stdlib only: a PNG drawn pixel by pixel)."""
+    import math
+    import struct
+    r = size / 2
+    rows = []
+    for yy in range(size):
+        row = bytearray([0])
+        for xx in range(size):
+            d = math.hypot(xx + 0.5 - r, yy + 0.5 - r)
+            a = max(0.0, min(1.0, r - 1 - d))
+            px, py = (xx + 0.5) / size, (yy + 0.5) / size
+            inside = 0.38 <= px <= 0.74 and abs(py - 0.5) <= (0.74 - px) * 0.72
+            col = fg if inside else bg
+            row += bytes([col[0], col[1], col[2], int(255 * a)])
+        rows.append(bytes(row))
+
+    def chunk(t: bytes, d: bytes) -> bytes:
+        return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xFFFFFFFF)
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 6, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(b"".join(rows), 9)) + chunk(b"IEND", b""))

@@ -65,3 +65,46 @@ def test_an_empty_deck_still_opens():
     data = build_pptx({"title": "Empty", "slides": []})
     z = zipfile.ZipFile(io.BytesIO(data))
     assert "ppt/slides/slide1.xml" in z.namelist() and "Empty" in z.read("ppt/slides/slide1.xml").decode("utf-8")
+
+
+def test_recordings_play_beside_their_examples_and_themes_recolour_the_deck():
+    """Seth, 2026-10-20: "embedded audio as playable media in the slides next to the examples", the
+    blocks the user put on one slide stacked on a MIXED slide, and "more styling options than just
+    white background". An example whose block carries `audio.src` gets the recording (from the
+    media resolver: Api.export_note_pptx reads it in Python) as a p:pic with an audioFile link and a
+    p14:media embed to one media part, a ▶ picture, and the timing node PowerPoint plays it from;
+    the same recording twice is one part; a recording that cannot be had leaves no player."""
+    doc = _doc()
+    ex = next(b for b in doc["blocks"] if b.get("type") == "interlinear")
+    ex = dict(ex, audio={"src": "fs-clip:00112233445566aa"})
+    gone = dict(ex, audio={"src": "fs-clip:ffffffffffffffff"})
+    deck = {"title": "Talk", "theme": {"bg": "#1e2227", "fg": "#e8eaed", "accent": "#3b6fb6", "vern": "#8ab4ff", "font": "Charis SIL"}, "slides": [
+        {"kind": "title", "title": "Talk", "subtitle": "s"},
+        {"kind": "object", "title": "One", "blocks": [ex]},
+        {"kind": "mixed", "title": "Two", "blocks": [{"type": "p", "runs": [{"text": "Look at this:"}]}, ex, {"type": "p", "runs": [{"text": "and this"}]}, gone]},
+    ]}
+    asked = []
+
+    def media(src):
+        asked.append(src)
+        return (b"RIFF\x00\x00\x00\x00WAVEfmt ", "audio/wav", ".wav") if src.endswith("aa") else None
+    z = zipfile.ZipFile(io.BytesIO(build_pptx(deck, media)))
+    assert z.testzip() is None
+    for n in z.namelist():
+        if n.endswith((".xml", ".rels")):
+            ET.fromstring(z.read(n))
+    assert sorted(n for n in z.namelist() if n.startswith("ppt/media/")) == ["ppt/media/audio-play.png", "ppt/media/media1.wav"]
+    assert 'Extension="wav" ContentType="audio/wav"' in z.read("[Content_Types].xml").decode()
+    s2, s3 = z.read("ppt/slides/slide2.xml").decode(), z.read("ppt/slides/slide3.xml").decode()
+    for s in (s2, s3):
+        assert s.count("<a:audioFile ") == 1 and s.count("<p:audio>") == 1 and "ppaction://media" in s and "p14:media" in s
+    r3 = z.read("ppt/slides/_rels/slide3.xml.rels").decode()
+    assert "relationships/audio" in r3 and "2007/relationships/media" in r3 and "../media/media1.wav" in r3
+    assert "Look at this:" in s3 and "and this" in s3 and s3.count('name="Example"') == 2 * s2.count('name="Example"') > 0      # both examples on the mixed slide
+    # the theme: the slide's background, the example's colours, the font
+    assert '<p:bg><p:bgPr><a:solidFill><a:srgbClr val="1E2227"/>' in s2 and "8AB4FF" in s2 and "00379C" not in s2
+    assert 'typeface="Charis SIL"' in z.read("ppt/theme/theme1.xml").decode()
+    # the default theme writes what it always did
+    plain = zipfile.ZipFile(io.BytesIO(build_pptx({"title": "T", "slides": [{"kind": "object", "title": "One", "blocks": [ex]}]})))
+    p1 = plain.read("ppt/slides/slide1.xml").decode()
+    assert "00379C" in p1 and "<p:bg>" not in p1 and "<a:audioFile" not in p1       # no resolver: no player
