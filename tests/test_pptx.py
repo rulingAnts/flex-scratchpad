@@ -100,7 +100,7 @@ def test_recordings_play_beside_their_examples_and_themes_recolour_the_deck():
         assert s.count("<a:audioFile ") == 1 and s.count("<p:audio>") == 1 and "ppaction://media" in s and "p14:media" in s
     r3 = z.read("ppt/slides/_rels/slide3.xml.rels").decode()
     assert "relationships/audio" in r3 and "2007/relationships/media" in r3 and "../media/media1.wav" in r3
-    assert "Look at this:" in s3 and "and this" in s3 and s3.count('name="Example"') == 2 * s2.count('name="Example"') > 0      # both examples on the mixed slide
+    assert "Look at this:" in s3 and "and this" in s3 and s3.count('name="Example"') >= 2 * len(ex["segments"])      # both examples on the mixed slide
     # the theme: the slide's background, the example's colours, the font
     assert '<p:bg><p:bgPr><a:solidFill><a:srgbClr val="1E2227"/>' in s2 and "8AB4FF" in s2 and "00379C" not in s2
     assert 'typeface="Charis SIL"' in z.read("ppt/theme/theme1.xml").decode()
@@ -108,3 +108,43 @@ def test_recordings_play_beside_their_examples_and_themes_recolour_the_deck():
     plain = zipfile.ZipFile(io.BytesIO(build_pptx({"title": "T", "slides": [{"kind": "object", "title": "One", "blocks": [ex]}]})))
     p1 = plain.read("ppt/slides/slide1.xml").decode()
     assert "00379C" in p1 and "<p:bg>" not in p1 and "<a:audioFile" not in p1       # no resolver: no player
+
+
+def test_a_long_example_or_chart_is_measured_wrapped_and_continued_never_drawn_over_itself():
+    """Seth, 2026-10-20 (a screenshot): a long example came out with its words broken inside their cells
+    ("cano / e", "15. / 1") and its free translation drawn over the next rows — PowerPoint draws a table
+    exactly as written and never shrinks it to the slide, as the web slideshow does. Now every piece is
+    measured: no two shapes of a slide's body overlap, a word column is never squeezed (a long line wraps
+    into another row group), and what does not fit continues on a "(cont.)" slide; a long chart's rows go
+    on as well, its header rows on every slide."""
+    import copy
+    import re
+
+    def seg(n, label, k):
+        words = [("bʷɔ", "bʷɔ", "FOC", "adp"), ("ϕakau", "ϕakau", "type.of.fish", "n"), ("natɛri", "natɛri", "leave.behind", "v")] * k
+        lines = [{"name": nm, "cells": [[{"text": w[i]}] for w in words]} for i, nm in enumerate(("txt", "morph", "mgls", "pos"))]
+        return {"n": n, "label": label, "lines": lines, "free": [{"text": "The little turtle, the catfish, the teti fish, the fakau fish, all of them, they left in the canoe."}]}
+    ex = {"type": "interlinear", "title": "The Great Flood", "segments": [seg(i + 1, "%d.1" % (i + 13), 5) for i in range(6)]}
+    doc = _doc()
+    ch = next(b for b in doc["blocks"] if b.get("type") == "chart")
+    big = dict(ch, rows=[dict(copy.deepcopy(r), label="%da" % (k + 1)) for k in range(14) for r in ch["rows"]])
+    z = zipfile.ZipFile(io.BytesIO(build_pptx({"title": "T", "slides": [{"kind": "object", "title": "Long", "blocks": [ex]}, {"kind": "object", "title": "Big chart", "blocks": [big]}]})))
+    slides = [z.read("ppt/slides/slide%d.xml" % i).decode() for i in range(1, len([n for n in z.namelist() if re.match(r"ppt/slides/slide\d+\.xml$", n)]) + 1)]
+    assert len(slides) >= 4, len(slides)
+    titles = [re.search(r'name="Heading".*?<a:t>(.*?)</a:t>', x, re.S).group(1) for x in slides]
+    assert titles[0] == "Long" and "Long (cont.)" in titles and "Big chart (cont.)" in titles, titles
+    for x in slides:
+        body = []
+        for m in re.finditer(r'<p:(sp|graphicFrame)>.*?name="([^"]+)".*?<a:off x="(\d+)" y="(\d+)"/><a:ext cx="(\d+)" cy="(\d+)"/>', x, re.S):
+            if m.group(2) not in ("Heading", "Rule"):
+                body.append((int(m.group(4)), int(m.group(4)) + int(m.group(6)), m.group(2)))
+        body.sort()
+        for (y0, y1, a), (z0, z1, b2) in zip(body, body[1:]):
+            assert z0 >= y1, (a, y0, y1, b2, z0)                 # nothing drawn over what is above it
+        assert all(y1 <= 6858000 for _, y1, _ in body), body       # and nothing below the slide
+    # a word column is as wide as its words: never the 300000 EMU squeeze that broke "canoe"
+    widths = [int(w) for x in slides if 'name="Example"' in x for w in re.findall(r'<a:gridCol w="(\d+)"/>', x)]
+    assert widths and min(widths) > 300000, min(widths)
+    # every page of the chart has its header rows
+    chart_pages = [x for x in slides if 'name="Chart"' in x]
+    assert len(chart_pages) >= 2 and all("Nucleus" in x for x in chart_pages)

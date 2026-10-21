@@ -1347,6 +1347,7 @@ My wishes for the look (edit these):
             count),
           el('div', { class: 'exp-plan-scroll' }, tbl));
         draw();
+        if (format === 'pptx') box.appendChild(el('p', { class: 'small exp-warn', 'data-test': 'pptx-advice' }, '⚠ A PowerPoint file comes out laid out, not finished: PowerPoint never fits a table to its slide, so the program measures every example and chart itself — a long line wraps, the type shrinks to 12 pt, and what still does not fit goes on to a “(cont.)” slide. Look through the slides afterwards and adjust them by hand where you want them tighter (the web slideshow fits each slide to the screen by itself).'));
         m.body.appendChild(box);
         plan.save = () => { const keep = {}; keys.forEach((k, i) => { const r = plan.rows[i]; const d = base.rows[i] || {}; if (r && (r.brk !== !!d.brk || r.skip)) keep[k] = { brk: r.brk, skip: r.skip }; }); ls.set('fs:slidePlan:' + note.id, keep); };
       }

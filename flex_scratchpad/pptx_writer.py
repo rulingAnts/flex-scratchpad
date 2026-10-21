@@ -13,7 +13,8 @@ title bar, then text as paragraphs, an interlinear example as a borderless table
 words across, their glosses under them), a text chart as a table (its header rows merged over
 their groups, a cell's words on one line and their glosses on the next, the markers, the free
 translations, a chart note's custom columns, the rows' colours), a Markdown table as a bordered
-table, a picture as itself. Fonts shrink when an example or a chart would not fit the slide.
+table, a picture as itself. Examples and charts are MEASURED (see "measuring"):
+wrapped, shrunk to 12 pt, and continued on "(cont.)" slides rather than squeezed or drawn over each other.
 A slide may also be {kind: 'mixed', title, blocks: [any of them]} — the blocks the user put on one
 slide in the export dialog (export.js slidesOf with a plan), stacked top to bottom with the room
 shared out by what each needs. An example or chart whose block carries `audio: {src}` gets its
@@ -32,6 +33,7 @@ import base64
 import io
 import re
 import threading
+import unicodedata
 import zipfile
 import zlib
 from xml.sax.saxutils import escape
@@ -156,18 +158,21 @@ def _line(tag: str, color: str, w: int = 6350) -> str:
     return f'<a:{tag} w="{w}" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:srgbClr val="{color}"/></a:solidFill><a:prstDash val="solid"/></a:{tag}>'
 
 
-def table_xml(sid: int, name: str, x: int, y: int, w: int, widths: list[int], rows: list[list[dict | None]], row_h: int, border: str = "E8EBEF", size: int = 1200) -> str:
+def table_xml(sid: int, name: str, x: int, y: int, w: int, widths: list[int], rows: list[list[dict | None]], row_h, border: str = "E8EBEF", size: int = 1200) -> str:
     """rows: per row a list of cells; a cell is {paras: [xml], fill, span, rowspan, anchor} or
-    {merged: 'h'|'v'} for a covered position (PowerPoint needs every cell written)."""
+    {merged: 'h'|'v'} for a covered position (PowerPoint needs every cell written). `row_h`: one
+    height for every row, or a list of them."""
+    hs = list(row_h) if isinstance(row_h, (list, tuple)) else [row_h] * len(rows)
+    hs = (hs + [hs[-1] if hs else 300000] * len(rows))[:len(rows)]
     total = sum(widths) or w
     if total > w:                                    # never wider than the slide; narrower is fine
         widths = [int(c * w / total) for c in widths]
     out = [f'<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="{sid}" name="{_t(name)}"/><p:cNvGraphicFramePr><a:graphicFrameLocks noGrp="1"/></p:cNvGraphicFramePr><p:nvPr/></p:nvGraphicFramePr>'
-           f'<p:xfrm><a:off x="{x}" y="{y}"/><a:ext cx="{sum(widths)}" cy="{row_h * len(rows)}"/></p:xfrm>'
+           f'<p:xfrm><a:off x="{x}" y="{y}"/><a:ext cx="{sum(widths)}" cy="{sum(hs)}"/></p:xfrm>'
            '<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table"><a:tbl><a:tblPr/>'
            "<a:tblGrid>" + "".join(f'<a:gridCol w="{cw}"/>' for cw in widths) + "</a:tblGrid>"]
-    for row in rows:
-        out.append(f'<a:tr h="{row_h}">')
+    for ri, row in enumerate(rows):
+        out.append(f'<a:tr h="{hs[ri]}">')
         for ci in range(len(widths)):
             c = row[ci] if ci < len(row) else None
             c = c or {}
@@ -205,6 +210,194 @@ def fit_widths(longest: list[int], total: int, min_w: int = 500000, per_char: in
     if s > total:
         want = [int(x * total / s) for x in want]
     return want
+
+
+# ----------------------------------------------------------------------------- measuring
+# PowerPoint draws a table exactly as it is written: it never shrinks one to its slide (Seth, 2026-10-20:
+# "In HTML slideshow … it auto-resizes the example to fit. I don't know if we can get our PowerPoint export to
+# do the same"; a long example came out with words broken inside their cells — "cano / e", "15. / 1" — and its
+# free translation drawn over the next rows). So the writer measures: a character is ~0.58 em (combining marks
+# take no room), a cell adds its margins, a line of text is 1.32 × its size; a word column is never narrower
+# than its words; a line too long for the slide wraps into further row groups; the font steps down to MIN_SIZE
+# until the example fits, and what still does not fit continues on "(cont.)" slides — at PAGE_SIZE then, since
+# a slide that continues anyway can be read from the back of the room.
+CHAR_EM = 0.52
+CELL_PAD = 91440 + 60000                      # the cell's own margins, and some air
+MAX_SIZE, MIN_SIZE, PAGE_SIZE = 1800, 1200, 1600   # an example's baseline: 18 pt, never under 12 pt; 16 pt once it is paged
+GROUP_GAP = 70000
+
+
+def _glen(text) -> int:
+    return sum(1 for ch in str(text or "") if not unicodedata.combining(ch) and unicodedata.category(ch) not in ("Mn", "Me", "Cf"))
+
+
+def text_w(text, size: int) -> int:
+    """About how wide `text` is at `size` (hundredths of a point), in EMU."""
+    return int(max((_glen(x) for x in str(text or "").split("\n")), default=0) * size * 127 * CHAR_EM)
+
+
+def cell_line_h(size: int) -> int:
+    return int(size * 127 * 1.32) + 54864     # + the cell's top and bottom margins
+
+
+def text_line_h(size: int) -> int:
+    return int(size * 127 * 1.3)
+
+
+def il_units(b: dict, size: int, width: int) -> list[dict]:
+    """An interlinear example measured at `size` in `width`: per line of text its row groups (as many
+    words as fit across, a column per word) and then its translations and notes — each a unit with its
+    height, in order, `seg` saying which line it belongs to."""
+    sub, lab = max(900, size - 300), max(900, size - 600)
+    segs = b.get("segments") or []
+    num_w = max([text_w(sg.get("label") or str(sg.get("n") or ""), lab) + CELL_PAD for sg in segs] + [300000])
+    out: list[dict] = []
+    for si, sg in enumerate(segs):
+        lines = sg.get("lines") or []
+        ncols = max((len(ln.get("cells") or []) for ln in lines), default=0)
+        col_w = [max([text_w(_plain((ln.get("cells") or [])[ci] if ci < len(ln.get("cells") or []) else []), size if ln.get("name") == "txt" else sub) for ln in lines] + [0]) + CELL_PAD for ci in range(ncols)]
+        room = max(400000, width - num_w)
+        col_w = [min(w, room) for w in col_w]            # one word wider than the slide: it wraps, nothing else can
+        groups: list[list[int]] = []
+        cur: list[int] = []
+        used = 0
+        for ci, w in enumerate(col_w):
+            if cur and used + w > room:
+                groups.append(cur)
+                cur, used = [], 0
+            cur.append(ci)
+            used += w
+        if cur:
+            groups.append(cur)
+        row_hs = [cell_line_h(size if ln.get("name") == "txt" else sub) for ln in lines]
+        label = sg.get("label") or str(sg.get("n") or "")
+        for gi, g in enumerate(groups):
+            out.append({"kind": "grp", "seg": si, "cols": g, "lines": lines, "col_w": col_w, "num_w": num_w, "width": width, "row_hs": row_hs,
+                        "label": label if gi == 0 else "", "size": size, "sub": sub, "lab": lab, "h": sum(row_hs) + GROUP_GAP})
+        for key, lab_text in (("free", "Free"), ("lit", "Lit."), ("notes", "Note")):
+            vals = sg.get(key)
+            if not vals:
+                continue
+            for v in (vals if key == "notes" else [vals]):
+                runs = v if isinstance(v, list) else [{"text": str(v)}]
+                n = max(1, -(-text_w(lab_text + "  " + _plain(runs), sub) // max(1, width - num_w)))
+                out.append({"kind": "tr", "seg": si, "key": key, "lab_text": lab_text, "runs": runs, "num_w": num_w, "width": width, "sub": sub,
+                            "h": n * text_line_h(sub) + 50000})
+        if out:
+            out[-1]["h"] += cell_line_h(sub) // 2          # room between two lines of text
+    return out
+
+
+def il_fit(b: dict, width: int, room: int) -> tuple[int, list[dict]]:
+    """The largest size (18 pt down to 12 pt) at which the example fits `room`; else PAGE_SIZE, and the
+    caller pages its units."""
+    for size in range(MAX_SIZE, MIN_SIZE - 1, -100):
+        units = il_units(b, size, width)
+        if sum(u["h"] for u in units) <= room:
+            return size, units
+    return PAGE_SIZE, il_units(b, PAGE_SIZE, width)
+
+
+def chart_widths(b: dict, width: int, size: int) -> list[int]:
+    """A chart's column widths, the same on every page: from its headings and its cells' words."""
+    headers = b.get("headers") or []
+    ncols = int(b.get("cols") or 0)
+    xcols = b.get("xcols") or []
+    x_left = [x for x in xcols if x.get("side") == "left"]
+    x_right = [x for x in xcols if x.get("side") != "left"]
+    nl = len(x_left)
+    longest = [3] + [max(4, len(x.get("name") or "")) for x in x_left] + [4] * ncols + [max(4, len(x.get("name") or "")) for x in x_right] + ([12] if b.get("freeCol") else []) + ([10] if b.get("notesCol") else [])
+    if headers:                                         # a column at least as wide as its heading
+        c = 1 + nl
+        for h in headers[-1]:
+            if int(h.get("span") or 1) == 1 and c <= ncols + nl:
+                longest[c] = max(longest[c], len(h.get("text") or ""))
+            c += int(h.get("span") or 1)
+    for r in b.get("rows") or []:
+        for c in r.get("cells") or []:
+            pl = c.get("plain") or {}
+            n = max(len(pl.get("txt") or ""), len(pl.get("gls") or ""))
+            col = int(c.get("col") or 0)
+            if 1 <= col <= ncols and int(c.get("span") or 1) == 1:
+                longest[col + nl] = max(longest[col + nl], min(28, n))
+    widths = fit_widths(longest, width, min_w=380000, per_char=int(size * 0.6 * 127))
+    if sum(widths) < width:                             # a chart fills the slide's width
+        widths = [int(w * width / sum(widths)) for w in widths]
+    return widths
+
+
+def _chart_cell_lines(cell: dict, w: int, size: int) -> int:
+    """How many lines a chart cell takes in a column `w` wide: its words' lines, wrapped, and its markers."""
+    tiers: list[str] = []
+    for word in cell.get("words") or []:
+        parts = _plain(word).split("\n")
+        for li, part in enumerate(parts):
+            while len(tiers) <= li:
+                tiers.append("")
+            tiers[li] += ("  " if tiers[li] else "") + part
+    room = max(1, w - CELL_PAD)
+    n = sum(max(1, -(-text_w(t, size if li == 0 else max(800, size - 200)) // room)) for li, t in enumerate(tiers))
+    if cell.get("marks"):
+        n += 1
+    return max(1, n)
+
+
+def chart_row_heights(b: dict, body: list, size: int, widths: list[int]) -> list[int]:
+    """The height of every table row of a page of the chart: the header rows, then each row (and its
+    translation row) as tall as its tallest cell."""
+    ncols = int(b.get("cols") or 0)
+    nl = len([x for x in b.get("xcols") or [] if x.get("side") == "left"])
+    out = []
+    for hr in b.get("headers") or []:
+        n = 1
+        c = 1 + nl
+        for h in hr:
+            span = int(h.get("span") or 1)
+            w = sum(widths[c:c + span]) if c < len(widths) else widths[-1]
+            n = max(n, -(-text_w(h.get("text") or "", size) // max(1, w - CELL_PAD)))
+            c += span
+        out.append(n * cell_line_h(size) - 30000)
+    for r in body:
+        n = 1
+        c = 1 + nl
+        for cell in r.get("cells") or []:
+            span = int(cell.get("span") or 1)
+            if c < len(widths):
+                n = max(n, _chart_cell_lines(cell, sum(widths[c:c + span]), size))
+            c += span
+        for xc in r.get("xcells") or []:
+            n = max(n, len(str(xc.get("text") or "").split("\n")))
+        out.append(n * text_line_h(size) + 54864 + 20000)
+        fr = r.get("freeRow")
+        if fr and (fr.get("text") or "").strip():
+            out.append(max(1, -(-text_w(fr["text"], size) // max(1, sum(widths[1:]) - CELL_PAD))) * text_line_h(size) + 54864)
+    del ncols
+    return out
+
+
+def chart_chunks(b: dict, width: int, room_first: int, room_next: int) -> list[tuple[list, int]]:
+    """The chart's rows as pages: [(rows, size)] — the whole chart on one slide at the largest size from
+    12 pt down to 9 pt that fits, else pages of rows at 10 pt, the header rows on each."""
+    rows = b.get("rows") or []
+    for size in range(1200, 899, -100):
+        if sum(chart_row_heights(b, rows, size, chart_widths(b, width, size))) <= room_first:
+            return [(rows, size)]
+    size = 1000
+    widths = chart_widths(b, width, size)
+    head = sum(chart_row_heights(b, [], size, widths))
+    pages: list[tuple[list, int]] = []
+    cur: list = []
+    used, room = head, room_first
+    for r in rows:
+        h = sum(chart_row_heights(b, [r], size, widths)) - head
+        if cur and used + h > room:
+            pages.append((cur, size))
+            cur, used, room = [], head, room_next
+        cur.append(r)
+        used += h
+    if cur:
+        pages.append((cur, size))
+    return pages
 
 
 # ----------------------------------------------------------------------------- a slide's content
@@ -273,63 +466,6 @@ class _SlideBuilder:
                 paras.append(para_xml([{"text": "— — —", "color": "C9CED6"}], 1400, align="ctr"))
         return paras
 
-    def object_slide(self, s: dict):
-        b = (s.get("blocks") or [{}])[0]
-        t = b.get("type")
-        sub = b.get("title") if t == "interlinear" else ((b.get("name") or "Chart") + " · " + (b.get("title") or "")) if t == "chart" else (b.get("headword") or "") if t == "entry" else ""
-        self.heading(s.get("title") or "", sub)
-        y = BODY_Y
-        if s.get("lead"):
-            self.shapes.append(text_box(self.sid(), "Lead", MARGIN, y, CONTENT_W, 420000, [para_xml(s["lead"].get("runs"), 1800, base={"color": "4A4F57"})]))
-            y += 480000
-        self.draw_object(b, y, SLIDE_H - MARGIN - y)
-
-    def draw_object(self, b: dict, y: int, avail_h: int):
-        t = b.get("type")
-        played = self.audio(b, y) if t in ("interlinear", "chart") else False
-        self.w = CONTENT_W - (AUDIO_SIZE + 160000 if played else 0)
-        if t == "interlinear":
-            self.interlinear(b, y, avail_h)
-        elif t == "chart":
-            self.chart(b, y, avail_h)
-        elif t == "table":
-            self.table(b, y, avail_h)
-        elif t == "entry":
-            self.entry(b, y, avail_h)
-        elif t == "wordform":
-            self.shapes.append(text_box(self.sid(), "Wordform", MARGIN, y, self.w, 600000, [para_xml([{"text": b.get("form") or "", "b": True, "color": VERN}, {"text": "  " + "; ".join(b.get("glosses") or []), "color": GLOSS}], 2200)]))
-        elif t in ("image", "imageref"):
-            self.image(b, y, avail_h)
-        elif t in TEXT_TYPES:
-            self.shapes.append(text_box(self.sid(), "Text", MARGIN, y, self.w, avail_h, self.text_paras([b])))
-        self.w = CONTENT_W
-
-    def mixed_slide(self, s: dict):
-        """Several blocks on one slide (the user's choice in the export dialog): stacked, the room
-        shared out by what each needs; running text in between keeps its paragraphs together."""
-        self.heading(s.get("title") or "")
-        groups: list[tuple[str, list[dict]]] = []
-        for b in s.get("blocks") or []:
-            if b.get("type") in TEXT_TYPES:
-                if groups and groups[-1][0] == "text":
-                    groups[-1][1].append(b)
-                else:
-                    groups.append(("text", [b]))
-            else:
-                groups.append(("obj", [b]))
-        need = [_need(kind, bs) for kind, bs in groups]
-        avail = SLIDE_H - MARGIN - BODY_Y
-        gap = 120000
-        k = min(1.0, (avail - gap * max(0, len(groups) - 1)) / max(1, sum(need)))
-        y = BODY_Y
-        for (kind, bs), h in zip(groups, need):
-            h = max(300000, int(h * k))
-            if kind == "text":
-                self.shapes.append(text_box(self.sid(), "Text", MARGIN, y, CONTENT_W, h, self.text_paras(bs)))
-            else:
-                self.draw_object(bs[0], y, h)
-            y += h + gap
-
     # -- a recording beside its object ----------------------------------------------------------
     def audio(self, b: dict, y: int) -> bool:
         src = (b.get("audio") or {}).get("src")
@@ -362,43 +498,28 @@ class _SlideBuilder:
         return True
 
     # -- objects ------------------------------------------------------------------------------
-    def interlinear(self, b: dict, y: int, avail_h: int):
-        segs = b.get("segments") or []
-        font = (b.get("ws") or {}).get("font") or ""
-        look = {"txt": {"color": VERN, "font": font}, "morph": {"color": MORPH, "font": font}, "mgls": {"color": GLOSS}, "gls": {"color": GLOSS}, "pos": {"color": POS}, "cf": {"color": MUTED}, "tag": {"b": True}}
-        # how much is there: lines + translation rows → a font that fits
-        nrows = sum(len(sg.get("lines") or []) + (1 if sg.get("free") else 0) + (1 if sg.get("lit") else 0) + len(sg.get("notes") or []) for sg in segs) + max(0, len(segs) - 1)
-        row_h = 330000
-        scale = min(1.0, avail_h / max(1, nrows * row_h))
-        size = max(1000, int(1800 * scale))
-        row_h = max(200000, int(row_h * max(scale, 0.6)))
-        for sg in segs:
-            lines = sg.get("lines") or []
-            ncols = max((len(ln.get("cells") or []) for ln in lines), default=0)
-            if ncols:
-                longest = [3] + [max((_text_len((ln.get("cells") or [[]] * ncols)[ci] if ci < len(ln.get("cells") or []) else []) for ln in lines), default=1) for ci in range(ncols)]
-                widths = fit_widths(longest, self.w, min_w=300000, per_char=int(size * 0.62 * 127))   # ~0.62 em a character, plus the cell margins (fit_widths adds 120000)
-                rows = []
-                for li, ln in enumerate(lines):
-                    base = look.get(ln.get("name"), {})
-                    cells = [{"paras": [para_xml([{"text": (sg.get("label") or str(sg.get("n") or "")) if li == 0 else "", "color": "A8B0BA"}], max(900, size - 600), space_after=0)]}]
-                    for ci in range(ncols):
-                        runs = ln["cells"][ci] if ci < len(ln.get("cells") or []) else []
-                        cells.append({"paras": [para_xml(runs, size if ln.get("name") == "txt" else max(900, size - 300), space_after=0, base=base)]})
-                    rows.append(cells)
-                self.shapes.append(table_xml(self.sid(), "Example", MARGIN, y, self.w, widths, rows, row_h, border="", size=size))
-                y += row_h * len(rows)
-            for key, lab in (("free", "Free"), ("lit", "Lit."), ("notes", "Note")):
-                vals = sg.get(key)
-                if not vals:
-                    continue
-                for v in (vals if key == "notes" else [vals]):
-                    runs = [{"text": lab + "  ", "color": "A8B0BA", "size": 9}] + ([dict(x) for x in v] if isinstance(v, list) else [{"text": str(v)}])
-                    self.shapes.append(text_box(self.sid(), lab, MARGIN + 400000, y, self.w - 400000, row_h, [para_xml(runs, max(1000, size - 200), space_after=0, base={"i": key != "free"})]))
-                    y += row_h
-            y += row_h // 2
+    def il_unit(self, b: dict, u: dict, y: int):
+        """One measured piece of an interlinear example (il_units): a row group of a line's words, or
+        one of its translations / notes."""
+        if u["kind"] == "grp":
+            font = (b.get("ws") or {}).get("font") or ""
+            look = {"txt": {"color": VERN, "font": font}, "morph": {"color": MORPH, "font": font}, "mgls": {"color": GLOSS}, "gls": {"color": GLOSS}, "pos": {"color": POS}, "cf": {"color": MUTED}, "tag": {"b": True}}
+            size, sub, lab = u["size"], u["sub"], u["lab"]
+            rows = []
+            for li, ln in enumerate(u["lines"]):
+                base = look.get(ln.get("name"), {})
+                cells = [{"paras": [para_xml([{"text": u["label"] if li == 0 else "", "color": "A8B0BA"}], lab, space_after=0)]}]
+                for ci in u["cols"]:
+                    runs = ln["cells"][ci] if ci < len(ln.get("cells") or []) else []
+                    cells.append({"paras": [para_xml(runs, size if ln.get("name") == "txt" else sub, space_after=0, base=base)]})
+                rows.append(cells)
+            self.shapes.append(table_xml(self.sid(), "Example", MARGIN, y, u["width"], [u["num_w"]] + [u["col_w"][ci] for ci in u["cols"]], rows, u["row_hs"], border="", size=size))
+        else:
+            runs = [{"text": u["lab_text"] + "  ", "color": "A8B0BA", "size": 9}] + [dict(x) for x in u["runs"]]
+            self.shapes.append(text_box(self.sid(), u["lab_text"], MARGIN + u["num_w"], y, u["width"] - u["num_w"], u["h"], [para_xml(runs, u["sub"], space_after=0, base={"i": u["key"] != "free"})], autofit=False))
 
-    def chart(self, b: dict, y: int, avail_h: int):
+    def chart(self, b: dict, y: int, avail_h: int, body: list | None = None, size: int | None = None):
+        """The chart, or the page of its rows `body` at `size` (chart_chunks): the header rows always."""
         headers = b.get("headers") or []
         ncols = int(b.get("cols") or 0)
         xcols = b.get("xcols") or []
@@ -407,31 +528,15 @@ class _SlideBuilder:
         nl = len(x_left)
         free_col, notes_col = bool(b.get("freeCol")), bool(b.get("notesCol"))
         total_cols = 1 + ncols + len(xcols) + (1 if free_col else 0) + (1 if notes_col else 0)
-        body_rows = b.get("rows") or []
+        all_rows = b.get("rows") or []
+        body_rows = all_rows if body is None else body
         n_free_rows = sum(1 for r in body_rows if r.get("freeRow") and (r["freeRow"].get("text") or "").strip())
         nrows = len(headers) + len(body_rows) + n_free_rows
         row_h = 420000
         scale = min(1.0, avail_h / max(1, int((len(headers) * 300000 + len(body_rows) * row_h + n_free_rows * 260000) * 1.3)))   # rows come out taller than the sum of their lines
-        size = max(800, int(1200 * scale))
+        size = size or max(800, int(1200 * scale))
         font = (b.get("ws") or {}).get("font") or ""
-        # column widths from the words
-        longest = [3] + [max(4, len(x.get("name") or "")) for _, x in x_left] + [4] * ncols + [max(4, len(x.get("name") or "")) for _, x in x_right] + ([12] if free_col else []) + ([10] if notes_col else [])
-        if headers:                                     # a column at least as wide as its heading
-            c = 1 + nl
-            for h in headers[-1]:
-                if int(h.get("span") or 1) == 1 and c <= ncols + nl:
-                    longest[c] = max(longest[c], len(h.get("text") or ""))
-                c += int(h.get("span") or 1)
-        for r in body_rows:
-            for c in r.get("cells") or []:
-                pl = c.get("plain") or {}
-                n = max(len(pl.get("txt") or ""), len(pl.get("gls") or ""))
-                col = int(c.get("col") or 0)
-                if 1 <= col <= ncols and int(c.get("span") or 1) == 1:
-                    longest[col + nl] = max(longest[col + nl], min(28, n))
-        widths = fit_widths(longest, self.w, min_w=380000, per_char=int(size * 0.6 * 127))
-        if sum(widths) < self.w:                     # a chart fills the slide's width
-            widths = [int(w * self.w / sum(widths)) for w in widths]
+        widths = chart_widths(b, self.w, size)
         rows: list[list[dict | None]] = []
         head_fill = "F3F4F6"
         for hi, hr in enumerate(headers):
@@ -505,7 +610,8 @@ class _SlideBuilder:
                 c += 1
             if free_col:
                 fr = r.get("free")
-                row[c] = {"paras": [para_xml([{"text": fr["text"], "i": True}], size, space_after=0)] if fr else None, "fill": "F3F9F3", "rowspan": int(fr.get("span") or 1) if fr else 1}
+                left = len(body_rows) - body_rows.index(r)          # a run of rows never spans past this page
+                row[c] = {"paras": [para_xml([{"text": fr["text"], "i": True}], size, space_after=0)] if fr else None, "fill": "F3F9F3", "rowspan": min(left, int(fr.get("span") or 1)) if fr else 1}
                 c += 1
             if notes_col:
                 row[c] = {"paras": [para_xml([{"text": r.get("notes") or "", "color": MUTED}], max(800, size - 200), space_after=0)]}
@@ -529,7 +635,7 @@ class _SlideBuilder:
                     skip -= 1
                     continue
                 skip = max(0, int((cell or {}).get("rowspan") or 1) - 1)
-        self.shapes.append(table_xml(self.sid(), "Chart", MARGIN, y, self.w, widths, rows, max(230000, int(row_h * max(scale, 0.55))), border="E8EBEF", size=size))
+        self.shapes.append(table_xml(self.sid(), "Chart", MARGIN, y, self.w, widths, rows, chart_row_heights(b, body_rows, size, widths) if body is not None else max(230000, int(row_h * max(scale, 0.55))), border="E8EBEF", size=size))
         del nrows
 
     def table(self, b: dict, y: int, avail_h: int):
@@ -646,6 +752,7 @@ class Pptx:
         self.slides: list[_SlideBuilder] = []
         self.media: list[tuple[str, bytes]] = []
         self._media_fn = media
+        self._media_ok: dict[str, bool] = {}
         self.media_names: dict[str, str] = {}
         self._icon = ""
 
@@ -666,17 +773,135 @@ class Pptx:
         return self._icon
 
     def add(self, s: dict):
-        b = _SlideBuilder(self, len(self.slides) + 1)
         kind = s.get("kind")
+        if kind in ("object", "mixed"):
+            self.add_paged(s)
+            return
+        b = _SlideBuilder(self, len(self.slides) + 1)
         if kind == "title":
             b.title_slide(s)
-        elif kind == "object":
-            b.object_slide(s)
-        elif kind == "mixed":
-            b.mixed_slide(s)
         else:
             b.text_slide(s)
         self.slides.append(b)
+
+    def has_media(self, b: dict) -> bool:
+        src = (b.get("audio") or {}).get("src")
+        if not src:
+            return False
+        if src not in self._media_ok:
+            self._media_ok[src] = bool(self.media_of(src))
+        return self._media_ok[src]
+
+    def add_paged(self, s: dict):
+        """An object slide or a mixed one, MEASURED (see "measuring" above): its blocks become pieces of
+        known height — a text group, each row group and translation of an example, a page of a chart's
+        rows, a table, an entry, a picture — laid down the slide in order; a piece that does not fit
+        starts a "(cont.)" slide. An example's line and a chart's page stay together where they can."""
+        blocks = s.get("blocks") or []
+        cap = SLIDE_H - MARGIN - BODY_Y
+        lead = s.get("lead")
+        lead_h = 480000 if lead else 0
+        objs = [b for b in blocks if b.get("type") not in TEXT_TYPES]
+        single = len(blocks) == 1
+        b0 = objs[0] if objs else {}
+        t0 = b0.get("type")
+        sub = (b0.get("title") if t0 == "interlinear" else ((b0.get("name") or "Chart") + " · " + (b0.get("title") or "")) if t0 == "chart" else (b0.get("headword") or "") if t0 == "entry" else "") if single else ""
+        room_first = cap - lead_h
+
+        def piece(h, draw, obj=None, width=CONTENT_W):
+            return {"h": int(h), "draw": draw, "obj": obj, "width": width}
+        def make_chunks(il_size):
+            chunks: list[list[dict]] = []                  # each a run of pieces that should share a slide
+            text_run: list[dict] = []
+
+            def flush_text():
+                if text_run:
+                    bs = list(text_run)
+                    chunks.append([piece(min(_need("text", bs), cap), lambda bl, y, h, bs=bs: bl.shapes.append(text_box(bl.sid(), "Text", MARGIN, y, CONTENT_W, h, bl.text_paras(bs))))])
+                    text_run.clear()
+            for b in blocks:
+                t = b.get("type")
+                if t in TEXT_TYPES:
+                    text_run.append(b)
+                    continue
+                flush_text()
+                width = CONTENT_W - (AUDIO_SIZE + 160000 if t in ("interlinear", "chart") and self.has_media(b) else 0)
+                if t == "interlinear":
+                    units = il_units(b, il_size, width) if il_size else il_fit(b, width, room_first if single else cap)[1]
+                    by_seg: dict[int, list[dict]] = {}
+                    for u in units:
+                        by_seg.setdefault(u["seg"], []).append(u)
+                    for si in sorted(by_seg):
+                        chunks.append([piece(u["h"], lambda bl, y, h, b=b, u=u: bl.il_unit(b, u, y), b, width) for u in by_seg[si]])
+                elif t == "chart":
+                    for rows, size in chart_chunks(b, width, room_first if single else cap, cap):
+                        h = sum(chart_row_heights(b, rows, size, chart_widths(b, width, size))) + 40000
+                        chunks.append([piece(h, lambda bl, y, h, b=b, rows=rows, size=size: bl.chart(b, y, h, body=rows, size=size), b, width)])
+                elif t == "table":
+                    chunks.append([piece(min(_need("obj", [b]), cap), lambda bl, y, h, b=b: bl.table(b, y, h))])
+                elif t == "entry":
+                    chunks.append([piece(min(_need("obj", [b]), cap), lambda bl, y, h, b=b: bl.entry(b, y, h))])
+                elif t == "wordform":
+                    chunks.append([piece(600000, lambda bl, y, h, b=b: bl.shapes.append(text_box(bl.sid(), "Wordform", MARGIN, y, CONTENT_W, 600000, [para_xml([{"text": b.get("form") or "", "b": True, "color": VERN}, {"text": "  " + "; ".join(b.get("glosses") or []), "color": GLOSS}], 2200)])))])
+                elif t in ("image", "imageref"):
+                    chunks.append([piece(min(3200000, cap), lambda bl, y, h, b=b: bl.image(b, y, h))])
+            flush_text()
+            return chunks
+
+        # several blocks on one slide shrink TOGETHER (to 12 pt at most) before anything moves to a "(cont.)"
+        # slide, as the web slideshow fits its slide; one object finds its own largest size
+        chunks = make_chunks(None)
+        if not single and any(b.get("type") == "interlinear" for b in blocks):
+            total = lambda cs: sum(sum(p["h"] for p in ch) for ch in cs) + 90000 * sum(1 for a, c in zip(cs, cs[1:]) if c[0]["obj"] is None or c[0]["obj"] is not a[0]["obj"])  # noqa: E731
+            if total(chunks) > room_first:
+                for size in range(MAX_SIZE, MIN_SIZE - 1, -100):
+                    cs = make_chunks(size)
+                    if total(cs) <= room_first:
+                        chunks = cs
+                        break
+                else:
+                    chunks = make_chunks(PAGE_SIZE)
+        # lay the pieces down, slide by slide
+        pages: list[list[tuple[dict, int]]] = [[]]
+        gap = 90000
+        y, bottom = BODY_Y + lead_h, SLIDE_H - MARGIN
+
+        def new_page():
+            nonlocal y
+            pages.append([])
+            y = BODY_Y
+        prev_obj = object()
+        for ch in chunks:
+            obj = ch[0]["obj"]
+            if obj is not None and obj is prev_obj:
+                y -= gap                                   # the lines of one example follow each other (il_units has their spacing)
+            prev_obj = obj
+            need = sum(p["h"] for p in ch)
+            if pages[-1] and y + need > bottom:
+                new_page()
+            for p in ch:
+                if pages[-1] and y + p["h"] > bottom + 20000:
+                    new_page()
+                pages[-1].append((p, y))
+                y += p["h"]
+            y += gap
+        for pi, placed in enumerate(pages):
+            if not placed and pi:
+                continue
+            bl = _SlideBuilder(self, len(self.slides) + 1)
+            bl.heading((s.get("title") or "") + (" (cont.)" if pi else ""), sub)
+            if pi == 0 and lead:
+                bl.shapes.append(text_box(bl.sid(), "Lead", MARGIN, BODY_Y, CONTENT_W, 420000, [para_xml(lead.get("runs"), 1800, base={"color": "4A4F57"})]))
+            played = set()
+            for p, py in placed:
+                ob = p["obj"]
+                if ob is not None and id(ob) not in played and self.has_media(ob):
+                    bl.audio(ob, py)
+                    played.add(id(ob))
+                bl.w = p["width"]
+                p["draw"](bl, py, p["h"])
+                bl.w = CONTENT_W
+            self.slides.append(bl)
 
     def build(self, title: str = "") -> bytes:
         if not self.slides:

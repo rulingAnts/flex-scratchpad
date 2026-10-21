@@ -5793,6 +5793,7 @@ def test_slides_are_planned_by_block_themed_and_carry_audio_and_a_design_prompt(
     page.select_option("[data-test=slide-theme]", "dark")
     assert page.locator("[data-test=embed-audio]").is_checked()
     assert page.locator("[data-test=handoff]").count() == 0                # no design prompt for PowerPoint
+    assert "adjust them by hand" in page.locator("[data-test=pptx-advice]").inner_text()   # PowerPoint wants finishing by hand
     page.locator("[data-test=export-html-go]").click()
     page.wait_for_function("() => { const l = FS.jobs.list(); return !l.running && !l.queue.length && l.finished.length === 1; }", timeout=20000)
     assert not page.evaluate("FS.jobs.list().finished[0].error"), page.evaluate("FS.jobs.list().finished[0].error")

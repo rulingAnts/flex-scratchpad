@@ -1190,3 +1190,5 @@ table.exp-plan tr.head td.lab { font-weight: 700; }
 table.exp-plan tr.skip td.lab { opacity: 0.45; text-decoration: line-through; }
 table.exp-plan .ic { display: inline-block; min-width: 20px; color: var(--muted, #68717d); }
 textarea.exp-prompt { width: 100%; box-sizing: border-box; font: 12px/1.45 ui-monospace, Consolas, monospace; margin: 6px 0; }
+
+.modal .exp-warn { background: #fff7e6; border: 1px solid #f1d39b; color: #5c4515; border-radius: 6px; padding: 6px 9px; margin: 8px 0 0; }

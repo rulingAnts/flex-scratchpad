@@ -1164,6 +1164,20 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   line (fonts shrink to fit, `fit_widths` from the words), a chart as a table filling the slide
   (header groups merged, a cell's words on one line and glosses on the next, markers, Free, custom
   columns, row fills), a Markdown table, an entry, a picture; each example's recording as a ▶ beside it (above).
+  MEASURED, NEVER SQUEEZED (Seth, 2026-10-20, a screenshot: words broken inside their cells — "cano / e", "15. / 1" — and a
+  free translation drawn over the next rows; "In HTML slideshow … it auto-resizes the example to fit. I don't know if we can
+  get our PowerPoint export to do the same"): PowerPoint draws a table exactly as written, so pptx_writer measures —
+  `text_w` (CHAR_EM 0.52 em a character, combining marks free), `cell_line_h` / `text_line_h`; `il_units` cuts an example
+  into row groups (a word column as wide as its widest line, never narrower; a long line wraps into the next group) and
+  translations with their wrapped heights; `il_fit` takes the largest size from 18 to 12 pt that fits, else 16 pt
+  (`PAGE_SIZE`) and paging; `chart_chunks` the largest of 12–9 pt, else pages of rows at 10 pt with the header rows on each
+  (`chart_widths`, `chart_row_heights`; a Free run's rowspan clamped to its page). `Pptx.add_paged` turns an object or a
+  mixed slide into PIECES of known height (a text group, a row group, a translation, a chart page, a table…), keeps an
+  example's line and a chart page together where it can, and starts a "(cont.)" slide when a piece does not fit; a mixed
+  slide first shrinks its examples TOGETHER to 12 pt. Heights err on the roomy side (LibreOffice draws tighter than
+  PowerPoint). The docs and the export dialog (`pptx-advice`) tell users a PowerPoint file wants adjusting by hand after
+  export (Seth, same day). `tests/test_pptx.py::test_a_long_example_or_chart_is_measured…` (no overlaps, nothing off the
+  slide, no squeezed columns, the header on every chart page).
   PDF (`Api.export_note_pdf` → pdf_print.py): on Windows a HIDDEN pywebview window loads the page
   (a `file://` temp file in `.scratchpad/export-tmp`) and `CoreWebView2.PrintToPdfAsync` writes the
   PDF (landscape when the page says so, backgrounds on) — pywebview exposes none of this, so the
