@@ -1,4 +1,4 @@
-**FLEx Scratchpad 0.1.0 for Windows, the first full release.** It works, it is tested by hand on real FieldWorks projects, and it will still have rough edges. Please report what breaks.
+**FLEx Scratchpad 0.2.0-beta.1 for Windows, a pre-release.** What is new since the 0.1.0 release is listed first; try it alongside your work and keep 0.1.0 at hand. It is tested by hand on real FieldWorks projects, and it will still have rough edges. Please report what breaks.
 
 FLEx Scratchpad is a notebook for FieldWorks: notes in tabs and folders that show live FLEx lexical entries and interlinear examples, read straight from your project (never written to). Highlight words in an example, put examples in tables, number them, collect them into an example collection and export that as a FLEx text.
 

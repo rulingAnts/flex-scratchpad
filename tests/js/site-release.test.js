@@ -45,12 +45,17 @@ test('the current release and the pre-release newer than it are both offered (Se
   assert.equal(pickReleases([]), null);
 });
 
-test('the home page carries one release\'s links, and only known keys', () => {
-  // Seth, 2026-10-20: "have just one download button that points to it" (0.1.0, a full release)
+test('the home page carries the release\'s links and one pre-release button, and only known keys', () => {
+  // Seth, 2026-10-20: "have just one download button that points to it" (0.1.0, a full release); then "push
+  // another pre-release (and add a download button for it on the main page)" — beside the release, hidden by
+  // release.js whenever no pre-release is newer than the release
   const html = fs.readFileSync(path.join(__dirname, '..', '..', 'docs', 'index.html'), 'utf8');
   const keys = [...html.matchAll(/data-dl="([^"]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(keys.filter((k) => !['exe', 'zip', 'notes', 'version'].includes(k)), []);
-  for (const k of ['exe', 'zip']) assert.ok(keys.includes(k), k);
-  assert.ok(!/ data-pre[ >]/.test(html) && !/beta/i.test(html.replace(/class="beta-band"/g, '')), 'a pre-release link or a beta is left');
-  assert.equal([...html.matchAll(/<section class="hero">[\s\S]*?<\/section>/g)][0][0].match(/data-dl="exe"/g).length, 1, 'one download button in the hero');
+  assert.deepEqual(keys.filter((k) => !['exe', 'zip', 'notes', 'version', 'pre-exe', 'pre-notes', 'pre-version'].includes(k)), []);
+  for (const k of ['exe', 'zip', 'pre-exe']) assert.ok(keys.includes(k), k);
+  const hero = [...html.matchAll(/<section class="hero">[\s\S]*?<\/section>/g)][0][0];
+  assert.equal(hero.match(/data-dl="exe"/g).length, 1, 'one release download button in the hero');
+  assert.equal(hero.match(/data-dl="pre-exe"/g).length, 1, 'one pre-release download button in the hero');
+  assert.ok(/<a [^>]*data-pre[^>]*data-dl="pre-exe"/.test(hero), 'the pre-release button hides itself when there is none');
+  assert.ok(!/beta/i.test(html.replace(/class="beta-band"/g, '').replace(/<[^>]*data-pre[\s\S]*?<\/(a|p)>/g, '')), 'a beta outside the pre-release links');
 });

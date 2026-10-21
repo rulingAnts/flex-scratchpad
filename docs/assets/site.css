@@ -298,3 +298,8 @@ footer { margin-top: 64px; border-top: 1px solid var(--slate-200); background: #
 @media (hover: none) { .car-btn { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .car-track { transition: none; } }
 @media (max-width: 640px) { .car-caption { font-size: 0.84rem; padding: 10px 44px 10px 12px; } .car-btn { width: 34px; height: 34px; font-size: 1.3rem; } }
+
+/* the pre-release beside the release (hidden by release.js when no pre-release is newer) */
+.hero .hero-pre { margin: 10px 0 0; font-size: 14px; text-align: center; opacity: 0.85; }
+.hero .hero-pre a { color: inherit; }
+[data-pre][hidden] { display: none !important; }
