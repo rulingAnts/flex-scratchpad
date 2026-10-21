@@ -150,6 +150,38 @@ def encode_for_embed(src: str | Path, dst_stem: Path, ffmpeg: str | None = None)
     return (src, mime) if mime else None
 
 
+OFFICE_MIMES = {".m4a": "audio/mp4", ".mp3": "audio/mpeg", ".wav": "audio/wav"}
+
+
+def encode_for_office(src: str | Path, dst_stem: Path, ffmpeg: str | None = None) -> tuple[Path, str] | None:
+    """A clip PowerPoint plays (Seth, 2026-10-20: "embedded audio as playable media in the slides next
+    to the examples"): PowerPoint does not play Opus or FLAC, so AAC in an .m4a at 64 kb/s mono through
+    ffmpeg (ffmpeg's own encoder, in every build), MP3 when that fails, else a 16-bit WAV; without
+    ffmpeg only a WAV clip can go in (the stdlib cuts WAV). Kept beside the clip as
+    `<clip>.office.m4a` so a second export is instant. Returns (path, mime) or None."""
+    src = Path(src)
+    if not src.is_file():
+        return None
+    exe = ffmpeg or find_ffmpeg()
+    if exe:
+        for ext, codec in ((".m4a", ["-c:a", "aac", "-b:a", "64k"]), (".mp3", ["-c:a", "libmp3lame", "-q:a", "6"]), (".wav", ["-c:a", "pcm_s16le"])):
+            dst = dst_stem.with_name(dst_stem.name + ext)
+            if dst.is_file() and dst.stat().st_mtime >= src.stat().st_mtime:
+                return dst, OFFICE_MIMES[ext]
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            tmp = dst.with_name(dst.stem + ".tmp" + ext)
+            try:
+                _run([exe, "-y", "-v", "error", "-i", str(src), "-vn", "-ac", "1", *codec, str(tmp)], 300)
+                tmp.replace(dst)
+                return dst, OFFICE_MIMES[ext]
+            except (subprocess.SubprocessError, OSError):
+                try:
+                    tmp.unlink()
+                except OSError:
+                    pass
+    return (src, "audio/wav") if src.suffix.lower() == ".wav" else None
+
+
 def store_clip_bytes(dst: Path, data_base64: str) -> Path:
     dst.parent.mkdir(parents=True, exist_ok=True)
     raw = base64.b64decode(data_base64.split(",", 1)[-1])

@@ -635,7 +635,7 @@
       }
       item('Unmerge', () => ops.unmerge(range), !(mergedInRange || covered.has(key)));
       sep();
-      const copySel = () => { if (!widget.sel) widget.select(at, at); const rows = widget.selectedRows(); FS.tableClip = { rows: rows.map((r) => r.slice()), tsv: tsvOf(rows), at: Date.now() }; FS.copyText(tsvOf(rows)); };
+      const copySel = () => { if (!widget.sel) widget.select(at, at); const rows = widget.selectedRows(); FS.tableClip = { rows: rows.map((r) => r.slice()), tsv: tsvOf(rows), at: Date.now() }; FS.copyRich({ text: tsvOf(rows), html: htmlOf(rows) }); };
       item(multi ? 'Copy cells' : 'Copy cell', copySel);
       item(multi ? 'Cut cells' : 'Cut cell', () => { copySel(); ops.clear(widget.sel); });
       item(multi ? 'Clear cells' : 'Clear cell', () => ops.clear(range));
@@ -925,7 +925,10 @@
             insertAtCaret(ed, (before && !/\s$/.test(before) && !/^\s/.test(t) ? ' ' : '') + t); refresh();   // a chooser result is a token: keep it off the preceding word
           };
           if (opts.onPasteLink && /silfw:|^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(text.trim())) { opts.onPasteLink(text.trim(), (embed) => put(String(embed).replace(/\n/g, ' '))); return; }
-          const flexRows = /^(\d+(\.\d+)?\t)?\s*(Word|Morphemes|Lex\.|Free|Literal|Note)\b/im.test(text);
+          // lines or rows copied out of an example or a chart: the reference on the first line is the object
+          const refRows = /^\s*(\{\{flex:(?:text|chart)\s[^}]*\}\})[ \t]*\n[\s\S]*\t/.exec(text);
+          if (refRows) { put(refRows[1]); return; }
+          const flexRows = /^(\d+(\.\d+)?\t)?\s*(Word|Morphemes|Lex\.|Free|Literal|Lit\.|Note)\b/im.test(text);
           const grid = e.dataTransfer ? clipGrid(e.dataTransfer) : null;
           if (grid && !flexRows && (grid.length > 1 || grid[0].length > 1)) { widget.ops.pasteOver(r, c, grid); return; }   // cells, from this one
           if (opts.onPasteLocate && /\t/.test(text)) { const plain = () => put(text.replace(/\r\n?/g, '\n').replace(/\n/g, ' ')); opts.onPasteLocate(text, (embed) => put(String(embed).replace(/\n/g, ' ')), plain); return; }
@@ -1128,7 +1131,8 @@
     FS.popover(anchor, (pop, close) => {
       const render = () => {
         pop.innerHTML = '';
-        pop.appendChild(el('div', { class: 'row' }, el('b', {}, 'Table')));
+        pop.appendChild(el('div', { class: 'row' }, el('b', {}, 'Table'), el('span', { class: 'spacer' }),
+          el('button', { class: 'btn small', 'data-test': 'tbl-copy', title: 'The whole table: pasted into Word, PowerPoint, Excel or a web page it is a formatted table (its FLEx objects as links, or in full when the cell shows them so); pasted here, this table again', onclick: () => { FS.copyRich({ text: tsvOf(t.rows), html: htmlOf(t.rows, true) }); FS.toast('Table copied — paste it into Word, PowerPoint, Excel or a note', 'ok'); } }, '⎘ Copy the table')));
         const lvl = el('span', { class: 'muted small' }, 'level ' + (t.style.indent || 0));
         pop.appendChild(el('div', { class: 'row' }, el('span', { class: 'lbl' }, 'Indent'),
           el('button', { class: 'btn small', title: 'Outdent (Shift+Tab on the table)', onclick: () => { widget.ops.indent(-1); render(); } }, '◂'),
@@ -1196,6 +1200,7 @@
   /* The grid of an HTML table: {rows, spans} with merged cells laid out, or null. */
   function htmlGrid(html) {
     if (!html || !/<table[\s>]/i.test(html)) return null;
+    if (/data-fs-copy/.test(html)) return null;          // this app's own rich copy: its text is the one to take (FS.copyRich)
     let doc;
     try { doc = new DOMParser().parseFromString(html, 'text/html'); } catch (e) { return null; }
     const table = doc.querySelector('table');
@@ -1258,7 +1263,36 @@
     return text.split('\n').map((l) => l.split('\t'));
   }
   const tsvOf = (rows) => rows.map((r) => r.map((x) => String(x == null ? '' : x).replace(/\t/g, ' ')).join('\t')).join('\n');
-  const htmlOf = (rows) => '<table>' + rows.map((r) => '<tr>' + r.map((x) => '<td>' + FS.markdown.renderInline(x) + '</td>').join('') + '</tr>').join('') + '</table>';
+  /* The HTML of cells (Seth, 2026-10-20: "the HTML table copy … paste-able in Word, Excel, PowerPoint"):
+   * bordered cells, the markup rendered, and a FLEx object in a cell as what it shows — an expanded
+   * one as the example itself (export.js clipHtml), a chip as its title and lines linked into FLEx.
+   * Rows holding FLEx objects are marked as this app's own copy (FS.copyRich), so pasted back here
+   * the TSV with the {{flex}} code is what arrives; plain cells stay an ordinary table. */
+  const EMBED_IN_CELL = /\{\{\s*(?:flex:|file\s)[^{}]*\}\}/g;
+  function objHtml(tok) {
+    let spec = null;
+    try { spec = FS.flexref.parse(tok); } catch (e) { spec = null; }
+    if (!spec) return FS.esc(tok);
+    if (spec.kind === 'file') return FS.esc(spec.label || String(spec.ref || '').split(/[\\/]/).pop());
+    const I = FS.interlinear;
+    const obj = I && I.peek ? I.peek(spec) : null;
+    if (!obj) return FS.esc(spec.label || tok);
+    if (spec.extra && spec.extra.expanded && FS.exporter && FS.exporter.clipHtml) { try { return FS.exporter.clipHtml(FS.exporter.blockOf(spec, obj)); } catch (e) { /* the link below */ } }
+    const text = spec.label || ((spec.kind === 'text' ? (obj.abbrev || obj.title || '') : I.chipTitle(spec, obj)) + ' ' + I.chipRange(spec, obj)).trim();
+    return obj.url ? '<a href="' + FS.esc(obj.url) + '">' + FS.esc(text) + '</a>' : FS.esc(text);
+  }
+  function cellHtml(md) {
+    md = String(md == null ? '' : md);
+    let out = '', last = 0, m;
+    EMBED_IN_CELL.lastIndex = 0;
+    while ((m = EMBED_IN_CELL.exec(md))) { out += FS.markdown.renderInline(md.slice(last, m.index)); out += objHtml(m[0]); last = m.index + m[0].length; }
+    return out + FS.markdown.renderInline(md.slice(last));
+  }
+  const htmlOf = (rows, headed) => {
+    const ours = rows.some((r) => r.some((x) => /\{\{\s*flex:/.test(String(x || ''))));
+    const td = 'border:1px solid #9ca3af;padding:2pt 5pt;vertical-align:top';
+    return (ours ? '<div data-fs-copy="1">' : '') + '<table style="border-collapse:collapse">' + rows.map((r, ri) => '<tr>' + r.map((x) => (headed && ri === 0 ? '<th style="' + td + ';background:#eef2f7;text-align:left">' : '<td style="' + td + '">') + cellHtml(x) + (headed && ri === 0 ? '</th>' : '</td>')).join('') + '</tr>').join('') + '</table>' + (ours ? '</div>' : '');
+  };
 
   function fromTsv(text) {
     const lines = String(text || '').replace(/\r\n?/g, '\n').replace(/\n+$/, '').split('\n');
@@ -1276,5 +1310,5 @@
     return fromHtml(html) || fromTsv(dt.getData && dt.getData('text/plain'));
   }
 
-  FS.tables = { spanMap, mergeCell, unmergeCell, mergeRange, unmergeRange, growToSpans, splitAt, mergeTables, htmlGrid, clipGrid, tsvOf, readClipGrid, parse, serialize, splitRow, parseStyle, serializeStyle, render, template, fromHtml, fromTsv, fromClipboard, cellMarkdown };
+  FS.tables = { htmlOf, cellHtml, spanMap, mergeCell, unmergeCell, mergeRange, unmergeRange, growToSpans, splitAt, mergeTables, htmlGrid, clipGrid, tsvOf, readClipGrid, parse, serialize, splitRow, parseStyle, serializeStyle, render, template, fromHtml, fromTsv, fromClipboard, cellMarkdown };
 })();

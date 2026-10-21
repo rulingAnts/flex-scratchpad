@@ -1159,3 +1159,10 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 .tchart tr.crow.row-sel th.rlab { box-shadow: inset 3px 0 0 var(--accent); color: var(--accent); }
 .tchart tr.crow.row-sel > td { background-image: linear-gradient(rgba(37, 99, 235, 0.07), rgba(37, 99, 235, 0.07)); }
 .sel-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted); padding: 4px 8px; margin: 0 0 6px; border: 1px dashed var(--accent); border-radius: 8px; background: var(--bg); }
+
+/* ⎘ Copy │ ▾ — one copy that pastes right everywhere, and the other ways under the arrow (interlinear.js copyButton) */
+.copy-split { display: inline-flex; align-items: center; gap: 0; white-space: nowrap; }
+.copy-split .copy-more { padding-left: 2px; padding-right: 4px; margin-left: -2px; opacity: 0.75; }
+.copy-split .copy-more:hover { opacity: 1; }
+.sel-bar .copy-split .btn + .btn { margin-left: 1px; border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.sel-bar .copy-split .btn:first-child { border-top-right-radius: 0; border-bottom-right-radius: 0; }

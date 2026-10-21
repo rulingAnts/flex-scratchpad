@@ -72,7 +72,7 @@
       <li><a href="#writing">Writing</a>
         <ol><li><a href="#wr-markdown">Markdown, markers shown or hidden</a></li><li><a href="#wr-headings">Headings that fold and stick</a></li><li><a href="#wr-lists">Lists, checklists, quotes</a></li><li><a href="#wr-blocks">Blocks: the bar, the menu, moving</a></li><li><a href="#wr-tables">Tables</a></li><li><a href="#wr-links">Links</a></li><li><a href="#wr-files">Attached files</a></li><li><a href="#wr-undo">Undo, saving, scripts</a></li></ol></li>
       <li><a href="#examples">Examples from FLEx</a>
-        <ol><li><a href="#ex-paste">Paste lines copied in FLEx</a></li><li><a href="#ex-picker">The FLEx object dialog</a></li><li><a href="#ex-link">Paste a FLEx hyperlink</a></li><li><a href="#ex-shows">What an example shows</a></li><li><a href="#ex-chips">Chips, inline and collapsed</a></li><li><a href="#ex-entries">Entries</a></li><li><a href="#ex-live">Live, refreshed, and staying on its lines</a></li></ol></li>
+        <ol><li><a href="#ex-paste">Paste lines copied in FLEx</a></li><li><a href="#ex-picker">The FLEx object dialog</a></li><li><a href="#ex-link">Paste a FLEx hyperlink</a></li><li><a href="#ex-shows">What an example shows</a></li><li><a href="#ex-chips">Chips, inline and collapsed</a></li><li><a href="#ex-entries">Entries</a></li><li><a href="#ex-copy">Copy an example: into a note, Word, PowerPoint, LingTeX Word</a></li><li><a href="#ex-live">Live, refreshed, and staying on its lines</a></li></ol></li>
       <li><a href="#styling">Styling and visual filters</a>
         <ol><li><a href="#st-words">Words, morphemes, letters</a></li><li><a href="#st-tags">FLEx text markup tags</a></li><li><a href="#st-scopes">Where a style applies</a></li><li><a href="#st-filters">Visual filters</a></li><li><a href="#st-find">Finding notes by tag</a></li></ol></li>
       <li><a href="#audio">Hearing an example</a></li>
@@ -206,7 +206,7 @@
     <figure class="shot"><img src="../media/guide/table.webp" loading="lazy" alt="A table with interlinear examples in its cells and the bar under it: Column, Row, Table menus and the add buttons"><figcaption>A table with examples in its cells. The bar appears once you click into the table.</figcaption></figure>
     <p>The <span class="ui">Table</span> button inserts one; a grid pasted from Excel or Word becomes a table too, merged cells included. Click a cell to edit it: <kbd>Tab</kbd> moves on (a new row at the end), <kbd>Enter</kbd> goes down, <kbd>Shift+Enter</kbd> breaks a line inside the cell, <kbd>Alt+↑</kbd> / <kbd>↓</kbd> move between rows. The bar under the table has <span class="ui">Column ▾</span>, <span class="ui">Row ▾</span> and <span class="ui">Table ▾</span> (alignment, bold, width, background and text colour, wrap, striped rows, borders, header row and column, the vernacular font, freeze panes, an indent) and the add buttons; deletions ask twice and leave an Undo.</p>
     <figure class="shot half"><img src="../media/guide/table-cell-menu.webp" loading="lazy" alt="The right-click menu of a table cell: merge, split, copy, paste, insert rows and columns, delete"><figcaption>Right-click a cell.</figcaption></figure>
-    <p>Drag across cells to select a range, click a row or column handle for a whole one; the context menu merges and splits cells, copies and pastes rows, columns and cells (also as TSV for a spreadsheet), and inserts or deletes. A table's style line is saved after it in the file, so a table is still a plain Markdown table anywhere else. An example in a cell is drawn in full when the cell says <code>expanded</code>, else as a chip that previews on hover.</p>
+    <p>Drag across cells to select a range, click a row or column handle for a whole one; the context menu merges and splits cells, copies and pastes rows, columns and cells (formatted for Word, Excel and PowerPoint, tab-separated for a plain editor; <span class="ui">Table ▾ → ⎘ Copy the table</span> takes the whole table), and inserts or deletes. A table's style line is saved after it in the file, so a table is still a plain Markdown table anywhere else. An example in a cell is drawn in full when the cell says <code>expanded</code>, else as a chip that previews on hover.</p>
 
     <h3 id="wr-links">Links</h3>
     <div class="shots">
@@ -275,13 +275,24 @@
     <figure class="shot half"><img src="../media/guide/entry-card.webp" loading="lazy" alt="An entry card: the headword -mo, its morph type, category, senses with glosses and definitions, and the link into FLEx"><figcaption>A lexical entry as a card; its ⋯ chooses the fields and senses shown.</figcaption></figure>
     <p>An entry shows its headword, lexeme and citation forms, morph type, homograph number, category, and its senses with glosses, definitions, examples, sub-senses, notes and semantic domains; the ⋯ menu picks which. <span class="ui">▦ In charts</span> on the card shows which chart columns the lexeme sits in (<a href="#cs-profile">column profile</a>). An inline entry is a chip with the headword.</p>
 
+    <h3 id="ex-copy">Copy an example: into a note, Word, PowerPoint, LingTeX Word</h3>
+    <p>Every example, entry and chart has <span class="ui">⎘ Copy</span> in its heading, with a <span class="ui">▾</span> beside it for the other ways to copy (the same list is in its ⋯ menu):</p>
+    <table class="ref wrap">
+      <tr><th>Choice</th><th>What lands on the clipboard</th><th>Paste it into</th></tr>
+      <tr><td><b>⎘ Copy</b></td><td>Two things at once, and each program takes the one it reads: the example's reference with FLEx's rows under it, and a formatted copy (a table per line with the words across and their lines under them, the free translation in ‘quotes’, the text's abbreviation and line numbers as a link into FLEx).</td><td>A note (it becomes this example again), Word, PowerPoint, Excel, an email, a web page.</td></tr>
+      <tr><td><b>Copy for LingTeX Word</b></td><td>FLEx's own rows, tab-separated, exactly as FieldWorks copies them from its interlinear view: the line number, then Word, Morphemes, Lex. Gloss, Word Gloss, Word Cat. (the lines the example shows) with a column per morpheme, and the free translation followed by its reference, <code>(DOG 1.1)</code>: the text's abbreviation (its title when it has none) and the FLEx line.</td><td>Word with <a href="https://github.com/rulingAnts/LingTeX-Tools">LingTeX Word</a>: its paste from FLEx makes a LingTeX example of each line. A spreadsheet takes the rows as columns, and a note finds the lines again.</td></tr>
+      <tr><td><b>Copy as HTML (for web, Word, PowerPoint, other)</b></td><td>Only the formatted copy.</td><td>Any program that keeps formatting.</td></tr>
+      <tr><td><b>Copy example source ({{flex}} code)</b></td><td>The reference alone, as it is written in the note's file.</td><td>A note, or the note file itself.</td></tr>
+    </table>
+    <p>A chart copies the same way; its tab-separated choice is <span class="ui">Copy as tab-separated rows (for a spreadsheet)</span> (the header rows, then a row per chart row), and a chart note's copy carries its custom columns. Selected lines or rows (<a href="#ex-live">below</a>) copy the same way from their bar, ⎘ Copy and ▾. A table's <span class="ui">Table ▾</span> has <span class="ui">⎘ Copy the table</span>, and copied cells carry the formatting too: its FLEx objects go to Word as links into FLEx, or in full where the cell shows them expanded.</p>
+
     <h3 id="ex-live">Live, refreshed, and staying on its lines</h3>
     <ul>
       <li><b>Live</b>: an example is read from the project when the note is shown. What FieldWorks saved after the project was opened shows after ↻ on the example (which re-reads the project from disk) or <span class="ui">Refresh all</span> on the toolbar.</li>
       <li><b>Snapshots</b>: every object fetched is also kept in the notebook, so the note still reads when FLEx is closed or the project is elsewhere; the example then says <em>snapshot</em>.</li>
       <li><b>It stays on its lines</b>: when you split, merge or delete lines in FLEx, the example keeps showing the lines it was made from and its highlights stay on the same words; it says what happened. A line that is gone is shown from the snapshot with a warning, never replaced by whatever line now has its number.</li>
       <li><b>Readable without the program</b>: the file also carries a plain-text copy of every object after it, with a link into FLEx (<a href="#files">Your notes are files</a>).</li>
-      <li><b>Copy some lines</b>: click a line's number (<kbd>Shift+click</kbd> for a range) and the bar that appears copies those lines as tab-separated rows with their own reference on the first line; pasted into another note they become a new example of just those lines, pasted into a sheet they are the rows.</li>
+      <li><b>Copy some lines</b>: click a line's number (<kbd>Shift+click</kbd> for a range) and the bar that appears copies those lines (⎘ Copy, or <kbd>Ctrl+C</kbd>; ▾ for the other ways, <a href="#ex-copy">above</a>): pasted into another note they become a new example of just those lines, into Word or PowerPoint a formatted example, into a sheet the rows.</li>
     </ul>
   </section>
 
@@ -384,7 +395,7 @@
       <li><b>Free translations</b>: a row after the last row holding a line's words (naming the rows it covers), a Free column, a tip for the clicked cell, or off. <b>Headings</b> on or off (for a continuation), the row <b>Notes</b> column on or off.</li>
       <li><b>Columns</b>: a box per column under its header group; <span class="ui">Hide empty columns</span> drops the ones with nothing in the rows shown; a heading's popover has <span class="ui">Hide this column</span>.</li>
       <li><b>Layout</b>, <b>Merged cells</b>, <b>Marker chips</b>, <b>Markers in cells with no words</b>, <b>Zoom</b>, <b>Line up on</b>: below.</li>
-      <li><b>Copy as TSV</b>, <b>Export as FLEx chart XML / JSON</b>, <b>Pivot</b>, <b>Change the chart…</b>, <b>Show these lines as an interlinear example</b>, <b>Open as a chart note…</b>, <b>Edit source</b>, <b>Duplicate</b>, <b>Remove</b>.</li>
+      <li><b>Copy</b>, <b>Copy as tab-separated rows</b>, <b>Copy as HTML</b>, <b>Copy chart source</b> (<a href="#ex-copy">Copy an example</a>), <b>Export as FLEx chart XML / JSON</b>, <b>Pivot</b>, <b>Change the chart…</b>, <b>Show these lines as an interlinear example</b>, <b>Open as a chart note…</b>, <b>Edit source</b>, <b>Duplicate</b>, <b>Remove</b>.</li>
     </ul>
 
     <h3 id="ch-style">Styling by click</h3>
@@ -424,14 +435,14 @@
 
     <h3 id="ch-rows">Copying rows, converting, pivoting</h3>
     <figure class="shot"><img src="../media/guide/chart-rows-selected.webp" loading="lazy" alt="Two rows of a chart selected by their labels, and the bar above the chart with the count, Copy and Clear"><figcaption><kbd>Ctrl+click</kbd> row labels to select rows; the bar copies them.</figcaption></figure>
-    <p><b>Copy rows</b>: <kbd>Ctrl+click</kbd> (or <kbd>Shift+click</kbd> for a range) on a row's label; the bar copies the rows as tab-separated text with the header rows and, on the first line, the rows' own reference, so pasting into another note makes a chart object of just those rows and pasting into a sheet gives the rows.</p>
+    <p><b>Copy rows</b>: <kbd>Ctrl+click</kbd> (or <kbd>Shift+click</kbd> for a range) on a row's label; the bar's ⎘ Copy (or <kbd>Ctrl+C</kbd>) copies them with the header rows: pasted into another note they make a chart object of just those rows, into Word or PowerPoint a formatted table, into a sheet the rows; ▾ has the other ways (<a href="#ex-copy">Copy an example</a>).</p>
     <div class="shots">
       <figure class="shot"><img src="../media/guide/chart-to-example.webp" loading="lazy" alt="The lines of the chart's rows shown as an interlinear example, with its menu open on Show these lines as a text chart"><figcaption>A chart as an example, and back.</figcaption></figure>
       <figure class="shot"><img src="../media/guide/chart-chooser.webp" loading="lazy" alt="The chart chooser: a text's charts with their templates and row counts"><figcaption>When a text has several charts, you choose.</figcaption></figure>
     </div>
     <p><b>Convert</b>: a chart's <span class="ui">Show these lines as an interlinear example</span> shows every line of the text its rows touch, first to last; an example's <span class="ui">Show these lines as a text chart…</span> shows the text's chart at every row holding words of those lines (asking which chart when the text has several). Both are inclusive; trim the range afterwards. <span class="ui">Change the chart…</span> retargets a chart object or a chart note to another chart.</p>
     <figure class="shot half"><img src="../media/guide/pivot.webp" loading="lazy" alt="The pivot dialog: a row per marker, clause type and moved text, a column per template column, each cell counting rows"><figcaption><span class="ui">Pivot: markers × columns…</span></figcaption></figure>
-    <p><b>Pivot</b>: a row per marker, clause type, moved text and clause marker, a column per visible template column, each cell counting the rows that carry the marker with words in that column; <span class="ui">Copy as TSV</span>.</p>
+    <p><b>Pivot</b>: a row per marker, clause type, moved text and clause marker, a column per visible template column, each cell counting the rows that carry the marker with words in that column; <span class="ui">⎘ Copy</span> (a table for Excel, Word or PowerPoint).</p>
 
     <h3 id="ch-join">Charts and examples, joined up</h3>
     <p>An interlinear example's ⋯ → <span class="ui">Chart columns</span> draws, like tags, which chart columns its words sit in (in all the text's charts), and the same <code>column:</code> rules style them. A chart's ⋯ → <span class="ui">FLEx tags</span> draws the text's markup tags as chips in its cells, in the look their scopes give them. An entry card's <span class="ui">▦ In charts</span> opens the column profile for its lexeme.</p>
@@ -516,7 +527,7 @@
       <tr><td>PowerPoint</td><td>A .pptx of the same slides: a title slide, a heading bar per slide, examples as tables, charts filling the slide; no audio (the slideshow carries it).</td></tr>
       <tr><td>FLEx text</td><td>A collection as a <code>.flextext</code> with its audio (<a href="#co-flextext">above</a>).</td></tr>
       <tr><td>Chart XML / JSON</td><td>One chart in FieldWorks' own discourse-chart XML shape (with identities added), or as data, from the chart's ⋯.</td></tr>
-      <tr><td>TSV</td><td>A whole example, table cells, a pivot, chosen lines of an example or rows of a chart: on the clipboard for a spreadsheet.</td></tr>
+      <tr><td>Copy</td><td>Not a file: an example, entry, chart, chosen lines or rows, a table or a pivot on the clipboard — formatted for Word, PowerPoint, Excel and web pages, the example itself for a note, FLEx's rows for LingTeX Word (<a href="#ex-copy">Copy an example</a>).</td></tr>
     </table>
     <div class="shots">
       <figure class="shot"><img src="../media/guide/export-web.webp" loading="lazy" alt="The exported web page: a header with the title, folder, project and date, then the note with its example and table"><figcaption>The web page export.</figcaption></figure>

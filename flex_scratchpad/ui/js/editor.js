@@ -1451,6 +1451,8 @@
       // tab-separated rows under it): the reference alone is the new example; the rows are for sheets
       const refRows = /^\s*(\{\{flex:(?:text|chart)\s[^}]*\}\})[ \t]*\n[\s\S]*\t/.exec(text);
       if (refRows) { insert(refRows[1], true); return; }
+      // cells copied out of one of this app's tables with FLEx objects in them: the table, never a locate
+      if (/\t/.test(text) && /\{\{\s*flex:/.test(text)) { const grid = FS.tables.fromTsv(text); if (grid) { const el2 = live(); if (document.activeElement !== el2) { el2.focus(); setCaret(el2, a, z); } this.insertBlockSourceAtCaret(el2, b, grid); return; } }
       if (this.opts.onPasteLink && (/^silfw:\/\//i.test(trimmed) || FS.flexref.GUID.test(trimmed))) {
         this.opts.onPasteLink(trimmed, insert);
         return;

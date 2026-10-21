@@ -489,8 +489,21 @@
     const extra = Object.assign({}, spec.extra || {});
     for (const k of ['ex', 'indent', 'collapsed', 'cw']) delete extra[k];
     const ref = { kind: 'chart', guid: spec.guid, seg: [a.n, b.n], at: a.guid && b.guid ? [FS.interlinear.anchor12(a.guid), FS.interlinear.anchor12(b.guid)] : null, lines: spec.lines, fields: null, senses: null, ws: spec.ws, styles: [], label: '', extra };
-    const sub = Object.assign({}, obj, { rows }, spec.extra && spec.extra.headers === 'off' ? {} : {});
-    return R.serialize(ref) + '\n' + chartTsv(Object.assign({}, spec, { extra: Object.assign({}, spec.extra || {}, { headers: undefined }) }), sub);
+    const sub = Object.assign({}, obj, { rows });
+    const withHeads = Object.assign({}, spec, { extra: Object.assign({}, spec.extra || {}, { headers: undefined }) });
+    return chartKit(withHeads, sub, null, R.serialize(ref));
+  }
+  /* What a chart (or a selection of its rows) copies as (interlinear.js textKit): the reference + the
+   * grid as text, the table as HTML (a chart note's custom columns too: opts.copyExtras), the grid
+   * alone for a spreadsheet, the reference alone. */
+  function chartKit(spec, obj, opts, source) {
+    source = source || R.serialize(spec);
+    const tsv = chartTsv(spec, flatten(obj, spec));
+    let html = '';
+    try { html = FS.exporter && FS.exporter.copyHtml ? FS.exporter.copyHtml(spec, obj, opts && opts.copyExtras ? opts.copyExtras() : null) : ''; } catch (e) { console.warn('copy as HTML:', e); }
+    return { what: 'chart', text: source + '\n' + tsv, html, tsv, source,
+      tsvLabel: 'Copy as tab-separated rows (for a spreadsheet)', tsvTitle: 'The header rows, then a row per chart row: its label, a cell per column, the free translation and notes',
+      sourceLabel: 'Copy chart source ({{flex}} code)' };
   }
 
   function renderChart(obj, spec, opts) {
@@ -559,7 +572,7 @@
     if (opts.editable && !opts.overlay && opts.duplicate) head.appendChild(el('button', { class: 'lnk', title: 'Duplicate this object', onclick: () => opts.duplicate() }, '⧉'));
     if (opts.editable && !opts.overlay && opts.remove) head.appendChild(el('button', { class: 'lnk danger', title: 'Remove this object…', onclick: async (e) => { if (await FS.confirmAt(e.currentTarget, 'Remove this chart from the note? (Undo brings it back.)', 'Remove')) { FS.interlinear.closeOverlay(); opts.remove(); } } }, '🗑'));
     if (!opts.context && spec.seg) head.appendChild(el('button', { class: 'lnk', title: 'See the whole chart', onclick: () => wholeChart(spec, obj) }, '⊡ Whole chart'));
-    if (!opts.inCell) head.appendChild(el('button', { class: 'lnk', title: 'Copy as a tab-separated grid (headers, rows, notes)', onclick: () => { FS.copyText(chartTsv(spec, obj)); FS.toast('Copied as TSV'); } }, '⎘ TSV'));
+    if (!opts.inCell) head.appendChild(FS.interlinear.copyButton(() => chartKit(spec, full, opts)));
     if (obj.url) head.appendChild(el('a', { href: obj.url, title: 'Open the text in FieldWorks (its Text Chart tab)', onclick: (e) => { e.preventDefault(); FS.interlinear.openInFlex(obj.url); } }, 'Open in FLEx ↗'));
     if (opts.editable && !opts.inCell) head.appendChild(el('button', { class: 'lnk', 'data-test': 'chart-view', title: flat ? 'Show the chart columns' : 'One column: each row in one cell, its words labelled with their columns', onclick: () => { spec.extra = spec.extra || {}; if (flat) delete spec.extra.view; else spec.extra.view = 'flat'; change(); } }, flat ? '▦ Columns' : '▤ One column'));
     if (opts.editable && !opts.inCell && !isGroups(spec) && ((full.template && full.template.columns) || []).some((c) => (c.path || []).length)) head.appendChild(el('button', { class: 'lnk', 'data-test': 'chart-view-groups', title: 'The header groups only: one cell per group, its columns’ words inside, labelled and styled by their own columns', onclick: () => { spec.extra = spec.extra || {}; spec.extra.view = 'groups'; change(); } }, '▥ Groups'));
@@ -1372,8 +1385,7 @@
       if (obj.url) pop.appendChild(el('button', { class: 'menu-item', onclick: () => { FS.copyText(obj.url); FS.toast('FLEx link copied'); close(); } }, 'Copy FLEx link'));
       pop.appendChild(el('button', { class: 'menu-item', 'data-test': 'chart-pivot', title: 'Counts of rows by marker (and clause type) and by column', onclick: () => { close(); pivotDialog(obj, spec); } }, 'Pivot: markers \u00d7 columns\u2026'));
       if (colWidths(spec).size) pop.appendChild(el('button', { class: 'menu-item', 'data-test': 'chart-reset-widths', onclick: () => { delete x.cw; change(); close(); } }, 'Reset column widths'));
-      pop.appendChild(el('button', { class: 'menu-item', onclick: () => { FS.copyText(chartTsv(spec, obj)); FS.toast('Copied as TSV'); close(); } }, 'Copy as TSV'));
-      pop.appendChild(el('button', { class: 'menu-item', onclick: () => { FS.copyText(R.serialize(spec)); FS.toast('Embed code copied'); close(); } }, 'Copy embed code'));
+      FS.interlinear.copyItems(pop, () => chartKit(spec, obj, opts), close);
       if (FS.api && FS.api.export_chart) {
         pop.appendChild(el('button', { class: 'menu-item', title: 'The shape FieldWorks itself exports (Texts & Words › Discourse Chart › Export), with GUIDs added', onclick: async () => { close(); try { const p = await FS.api.export_chart(obj.guid, 'xml', spec.seg || null); if (p) FS.toast('Saved ' + p); } catch (e) { FS.toast(e.message, 'error'); } } }, 'Export as FLEx chart XML…'));
         pop.appendChild(el('button', { class: 'menu-item', title: 'Every row, cell and word with its GUID', onclick: async () => { close(); try { const p = await FS.api.export_chart(obj.guid, 'json', spec.seg || null); if (p) FS.toast('Saved ' + p); } catch (e) { FS.toast(e.message, 'error'); } } }, 'Export as JSON…'));
@@ -1413,7 +1425,7 @@
   /* ------------------------------------------------------------------ plain text */
   /* The chart as a tab-separated grid: the header rows, then per row its label, one cell per
    * visible column (words space-separated; markers as ‹‹1b, [2a], ⟨Top⟩), the free translation
-   * and the notes. What "Copy as TSV" and the readable copy in the file (flexcopy.js) use. */
+   * and the notes. What ⎘ Copy's text (and "Copy as tab-separated rows") and the readable copy in the file (flexcopy.js) use. */
   function chartGrid(spec, obj) {
     obj = flatten(obj, spec);
     const cols = visibleColumns(spec, obj);
@@ -1484,7 +1496,7 @@
     tbl.appendChild(el('tr', { class: 'totals' }, el('th', {}, 'rows with words'), ...p.totals.map((n) => el('td', { class: 'n' }, String(n))), el('td', { class: 'n total' }, String(p.rowCount))));
     const tsv = [['', ...p.columns, 'rows'].join('\t')].concat(p.lines.map((l) => [l.label, ...l.counts, l.total].join('\t'))).concat([['rows with words', ...p.totals, p.rowCount].join('\t')]).join('\n') + '\n';
     m.body.append(el('p', { class: 'muted small' }, 'Each cell counts the rows of this chart (the range shown) that carry the marker and have words in the column; the last column counts the rows with the marker.'), tbl,
-      el('div', { class: 'btn-row' }, el('button', { class: 'btn', 'data-test': 'pivot-copy', onclick: () => { FS.copyText(tsv); FS.toast('Copied as TSV'); } }, 'Copy as TSV'), el('button', { class: 'btn primary', onclick: () => m.close() }, 'Done')));
+      el('div', { class: 'btn-row' }, el('button', { class: 'btn', 'data-test': 'pivot-copy', title: 'The table: pasted into Excel, Word or PowerPoint a table, into a plain editor tab-separated rows', onclick: () => { const rows = tsv.replace(/\n$/, '').split('\n').map((l) => l.split('\t')); FS.copyRich({ text: tsv, html: FS.tables.htmlOf(rows, true) }); FS.toast('Pivot copied — paste it into Excel, Word or PowerPoint', 'ok'); } }, '⎘ Copy'), el('button', { class: 'btn primary', onclick: () => m.close() }, 'Done')));
   }
 
   FS.chart = { renderChart, visibleColumns, selectedColumns, flatten, isFlat, isGroups, viewOf, alignedColumns, alignEdge, chipsMode, mergeMode, mergedNeighbour, partColumns, mergedLook, zoomOf, setZoom, playGroups, columnLook, pseudoLook, markerShown, headerRows, layoutRow, rowSegs, freeRuns, lineStarts, colWidths, setColWidths, freeText, chartGrid, chartTsv, markerLook, pivot, pivotDialog, LINE_NAMES, FREE_NAMES };

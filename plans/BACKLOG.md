@@ -14,8 +14,9 @@ the source either way.
 
 ## Copy an example as FLEx TSV or langsci-gb4e LaTeX (Seth, 2026-10-12)
 
-**FLEx TSV: done 2026-10-13** (⋯ → Copy as FLEx TSV, the ⎘ TSV button on the header and the
-overlay; `interlinear.flexTsv`; what it writes is what `locate()` reads). LaTeX remains.
+**FLEx TSV: done 2026-10-13; since 2026-10-20 ⎘ Copy ▾ (CLAUDE.md › COPY): one Copy writing the
+reference + FLEx's rows and HTML, "Copy for LingTeX Word" (FLEx's own shape with a citation), "Copy as HTML".**
+LaTeX and XLingPaper remain.
 
 > *"I'd also like to be able to copy FLEx TSV or langsci-gb4e latex from a flex object without
 > having to open FLEx. We'll have to fine tune how to work that exactly later. But I will want

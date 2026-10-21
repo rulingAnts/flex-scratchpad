@@ -629,3 +629,25 @@ def test_a_recording_in_a_lameta_project_remembers_the_project_folder(tmp_path):
     assert lameta_root(a) == proj
     loose = tmp_path / "elsewhere" / "x.wav"; loose.parent.mkdir(); loose.write_bytes(b"RIFF")
     assert lameta_root(loose) is None
+
+
+def test_locate_reads_our_own_copy_for_lingtex_word(tmp_path):
+    """Seth, 2026-10-20: the TSV copy is "Copy for LingTeX Word" — FLEx's own clipboard shape, which
+    LingTeX Word's paste reads: FLEx's number on a line of its own, one column per morpheme with the
+    word over its first one, punctuation against its word, `Free <text>` / `Lit. <text>` with a
+    space. Pasted back into the app it must land on the same lines."""
+    from flex_scratchpad.api import Api
+    from flex_scratchpad.config import AppConfig
+    api = Api(AppConfig(tmp_path / "cfg.json"), notebook_dir=tmp_path / "nb", demo=True)
+    pasted = ("1.1\n"
+              "Word\tKabir\tka-nuwa-mo\t\t\tlo.\n"
+              "Morphemes\tkabir\tka-\tnuwa\t-mo\tlo\n"
+              "Lex. Gloss\tdog\t3SG\tsleep\tPST\tDECL\n"
+              "Free The dog slept. (Story 1.1)\n"
+              "Lit. dog it-sleep-PST DECL\n"
+              "\n"
+              "1.2\n"
+              "Word\tHaŋa\ttiket\tka-sila-mo\t\t\tpemu.\n"
+              "Free (Story 1.2)\n")
+    hits = api._flex.locate(pasted)
+    assert hits and hits[0]["seg"] == 1 and hits[0]["segTo"] == 2 and hits[0]["matched"] == 2, hits

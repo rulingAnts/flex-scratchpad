@@ -734,6 +734,7 @@
         editable: true, keepView: !refresh, layout: false, collection: true,
         onSpecChange: (s) => { self.st.spec = s; self.st.view = R.serialize(s); self.changed(); self.drawChart(); },
         extraCols: this.extraCols(),
+        copyExtras: () => this.exportExtras(),     // ⎘ Copy carries the custom columns too
         rowDecor: (row) => self.rowDecor(row),
         onObject: (obj) => { self.obj = obj; self.drawHead(); },
         // "Change the chart…" in the ⋯ menu: the note's front matter, then the view embed (retarget → onSpecChange)

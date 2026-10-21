@@ -423,7 +423,7 @@ class FlexService:
     # vernacular (kept for matching) or something else (dropped).
     _ROW_KEEP = ("word", "free", "baseline", "words")
     _ROW_DROP = ("morphemes", "lex. entries", "lex entries", "lex. gloss", "lex gloss", "lex. gram. info",
-                 "word gloss", "word cat.", "word cat", "literal", "note", "notes", "gloss", "category")
+                 "word gloss", "word cat.", "word cat", "literal", "lit.", "note", "notes", "gloss", "category")
 
     def locate(self, pasted: str, limit: int = 5) -> list[dict]:
         """Where in the project do these pasted interlinear lines come from? Matched against
@@ -543,6 +543,7 @@ class FlexService:
         # bidi format marks (U+200E/F and friends) ride along in FLEx's clipboard text
         pasted = "".join(c for c in (pasted or "") if _ud.category(c) != "Cf")
         ws_codes = self._paste_ws_codes(pasted)
+        pending_num = ""             # FLEx's number on a line of its own ("12.3"): it names the next row's segment
         for raw in pasted.replace("\r\n", "\n").split("\n"):
             line = raw.strip()
             if not line:
@@ -550,6 +551,10 @@ class FlexService:
             cells = [c.strip() for c in line.split("\t")]
             while cells and not cells[0]:          # a row whose number cell is empty
                 cells = cells[1:]
+            if len(cells) == 1 and re.fullmatch(r"\d+(\.\d+)?", cells[0]):
+                pending_num = cells[0]
+                continue
+            given_num, pending_num = pending_num, ""
             # FLEx's Gloss / Print views lead each block with the segment number ("4.1") — as
             # its own cell or glued to the label ("4.1 Word") — and end the Word row with the
             # paragraph mark "§"; neither is text to match (Seth, 2026-10-13: a pasted range
@@ -561,6 +566,8 @@ class FlexService:
                 m = re.match(r"^(\d+(?:\.\d+)?)\s+(\S.*)$", cells[0])
                 if m and len(cells) > 1:
                     row_label, cells[0], numbered = m.group(1), m.group(2), True
+            if given_num and not numbered:
+                row_label, numbered = given_num, True
             # a label followed by a space instead of a tab ("Free she caught it.")
             if len(cells) == 1:
                 labels = sorted(self._ROW_KEEP + self._ROW_DROP, key=len, reverse=True)   # "word gloss" before "word"
@@ -609,6 +616,10 @@ class FlexService:
             if len(text) > 400:
                 return [], norm
             if is_free:
+                # the reference our "Copy for LingTeX Word" puts after a translation: "… (KAB 1.1)"
+                text = re.sub(r"\s*\([^()]*\d+(?:\.\d+)?(?:\s*[-\u2013]\s*\d+(?:\.\d+)?)?\)\s*$", "", text)
+                if not text.strip():
+                    continue
                 if cur is not None and not cur["free"] and not numbered:
                     cur["free"] = norm(text)
                 else:
@@ -1159,7 +1170,7 @@ class FlexService:
                 "needsCapture": bool(found and not clip),
             }
 
-    def export_clips(self, items: list[dict], progress=None) -> list[dict]:
+    def export_clips(self, items: list[dict], progress=None, fmt: str = "web") -> list[dict]:
         """The recordings an HTML export embeds (Seth, 2026-10-18: "audio players and base64
         embedded audio where audio files and segmentation data are available and match"): per
         item {id, text, media?, begin, end} — ONE clip per example or chart, its first timed line's
@@ -1174,8 +1185,10 @@ class FlexService:
         "froze the UI until the export is done"): pywebview parses every call's arguments and pushes
         every answer into the page on the WINDOW's thread, so megabytes of base64 there stopped the
         window. Api.export_clips hands the page a token per clip and Api.export_note_html writes the
-        recording into the file itself. `progress(done, total, text)` is called before each clip."""
-        from .audio import encode_for_embed, find_ffmpeg
+        recording into the file itself. `progress(done, total, text)` is called before each clip.
+        `fmt="office"`: a clip PowerPoint plays (audio.encode_for_office: .m4a, .mp3 or .wav)."""
+        from .audio import encode_for_embed, encode_for_office, find_ffmpeg
+        office = fmt == "office"
         exe = find_ffmpeg(self.nb.config.get("settings", {}).get("ffmpegPath", ""))
         out = []
         todo = list(items or [])
@@ -1196,8 +1209,8 @@ class FlexService:
                 if not src:
                     out.append({"id": rid, "error": "The recording is not available on this computer." if not info.get("found") else "This recording cannot be cut here (a non-WAV file needs ffmpeg)."})
                     continue
-                stem = self.cache.audio_clip_path(self.project_name, it["text"], begin, end, ".export")
-                enc = encode_for_embed(src, stem, exe)
+                stem = self.cache.audio_clip_path(self.project_name, it["text"], begin, end, ".office" if office else ".export")
+                enc = (encode_for_office if office else encode_for_embed)(src, stem, exe)
                 if not enc:
                     out.append({"id": rid, "error": "The clip could not be encoded."})
                     continue

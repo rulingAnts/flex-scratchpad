@@ -381,7 +381,7 @@
     if (opts.editable && !opts.overlay && opts.duplicate) head.appendChild(el('button', { class: 'lnk', title: 'Duplicate this object', onclick: () => opts.duplicate() }, '⧉'));
     if (opts.editable && !opts.overlay && opts.remove) head.appendChild(el('button', { class: 'lnk danger', title: 'Remove this object…', onclick: (e) => removeObject(e.currentTarget, spec, opts) }, '🗑'));
     if (!opts.context) head.appendChild(el('button', { class: 'lnk', title: 'See this example in its context: the whole text, scrolled to it', onclick: () => openContext(spec, obj) }, '⊡ Context'));
-    if (!opts.inCell) head.appendChild(el('button', { class: 'lnk', title: 'Copy as FLEx TSV (the rows FLEx itself copies)', onclick: () => { FS.copyText(flexTsv(spec, obj)); FS.toast('Copied as FLEx TSV'); } }, '⎘ TSV'));
+    if (!opts.inCell) head.appendChild(copyButton(() => textKit(spec, obj)));
     if (obj.url) head.appendChild(el('a', { href: obj.url, title: 'Open in FieldWorks', onclick: (e) => { e.preventDefault(); openInFlex(obj.url); } }, 'Open in FLEx ↗'));
     if (opts.editable) head.appendChild(el('button', { class: 'lnk', title: 'Options', onclick: (e) => embedMenu(e.currentTarget, spec, opts, obj) }, '⋯'));
     box.appendChild(head);
@@ -533,7 +533,8 @@
     const segs = (obj.segments || []).filter((s) => ns.includes(s.n));
     const a = segs[0], b = segs[segs.length - 1];
     const ref = { kind: 'text', guid: spec.guid, seg: [a.n, b.n], at: a.guid && b.guid ? [anchor12(a.guid), anchor12(b.guid)] : null, lines: spec.lines, fields: null, senses: null, ws: spec.ws, styles: [], label: '', extra: {} };
-    return R.serialize(ref) + '\n' + flexTsv(spec, Object.assign({}, obj, { segments: segs }));
+    const sub = Object.assign({}, obj, { segments: segs });
+    return textKit(spec, sub, R.serialize(ref));
   }
   /* The bar above the first line / row: "N selected · Copy · Clear"; shared by examples and charts. */
   function selectionBar(box, before, selected, copyText, unit, clear) {
@@ -541,11 +542,13 @@
     const sel = selected();
     if (!sel.length) { if (bar) bar.remove(); if (R.lastSel && R.lastSel.box === box) R.lastSel = null; return; }
     if (!bar) { bar = el('div', { class: 'sel-bar', 'data-test': 'sel-bar' }); box.insertBefore(bar, before && before.parentElement === box ? before : null); }
-    const copy = () => { const s = selected(); if (!s.length) return; FS.copyText(copyText(s)); FS.toast(s.length + ' ' + unit + (s.length === 1 ? '' : 's') + ' copied — paste into a note for a new example of ' + (s.length === 1 ? 'it' : 'them') + ', or into a sheet', 'ok'); };
+    const kitOf = () => { const s = selected(); if (!s.length) return null; const k = copyText(s); return typeof k === 'string' ? { text: k, source: k } : k; };
+    const copy = () => { const k = kitOf(); if (!k) return; const s = selected(); doCopy(k, 'all', s.length + ' ' + unit + (s.length === 1 ? '' : 's') + ' copied — pasted into a note, a new example of ' + (s.length === 1 ? 'it' : 'them') + '; into Word, PowerPoint or a web page, formatted'); };
     const gap = sel.length !== sel[sel.length - 1] - sel[0] + 1;
     bar.innerHTML = '';
     bar.append(el('b', { 'data-test': 'sel-count' }, sel.length + ' ' + unit + (sel.length === 1 ? '' : 's') + ' selected'),
-      el('button', { class: 'btn small', 'data-test': 'sel-copy', title: 'Copy the selected ' + unit + 's: their reference and FLEx’s tab-separated rows (Ctrl+C)', onclick: copy }, '⎘ Copy'),
+      el('span', { class: 'copy-split' }, el('button', { class: 'btn small', 'data-test': 'sel-copy', title: 'Copy the selected ' + unit + 's (Ctrl+C): pasted into a note they are a new example; into Word, PowerPoint, Excel or a web page, a formatted table', onclick: copy }, '⎘ Copy'),
+        el('button', { class: 'btn small copy-more', 'data-test': 'sel-copy-more', title: 'More ways to copy them', onclick: (e) => { const k = kitOf(); if (k) copyMenu(e.currentTarget, () => k); } }, '▾')),
       el('span', { class: 'muted small' }, gap ? 'Pasted into a note they become one example of the whole range ' + sel[0] + '–' + sel[sel.length - 1] : 'Paste into a note for a new example, or into a sheet'),
       el('button', { class: 'lnk', 'data-test': 'sel-clear', onclick: () => { clear(); selectionBar(box, before, selected, copyText, unit, clear); } }, 'Clear'));
     R.lastSel = { box, copy };
@@ -1041,8 +1044,8 @@
       }
       if (obj && obj.url) pop.appendChild(el('button', { class: 'menu-item', onclick: () => { FS.copyText(obj.url); FS.toast('FLEx link copied'); close(); } }, 'Copy FLEx link'));
       if (spec.kind === 'text') pop.appendChild(el('button', { class: 'menu-item', onclick: () => { close(); openContext(spec, obj); } }, 'View in context (whole text)'));
-      if (spec.kind === 'text' && obj && obj.kind === 'text') pop.appendChild(el('button', { class: 'menu-item', title: 'The rows FLEx itself puts on the clipboard (Word / Morphemes / Lex. Gloss / Free …), one block per segment, the lines this example shows', onclick: () => { FS.copyText(flexTsv(spec, obj)); FS.toast('Copied as FLEx TSV'); close(); } }, 'Copy as FLEx TSV'));
-      pop.appendChild(el('button', { class: 'menu-item', onclick: () => { FS.copyText(R.serialize(spec)); FS.toast('Embed code copied'); close(); } }, 'Copy embed code'));
+      if (obj && (obj.kind === 'text' || obj.kind === 'entry' || obj.kind === 'wordform')) copyItems(pop, () => (obj.kind === 'text' ? textKit(spec, obj) : entryKit(spec, obj)), close);
+      else pop.appendChild(el('button', { class: 'menu-item', 'data-test': 'copy-source', onclick: () => { FS.copyText(R.serialize(spec)); FS.toast('Source copied'); close(); } }, 'Copy source ({{flex}} code)'));
       if (spec.kind === 'text' && obj && obj.kind === 'text' && opts.onSpecChange && FS.chart) pop.appendChild(el('button', { class: 'menu-item', 'data-test': 'to-chart', title: 'The text chart of this text, at every row that holds words of these lines, first to last (the rows are yours to adjust afterwards)', onclick: () => { close(); toChart(spec, obj, opts); } }, 'Show these lines as a text chart…'));
       if (opts.editSource) pop.appendChild(el('button', { class: 'menu-item', onclick: () => { close(); opts.editSource(); } }, 'Edit source'));
       if (opts.duplicate || opts.remove) pop.appendChild(el('hr'));
@@ -1050,37 +1053,137 @@
       if (opts.remove) pop.appendChild(el('button', { class: 'menu-item danger', onclick: () => { close(); removeObject(anchor, spec, opts); } }, 'Remove this object…'));
     });
   }
+  /* ⎘ COPY (Seth, 2026-10-20: "Change our 'Copy TSV' to a dropdown 'Copy...' … Or maybe just
+   * 'Copy...' that copies both, where our app spots and grabs the TSV first, but Word and others
+   * would spot and grab the HTML first"; "make sure the TSV option is clear as 'Copy for LingTeX
+   * Word'"). A KIT is what one object (or a selection of its lines / rows) copies as:
+   *   text    the reference ({{flex:…}}) and the rows under it — what this app pastes (a new example)
+   *   html    the formatted copy (export.js copyHtml) — what Word, PowerPoint, Excel, web pages paste
+   *   tsv     the rows alone: for an example FLEx's own clipboard shape, what LingTeX Word reads
+   *   source  the reference alone
+   * ⎘ Copy writes `text` + `html` at once (FS.copyRich); its ▾ offers each on its own. */
+  function textKit(spec, obj, source) {
+    source = source || R.serialize(spec);
+    const tsv = flexTsv(spec, obj, { cite: true });
+    let html = '';
+    try { html = FS.exporter && FS.exporter.copyHtml ? FS.exporter.copyHtml(spec, obj) : ''; } catch (e) { console.warn('copy as HTML:', e); }
+    return { what: 'example', text: source + '\n' + tsv, html, tsv, source,
+      tsvLabel: 'Copy for LingTeX Word', tsvTitle: 'FLEx’s own rows (Word, Morphemes, Lex. Gloss … and Free), tab-separated, a column per morpheme — what LingTeX Word’s paste from FLEx reads — each free translation followed by its reference, (KAB 1.1): the text’s abbreviation, or its title, and the FLEx line; a spreadsheet takes the rows as columns',
+      sourceLabel: 'Copy example source ({{flex}} code)' };
+  }
+  function entryKit(spec, obj) {
+    const source = R.serialize(spec);
+    let html = '', plain = '';
+    try {
+      const b = FS.exporter && FS.exporter.blockOf ? FS.exporter.blockOf(spec, obj) : null;
+      if (b) {
+        html = '<div data-fs-copy="1">' + FS.exporter.clipHtml(b) + '</div>';
+        plain = b.type === 'entry' ? [(b.headword || '') + (b.pos ? ' (' + b.pos + ')' : '')].concat((b.senses || []).map((x) => '  ' + (x.number ? x.number + ' ' : '') + (x.gloss || x.definition || ''))).join('\n') : (b.form || '') + ' ' + (b.glosses || []).join('; ');
+      }
+    } catch (e) { console.warn('copy as HTML:', e); }
+    return { what: obj.kind === 'wordform' ? 'wordform' : 'entry', text: source + (plain ? '\n' + plain : ''), html, tsv: '', source, sourceLabel: 'Copy entry source ({{flex}} code)' };
+  }
+  const COPY_TOAST = {
+    all: 'Copied — pasted into a note it is this example again; into Word, PowerPoint, Excel or a web page, a formatted copy',
+    tsv: 'Copied FLEx’s rows — in Word, LingTeX’s paste from FLEx turns them into an example',
+    html: 'Copied as HTML — paste into Word, PowerPoint, Excel, an email or a web page',
+    source: 'Copied the source — paste it into a note',
+  };
+  async function doCopy(kit, which, msg) {
+    if (which === 'all') await FS.copyRich({ text: kit.text, html: kit.html });
+    else if (which === 'html') await FS.copyRich({ text: kit.text, html: kit.html, htmlOnly: true });
+    else await FS.copyText(which === 'tsv' ? kit.tsv : kit.source);
+    FS.toast(msg || (which === 'all' && kit.what !== 'example' ? COPY_TOAST.all.replace('this example', 'this ' + kit.what) : which === 'tsv' && kit.what === 'chart' ? 'Copied the rows, tab-separated — paste into a spreadsheet' : COPY_TOAST[which]), 'ok');
+  }
+  function copyItems(pop, kitFn, close) {
+    const item = (label, title, test, which) => pop.appendChild(el('button', { class: 'menu-item', 'data-test': test, title, onclick: () => { const k = kitFn(); close(); doCopy(k, which); } }, label));
+    const k = kitFn();
+    item('Copy', 'Pasted into a note: this ' + k.what + ' again. Into Word, PowerPoint, Excel or a web page: a formatted copy. (Both at once: each program takes the one it reads.)', 'copy-all', 'all');
+    if (k.tsv) item(k.tsvLabel, k.tsvTitle || '', 'copy-tsv', 'tsv');
+    if (k.html) item('Copy as HTML (for web, Word, PowerPoint, other)', 'Only the formatted copy: tables Word, PowerPoint, Excel and web pages keep as they look', 'copy-html', 'html');
+    item(k.sourceLabel || 'Copy source ({{flex}} code)', 'The {{flex …}} code alone, as it is written in the note file', 'copy-source', 'source');
+  }
+  function copyMenu(anchor, kitFn) {
+    FS.popover(anchor, (pop, close) => copyItems(pop, kitFn, close));
+  }
+  /* ⎘ Copy │ ▾ — the split button in an object's head. */
+  function copyButton(kitFn) {
+    return el('span', { class: 'copy-split' },
+      el('button', { class: 'lnk', 'data-test': 'copy-btn', title: 'Copy: pasted into a note, this object again; into Word, PowerPoint, Excel or a web page, a formatted copy (▾ for the other ways)', onclick: () => doCopy(kitFn(), 'all') }, '⎘ Copy'),
+      el('button', { class: 'lnk copy-more', 'data-test': 'copy-more', title: 'More ways to copy: for LingTeX Word, as HTML only, the source', onclick: (e) => copyMenu(e.currentTarget, kitFn) }, '▾'));
+  }
+
   /* The example as FLEx copies it from its interlinear view (Seth, 2026-10-13: "As FLEx TSV.
-   * Just like if I copied it directly from FLEx"): per segment one row per interlinear line,
-   * FLEx's row label first, one cell per word (a word's morphemes space-separated in its
-   * cell, punctuation as its own cell on the Word row), the free translation as a Free row;
-   * segments separated by a blank line. Only the lines this example shows, in its order. */
-  const TSV_LABELS = { txt: 'Word', morph: 'Morphemes', cf: 'Lex. Entries', mgls: 'Lex. Gloss', gls: 'Word Gloss', pos: 'Word Cat.', ft: 'Free', lit: 'Literal', note: 'Note' };
-  function flexTsv(spec, obj) {
+   * Just like if I copied it directly from FLEx") — which is also what LingTeX Word's "paste from
+   * FLEx" reads (Seth, 2026-10-20: the copy "should be clear as 'Copy for LingTeX Word'"; its
+   * modFlexParse.bas and PROMPT.md are the spec): per segment FLEx's number on a line of its own,
+   * then one row per interlinear line, the row label first, ONE COLUMN PER MORPHEME — the word, its
+   * gloss and category over the first of its morphemes' columns, the morphemes wearing their break
+   * characters (`ka-`, `-mo`, `=lo`; LingTeX groups them into words by those), their glosses without
+   * them (it puts them back), punctuation tucked against its word (an opening mark against the next)
+   * — then `Free <text>`, `Lit. <text>`, `Note <text>` (a space, not a tab: LingTeX reads a tabbed
+   * Free as an interlinear row). Segments are separated by a blank line. Only the lines this example
+   * shows, in its order. The locator reads it back (FlexService._paste_queries).
+   * THE CITATION (opts.cite; Seth, 2026-10-20: "as close as possible to a standard citation/reference
+   * to the Text in FLEx/corpus (abbreviation if present + line number(s), title if no abbrev + line
+   * number(s))"): LingTeX Word parses FLEx's number but never prints it, and every Free / Lit. / Note
+   * line becomes a quoted translation paragraph, so the reference rides at the end of the segment's
+   * free translation — `Free The dog slept. (KAB 1.1)` — one per segment, since each block is an
+   * example of its own there (its line); with no translation shown, a `Free (KAB 1.1)` line. */
+  const TSV_LABELS = { txt: 'Word', morph: 'Morphemes', cf: 'Lex. Entries', mgls: 'Lex. Gloss', gls: 'Word Gloss', pos: 'Word Cat.', ft: 'Free', lit: 'Lit.', note: 'Note' };
+  const BREAKS = '-=~<>';
+  const OPENER = /^[\p{Ps}\p{Pi}\u00bf\u00a1]/u;
+  function bareGloss(g, form) {
+    let t = String(g || '');
+    const f = String(form || '');
+    if (t.length > 1 && BREAKS.includes(t[0]) && f && BREAKS.includes(f[0])) t = t.slice(1);
+    if (t.length > 1 && BREAKS.includes(t[t.length - 1]) && f && BREAKS.includes(f[f.length - 1])) t = t.slice(0, -1);
+    return t;
+  }
+  function flexTsv(spec, obj, opts) {
     const lines = spec.lines && spec.lines.length ? spec.lines : R.DEFAULT_LINES;
-    const cell = (v) => String(v == null ? '' : v).replace(/[\t\r\n]+/g, ' ');
+    const citeName = opts && opts.cite ? String(obj.abbrev || obj.title || '').trim() : '';
+    const cell = (v) => String(v == null ? '' : v).replace(/[\t\r\n]+/g, ' ').trim();
+    const text = (v) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim();
     const out = [];
     for (const seg of (obj.segments || []).filter((x) => !blankSeg(x))) {
-      const words = seg.words || [];
-      const block = [];
+      // the words, each with the punctuation that belongs against it
+      const words = [];
+      let lead = '';
+      for (const w of seg.words || []) {
+        if (w.punct) {
+          const p = w.txt || '';
+          if (!words.length || OPENER.test(p)) lead += p; else words[words.length - 1].after += p;
+          continue;
+        }
+        words.push({ w, before: lead, after: '' });
+        lead = '';
+      }
+      if (lead) { if (words.length) words[words.length - 1].after += lead; else words.push({ w: { txt: '' }, before: lead, after: '' }); }
+      const spread = (first, n) => [first].concat(Array(n - 1).fill(''));
+      const block = [String(seg.label || seg.n)];
       for (const line of lines) {
         if (line === 'ft' || line === 'lit' || line === 'note') continue;
-        const cells = words.map((w) => {
-          if (w.punct) return line === 'txt' ? w.txt : '';
-          if (line === 'txt') return w.txt || '';
-          if (line === 'morph') return (w.morphs || []).map((m) => m.form || '').join(' ');
-          if (line === 'mgls') return (w.morphs || []).map((m) => m.gls || '').join(' ');
-          if (line === 'cf') return (w.morphs || []).map((m) => m.cf || '').join(' ');
-          if (line === 'gls') return w.gls || '';
-          if (line === 'pos') return w.pos || '';
-          return '';
-        });
+        const cells = [];
+        for (const { w, before, after } of words) {
+          const ms = w.morphs || [];
+          const n = Math.max(1, ms.length);
+          if (line === 'txt') cells.push(...spread(before + (w.txt || '') + after, n));
+          else if (line === 'morph') cells.push(...(ms.length ? ms.map((m) => m.form || '') : [w.txt || '']));
+          else if (line === 'mgls') cells.push(...(ms.length ? ms.map((m) => bareGloss(m.gls, m.form)) : ['']));
+          else if (line === 'cf') cells.push(...(ms.length ? ms.map((m) => m.cf || '') : ['']));
+          else if (line === 'gls') cells.push(...spread(w.gls || '', n));
+          else if (line === 'pos') cells.push(...spread(w.pos || '', n));
+          else cells.push(...spread('', n));
+        }
         if (line !== 'txt' && !cells.some((c) => c)) continue;
         block.push([TSV_LABELS[line] || line, ...cells.map(cell)].join('\t'));
       }
-      if (lines.includes('ft') && seg.free) block.push('Free\t' + cell(seg.free));
-      if (lines.includes('lit') && seg.lit) block.push('Literal\t' + cell(seg.lit));
-      if (lines.includes('note')) for (const n of seg.notes || []) block.push('Note\t' + cell(n));
+      const cite = citeName ? '(' + citeName + ' ' + (seg.label || seg.n) + ')' : '';
+      if (lines.includes('ft') && seg.free) block.push('Free ' + text(seg.free) + (cite ? ' ' + cite : ''));
+      else if (cite) block.push('Free ' + cite);
+      if (lines.includes('lit') && seg.lit) block.push('Lit. ' + text(seg.lit));
+      if (lines.includes('note')) for (const n of seg.notes || []) if (text(n)) block.push('Note ' + text(n));
       out.push(block.join('\n'));
     }
     return out.join('\n\n') + '\n';
@@ -1113,6 +1216,7 @@
     if (opts.editable && opts.inCell && opts.editCell && !opts.overlay) head.appendChild(el('button', { class: 'lnk', title: 'Edit the cell\u2019s text', onclick: () => opts.editCell() }, '✎'));
     if (opts.editable && !opts.overlay && opts.duplicate) head.appendChild(el('button', { class: 'lnk', title: 'Duplicate this object', onclick: () => opts.duplicate() }, '⧉'));
     if (opts.editable && !opts.overlay && opts.remove) head.appendChild(el('button', { class: 'lnk danger', title: 'Remove this object…', onclick: (e) => removeObject(e.currentTarget, spec, opts) }, '🗑'));
+    if (!opts.inCell && !opts.overlay) head.appendChild(copyButton(() => entryKit(spec, obj)));
     if (obj.url) head.appendChild(el('a', { href: obj.url, onclick: (e) => { e.preventDefault(); openInFlex(obj.url); } }, 'Open in FLEx ↗'));
     if (opts.editable) head.appendChild(el('button', { class: 'lnk', title: 'Options', onclick: (e) => embedMenu(e.currentTarget, spec, opts, obj) }, '⋯'));
     box.appendChild(head);
@@ -1187,7 +1291,7 @@
         el('span', { class: 'ctx-mark' }), el('span', {}, 'This example: ' + label + ' of ' + segs.length),
         el('span', { class: 'spacer' }),
         rows.length ? el('button', { class: 'lnk', onclick: back }, '⌖ Back to the example') : null,
-        el('button', { class: 'lnk', title: 'Copy the whole text as FLEx TSV', onclick: () => { FS.copyText(flexTsv(full, text)); FS.toast('Copied as FLEx TSV'); } }, '⎘ TSV'),
+        copyButton(() => textKit(full, text)),
         text.url ? el('a', { href: text.url, onclick: (e) => { e.preventDefault(); openInFlex(text.url); } }, 'Open in FLEx ↗') : null);
       m.body.append(bar, host);
       if (rows[0]) requestAnimationFrame(() => rows[0].scrollIntoView({ block: 'center' }));
@@ -1326,7 +1430,7 @@
       opts.editable && opts.editCell ? el('button', { class: 'lnk', title: 'Edit the cell\u2019s text (type before or after this example, add another)', onclick: () => { closeOverlay(); opts.editCell(); } }, '✎ Edit cell') : null,
       opts.editable && opts.editInline ? el('button', { class: 'lnk', title: 'Show the embed code in the text so it can be edited', onclick: () => { closeOverlay(); opts.editInline(); } }, '✎ Edit code') : null,
       spec.kind === 'text' ? el('button', { class: 'lnk', title: 'See this example in its context: the whole text, scrolled to it', onclick: () => { closeOverlay(); openContext(spec, inner._obj || null); } }, '⊡ Context') : null,
-      spec.kind === 'text' ? el('button', { class: 'lnk', title: 'Copy as FLEx TSV', onclick: () => { const o = inner._obj; if (o) { FS.copyText(flexTsv(spec, o)); FS.toast('Copied as FLEx TSV'); } } }, '⎘ TSV') : null,
+      spec.kind === 'text' ? el('button', { class: 'lnk', 'data-test': 'copy-btn', title: 'Copy this example: pasted into a note it is this example; into Word, PowerPoint, Excel or a web page, a formatted example (the ⋯ menu of the example has the other copies)', onclick: () => { const o = inner._obj; if (o) doCopy(textKit(spec, o), 'all'); } }, '⎘ Copy') : null,
       spec.kind === 'text' && FS.addToCollection ? el('button', { class: 'lnk', title: 'Add this example to an example collection (the note that exports as a FLEx text)', onclick: (e) => FS.addToCollection(e.currentTarget, FS.flexref.serialize(spec)) }, '\u2795 Collection') : null,
       opts.editable && opts.duplicate ? el('button', { class: 'lnk', title: 'Duplicate this object', onclick: () => { closeOverlay(); opts.duplicate(); } }, '⧉ Duplicate') : null,
       opts.editable && opts.remove ? el('button', { class: 'lnk danger', title: 'Remove this object…', onclick: (e) => removeObject(e.currentTarget, spec, opts) }, '🗑 Remove') : null,
@@ -1535,5 +1639,5 @@
   }
 
   R.lastSel = null;
-  FS.interlinear = { selectionBar, anchor12, dropTextSelection, playRange, audio, chipTitle, chipRange, blankSeg, peek, segTags, chartTags, withChartTags, nowPlaying, render, renderText, renderEntry, renderWordform, renderChip, hydrateInline, openContext, wholeText, openOverlay, closeOverlay, isCollapsed, setCollapsed, styled, styledParts, invalidate, flexGet, openInFlex, labelOf, numberFor, flexTsv, HL_COLORS };
+  FS.interlinear = { copyButton, copyMenu, copyItems, doCopy, textKit, entryKit, selectionBar, anchor12, dropTextSelection, playRange, audio, chipTitle, chipRange, blankSeg, peek, segTags, chartTags, withChartTags, nowPlaying, render, renderText, renderEntry, renderWordform, renderChip, hydrateInline, openContext, wholeText, openOverlay, closeOverlay, isCollapsed, setCollapsed, styled, styledParts, invalidate, flexGet, openInFlex, labelOf, numberFor, flexTsv, HL_COLORS };
 })();

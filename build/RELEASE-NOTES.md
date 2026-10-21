@@ -2,7 +2,11 @@
 
 FLEx Scratchpad is a notebook for FieldWorks: notes in tabs and folders that show live FLEx lexical entries and interlinear examples, read straight from your project (never written to). Highlight words in an example, put examples in tables, number them, collect them into an example collection and export that as a FLEx text.
 
-### New since 0.1.0-beta.2
+### New since 0.1.0
+
+- **⎘ Copy, for a note, Word, PowerPoint and LingTeX Word.** The *⎘ TSV* button is now *⎘ Copy* with a ▾ beside it. *⎘ Copy* puts both an example's reference and a formatted copy on the clipboard, so a note pastes the example again and Word, PowerPoint, Excel or a web page paste a formatted example (a table per line, the translation in quotes, the text's abbreviation and line numbers linked into FLEx). Under ▾: *Copy for LingTeX Word* (FLEx's own rows, a column per morpheme, each translation followed by its reference such as `(DOG 1.1)`), *Copy as HTML (for web, Word, PowerPoint, other)* and *Copy example source ({{flex}} code)*. Charts, entries, selected lines and rows, tables (*Table ▾ → ⎘ Copy the table*), copied cells and the pivot copy the same way.
+
+### New in 0.1.0 since 0.1.0-beta.2
 
 Everything below arrived in the pre-release 0.1.0-beta.3 or since.
 

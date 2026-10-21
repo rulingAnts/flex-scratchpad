@@ -252,6 +252,44 @@
     });
   };
 
+  /* Text AND a formatted copy at once (Seth, 2026-10-20: "just 'Copy...' that copies both, where our
+   * app spots and grabs the TSV first, but Word and others would spot and grab the HTML first"): the
+   * clipboard carries text/plain (an example's reference + FLEx's rows) and text/html (tables Word,
+   * PowerPoint, Excel and web pages paste as they look). The HTML is marked `data-fs-copy`, so this
+   * app's own paste ignores it (tables.js htmlGrid) and takes the text — the reference, a new example.
+   * A copy event set up around execCommand('copy') writes both in one go (no permission needed);
+   * navigator.clipboard.write with a ClipboardItem is the second way, the text alone the last. */
+  /* The text an HTML fragment reads as (cells tab-separated, rows and paragraphs on lines of their own). */
+  FS.htmlText = function (html) {
+    const host = FS.el('div', { style: { position: 'fixed', left: '-10000px', top: '0', whiteSpace: 'pre' } });
+    host.innerHTML = html;
+    document.body.appendChild(host);
+    const t = host.innerText;
+    host.remove();
+    return t.replace(/\n{3,}/g, '\n\n').trim() + '\n';
+  };
+  FS.copyRich = async function ({ text, html, htmlOnly }) {
+    if (!html) return FS.copyText(text);
+    const marked = html;                               // the caller marks an object's copy as ours (data-fs-copy); a plain table stays a table
+    if (htmlOnly) text = FS.htmlText(marked);         // "as HTML" alone: the plain text is what the HTML reads as
+    let wrote = false;
+    const onCopy = (e) => { e.preventDefault(); e.stopImmediatePropagation(); e.clipboardData.setData('text/plain', text); e.clipboardData.setData('text/html', marked); wrote = true; };
+    const sel = window.getSelection();
+    const ranges = sel ? Array.from({ length: sel.rangeCount }, (_, i) => sel.getRangeAt(i).cloneRange()) : [];
+    document.addEventListener('copy', onCopy, true);
+    try { document.execCommand('copy'); } catch (e) { /* fall through */ }
+    document.removeEventListener('copy', onCopy, true);
+    if (sel && ranges.length && sel.rangeCount !== ranges.length) { sel.removeAllRanges(); ranges.forEach((r) => sel.addRange(r)); }
+    if (wrote) return true;
+    try {
+      if (window.ClipboardItem && navigator.clipboard && navigator.clipboard.write) {
+        await navigator.clipboard.write([new ClipboardItem({ 'text/plain': new Blob([text], { type: 'text/plain' }), 'text/html': new Blob([marked], { type: 'text/html' }) })]);
+        return true;
+      }
+    } catch (e) { /* fall through */ }
+    return FS.copyText(text);
+  };
+
   FS.copyText = async function (text) {
     try { await navigator.clipboard.writeText(text); return true; } catch (e) { /* fall through */ }
     // the execCommand fallback (no clipboard permission: CI's Chromium, some WebView2 set-ups) has to

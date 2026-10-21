@@ -1157,7 +1157,7 @@ def test_copy_paste_rows_columns_and_cells(app):
     page.wait_for_timeout(100)
     r = clip_event(page, "copy", None)
     assert r["prevented"] and r["text"] == "new1\tv1\nnew2\tv2", r
-    assert "<td>new1</td>" in r["html"]
+    assert re.search(r"<td[^>]*>new1</td>", r["html"]) and "border:1px solid" in r["html"]   # bordered cells, for Word / Excel / PowerPoint
     page.keyboard.press("Delete")
     page.wait_for_timeout(900)
     assert "| new1 |" not in body_of(h) and "|  |  | x1 |" in body_of(h)
@@ -1727,7 +1727,13 @@ def test_outline_numbering_and_enter(app):
     assert not errors
 
 
-def test_copy_example_as_flex_tsv(app):
+def test_copy_example_for_lingtex_word_and_as_html(app):
+    """Seth, 2026-10-20: "Copy TSV" becomes ⎘ Copy ▾ — one Copy that writes both the text this app
+    reads (the example's reference + FLEx's rows) and HTML Word / PowerPoint / Excel read, and under
+    ▾ "Copy for LingTeX Word" (FLEx's own clipboard shape: the number on a line of its own, a column
+    per morpheme, punctuation against its word, `Free <text>`), "Copy as HTML (for web, Word,
+    PowerPoint, other)" and "Copy example source ({{flex}} code)". Our own paste of the rich copy
+    is the example again, never a table of its words."""
     h, page, errors = app
     new_note(page, "TSV")
     page.keyboard.type("{{flex:text %s seg=1-2 lines=txt,morph,mgls,gls,pos,ft}}" % T_STORY)
@@ -1737,20 +1743,77 @@ def test_copy_example_as_flex_tsv(app):
     blocks = tsv.strip().split("\n\n")
     assert len(blocks) == 2
     rows = blocks[0].split("\n")
-    assert rows[0] == "Word\tKabir\tka-nuwa-mo\tlo\t.", rows
-    assert rows[1] == "Morphemes\tkabir\tka- nuwa -mo\tlo\t", rows
-    assert rows[2] == "Lex. Gloss\tdog\t3SG- sleep -PST\tDECL\t", rows
+    assert rows[0] == "1.1", rows
+    assert rows[1] == "Word\tKabir\tka-nuwa-mo\t\t\tlo.", rows
+    assert rows[2] == "Morphemes\tkabir\tka-\tnuwa\t-mo\tlo", rows
+    assert rows[3] == "Lex. Gloss\tdog\t3SG\tsleep\tPST\tDECL", rows
     assert any(r.startswith("Word Gloss\t") for r in rows) and any(r.startswith("Word Cat.\t") for r in rows)
-    assert rows[-1] == "Free\tThe dog slept."
+    assert rows[-1] == "Free The dog slept."
     # the pasted rows find their way back: locate() resolves them to the same segments
     hits = h.api.flex_locate(tsv)
     assert hits and hits[0]["seg"] == 1 and hits[0]["segTo"] == 2, hits
-    # the menu and the header offer it
-    assert page.locator("#editor .text-obj .flex-head .lnk[title^='Copy as FLEx TSV']").count() == 1
+    # ⎘ Copy writes both: the reference + rows as text, the formatted example as HTML (marked as ours)
+    page.evaluate("""() => { window.__rich = null; window.__copied = null;
+      FS.copyRich = (x) => { window.__rich = x; return Promise.resolve(true); };
+      FS.copyText = (t) => { window.__copied = t; return Promise.resolve(true); }; }""")
+    page.locator("#editor .text-obj .flex-head [data-test=copy-btn]").click()
+    rich = page.evaluate("window.__rich")
+    assert rich["text"].startswith("{{flex:text %s seg=1-2" % T_STORY) and "\nWord\tKabir" in rich["text"] and "(DOG 1.1)" in rich["text"], rich["text"]
+    html = rich["html"]
+    assert 'data-fs-copy' in html and "<table" in html and "Kabir" in html and "\u2018The dog slept.\u2019" in html, html
+    assert "ka-nuwa-mo" in html and "3SG-sleep-PST" in html        # word-aligned, morphemes joined by their breaks
+    assert "DOG 1.1\u20131.2" in html                               # the source: the text's abbreviation and its FLEx lines
+    # ▾ lists the other ways; "Copy for LingTeX Word" is the TSV alone
+    page.locator("#editor .text-obj .flex-head [data-test=copy-more]").click()
+    page.wait_for_selector(".popover [data-test=copy-tsv]")
+    labels = page.locator(".popover .menu-item").all_inner_texts()
+    assert labels == ["Copy", "Copy for LingTeX Word", "Copy as HTML (for web, Word, PowerPoint, other)", "Copy example source ({{flex}} code)"], labels
+    page.locator(".popover [data-test=copy-tsv]").click()
+    lt = page.evaluate("window.__copied")
+    # the reference after each translation, as close to a corpus citation as LingTeX Word carries:
+    # the text's abbreviation (its title when it has none) and the FLEx line
+    assert lt.split("\n\n")[0].split("\n")[-1] == "Free The dog slept. (DOG 1.1)", lt
+    assert "(DOG 1.2)" in lt and lt.replace(" (DOG 1.1)", "").replace(" (DOG 1.2)", "") == tsv, lt
+    assert h.api.flex_locate(lt)[0]["seg"] == 1
+    no_abbrev = page.evaluate("""() => FS.interlinear.flexTsv({ lines: ['txt'] }, { title: 'The dog and the river',
+      segments: [{ n: 4, label: '2.1', words: [{ txt: 'Kabir' }] }] }, { cite: true })""")
+    assert no_abbrev.strip().split("\n")[-1] == "Free (The dog and the river 2.1)", no_abbrev
+    page.locator("#editor .text-obj .flex-head [data-test=copy-more]").click()
+    page.locator(".popover [data-test=copy-source]").click()
+    src = page.evaluate("window.__copied")
+    assert src.startswith("{{flex:text %s seg=1-2" % T_STORY) and src.endswith("lines=txt,morph,mgls,gls,pos,ft}}") and "\n" not in src, src
+    page.locator("#editor .text-obj .flex-head [data-test=copy-more]").click()
+    page.locator(".popover [data-test=copy-html]").click()
+    assert page.evaluate("window.__rich")["htmlOnly"] is True
+    # the ⋯ menu has the same four
     page.locator("#editor .text-obj .flex-head .lnk[title='Options']").click()
-    page.wait_for_selector(".popover .menu-item")
-    assert page.locator(".popover .menu-item", has_text="Copy as FLEx TSV").count() == 1
+    page.wait_for_selector(".popover [data-test=copy-tsv]")
+    assert page.locator(".popover .menu-item", has_text="Copy for LingTeX Word").count() == 1
     page.keyboard.press("Escape")
+    # pasted back into the note (both formats on the clipboard): the example again, not a table
+    page.locator("#editor .blk-body").last.click()
+    page.keyboard.press("End")
+    paste(page, rich["text"], rich["html"])
+    page.wait_for_function("() => document.querySelectorAll('#editor .text-obj').length === 2")
+    md = page.evaluate("() => window.__fsEditor.getMarkdown()")
+    assert md.count("{{flex:text %s seg=1-2" % T_STORY) == 2 and "md-table" not in page.inner_html("#editor") and "|" not in md.replace("lines=", ""), md
+    assert not errors
+
+
+def test_the_rich_copy_really_reaches_the_clipboard_in_both_formats(app):
+    """FS.copyRich writes text/plain and text/html in ONE copy event (no clipboard permission
+    needed), and our table readers decline HTML marked as ours."""
+    h, page, errors = app
+    got = page.evaluate("""async () => {
+      let seen = null;
+      document.addEventListener('copy', (e) => { seen = 'reached'; }, { once: true });
+      const sink = (e) => { seen = { text: e.clipboardData.getData('text/plain'), html: e.clipboardData.getData('text/html') }; };
+      const ok = await FS.copyRich({ text: 'T', html: '<div data-fs-copy="1"><table><tr><td>x</td></tr></table></div>' });
+      return { ok, ours: FS.tables.htmlGrid('<div data-fs-copy="1"><table><tr><td>x</td><td>y</td></tr></table></div>'), plain: !!FS.tables.htmlGrid('<table><tr><td>x</td><td>y</td></tr></table>'),
+               text: FS.htmlText('<table><tr><td>a</td><td>b</td></tr></table><p>c</p>') };
+    }""")
+    assert got["ok"] is True and got["ours"] is None and got["plain"] is True, got
+    assert got["text"].startswith("a\tb") and "c" in got["text"], got
     assert not errors
 
 
@@ -2988,6 +3051,7 @@ def test_move_copy_and_drag_several_blocks_in_a_note(app):
     # dragging a block by ⋮: Charlie onto the top half of the first Alpha
     n = page.locator("#editor > .blk").count()
     charlie = [i for i in range(n) if page.locator("#editor > .blk").nth(i).inner_text().strip().endswith("Charlie")][0]
+    page.locator("#editor .blk-p", has_text="Alpha").first.scroll_into_view_if_needed()       # the drop point must be in the window
     box = page.locator("#editor .blk-p", has_text="Alpha").first.bounding_box()
     dnd(page, "#editor > .blk:nth-child(%d) .blk-handle button" % (charlie + 1), box["x"] + 40, box["y"] + 3)
     assert order()[0] == "Charlie", order()
@@ -2996,6 +3060,7 @@ def test_move_copy_and_drag_several_blocks_in_a_note(app):
     page.keyboard.press("Home")
     page.locator("#editor .blk-flex").first.click(modifiers=["Shift"], position={"x": 30, "y": 8})
     page.wait_for_function("!!window.__fsEditor.msel")
+    page.locator("#editor > .blk").last.scroll_into_view_if_needed()
     last = page.locator("#editor > .blk").last.bounding_box()
     dnd(page, "#editor .blk-flex .blk-handle button", last["x"] + 40, last["y"] + last["height"] - 3)
     assert order() == ["Charlie", "Alpha", "Alpha", "Bravo", "{{flex:text ", "Bravo", "{{flex:text "], order()
@@ -3537,7 +3602,7 @@ def test_blank_flex_lines_are_left_out_and_flex_numbers_kept(app):
     assert "1.1" in body and "1.3" in body and "segments 1.1–1.3" in body, body
     # an example that IS the blank line says so instead of showing nothing
     assert "This line is empty in FLEx." in page.locator("#editor .text-obj").nth(1).inner_text()
-    # the copy for FLEx (TSV) leaves it out too
+    # the copy for LingTeX Word (FLEx's rows) leaves it out too
     tsv = page.evaluate("""(g) => FS.interlinear.flexTsv(FS.flexref.parse('{{flex:text ' + g + ' seg=1-2 lines=txt}}'),
         { segments: [{ n: 1, label: '1.1', baseline: 'Kabir', words: [{ txt: 'Kabir' }] }, { n: 2, label: '1.2', baseline: '\u2028', words: [] }] })""", T_STORY)
     assert tsv.count("Word") == 1 and "Kabir" in tsv, tsv
@@ -5615,7 +5680,9 @@ def test_selected_lines_and_rows_copy_and_paste_as_a_new_example(app):
     page.keyboard.type("{{flex:text %s seg=1-3}}" % TEXT)
     page.keyboard.press("Enter")
     page.wait_for_selector("#editor .text-obj .segment[data-n='3']")
-    page.evaluate("() => { window.__copied = null; FS.copyText = (t) => { window.__copied = t; return Promise.resolve(true); }; }")
+    page.evaluate("""() => { window.__copied = null; window.__html = null;
+      FS.copyText = (t) => { window.__copied = t; return Promise.resolve(true); };
+      FS.copyRich = (x) => { window.__copied = x.text; window.__html = x.html; return Promise.resolve(true); }; }""")
     page.locator("#editor .text-obj .segment[data-n='1'] [data-test=segnum]").click()
     page.locator("#editor .text-obj .segment[data-n='2'] [data-test=segnum]").click(modifiers=["Shift"])
     assert page.locator("#editor .text-obj .segment.line-sel").count() == 2
@@ -5625,9 +5692,11 @@ def test_selected_lines_and_rows_copy_and_paste_as_a_new_example(app):
     assert copied.startswith("{{flex:text %s seg=1-2 at=0e1f2a3b1001-0e1f2a3b1002}}\n" % TEXT), copied
     assert "Word\tKabir" in copied and "Ha\u014ba" in copied and "Tiket" not in copied
     # pasted at the end of the note: a new example of lines 1–2 (the rows under the reference are left out)
+    html = page.evaluate("window.__html")
+    assert "data-fs-copy" in html and "Kabir" in html and "Tiket" not in html, html     # Word / PowerPoint get the two lines formatted
     page.locator("#editor .blk-body").last.click()
     page.keyboard.press("End")
-    paste(page, copied)
+    paste(page, copied, html)                                                            # both formats, as the real clipboard has them
     page.wait_for_function("() => document.querySelectorAll('#editor .text-obj').length === 2")
     md = page.evaluate("() => window.__fsEditor.getMarkdown()")
     assert "{{flex:text %s seg=1-2 at=0e1f2a3b1001-0e1f2a3b1002}}" % TEXT in md and "Word\t" not in md

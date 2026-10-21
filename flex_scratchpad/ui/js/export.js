@@ -68,6 +68,12 @@
   async function flexBlock(spec, extras) {
     const kind = spec.kind === 'sense' ? 'entry' : spec.kind;
     const obj = await FS.interlinear.flexGet(kind, spec.guid, spec.kind === 'text' && spec.seg ? spec.seg[0] : null, spec.kind === 'text' && spec.seg ? spec.seg[1] : null, false, spec.kind === 'text' ? spec.ws : null);
+    return blockOf(spec, obj, extras);
+  }
+  /* The export model of an object already fetched (what flexBlock does after its fetch; the rich
+   * copy builds from the drawing's own object, never a new fetch). */
+  function blockOf(spec, obj, extras) {
+    const kind = spec.kind === 'sense' ? 'entry' : spec.kind;
     if (kind === 'entry') {
       const F = new Set(R.entryFields(spec));
       return { type: 'entry', headword: obj.headword || obj.lexemeForm, pos: obj.pos, font: obj.ws && obj.ws.vern && obj.ws.vern.font, label: spec.label,
@@ -85,6 +91,16 @@
     const vbase = { color: '#00379c', font: vern.font || undefined, rtl: !!vern.rtl };
     const segs = (obj.segments || []).filter((seg) => !FS.interlinear.blankSeg(seg)).map((seg) => {   // blank lines are left out
       const words = (seg.words || []).filter((w) => !w.punct);
+      // punctuation rides on the Word line against its word (an opening mark against the next one),
+      // as FLEx shows it and as the LingTeX copy writes it; it was left out of every export before
+      const pBefore = new Map(), pAfter = new Map();
+      { let lead = '', last = null;
+        for (const w of seg.words || []) {
+          if (w.punct) { if (last === null || /^[\p{Ps}\p{Pi}\u00bf\u00a1]/u.test(w.txt || '')) lead += w.txt || ''; else pAfter.set(last, (pAfter.get(last) || '') + (w.txt || '')); continue; }
+          if (lead) { pBefore.set(w, lead); lead = ''; }
+          last = w;
+        }
+        if (lead && last) pAfter.set(last, (pAfter.get(last) || '') + lead); }
       const lineModels = [];
       const add = (name, cellsFn) => { const cells = words.map((w, i) => cellsFn(w, i + 1)); if (cells.some((c) => c.some((r) => r.text))) lineModels.push({ name, cells }); };
       // FLEx text markup tags styling the TEXT: brackets round the span and a marker behind the words
@@ -99,6 +115,9 @@
         for (const o of on) { if (o.res.hl || o.res.tile) for (const r of runs) if (!r.hl) r.hl = (o.res.tile && o.res.tc) || o.res.bg; if (o.res.c) for (const r of runs) r.color = o.res.c; if (o.res.b) for (const r of runs) r.b = true; if (o.res.i) for (const r of runs) r.i = true; }
         const open = on.filter((o) => o.res.br && BR[o.res.br] && o.firstAi === ai && seg.n === o.t.from.seg).sort((x, y) => y.span - x.span).map((o) => BR[o.res.br][0]).join('');
         const close = on.filter((o) => o.res.br && BR[o.res.br] && o.lastAi === ai && seg.n === o.t.to.seg).sort((x, y) => x.span - y.span).map((o) => BR[o.res.br][1] + (o.res.label && !o.res.showBar ? (o.t.tag.abbr || o.t.tag.name) : '')).join('');
+        const w0 = words[i - 1];
+        if (pBefore.has(w0)) runs.unshift(Object.assign({}, vbase, { text: pBefore.get(w0) }));
+        if (pAfter.has(w0)) runs.push(Object.assign({}, vbase, { text: pAfter.get(w0) }));
         if (open) runs.unshift({ text: open, color: vbase.color });
         if (close) runs.push({ text: close, color: vbase.color });
         return runs;
@@ -705,6 +724,110 @@
     }
   }
 
+  /* ------------------------------------------------------------------ the rich copy's HTML
+   * (Seth, 2026-10-20: "Copy as HTML (for web, Word, PowerPoint, other)"). What Word, PowerPoint,
+   * Excel and a web editor paste as they look: INLINE styles only (they drop a stylesheet's
+   * classes), no players, no scripts. An example is a borderless table per line — FLEx's number in
+   * the first cell, a column per word with its lines under it (morphemes joined with their break
+   * characters, word-aligned, as LingTeX Word draws them), a long line wrapped into further tables
+   * — then the free / literal translation and notes in ‘quotes’, and the source (the text and its
+   * FLEx line numbers, a link into FLEx) in small grey type. A chart is one bordered table, an
+   * entry a headword with its senses. The caller marks it as ours (FS.copyRich). */
+  const CLIP_FONT = 'font-family:"Charis SIL","Doulos SIL",Cambria,"Times New Roman",serif';
+  const joinBreaks = (runs) => (runs || []).map((r) => Object.assign({}, r, { text: String(r.text || '').replace(/([-=~<>]) +/g, '$1').replace(/ +([-=~<>])/g, '$1') }));
+  function clipSource(b, from, to) {
+    const where = (b.abbrev || b.title || '') + (from ? ' ' + from + (to && to !== from ? '–' + to : '') : '');
+    if (!where.trim()) return '';
+    const label = esc(where.trim());
+    return '<p style="margin:2pt 0 8pt 0;font-size:8.5pt;color:#6b7280;' + CLIP_FONT + '">' + (b.label ? esc(b.label) + ' · ' : '') + (b.url ? '<a href="' + esc(b.url) + '" style="color:#6b7280">' + label + '</a>' : label) + '</p>';
+  }
+  function clipInterlinear(b) {
+    const rtl = b.ws && b.ws.rtl;
+    const dir = rtl ? ' dir="rtl"' : '';
+    const td = 'padding:0 10pt 0 0;margin:0;vertical-align:top;white-space:nowrap;border:none;line-height:1.15;' + CLIP_FONT;
+    const MAX = 64;          // characters per table before the line wraps on to the next
+    let h = '';
+    for (const seg of b.segments || []) {
+      const lines = (seg.lines || []).map((l) => ({ name: l.name, cells: l.name === 'morph' || l.name === 'mgls' || l.name === 'cf' ? l.cells.map(joinBreaks) : l.cells }));
+      const n = Math.max(0, ...lines.map((l) => l.cells.length));
+      const groups = [];
+      let cur = [], width = 0;
+      for (let i = 0; i < n; i++) {
+        const w = Math.max(1, ...lines.map((l) => plainOf(l.cells[i]).length)) + 2;
+        if (cur.length && width + w > MAX) { groups.push(cur); cur = []; width = 0; }
+        cur.push(i); width += w;
+      }
+      if (cur.length || !groups.length) groups.push(cur);
+      groups.forEach((g, gi) => {
+        h += '<table' + dir + ' style="border-collapse:collapse;border:none;margin:' + (gi ? '2pt' : '6pt') + ' 0 0 0">';
+        lines.forEach((l, li) => {
+          h += '<tr><td style="' + td + 'width:34pt;color:#374151"><p style="margin:0;line-height:1.15">' + (gi === 0 && li === 0 ? esc(seg.label || seg.n) : '&nbsp;') + '</p></td>';
+          // each cell's text in a paragraph with no spacing: Word gives a bare cell its Normal style's space after
+          h += g.map((i) => '<td style="' + td + '"><p style="margin:0;line-height:1.15">' + (runsHtml(l.cells[i] || []) || '&nbsp;') + '</p></td>').join('') + '</tr>';
+        });
+        if (!lines.length) h += '<tr><td style="' + td + '">' + esc(seg.label || seg.n) + '</td></tr>';
+        h += '</table>';
+      });
+      const para = (runs, lead) => '<p' + dir + ' style="margin:2pt 0 0 34pt;' + CLIP_FONT + '">' + (lead || '') + '‘' + runsHtml(runs) + '’</p>';
+      if (seg.free) h += para(seg.free);
+      if (seg.lit) h += para(seg.lit, '<i style="color:#6b7280">lit.</i> ');
+      for (const nt of seg.notes || []) h += '<p style="margin:2pt 0 0 34pt;font-size:9.5pt;color:#6b7280;' + CLIP_FONT + '">' + runsHtml(nt) + '</p>';
+    }
+    const segs = b.segments || [];
+    return h + clipSource(b, segs.length ? segs[0].label : '', segs.length ? segs[segs.length - 1].label : '');
+  }
+  function clipChart(b) {
+    const bd = 'border:1px solid #9ca3af;padding:2pt 4pt;vertical-align:top;' + CLIP_FONT;
+    const th = bd + 'background:#eef2f7;font-weight:700;text-align:center';
+    const xcols = b.xcols || [];
+    const xL = xcols.map((x, i) => Object.assign({ i }, x)).filter((x) => x.side === 'left'), xR = xcols.map((x, i) => Object.assign({ i }, x)).filter((x) => x.side !== 'left');
+    const extra = (b.freeCol ? 1 : 0) + (b.notesCol ? 1 : 0) + xcols.length;
+    const look = (c) => (c.hl ? 'background:' + c.hl + ';' : '') + (c.b ? 'font-weight:700;' : '') + (c.i ? 'font-style:italic;' : '') + (c.u ? 'text-decoration:underline;' : '') + (c.color ? 'color:' + c.color + ';' : '');
+    const rowLook = (r) => (r.rowStyle ? (r.rowStyle.bg ? 'background:' + r.rowStyle.bg + ';' : '') + (r.rowStyle.color ? 'color:' + r.rowStyle.color + ';' : '') + (r.rowStyle.b ? 'font-weight:700;' : '') + (r.rowStyle.i ? 'font-style:italic;' : '') + (r.rowStyle.u ? 'text-decoration:underline;' : '') : '');
+    let h = '<p style="margin:6pt 0 2pt 0;font-weight:700;' + CLIP_FONT + '">' + esc((b.name || 'Chart') + (b.title ? ' · ' + b.title : '')) + '</p>';
+    h += '<table' + (b.ws && b.ws.rtl ? ' dir="rtl"' : '') + ' style="border-collapse:collapse">';
+    if ((b.headers || []).length) {
+      const xh = (x) => '<th rowspan="' + b.headers.length + '" style="' + th + '">' + esc(x.name) + '</th>';
+      h += b.headers.map((hr, i) => '<tr>' + (i === 0 ? '<th rowspan="' + b.headers.length + '" style="' + th + '">#</th>' + xL.map(xh).join('') : '') + hr.map((x) => '<th' + (x.span > 1 ? ' colspan="' + x.span + '"' : '') + ' style="' + th + '">' + esc(x.text) + '</th>').join('') + (i === 0 ? xR.map(xh).join('') : '') + (i === 0 && b.freeCol ? '<th rowspan="' + b.headers.length + '" style="' + th + '">Free</th>' : '') + (i === 0 && b.notesCol ? '<th rowspan="' + b.headers.length + '" style="' + th + '">Notes</th>' : '') + '</tr>').join('');
+    }
+    for (const r of b.rows || []) {
+      const xtd = (x) => { const c = r.xcells[x.i] || { text: '' }; return '<td style="' + bd + look(c) + '">' + esc(c.text).replace(/\n/g, '<br>') + '</td>'; };
+      h += '<tr style="' + rowLook(r) + '"><th style="' + th + (r.clause === 'dependent' ? ';font-style:italic' : '') + '">' + esc(r.label) + '</th>' + xL.map(xtd).join('');
+      h += r.cells.map((c) => '<td' + (c.span > 1 ? ' colspan="' + c.span + '"' : '') + ' style="' + bd + look(c) + '">' + c.words.map((w) => runsHtml(w).replace(/\n/g, '<br>')).join(' ') + (c.marks.length ? ' ' + runsHtml(c.marks) : '') + '</td>').join('');
+      h += xR.map(xtd).join('');
+      if (r.free) h += '<td' + (r.free.span > 1 ? ' rowspan="' + r.free.span + '"' : '') + ' style="' + bd + '">' + esc(r.free.text) + '</td>';
+      if (r.notes != null) h += '<td style="' + bd + '">' + esc(r.notes) + '</td>';
+      h += '</tr>';
+      if (r.freeRow && r.freeRow.text) h += '<tr><th style="' + th + '"></th><td colspan="' + (b.cols + extra) + '" style="' + bd + '"><i>‘' + esc(r.freeRow.text) + '’</i> <span style="color:#6b7280;font-size:8.5pt">' + esc(r.freeRow.rows) + '</span></td></tr>';
+    }
+    h += '</table>';
+    const rows = b.rows || [];
+    return h + clipSource({ abbrev: b.title, url: b.url, label: b.label }, rows.length ? 'rows ' + rows[0].label : '', rows.length ? rows[rows.length - 1].label : '');
+  }
+  function clipEntry(b) {
+    const font = b.font ? 'font-family:"' + esc(b.font) + '",serif;' : CLIP_FONT + ';';
+    let h = '<p style="margin:6pt 0 2pt 0;' + CLIP_FONT + '"><b style="' + font + 'font-size:13pt">' + esc(b.headword || '') + '</b>' + (b.pos ? ' <i>' + esc(b.pos) + '</i>' : '') + (b.citationForm ? ' (' + esc(b.citationForm) + ')' : '') + '</p>';
+    for (const sn of b.senses || []) {
+      h += '<p style="margin:1pt 0 0 ' + (14 + (sn.level || 0) * 14) + 'pt;' + CLIP_FONT + '">' + (sn.number ? '<b>' + esc(sn.number) + '</b> ' : '') + (sn.pos ? '<i>' + esc(sn.pos) + '</i> ' : '') + esc(sn.gloss || '') + (sn.definition && sn.definition !== sn.gloss ? (sn.gloss ? ' — ' : '') + esc(sn.definition) : '') + '</p>';
+      for (const ex of sn.examples || []) h += '<p style="margin:0 0 0 ' + (28 + (sn.level || 0) * 14) + 'pt;' + CLIP_FONT + '"><i style="' + font + '">' + esc(ex.text || '') + '</i>' + (ex.translation ? ' ‘' + esc(ex.translation) + '’' : '') + '</p>';
+    }
+    return h;
+  }
+  function clipHtml(b) {
+    if (!b) return '';
+    if (b.type === 'interlinear') return clipInterlinear(b);
+    if (b.type === 'chart') return clipChart(b);
+    if (b.type === 'entry') return clipEntry(b);
+    if (b.type === 'wordform') return '<p style="' + CLIP_FONT + '"><b>' + esc(b.form || '') + '</b> ' + esc((b.glosses || []).join('; ')) + '</p>';
+    return blockHtml(b);
+  }
+  /* The HTML of an object as drawn (its own fetched object), for the clipboard. */
+  function copyHtml(spec, obj, extras) {
+    const b = blockOf(spec, obj, extras || null);
+    if (b && b.type === 'chart' && !b.url) b.url = obj && obj.url || '';
+    return '<div data-fs-copy="1">' + clipHtml(b) + '</div>';
+  }
+
   /* The page: a header (title, where the note lives, the date, the FLEx project), the blocks, the
    * player bar when a recording is embedded, a footer. A note with a chart is laid out wide and
    * printed landscape. */
@@ -896,5 +1019,5 @@
     });
   }
 
-  FS.exporter = { buildDoc, toHtml, toSlides, slidesOf, exportNote, runsOf, flextextItems, exportFlextext, embedAudio, timedBlocks, askEmbedAudio, linkRun };
+  FS.exporter = { blockOf, clipHtml, copyHtml, buildDoc, toHtml, toSlides, slidesOf, exportNote, runsOf, flextextItems, exportFlextext, embedAudio, timedBlocks, askEmbedAudio, linkRun };
 })();

@@ -638,7 +638,7 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   (`notes=off`). A click on a word / cell / row label / column heading opens `stylePopover`
   (scope: this word · the cell · the row · the column; the same hl/b/u/i/s/colour as examples) →
   `R.toggleStyle` with a chart target. The ⋯ menu: label, rows, lines, free translations,
-  headings / notes, the columns (per group), Copy as TSV, Export as FLEx chart XML / JSON
+  headings / notes, the columns (per group), the copies (COPY below), Export as FLEx chart XML / JSON
   (`Api.export_chart` → `flex/chart_export.py`: FLEx's own `<document><chart><row><cell><main>`
   shape with `guid` / `text` / `col` attributes ADDED — a future importer can be exact; the JSON is
   the chart dict), Edit source, Duplicate, Remove. Chips: icon ▦, "Story chart · The dog and the
@@ -1051,7 +1051,7 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   their scopes give them. PIVOT (`FS.chart.pivot(obj, spec)` / `pivotDialog`; the chart's ⋯ →
   "Pivot: markers × columns…", a chart note's "Pivot…"): rows = each marker, clause type, moved
   text and clause marker; columns = the visible template columns; a cell counts the rows carrying
-  the marker with words in the column; Copy as TSV. The entry card's "▦ In charts" opens the
+  the marker with words in the column; ⎘ Copy (TSV + an HTML table). The entry card's "▦ In charts" opens the
   column profile for the lexeme form (`FS.chartProfile`).
 - EXPORTS (Seth, 2026-10-18: "pretty exports for chart-type notes. HTML, DOCX, Excel, and PDF … for
   our collection-type and regular notes, too … including audio players and base64 embedded audio
@@ -1162,6 +1162,39 @@ compares notes WITHOUT their copies; `test_flex_objects_get_a_readable_copy_in_t
   disables it). `-v` / `--verbose`, `-q` / `--quiet`, `FLEX_SCRATCHPAD_LOG=level`. `--devtools`
   (`--debug` still works) turns the browser developer tools on; WebView2 opens them in their own
   window (F12 in the app, or right-click → Inspect). Nothing in the log must ever hold a secret.
+- COPY (Seth, 2026-10-20: "change our 'Copy TSV' to a dropdown 'Copy...' … just 'Copy...' that copies both, where
+  our app spots and grabs the TSV first, but Word and others would spot and grab the HTML first"; "make sure the TSV
+  option is clear as 'Copy for LingTeX Word'"; "as close as possible to a standard citation/reference to the Text in
+  FLEx/corpus (abbreviation if present + line number(s), title if no abbrev + line number(s))"). Every example, entry
+  and chart head has `⎘ Copy │ ▾` (`interlinear.copyButton`), its ⋯ menu the same items (`copyItems`), a selection
+  bar both. A KIT (`textKit` / `entryKit` / chart.js `chartKit`) = {text: the reference + the rows, html, tsv, source}.
+  ⎘ Copy = `FS.copyRich({text, html})` (util.js: ONE copy event around `execCommand('copy')` sets text/plain and
+  text/html — no permission needed; ClipboardItem, then the text alone, as fallbacks). ▾: "Copy for LingTeX Word" (an
+  example's tsv; a chart's is "Copy as tab-separated rows (for a spreadsheet)"), "Copy as HTML (for web, Word,
+  PowerPoint, other)" (`htmlOnly`: the text/plain is what the HTML reads as, `FS.htmlText`), "Copy example source
+  ({{flex}} code)". OUR HTML IS MARKED `data-fs-copy` and `tables.htmlGrid` returns null for it, so every paste path
+  here (editor, cell, collection box) takes the text — the reference, a new example — never a table of the words;
+  a cell paste of reference + rows takes the reference too. THE TSV IS FLEx's OWN CLIPBOARD SHAPE, what LingTeX Word's
+  `modFlexParse.bas` reads (its PROMPT.md is the spec; reference clone `/home/user/rulingants/lingtex-tools`): per
+  segment FLEx's number on a line of its own, a row per line, ONE COLUMN PER MORPHEME (the word / word gloss / category
+  over its first morpheme's column; morphemes with their break characters — LingTeX groups words by them — glosses
+  without, `bareGloss`), punctuation against its word, `Free <text>` / `Lit. <text>` / `Note <text>` with a SPACE (a
+  tabbed Free is read as an interlinear row there). THE CITATION (`flexTsv(spec, obj, {cite: true})`, what the kits
+  use): LingTeX Word parses FLEx's number but never prints it, and quotes every Free line, so the reference rides at
+  the END of each segment's free translation, `Free The dog slept. (DOG 1.1)` — the text's abbreviation, else its title,
+  + the segment's FLEx label; each segment is its own example there, so each carries its own line. No translation
+  shown → `Free (DOG 1.1)`. Python's `_paste_queries` reads all of it back: a lone number line names the next row's
+  segment, `Lit.` is a dropped row, a trailing `(… 1.1)` is taken off a free translation. THE HTML (export.js
+  `blockOf` = the export model of an object ALREADY FETCHED, `clipHtml`, `copyHtml`): inline styles only (Word and
+  PowerPoint drop stylesheet classes), a borderless table per line (FLEx's number, a column per word with its lines,
+  morphemes joined by their breaks — word-aligned as LingTeX draws them — wrapped into a further table past ~64
+  characters), the translation in ‘quotes’, the source "DOG 1.1–1.2" in small grey type linked into FLEx; a chart one
+  bordered table (a chart note's custom columns through `opts.copyExtras`); an entry its headword and senses. TABLES:
+  `tables.htmlOf(rows, headed)` (copied cells, `Table ▾ → ⎘ Copy the table`, the pivot) renders a FLEx object in a cell
+  as a link (an `expanded` one in full) and marks the copy as ours only when it holds a `{{flex:`, so a plain table
+  still pastes back as a table with its spans; a TSV holding `{{flex:` pastes as a table, never through the locator.
+  e2e `test_copy_example_for_lingtex_word_and_as_html`, `test_the_rich_copy_really_reaches_the_clipboard…`,
+  `tests/test_flex.py::test_locate_reads_our_own_copy_for_lingtex_word`.
 - TEXTS USED (Seth, 2026-10-16: "list which texts are referenced in a [note], a folder, or a
   selected range … not individual items, but texts they come from … a FLEx hyperlink for each"):
   `Api.texts_used(scope)` → `FlexService.texts_used` — one row per source TEXT (the guid of every
